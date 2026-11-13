@@ -81,17 +81,21 @@ interface KimiDeviceCode {
 
 /** Runs Kimi Code's attended device-code flow and returns a record for the local secret store. */
 export async function signInWithKimiCode(options: KimiCodeSignInOptions): Promise<KimiTokenRecord> {
+  throwIfCancelled(options.signal);
   const clientId = nonEmptyString(options.clientId) ?? KIMI_CODE_CLIENT_ID;
   if (clientId.length === 0) {
     throw new OAuthFlowError('NOT_CONFIGURED', 'Kimi sign-in needs an OAuth client ID.');
   }
   const requestedAt = options.now();
   const device = await requestDeviceCode(options, clientId);
+  throwIfCancelled(options.signal);
   try {
     await options.openExternal(device.approvalUrl);
   } catch {
+    if (isCancelled(options.signal)) throw cancelled();
     throw new OAuthFlowError('EXCHANGE_FAILED', 'Kimi approval page could not be opened.');
   }
+  throwIfCancelled(options.signal);
   try {
     options.onAuthorization?.({
       url: device.approvalUrl,
@@ -158,6 +162,7 @@ export async function signInWithKimiCode(options: KimiCodeSignInOptions): Promis
     }
 
     if (result.response.ok && typeof reply.access_token === 'string') {
+      throwIfCancelled(options.signal);
       return tokenRecordFromReply(reply, clientId, options.now());
     }
     const error = nonEmptyString(reply.error);
@@ -308,6 +313,7 @@ async function requestDeviceCode(
     `${KIMI_CODE_OAUTH_HOST}/api/oauth/device_authorization`,
     new URLSearchParams({ client_id: clientId }),
     KIMI_CODE_REQUEST_TIMEOUT_MS,
+    options.signal,
   );
   if (!result.response.ok || result.reply === undefined) {
     throw new OAuthFlowError(
@@ -373,6 +379,7 @@ async function postForm(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<FormReply> {
+  throwIfCancelled(signal);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   // A cancelled sign-in stops the request in flight too (T-J03).
@@ -393,9 +400,18 @@ async function postForm(
         signal: controller.signal,
       });
     } catch {
+      if (isCancelled(signal)) throw cancelled();
       throw new OAuthFlowError('EXCHANGE_FAILED', 'Kimi could not be reached.');
     }
-    return { response, reply: parseReplyObject(await replyText(response)) };
+    throwIfCancelled(signal);
+    try {
+      const reply = parseReplyObject(await replyText(response));
+      throwIfCancelled(signal);
+      return { response, reply };
+    } catch (error) {
+      if (isCancelled(signal)) throw cancelled();
+      throw error;
+    }
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onCancel);
@@ -453,6 +469,14 @@ function deviceTimeout(): OAuthFlowError {
 /** True once a cancelled sign-in has aborted its signal (T-J03). */
 function isCancelled(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
+}
+
+function cancelled(): OAuthFlowError {
+  return new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.');
+}
+
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+  if (isCancelled(signal)) throw cancelled();
 }
 
 /** Waits, or rejects with CANCELLED as soon as the signal aborts (T-J03). */

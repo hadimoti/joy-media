@@ -86,7 +86,7 @@ describe('ProviderSignInPanel while a sign-in waits for the browser (T-J03)', ()
 
     const waiting = container.querySelector('.joy-provider-sign-in-waiting');
     expect(waiting).not.toBeNull();
-    expect(waiting?.textContent).toContain('Waiting for the browser. 5:00 left.');
+    expect(waiting?.textContent).toContain('Waiting for the browser. 3:00 left.');
     expect(buttonNamed(SETTINGS_PROVIDER_SIGN_IN.openSignInPageAgain)).toBeDefined();
     expect(buttonNamed(SETTINGS_PROVIDER_SIGN_IN.cancelSignIn)).toBeDefined();
   });
@@ -114,7 +114,7 @@ describe('ProviderSignInPanel while a sign-in waits for the browser (T-J03)', ()
   });
 
   it('formats the countdown as minutes and seconds', () => {
-    expect(formatSignInCountdown(5 * 60_000)).toBe('5:00');
+    expect(formatSignInCountdown(3 * 60_000)).toBe('3:00');
     expect(formatSignInCountdown(61_000)).toBe('1:01');
     expect(formatSignInCountdown(-5)).toBe('0:00');
   });

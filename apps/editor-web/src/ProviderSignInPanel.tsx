@@ -23,7 +23,7 @@ import { SETTINGS_PROVIDER_SIGN_IN } from './settings-wording.js';
  * How long a sign-in waits for the browser to come back. Matches CALLBACK_TIMEOUT_MS in provider-oauth/loopback.ts
  * (the listener closes itself after this), so the countdown ends when the sign-in does.
  */
-export const SIGN_IN_WAIT_MS = 5 * 60_000;
+export const SIGN_IN_WAIT_MS = 3 * 60_000;
 
 /** Minutes and seconds, such as 4:59. */
 export function formatSignInCountdown(ms: number): string {

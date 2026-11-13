@@ -254,21 +254,9 @@ if (!app.requestSingleInstanceLock()) {
     classifyDrive: async (directory) => classifyDriveOfDirectory(directory),
     secretStore,
     providerBroker,
-    providerSignIn: (provider, context) =>
-      // One attempt per provider at a time: a new attempt cancels the running one and waits for it (T-J03).
-      signInAttempts.start(provider, ({ signal, setAuthorizationUrl }) =>
-        signInRunner(provider, context, {
-          signal,
-          openExternal: (url) => {
-            setAuthorizationUrl(url);
-            return shell.openExternal(url);
-          },
-        }),
-      ),
-    signInAttempts: {
-      cancel: (provider) => signInAttempts.cancel(provider),
-      reopen: (provider) => signInAttempts.reopen(provider),
-    },
+    providerSignIn: (provider, context, call) => signInRunner(provider, context, call),
+    openExternal: (url) => shell.openExternal(url),
+    signInAttempts,
     providerSignOut: (record) =>
       revokeChatGptRefreshToken({ record, fetch: (url, init) => fetch(url, init) }),
     handleWindowControl: (action) => {

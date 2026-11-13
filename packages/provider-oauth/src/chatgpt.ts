@@ -167,7 +167,9 @@ export async function exchangeChatGptCode(input: {
   readonly codeVerifier: string;
   readonly redirectUri: string;
   readonly fetch: FetchLike;
+  readonly signal?: AbortSignal;
 }): Promise<ChatGptCode> {
+  throwIfCancelled(input.signal);
   const reply = await postToken(
     input.fetch,
     new URLSearchParams({
@@ -178,7 +180,9 @@ export async function exchangeChatGptCode(input: {
       redirect_uri: input.redirectUri,
       resource: CHATGPT_RESOURCE,
     }),
+    input.signal,
   );
+  throwIfCancelled(input.signal);
   if (!grantedScopes(reply).includes(CHATGPT_REQUIRED_SCOPE)) {
     throw new OAuthFlowError('MISSING_SCOPE', 'ChatGPT did not grant the access this app needs.');
   }
@@ -200,7 +204,9 @@ export async function verifyIdToken(input: {
   readonly nonce: string;
   readonly fetch: FetchLike;
   readonly nowSeconds: number;
+  readonly signal?: AbortSignal;
 }): Promise<{ readonly sub: string }> {
+  throwIfCancelled(input.signal);
   const refuse = (): never => {
     throw new OAuthFlowError('ID_TOKEN_INVALID', 'The ChatGPT sign-in could not be verified.');
   };
@@ -218,7 +224,8 @@ export async function verifyIdToken(input: {
   if (header === undefined || payload === undefined) return refuse();
   if (header.alg !== 'RS256' || typeof header.kid !== 'string') return refuse();
 
-  const jwk = await signingKeyFor(header.kid, input.fetch);
+  const jwk = await signingKeyFor(header.kid, input.fetch, input.signal);
+  throwIfCancelled(input.signal);
   if (jwk === undefined) return refuse();
   if (!signatureValid(`${encodedHeader}.${encodedPayload}`, encodedSignature, jwk)) return refuse();
 
@@ -371,6 +378,7 @@ export function createChatGptTokenKeeper(deps: ChatGptTokenKeeperDeps): ChatGptT
 export async function signInWithChatGpt(
   options: ChatGptSignInOptions,
 ): Promise<ChatGptTokenRecord> {
+  throwIfCancelled(options.signal);
   // Refused before a listener starts or a browser opens, so ChatGPT never sees a host ID it would refuse.
   if (!isExtAgentHostId(options.extAgentHostId)) {
     throw new OAuthFlowError(
@@ -393,19 +401,28 @@ export async function signInWithChatGpt(
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
   try {
-    await options.openExternal(
-      buildChatGptAuthUrl({
-        clientId: saved ?? CHATGPT_DYNAMIC_CLIENT_ID,
-        redirectUri: callback.redirectUri,
-        state,
-        nonce,
-        codeChallenge: pkce.challenge,
-        extAgentHostId: options.extAgentHostId,
-        ...(saved === undefined ? { agentNameHint: CHATGPT_AGENT_NAME } : {}),
-      }),
-    );
+    throwIfCancelled(options.signal);
+    try {
+      await options.openExternal(
+        buildChatGptAuthUrl({
+          clientId: saved ?? CHATGPT_DYNAMIC_CLIENT_ID,
+          redirectUri: callback.redirectUri,
+          state,
+          nonce,
+          codeChallenge: pkce.challenge,
+          extAgentHostId: options.extAgentHostId,
+          ...(saved === undefined ? { agentNameHint: CHATGPT_AGENT_NAME } : {}),
+        }),
+      );
+    } catch (error) {
+      throwIfCancelled(options.signal);
+      throw error;
+    }
+    throwIfCancelled(options.signal);
     const code = await callback.code;
+    throwIfCancelled(options.signal);
     const issued = await callback.clientId;
+    throwIfCancelled(options.signal);
     if (saved !== undefined && issued !== undefined && issued !== saved) {
       throw new OAuthFlowError(
         'REGISTRATION_FAILED',
@@ -420,20 +437,25 @@ export async function signInWithChatGpt(
       );
     }
     if (saved === undefined) await options.onRegistration?.(clientId);
+    throwIfCancelled(options.signal);
     const tokens = await exchangeChatGptCode({
       clientId,
       code,
       codeVerifier: pkce.verifier,
       redirectUri: callback.redirectUri,
       fetch: options.fetch,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
+    throwIfCancelled(options.signal);
     const claims = await verifyIdToken({
       idToken: tokens.idToken,
       clientId,
       nonce,
       fetch: options.fetch,
       nowSeconds: Math.floor(options.now() / 1000),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
+    throwIfCancelled(options.signal);
     return {
       version: 1,
       clientId,
@@ -483,30 +505,41 @@ async function fetchReply(
   url: string,
   init: RequestInit,
   unreachable: () => OAuthFlowError,
+  signal?: AbortSignal,
 ): Promise<{ readonly response: Response; readonly reply: Record<string, unknown> | undefined }> {
+  throwIfCancelled(signal);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
+  const onCancel = (): void => controller.abort();
+  signal?.addEventListener('abort', onCancel, { once: true });
   try {
     let response: Response;
     try {
       response = await fetchImpl(url, { ...init, signal: controller.signal });
     } catch {
+      throwIfCancelled(signal);
       throw unreachable();
     }
+    throwIfCancelled(signal);
     try {
-      return { response, reply: parseReplyObject(await replyText(response)) };
+      const reply = parseReplyObject(await replyText(response));
+      throwIfCancelled(signal);
+      return { response, reply };
     } catch (error) {
+      throwIfCancelled(signal);
       if (error instanceof OAuthFlowError) throw error;
       throw unreachable();
     }
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onCancel);
   }
 }
 
 async function postToken(
   fetchImpl: FetchLike,
   body: URLSearchParams,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   const { response, reply } = await fetchReply(
     fetchImpl,
@@ -521,6 +554,7 @@ async function postToken(
       redirect: 'manual',
     },
     () => new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT could not be reached.'),
+    signal,
   );
   if (!response.ok) {
     if (reply?.error === 'invalid_grant') {
@@ -566,18 +600,29 @@ function decodePart(part: string): Record<string, unknown> | undefined {
   }
 }
 
-async function signingKeyFor(kid: string, fetchImpl: FetchLike): Promise<JsonWebKey | undefined> {
+async function signingKeyFor(
+  kid: string,
+  fetchImpl: FetchLike,
+  signal?: AbortSignal,
+): Promise<JsonWebKey | undefined> {
   const { response, reply } = await fetchReply(
     fetchImpl,
     CHATGPT_JWKS_URL,
     { method: 'GET', headers: { accept: 'application/json' }, redirect: 'manual' },
     () => new OAuthFlowError('ID_TOKEN_INVALID', 'The ChatGPT sign-in could not be verified.'),
+    signal,
   );
   const keys = reply?.keys;
   if (!response.ok || !Array.isArray(keys)) return undefined;
   return keys.find(
     (key: unknown): key is JsonWebKey => isRecord(key) && key.kid === kid && key.kty === 'RSA',
   );
+}
+
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    throw new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.');
+  }
 }
 
 function signatureValid(signingInput: string, signature: string, jwk: JsonWebKey): boolean {

@@ -25,7 +25,7 @@ function manualRun<T>() {
   };
 }
 
-const WAIT_MS = 5 * 60_000;
+const WAIT_MS = 3 * 60_000;
 
 function registry(openExternal = vi.fn()) {
   let clock = 1_000;
@@ -69,6 +69,45 @@ describe('one sign-in attempt per provider (T-J03)', () => {
     await expect(secondDone).resolves.toBe('ok');
   });
 
+  it('only the latest replacement runs when several starts wait for the same attempt', async () => {
+    const { attempts } = registry();
+    const first = manualRun<string>();
+    const firstDone = attempts.start('chatgpt', first.run);
+    await vi.waitFor(() => expect(first.context()).toBeDefined());
+
+    const secondRun = vi.fn(async () => 'stale');
+    const secondDone = attempts.start('chatgpt', secondRun);
+    const latestRun = vi.fn(async () => 'latest');
+    const latestDone = attempts.start('chatgpt', latestRun);
+
+    first.fail(new Error('CANCELLED'));
+    await expect(firstDone).rejects.toThrow('CANCELLED');
+    const [secondResult, latestResult] = await Promise.allSettled([secondDone, latestDone]);
+
+    expect(secondResult).toMatchObject({ status: 'rejected', reason: { code: 'CANCELLED' } });
+    expect(secondRun).not.toHaveBeenCalled();
+    expect(latestResult).toEqual({ status: 'fulfilled', value: 'latest' });
+    expect(latestRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the pending replacement while it waits for the old attempt to finish', async () => {
+    const { attempts } = registry();
+    const first = manualRun<void>();
+    const firstDone = attempts.start('chatgpt', first.run);
+    await vi.waitFor(() => expect(first.context()).toBeDefined());
+    const replacement = vi.fn(async () => 'must not run');
+    const replacementDone = attempts.start('chatgpt', replacement);
+
+    expect(attempts.cancel('chatgpt')).toBe(true);
+    first.fail(new Error('CANCELLED'));
+    await expect(firstDone).rejects.toThrow('CANCELLED');
+    await expect(replacementDone).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The sign-in was cancelled.',
+    });
+    expect(replacement).not.toHaveBeenCalled();
+  });
+
   it('the cancelled attempt is no longer the running one when the second starts', async () => {
     const { attempts } = registry();
     const first = manualRun<void>();
@@ -78,7 +117,10 @@ describe('one sign-in attempt per provider (T-J03)', () => {
     const second = manualRun<void>();
     const secondDone = attempts.start('chatgpt', second.run);
     first.finish(undefined);
-    await firstDone;
+    await expect(firstDone).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The sign-in was superseded by a newer attempt.',
+    });
     await vi.waitFor(() => expect(second.context()).toBeDefined());
     expect(attempts.running('chatgpt')).toBeDefined();
     second.finish(undefined);

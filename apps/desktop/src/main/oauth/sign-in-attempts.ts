@@ -1,7 +1,9 @@
+import { OAuthFlowError } from './errors.js';
+
 /**
  * One sign-in attempt per provider at a time (T-J03). A new attempt first cancels the running one and waits
- * for it to finish, so the old listener is closed and its port is free before the new attempt listens. A
- * cancelled attempt's callback is refused by its closed listener (provider-oauth loopback).
+ * for it to finish, so the old listener is closed and its port is free before the new attempt listens. Only
+ * the last requested replacement runs; Cancel also reaches a replacement waiting for the old attempt to finish.
  *
  * The registry lives in the main process. It keeps only what the settings screen needs: when the wait began,
  * when it ends, and the sign-in page, so the page can be opened again.
@@ -12,6 +14,8 @@ export interface SignInAttemptContext {
   readonly signal: AbortSignal;
   /** Remembers the sign-in page this attempt opened, so "Open the sign-in page again" can open it. */
   setAuthorizationUrl(url: string): void;
+  /** Marks the profile save as committed; later cancellation requests cannot report a saved sign-in as cancelled. */
+  markCommitted(): void;
 }
 
 /** What the settings screen shows for the running attempt. */
@@ -26,9 +30,9 @@ export interface RunningSignIn {
 }
 
 export interface SignInAttempts {
-  /** Runs one attempt for `provider`, first cancelling and waiting for any running one. */
+  /** Runs one attempt for `provider`, cancelling older work and rejecting any replacement superseded while waiting. */
   start<T>(provider: string, run: (context: SignInAttemptContext) => Promise<T>): Promise<T>;
-  /** Cancels the running attempt for `provider`. False when none is running. */
+  /** Cancels the running or pending attempt for `provider`. False when none can be cancelled. */
   cancel(provider: string): boolean;
   /** Opens the sign-in page of the running attempt again. False when there is no page to open. */
   reopen(provider: string): Promise<boolean>;
@@ -46,8 +50,9 @@ export interface SignInAttemptOptions {
 interface Entry {
   readonly controller: AbortController;
   readonly startedAt: number;
+  readonly settled: Promise<void>;
   authUrl: string | undefined;
-  settled: Promise<void>;
+  committed: boolean;
 }
 
 export function createSignInAttempts(options: SignInAttemptOptions): SignInAttempts {
@@ -59,33 +64,42 @@ export function createSignInAttempts(options: SignInAttemptOptions): SignInAttem
       run: (context: SignInAttemptContext) => Promise<T>,
     ): Promise<T> {
       const previous = entries.get(provider);
-      if (previous !== undefined) {
-        previous.controller.abort();
-        // Waits until the old run has returned, which is after its listener has closed.
-        await previous.settled;
-      }
-
       const controller = new AbortController();
+      let resolveSettled: () => void = () => undefined;
+      const settled = new Promise<void>((resolve) => {
+        resolveSettled = resolve;
+      });
       const entry: Entry = {
         controller,
         startedAt: options.now(),
         authUrl: undefined,
-        settled: Promise.resolve(),
+        settled,
+        committed: false,
       };
-      const result = run({
-        signal: controller.signal,
-        setAuthorizationUrl: (url) => {
-          entry.authUrl = url;
-        },
-      });
-      entry.settled = result.then(
-        () => undefined,
-        () => undefined,
-      );
+      // Publish the pending request before waiting, so Cancel and a later start target the newest request.
       entries.set(provider, entry);
+      if (previous !== undefined && !previous.committed) {
+        previous.controller.abort();
+        // Waits until the old run has returned, which is after its listener has closed.
+      }
       try {
-        return await result;
+        if (previous !== undefined) await previous.settled;
+        throwIfInactive(entries, provider, entry);
+        const result = await run({
+          signal: controller.signal,
+          setAuthorizationUrl: (url) => {
+            if (entries.get(provider) === entry && !controller.signal.aborted) {
+              entry.authUrl = url;
+            }
+          },
+          markCommitted: () => {
+            entry.committed = true;
+          },
+        });
+        if (!entry.committed) throwIfInactive(entries, provider, entry);
+        return result;
       } finally {
+        resolveSettled();
         // Only the entry this run created is removed; a newer attempt may already have replaced it.
         if (entries.get(provider) === entry) entries.delete(provider);
       }
@@ -93,14 +107,20 @@ export function createSignInAttempts(options: SignInAttemptOptions): SignInAttem
 
     cancel(provider: string): boolean {
       const entry = entries.get(provider);
-      if (entry === undefined) return false;
+      if (entry === undefined || entry.committed) return false;
       entry.controller.abort();
       return true;
     },
 
     async reopen(provider: string): Promise<boolean> {
       const entry = entries.get(provider);
-      if (entry === undefined || entry.authUrl === undefined) return false;
+      if (
+        entry === undefined ||
+        entry.committed ||
+        entry.controller.signal.aborted ||
+        entry.authUrl === undefined
+      )
+        return false;
       await options.openExternal(entry.authUrl);
       return true;
     },
@@ -116,4 +136,14 @@ export function createSignInAttempts(options: SignInAttemptOptions): SignInAttem
       };
     },
   };
+}
+
+function throwIfInactive(entries: Map<string, Entry>, provider: string, entry: Entry): void {
+  // Map identity is the request token: a newer pending start supersedes this one.
+  if (entries.get(provider) !== entry) {
+    throw new OAuthFlowError('CANCELLED', 'The sign-in was superseded by a newer attempt.');
+  }
+  if (entry.controller.signal.aborted) {
+    throw new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.');
+  }
 }

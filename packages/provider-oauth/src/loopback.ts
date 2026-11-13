@@ -4,7 +4,7 @@ import { OAuthFlowError } from './errors.js';
 /** The only host a sign-in listens on and redirects to. `localhost` is never used (PLAN-v4 §6d). */
 export const LOOPBACK_HOST = '127.0.0.1';
 /** How long a sign-in waits for the browser to come back (PLAN-v4 §6d). */
-export const CALLBACK_TIMEOUT_MS = 5 * 60_000;
+export const CALLBACK_TIMEOUT_MS = 3 * 60_000;
 
 export interface LoopbackCallbackOptions {
   /** The path the browser returns to, such as `/callback`. Any other path is ignored. */
