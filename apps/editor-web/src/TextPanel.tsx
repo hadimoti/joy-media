@@ -147,18 +147,31 @@ export function TextPanel({
   );
 }
 
+/**
+ * An outline style has a stroke around its letters. Its fill is often dark, so
+ * on a dark tile the outline cannot be seen: such a template gets a mid-grey tile (T-D15).
+ */
+export function isOutlineTextTemplate(template: Pick<TextTemplateV1, 'style'>): boolean {
+  return template.style.stroke !== undefined;
+}
+
 function TemplatePreview({ template }: { readonly template: TextTemplateV1 }) {
   const fill = template.style.fill;
+  const outline = isOutlineTextTemplate(template);
   const background =
     fill.kind === 'linear-gradient'
       ? `linear-gradient(${fill.angleDeg}deg, ${fill.stops.map((stop) => `${stop.color} ${Math.round(stop.offset * 100)}%`).join(', ')})`
       : undefined;
   return (
     <span
-      className="text-template-preview"
+      className={`text-template-preview${outline ? ' is-outline' : ''}`}
       dir={template.style.direction === 'rtl' ? 'rtl' : 'auto'}
       style={{
         color: fill.kind === 'solid' ? fill.color : fill.stops[0]?.color,
+        WebkitTextStroke:
+          template.style.stroke === undefined
+            ? undefined
+            : `${template.style.stroke.widthPx}px ${template.style.stroke.color}`,
         backgroundImage: background,
         fontFamily: resolveContentFontFamily(template.style.fontFamily),
         fontSize: `${Math.max(0.68, Math.min(1.2, template.style.fontSizePx / 96))}rem`,

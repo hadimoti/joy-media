@@ -42,6 +42,46 @@ function fail(message) {
   return error;
 }
 
+/**
+ * The environment of a test launch. Every folder is scratch (user data, USERPROFILE, HOME, APPDATA, TEMP,
+ * LOCALAPPDATA), except in sign-in mode (`--needs-sign-in`): there LOCALAPPDATA stays the owner's real one, so
+ * the sign-in page opens in the normal Chrome profile. Everything else stays scratch in both modes.
+ * Pure: it touches no disk. The caller creates `scratchDirs` and prints `modeLine`.
+ */
+export function buildLaunchEnvironment({ baseEnv, envRoot, needsSignIn, electronDir }) {
+  const scratch = {
+    USERPROFILE: join(envRoot, 'User'),
+    HOME: join(envRoot, 'User'),
+    APPDATA: join(envRoot, 'Roaming'),
+    TEMP: join(envRoot, 'Temp'),
+    TMP: join(envRoot, 'Temp'),
+  };
+  const env = { ...baseEnv, ...scratch, ELECTRON_OVERRIDE_DIST_PATH: electronDir };
+  const scratchDirs = [scratch.USERPROFILE, scratch.APPDATA, scratch.TEMP];
+  if (needsSignIn) {
+    const realLocalAppData = baseEnv.LOCALAPPDATA;
+    if (!realLocalAppData) {
+      throw fail('--needs-sign-in needs the real LOCALAPPDATA, and this environment has none');
+    }
+    env.LOCALAPPDATA = realLocalAppData;
+    return {
+      env,
+      scratchDirs,
+      mode: 'sign-in',
+      modeLine:
+        'mode: sign-in (LOCALAPPDATA is the real one, kept for the sign-in page; user data, USERPROFILE, HOME, APPDATA and TEMP are scratch)',
+    };
+  }
+  env.LOCALAPPDATA = join(envRoot, 'Local');
+  scratchDirs.push(env.LOCALAPPDATA);
+  return {
+    env,
+    scratchDirs,
+    mode: 'scratch',
+    modeLine: 'mode: scratch (every folder is scratch; no sign-in)',
+  };
+}
+
 export async function checkLaunchRules(config, deps = {}) {
   const platform = deps.platform ?? process.platform;
   if (platform !== 'win32') throw fail('live app runs require Windows');
@@ -255,19 +295,15 @@ export function createLiveDriver(config, options = {}) {
 
     const port = await findFreePort();
     const envRoot = join(profileDir, 'environment');
-    const env = {
-      ...process.env,
-      USERPROFILE: join(envRoot, 'User'),
-      HOME: join(envRoot, 'User'),
-      APPDATA: join(envRoot, 'Roaming'),
-      LOCALAPPDATA: config.needsSignIn ? process.env.LOCALAPPDATA : join(envRoot, 'Local'),
-      TEMP: join(envRoot, 'Temp'),
-      TMP: join(envRoot, 'Temp'),
-      ELECTRON_OVERRIDE_DIST_PATH: baseline.electronDir,
-    };
-    for (const path of [env.USERPROFILE, env.APPDATA, env.TEMP, env.LOCALAPPDATA]) {
-      if (path) mkdirSync(path, { recursive: true });
-    }
+    const launchEnv = buildLaunchEnvironment({
+      baseEnv: process.env,
+      envRoot,
+      needsSignIn: config.needsSignIn === true,
+      electronDir: baseline.electronDir,
+    });
+    const env = launchEnv.env;
+    for (const path of launchEnv.scratchDirs) mkdirSync(path, { recursive: true });
+    process.stdout.write(`${launchEnv.modeLine}\n`);
     const requireFromApp = createRequire(join(baseline.appDir, 'resources', 'app', 'package.json'));
     const { chromium: appChromium } = requireFromApp('playwright-core');
     child = spawnProcess(
