@@ -28,6 +28,7 @@ import { createCreativeEffectFilter } from './creative-effects.js';
 export { colorGradeSignature, effectsSignature, isIdentityColorGrade } from './effects-cpu.js';
 
 const DEFAULT_FILTER_VERT = `
+precision highp float;
 in vec2 aPosition;
 out vec2 vTextureCoord;
 
@@ -56,6 +57,7 @@ void main(void)
 `;
 
 const VIGNETTE_FRAG = `
+precision highp float;
 in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
@@ -69,6 +71,193 @@ void main()
     float vig = smoothstep(0.35, 1.05, dist) * uAmount;
     color.rgb *= (1.0 - vig);
     finalColor = color;
+}
+`;
+
+const EFFECT_FRAG_HEADER = `
+precision highp float;
+in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+uniform vec4 uInputSize;
+uniform vec4 uOutputFrame;
+`;
+
+const COLOR_OVERLAY_FRAG = `${EFFECT_FRAG_HEADER}
+uniform float uR;
+uniform float uG;
+uniform float uB;
+uniform float uOpacity;
+
+void main()
+{
+    vec4 color = texture(uTexture, vTextureCoord);
+    vec3 overlay = clamp(vec3(uR, uG, uB) / 255.0, 0.0, 1.0);
+    float op = clamp(uOpacity, 0.0, 1.0);
+    finalColor = vec4(mix(color.rgb, overlay * color.a, op), color.a);
+}
+`;
+
+const CURVES_FRAG = `${EFFECT_FRAG_HEADER}
+uniform float uShadows;
+uniform float uMidtones;
+uniform float uHighlights;
+
+void main()
+{
+    vec4 color = texture(uTexture, vTextureCoord);
+    float lum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+    float sw = pow(1.0 - lum, 2.0);
+    float hw = pow(lum, 2.0);
+    float mw = clamp(1.0 - sw - hw, 0.0, 1.0);
+    float delta = uShadows * sw + uMidtones * mw + uHighlights * hw;
+    finalColor = vec4(clamp(color.rgb + delta, 0.0, 1.0), color.a);
+}
+`;
+
+const BULGE_FRAG = `${EFFECT_FRAG_HEADER}
+uniform float uAmount;
+uniform float uRadius;
+
+void main()
+{
+    vec2 contentMax = max(uOutputFrame.zw * uInputSize.zw, vec2(0.0001));
+    vec2 uv = vTextureCoord / contentMax;
+    vec2 centered = uv - 0.5;
+    float aspect = uOutputFrame.z / max(1.0, uOutputFrame.w);
+    vec2 scaled = vec2(centered.x * aspect, centered.y);
+    float dist = length(scaled);
+    float radius = max(0.05, uRadius);
+    if (dist < radius && dist > 0.0001) {
+        float norm = dist / radius;
+        float factor = uAmount >= 0.0
+            ? pow(norm, 1.0 + uAmount * 1.4)
+            : 1.0 / max(0.25, 1.0 - (-uAmount) * (1.0 - norm));
+        centered *= (factor / max(norm, 0.0001));
+    }
+    vec2 targetUv = clamp(0.5 + centered, vec2(0.0), vec2(1.0)) * contentMax;
+    finalColor = texture(uTexture, targetUv);
+}
+`;
+
+const TWIST_FRAG = `${EFFECT_FRAG_HEADER}
+uniform float uAngle;
+uniform float uRadius;
+
+void main()
+{
+    vec2 contentMax = max(uOutputFrame.zw * uInputSize.zw, vec2(0.0001));
+    vec2 uv = vTextureCoord / contentMax;
+    vec2 centered = uv - 0.5;
+    float dist = length(centered);
+    float radius = max(0.05, uRadius);
+    if (dist < radius) {
+        float falloff = 1.0 - dist / radius;
+        float theta = uAngle * 3.14159265 * falloff * falloff;
+        float c = cos(theta);
+        float s = sin(theta);
+        centered = vec2(centered.x * c - centered.y * s, centered.x * s + centered.y * c);
+    }
+    vec2 targetUv = clamp(0.5 + centered, vec2(0.0), vec2(1.0)) * contentMax;
+    finalColor = texture(uTexture, targetUv);
+}
+`;
+
+const RIPPLE_FRAG = `${EFFECT_FRAG_HEADER}
+uniform float uAmplitude;
+uniform float uFrequency;
+
+void main()
+{
+    vec2 contentMax = max(uOutputFrame.zw * uInputSize.zw, vec2(0.0001));
+    vec2 uv = vTextureCoord / contentMax;
+    vec2 centered = uv - 0.5;
+    float dist = length(centered);
+    float wave = sin(dist * uFrequency * 6.2831853 + uv.y * uFrequency);
+    vec2 dir = dist > 0.0001 ? centered / dist : vec2(1.0, 0.0);
+    vec2 displaced = clamp(uv + dir * wave * uAmplitude, vec2(0.0), vec2(1.0));
+    finalColor = texture(uTexture, displaced * contentMax);
+}
+`;
+
+const CRT_FRAG = `${EFFECT_FRAG_HEADER}
+uniform float uScanlines;
+uniform float uNoise;
+
+void main()
+{
+    vec2 contentMax = max(uOutputFrame.zw * uInputSize.zw, vec2(0.0001));
+    vec2 uv = vTextureCoord / contentMax;
+    float scanY = uv.y * max(1.0, uOutputFrame.w);
+    float scanMask = 1.0 - clamp(uScanlines, 0.0, 1.0) * (0.5 + 0.5 * sin(scanY * 3.14159265));
+    vec2 chroma = vec2(uInputSize.z * 2.0, 0.0);
+    float r = texture(uTexture, clamp(uv + chroma, vec2(0.0), vec2(1.0)) * contentMax).r;
+    float g = texture(uTexture, clamp(uv, vec2(0.0), vec2(1.0)) * contentMax).g;
+    float b = texture(uTexture, clamp(uv - chroma, vec2(0.0), vec2(1.0)) * contentMax).b;
+    float a = texture(uTexture, clamp(uv, vec2(0.0), vec2(1.0)) * contentMax).a;
+    float grain = (fract(sin(dot(floor(uv * uOutputFrame.zw), vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * uNoise;
+    finalColor = vec4(clamp(vec3(r, g, b) * scanMask + grain, 0.0, 1.0), a);
+}
+`;
+
+const EDGE_DETECT_FRAG = `${EFFECT_FRAG_HEADER}
+uniform float uThreshold;
+
+void main()
+{
+    vec2 stepUv = uInputSize.zw * 1.5;
+    vec2 contentMax = max(uOutputFrame.zw * uInputSize.zw, vec2(0.0001));
+    float tl = dot(texture(uTexture, clamp(vTextureCoord + vec2(-stepUv.x, -stepUv.y), vec2(0.0), contentMax)).rgb, vec3(0.299, 0.587, 0.114));
+    float tc = dot(texture(uTexture, clamp(vTextureCoord + vec2(0.0, -stepUv.y), vec2(0.0), contentMax)).rgb, vec3(0.299, 0.587, 0.114));
+    float tr = dot(texture(uTexture, clamp(vTextureCoord + vec2(stepUv.x, -stepUv.y), vec2(0.0), contentMax)).rgb, vec3(0.299, 0.587, 0.114));
+    float ml = dot(texture(uTexture, clamp(vTextureCoord + vec2(-stepUv.x, 0.0), vec2(0.0), contentMax)).rgb, vec3(0.299, 0.587, 0.114));
+    float mr = dot(texture(uTexture, clamp(vTextureCoord + vec2(stepUv.x, 0.0), vec2(0.0), contentMax)).rgb, vec3(0.299, 0.587, 0.114));
+    float bl = dot(texture(uTexture, clamp(vTextureCoord + vec2(-stepUv.x, stepUv.y), vec2(0.0), contentMax)).rgb, vec3(0.299, 0.587, 0.114));
+    float bc = dot(texture(uTexture, clamp(vTextureCoord + vec2(0.0, stepUv.y), vec2(0.0), contentMax)).rgb, vec3(0.299, 0.587, 0.114));
+    float br = dot(texture(uTexture, clamp(vTextureCoord + vec2(stepUv.x, stepUv.y), vec2(0.0), contentMax)).rgb, vec3(0.299, 0.587, 0.114));
+    float gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+    float gy = (bl + 2.0 * bc + br) - (tl + 2.0 * tc + tr);
+    float edge = smoothstep(clamp(uThreshold * 0.5, 0.02, 0.6), 0.75, length(vec2(gx, gy)));
+    vec4 center = texture(uTexture, vTextureCoord);
+    finalColor = vec4(max(center.rgb * 0.08, vec3(edge) * mix(vec3(0.85), center.rgb * 1.4, 0.5)), center.a);
+}
+`;
+
+const EMBOSS_FRAG = `${EFFECT_FRAG_HEADER}
+uniform float uStrength;
+
+void main()
+{
+    vec2 stepUv = uInputSize.zw * 1.5;
+    vec2 contentMax = max(uOutputFrame.zw * uInputSize.zw, vec2(0.0001));
+    vec3 tl = texture(uTexture, clamp(vTextureCoord - stepUv, vec2(0.0), contentMax)).rgb;
+    vec3 br = texture(uTexture, clamp(vTextureCoord + stepUv, vec2(0.0), contentMax)).rgb;
+    vec4 center = texture(uTexture, vTextureCoord);
+    vec3 diff = (tl - br) * max(0.1, uStrength);
+    float relief = clamp(0.5 + dot(diff, vec3(0.299, 0.587, 0.114)) * 2.0, 0.0, 1.0);
+    finalColor = vec4(vec3(relief), center.a);
+}
+`;
+
+const UNSHARP_MASK_FRAG = `${EFFECT_FRAG_HEADER}
+uniform float uAmount;
+uniform float uRadius;
+uniform float uThreshold;
+
+void main()
+{
+    vec2 stepUv = uInputSize.zw * max(1.0, uRadius * 1.5);
+    vec2 contentMax = max(uOutputFrame.zw * uInputSize.zw, vec2(0.0001));
+    vec4 center = texture(uTexture, vTextureCoord);
+    vec3 blurred = (
+        texture(uTexture, clamp(vTextureCoord + vec2(stepUv.x, 0.0), vec2(0.0), contentMax)).rgb +
+        texture(uTexture, clamp(vTextureCoord - vec2(stepUv.x, 0.0), vec2(0.0), contentMax)).rgb +
+        texture(uTexture, clamp(vTextureCoord + vec2(0.0, stepUv.y), vec2(0.0), contentMax)).rgb +
+        texture(uTexture, clamp(vTextureCoord - vec2(0.0, stepUv.y), vec2(0.0), contentMax)).rgb
+    ) * 0.25;
+    vec3 detail = center.rgb - blurred;
+    float mask = smoothstep(max(0.0, uThreshold * 0.25), max(0.05, uThreshold + 0.1), length(detail));
+    finalColor = vec4(clamp(center.rgb + detail * (uAmount * 2.5) * mask, 0.0, 1.0), center.a);
 }
 `;
 
@@ -527,25 +716,121 @@ function filterForEffect(effect: EffectInstanceIR): Filter[] | undefined {
       return [createBrightnessContrastFilter(params)];
     }
     case 'sepia': {
-      const amount = effect.params.amount ?? 0.5;
+      const amount = Math.max(0, Math.min(1, effect.params.amount ?? 0.5));
       const matrix = new ColorMatrixFilter();
-      matrix.sepia(false);
-      matrix.brightness(amount, false);
+      const s = amount;
+      const inv = 1 - s;
+      matrix.matrix = [
+        inv + s * 0.393,
+        s * 0.769,
+        s * 0.189,
+        0,
+        0,
+        s * 0.349,
+        inv + s * 0.686,
+        s * 0.168,
+        0,
+        0,
+        s * 0.272,
+        s * 0.534,
+        inv + s * 0.131,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+      ];
       return [matrix];
     }
     case 'hue-saturation': {
       const matrix = new ColorMatrixFilter();
       const hue = (effect.params.hue ?? 0) * 180;
-      const sat = (effect.params.saturation ?? 0) + 1;
+      const sat = effect.params.saturation ?? 0;
       if (hue !== 0) matrix.hue(hue, false);
-      if (sat !== 1) matrix.saturate(sat, true);
+      if (sat !== 0) matrix.saturate(sat, hue !== 0);
       return [matrix];
     }
     case 'vibrance': {
       const amount = effect.params.amount ?? 0;
       const matrix = new ColorMatrixFilter();
-      matrix.saturate(1 + amount * 0.5, true);
+      if (amount !== 0) matrix.saturate(amount * 0.85, false);
       return [matrix];
+    }
+    case 'color-overlay': {
+      return [
+        createShaderEffectFilter('joy-color-overlay-filter', COLOR_OVERLAY_FRAG, {
+          uR: effect.params.r ?? 255,
+          uG: effect.params.g ?? 0,
+          uB: effect.params.b ?? 0,
+          uOpacity: effect.params.opacity ?? 0.3,
+        }),
+      ];
+    }
+    case 'curves': {
+      return [
+        createShaderEffectFilter('joy-curves-filter', CURVES_FRAG, {
+          uShadows: effect.params.shadows ?? 0,
+          uMidtones: effect.params.midtones ?? 0,
+          uHighlights: effect.params.highlights ?? 0,
+        }),
+      ];
+    }
+    case 'bulge': {
+      return [
+        createShaderEffectFilter('joy-bulge-filter', BULGE_FRAG, {
+          uAmount: effect.params.amount ?? 0,
+          uRadius: effect.params.radius ?? 0.4,
+        }),
+      ];
+    }
+    case 'twist': {
+      return [
+        createShaderEffectFilter('joy-twist-filter', TWIST_FRAG, {
+          uAngle: effect.params.angle ?? 0,
+          uRadius: effect.params.radius ?? 0.5,
+        }),
+      ];
+    }
+    case 'ripple': {
+      return [
+        createShaderEffectFilter('joy-ripple-filter', RIPPLE_FRAG, {
+          uAmplitude: effect.params.amplitude ?? 0.02,
+          uFrequency: effect.params.frequency ?? 10,
+        }),
+      ];
+    }
+    case 'crt': {
+      return [
+        createShaderEffectFilter('joy-crt-filter', CRT_FRAG, {
+          uScanlines: effect.params.scanlines ?? 0.5,
+          uNoise: effect.params.noise ?? 0.08,
+        }),
+      ];
+    }
+    case 'edge-detect': {
+      return [
+        createShaderEffectFilter('joy-edge-detect-filter', EDGE_DETECT_FRAG, {
+          uThreshold: effect.params.threshold ?? 0.3,
+        }),
+      ];
+    }
+    case 'emboss': {
+      return [
+        createShaderEffectFilter('joy-emboss-filter', EMBOSS_FRAG, {
+          uStrength: effect.params.strength ?? 1,
+        }),
+      ];
+    }
+    case 'unsharp-mask': {
+      return [
+        createShaderEffectFilter('joy-unsharp-mask-filter', UNSHARP_MASK_FRAG, {
+          uAmount: effect.params.amount ?? 0.5,
+          uRadius: effect.params.radius ?? 1,
+          uThreshold: effect.params.threshold ?? 0.05,
+        }),
+      ];
     }
     case 'bloom': {
       const amount = effect.params.amount ?? 0.4;
@@ -571,16 +856,26 @@ function filterForEffect(effect: EffectInstanceIR): Filter[] | undefined {
 }
 
 function createVignetteFilter(amount: number): Filter {
+  return createShaderEffectFilter('joy-vignette-filter', VIGNETTE_FRAG, { uAmount: amount });
+}
+
+function createShaderEffectFilter(
+  name: string,
+  fragment: string,
+  values: Readonly<Record<string, number>>,
+): Filter {
+  const uniforms: Record<string, { value: number; type: 'f32' }> = {};
+  for (const [key, value] of Object.entries(values)) {
+    uniforms[key] = { value, type: 'f32' };
+  }
   return new Filter({
     glProgram: GlProgram.from({
       vertex: DEFAULT_FILTER_VERT,
-      fragment: VIGNETTE_FRAG,
-      name: 'joy-vignette-filter',
+      fragment,
+      name,
     }),
     resources: {
-      vignetteUniforms: {
-        uAmount: { value: amount, type: 'f32' },
-      },
+      effectUniforms: uniforms,
     },
   });
 }

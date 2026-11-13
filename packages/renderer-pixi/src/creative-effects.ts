@@ -2,6 +2,7 @@ import { Filter, GlProgram } from 'pixi.js';
 import type { EffectInstanceIR } from '@joy-media/render-ir';
 
 const FILTER_VERT = `
+precision highp float;
 in vec2 aPosition;
 out vec2 vTextureCoord;
 
@@ -30,6 +31,7 @@ void main(void)
 `;
 
 const FRAGMENT_HEADER = `
+precision highp float;
 in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
@@ -165,7 +167,7 @@ void main()
     } else if (uShape >= 1.5) {
         distanceToShape = abs(local.y) * 1.8;
     }
-    float antialias = max(fwidth(distanceToShape), 0.006);
+    float antialias = max(1.5 / cellSize, 0.006);
     float ink = 1.0 - smoothstep(radius - antialias, radius + antialias, distanceToShape);
     vec3 inkColor = mix(vec3(0.0), source.rgb, step(0.5, uColorMode));
     finalColor = vec4(mix(vec3(1.0), inkColor, ink), source.a);
@@ -336,7 +338,7 @@ void main()
     } else if (uShape >= 2.5) {
         distanceToShape = abs(local.y) * 1.8;
     }
-    float antialias = max(fwidth(distanceToShape), 0.006);
+    float antialias = max(1.5 / cellSize, 0.006);
     float mask = 1.0 - smoothstep(radius - antialias, radius + antialias, distanceToShape);
     vec3 ink = mix(vec3(0.0), source.rgb, step(0.5, uColorMode));
     finalColor = vec4(mix(vec3(1.0), ink, mask), source.a);
