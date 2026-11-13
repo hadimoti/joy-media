@@ -107,8 +107,20 @@ function usePopupStore(): PopupManager {
     let ref = rootRefsRef.current.get(id);
     if (ref === undefined) {
       const callback = (element: HTMLElement | null) => {
-        if (element === null) rootsRef.current.delete(id);
-        else rootsRef.current.set(id, element);
+        if (element !== null) {
+          rootsRef.current.set(id, element);
+          return;
+        }
+        rootsRef.current.delete(id);
+        if (openIdRef.current !== id) return;
+        // The open popup's root has gone, so the popup is gone too. Check after the commit:
+        // an inline ref callback detaches and re-attaches the same root on every render.
+        queueMicrotask(() => {
+          if (rootsRef.current.has(id) || openIdRef.current !== id) return;
+          openIdRef.current = null;
+          openerRef.current = null;
+          setOpenId(null);
+        });
       };
       rootRefsRef.current.set(id, callback);
       ref = callback;
@@ -123,6 +135,9 @@ function usePopupStore(): PopupManager {
       const target = event.target;
       if (root === undefined || (target instanceof Node && root.contains(target))) return;
       const opener = openerRef.current;
+      // The opener is part of the popup: its own click toggles the popup, so it must not
+      // close here first and reopen on click (a toolbar button for the palette, for example).
+      if (opener !== null && target instanceof Node && opener.contains(target)) return;
       close(openId, { restoreFocus: false });
       // Let the pointer's own focus change (mousedown) happen first. A click on
       // another focusable control keeps its focus; a click on plain background

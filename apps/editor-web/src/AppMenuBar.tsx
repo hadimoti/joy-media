@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from 'react';
 import { APP_MENU_GROUPS, type AppMenuActionId, type AppMenuItem } from './app-menu.js';
 import { PANEL_INTENT_LABELS } from './panel-metadata.js';
 import { usePopupManager } from './popup-manager.js';
+import { appMenuPopupId } from './popup-ids.js';
 
 export interface AppMenuBarProps {
   readonly canUndo: boolean;
@@ -9,11 +10,6 @@ export interface AppMenuBarProps {
   readonly hasSelection: boolean;
   readonly exporting: boolean;
   readonly onAction: (id: AppMenuActionId) => void;
-}
-
-/** Each menu-bar group is one popup on the shared manager (OB-18). */
-function menuPopupId(groupId: string): string {
-  return `app-menu:${groupId}`;
 }
 
 function itemDisabled(
@@ -43,7 +39,8 @@ export function AppMenuBar(props: AppMenuBarProps) {
   const menuRefs = useRef(new Map<string, HTMLUListElement>());
   const baseId = useId();
   // Which menu-bar group is open, if any. Outside click and Escape are handled by the manager.
-  const openGroupId = APP_MENU_GROUPS.find((group) => menuPopupId(group.id) === openId)?.id ?? null;
+  const openGroupId =
+    APP_MENU_GROUPS.find((group) => appMenuPopupId(group.id) === openId)?.id ?? null;
 
   useEffect(() => {
     if (openGroupId === null) return;
@@ -76,7 +73,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
   return (
     <nav className="app-menubar" aria-label="Application menu">
       {APP_MENU_GROUPS.map((group) => {
-        const popupId = menuPopupId(group.id);
+        const popupId = appMenuPopupId(group.id);
         const menuId = `${baseId}-${group.id}`;
         const isOpen = openGroupId === group.id;
         const items = group.items;

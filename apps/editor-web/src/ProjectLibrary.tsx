@@ -6,6 +6,7 @@ import {
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import { usePopupManager } from './popup-manager.js';
+import { POPUP_IDS } from './popup-ids.js';
 import {
   loadEditorUiPreferences,
   saveEditorUiPreferences,
@@ -74,7 +75,7 @@ export function ProjectLibrary({
   // The project action menu is one popup among the app's popups (OB-18).
   const popups = usePopupManager();
   const { open: openPopup, close: closePopup } = popups;
-  const menuProjectId = popups.openId === 'project-menu' ? menuEntryId : null;
+  const menuProjectId = popups.openId === POPUP_IDS.projectMenu ? menuEntryId : null;
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [dialog, setDialog] = useState<DialogState | undefined>(undefined);
   const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
@@ -113,7 +114,7 @@ export function ProjectLibrary({
     (restoreFocus: boolean) => {
       const projectId = menuProjectId;
       setMenuEntryId(null);
-      closePopup('project-menu', { restoreFocus: false });
+      closePopup(POPUP_IDS.projectMenu, { restoreFocus: false });
       if (restoreFocus && projectId !== null) {
         window.setTimeout(() => triggerRefs.current.get(projectId)?.focus(), 0);
       }
@@ -233,7 +234,7 @@ export function ProjectLibrary({
   const openMenu = (entry: ProjectCatalogEntry, trigger: HTMLButtonElement) => {
     triggerRefs.current.set(entry.id, trigger);
     setMenuEntryId(entry.id);
-    openPopup('project-menu', trigger);
+    openPopup(POPUP_IDS.projectMenu, trigger);
   };
 
   const menuEntry =
@@ -262,7 +263,7 @@ export function ProjectLibrary({
               onClick={() => {
                 setShowTrash(false);
                 setMenuEntryId(null);
-                closePopup('project-menu', { restoreFocus: false });
+                closePopup(POPUP_IDS.projectMenu, { restoreFocus: false });
                 setNotice(undefined);
               }}
             >
@@ -275,7 +276,7 @@ export function ProjectLibrary({
               onClick={() => {
                 setShowTrash((active) => !active);
                 setMenuEntryId(null);
-                closePopup('project-menu', { restoreFocus: false });
+                closePopup(POPUP_IDS.projectMenu, { restoreFocus: false });
                 setNotice(undefined);
               }}
             >

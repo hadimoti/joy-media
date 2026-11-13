@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { ChevronDownIcon } from './icons.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
 import { usePopup } from './popup-manager.js';
+import { POPUP_IDS } from './popup-ids.js';
 import { WORKSPACE_PRESETS, workspacePresetLabel } from './workspace-presets.js';
 
 export function WorkspaceSwitcher({
@@ -14,7 +15,7 @@ export function WorkspaceSwitcher({
   readonly onReset: () => void;
 }) {
   // Opening this menu closes any other header popup; outside click and Escape close it (OB-18).
-  const popup = usePopup('workspace-switcher');
+  const popup = usePopup(POPUP_IDS.workspaceSwitcher);
   const open = popup.open;
   const optionRefs = useRef(new Map<WorkspacePresetId, HTMLButtonElement>());
 

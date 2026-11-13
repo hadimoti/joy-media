@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from 'react';
 import { usePopup } from './popup-manager.js';
+import { actionOverflowPopupId } from './popup-ids.js';
 
 export interface ActionOverflowMenuItem {
   readonly id: string;
@@ -20,7 +21,7 @@ export function ActionOverflowMenu({
   // A panel-header menu is one popup among the app's popups (OB-18): opening
   // another popup closes it, and outside click or Escape closes it.
   const popupKey = useId();
-  const popup = usePopup(`action-overflow:${popupKey}`);
+  const popup = usePopup(actionOverflowPopupId(popupKey));
   const open = popup.open;
   const menuRef = useRef<HTMLDivElement | null>(null);
 

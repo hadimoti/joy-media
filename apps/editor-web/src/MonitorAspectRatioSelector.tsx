@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from 'react';
 import { usePopup } from './popup-manager.js';
+import { POPUP_IDS } from './popup-ids.js';
 import { AspectRatioIcon, CloseIcon } from './icons.js';
 
 /**
@@ -113,7 +114,7 @@ export function MonitorAspectRatioSelector({
 }: MonitorAspectRatioSelectorProps) {
   const [uncontrolledAspectRatio, setUncontrolledAspectRatio] = useState(defaultAspectRatio);
   // The "Canvas format" drawer is one popup (OB-18): outside click and Escape close it.
-  const popup = usePopup('canvas-format');
+  const popup = usePopup(POPUP_IDS.canvasFormat);
   const open = popup.open;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);

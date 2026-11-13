@@ -61,6 +61,7 @@ import {
   stickerImageCache,
 } from '../editor-runtime-singletons.js';
 import { usePopup } from '../popup-manager.js';
+import { POPUP_IDS } from '../popup-ids.js';
 import { MonitorTransport } from './MonitorTransport.js';
 import { monitorZoomLabel } from './monitor-view.js';
 import {
@@ -218,7 +219,7 @@ function MonitorPanelContent({
       ? agentPreviewState.document
       : undefined;
   // The zoom drawer is one popup (OB-18): outside click, Escape and a second popup close it.
-  const zoomDrawer = usePopup('monitor-zoom');
+  const zoomDrawer = usePopup(POPUP_IDS.monitorZoom);
   const panelRef = useRef<HTMLElement | null>(null);
   const initialPreviewPreference = useRef(
     loadEditorUiPreferences(storage).monitorPreview ??
