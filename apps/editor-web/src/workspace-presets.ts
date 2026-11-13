@@ -29,8 +29,14 @@ export function workspacePresetLabel(id: WorkspacePresetId): string {
   return WORKSPACE_PRESETS.find((preset) => preset.id === id)?.label ?? 'Edit';
 }
 
-/** Separate keys keep a user's Custom layout independent from named presets. */
+/**
+ * Separate keys keep each preset and view mode independent.
+ *
+ * Edit keeps using its established dock-layout key so saved layouts continue
+ * to work without copying or deleting them during this migration.
+ */
 export function workspacePresetLayoutKey(mode: EditorViewMode, preset: WorkspacePresetId): string {
+  if (preset === 'edit') return dockLayoutKey(mode);
   return `joy-media.workspace.${preset}.${mode}.v2`;
 }
 
@@ -116,7 +122,7 @@ export function planWorkspaceLayout(
   preset: WorkspacePresetId,
   mode: EditorViewMode,
 ): WorkspaceLayoutPlan {
-  const key = preset === 'edit' ? dockLayoutKey(mode) : workspacePresetLayoutKey(mode, preset);
+  const key = workspacePresetLayoutKey(mode, preset);
   const saved = storage.getItem(key);
   if (saved !== null) {
     try {

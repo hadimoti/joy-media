@@ -3572,11 +3572,8 @@ function EditorWorkspace({
       const api = dockviewApiRef.current;
       const current = workspacePresetRef.current;
       const mode = viewModeRef.current;
-      if (api !== null && current !== 'custom') {
-        storage.setItem(
-          workspacePresetLayoutKey(mode, 'custom'),
-          serializeDockLayout(api.toJSON()),
-        );
+      if (api !== null) {
+        storage.setItem(workspacePresetLayoutKey(mode, current), serializeDockLayout(api.toJSON()));
       }
       workspacePresetRef.current = next;
       setWorkspacePreset(next);
@@ -3606,10 +3603,14 @@ function EditorWorkspace({
     const api = dockviewApiRef.current;
     if (api === null) return;
     const current = viewModeRef.current;
-    storage.setItem(dockLayoutKey(current), serializeDockLayout(api.toJSON()));
+    storage.setItem(
+      workspacePresetLayoutKey(current, workspacePresetRef.current),
+      serializeDockLayout(api.toJSON()),
+    );
     const next: EditorViewMode = current === 'vertical' ? 'widescreen' : 'vertical';
     saveViewMode(storage, next);
     persistUiPreferences({ viewMode: next });
+    viewModeRef.current = next;
     setViewMode(next);
     applyDockLayout(api, next, workspacePresetRef.current);
   }, [applyDockLayout, persistUiPreferences, storage]);
@@ -5229,7 +5230,7 @@ function EditorWorkspace({
 
       const persistDockLayout = () => {
         storage.setItem(
-          dockLayoutKey(viewModeRef.current),
+          workspacePresetLayoutKey(viewModeRef.current, workspacePresetRef.current),
           serializeDockLayout(event.api.toJSON()),
         );
       };
