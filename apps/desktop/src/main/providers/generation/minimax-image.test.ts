@@ -6,7 +6,7 @@ import { replyFailure } from './minimax-reply.js';
 // from a live call (T-C10 records the first live reply).
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-const KEY = 'sk-cp-test-not-a-real-key';
+const KEY = 'not-a-real-key-for-tests';
 const INPUT = { baseUrl: 'https://api.minimax.io/v1', apiKey: KEY, prompt: 'a red square' };
 
 describe('MiniMax picture request', () => {

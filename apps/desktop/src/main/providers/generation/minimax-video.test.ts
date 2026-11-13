@@ -11,7 +11,7 @@ import {
 
 // The request and reply shapes the master-plan facts P6 to P8 describe. They are documented shapes, not replies recorded
 // from a live call (T-C10 records the first live reply).
-const KEY = 'sk-cp-test-not-a-real-key';
+const KEY = 'not-a-real-key-for-tests';
 const INPUT = { baseUrl: 'https://api.minimax.io/v1', apiKey: KEY, prompt: 'a slow pan' };
 
 describe('MiniMax video requests', () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { holdsCredential } from './credential-screen.js';
 
-const KEY = 'sk-cp-test-not-a-real-key';
+const KEY = 'not-a-real-key-for-tests';
 const PICTURE =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 

@@ -8,7 +8,7 @@ import {
 } from './provider-broker.js';
 
 const NOW = Date.UTC(2026, 10, 13);
-const KEY = 'sk-cp-test-not-a-real-key';
+const KEY = 'not-a-real-key-for-tests';
 // A 1x1 PNG. The documented reply shapes carry it as base64; it is not a recorded live reply.
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
