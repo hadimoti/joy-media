@@ -1,14 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { APP_MENU_GROUPS, panelIdFromMenuAction, isPanelMenuAction } from './app-menu.js';
-import { paletteActionsFromMenu, searchActions } from './editor-state.js';
+import { searchActions } from './editor-state.js';
 
 describe('app-menu catalog', () => {
   it('puts every menu action id in the command palette', () => {
     const menuIds = APP_MENU_GROUPS.flatMap((group) => group.items.map((item) => item.id));
-    const paletteIds = paletteActionsFromMenu().map((action) => action.id);
+    // searchActions('') is the list the palette renders, so the check reads the real list.
+    const paletteIds = searchActions('').map((action) => action.id);
     expect(menuIds.filter((id) => !paletteIds.includes(id))).toEqual([]);
     // Each id appears once in the palette, even when two menus share it.
     expect(new Set(paletteIds).size).toBe(paletteIds.length);
+  });
+
+  it('lists the command palette once, under Edit', () => {
+    const paletteItems = APP_MENU_GROUPS.flatMap((group) =>
+      group.items
+        .filter((item) => item.label === 'Command Palette…')
+        .map((item) => [group.id, item.id]),
+    );
+    expect(paletteItems).toEqual([['edit', 'edit.commandPalette']]);
   });
 
   it('builds the Clip menu from the clip commands that exist, with Delete shared with Edit', () => {

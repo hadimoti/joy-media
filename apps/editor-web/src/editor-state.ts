@@ -44,3 +44,35 @@ export function searchActions(query: string): readonly EditorAction[] {
     ? EDITOR_ACTIONS
     : EDITOR_ACTIONS.filter((action) => action.title.toLowerCase().includes(needle));
 }
+
+interface SpeedTimelineClip {
+  readonly id: string;
+  readonly kind: string;
+}
+
+/**
+ * Whether Clip > Speed applies to the selection. The Inspector's Speed tab exists only
+ * for a video clip, and it follows the first selected id that the timeline holds, so
+ * this uses the same rule.
+ */
+export function selectedClipSupportsSpeed(
+  timelineProject: {
+    readonly compositions: Readonly<
+      Record<
+        string,
+        { readonly tracks: readonly { readonly clips: readonly SpeedTimelineClip[] }[] }
+      >
+    >;
+  },
+  selectedIds: readonly string[],
+): boolean {
+  for (const clipId of selectedIds) {
+    for (const composition of Object.values(timelineProject.compositions)) {
+      for (const track of composition.tracks) {
+        const clip = track.clips.find((candidate) => candidate.id === clipId);
+        if (clip !== undefined) return clip.kind === 'video';
+      }
+    }
+  }
+  return false;
+}

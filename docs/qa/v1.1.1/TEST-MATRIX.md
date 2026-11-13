@@ -50,16 +50,17 @@ Source of truth: `APP_MENU_GROUPS` in `apps/editor-web/src/app-menu.ts`. The Vie
 | ----- | -------------------------------------------------------- | ----------------------------------------------------- | ------ | ----------------------------------------------------- | -------------------------------------------------------------------------- | ----------------- | ----- |
 | D-005 | Edit > Undo (Ctrl+Z) `edit.undo`                         | Undo takes the last change back                       | manual | Make one edit, press Ctrl+Z                           | The change is gone; the project document matches the state before the edit | `T-A08\D-005.png` | T-A08 |
 | D-006 | Edit > Redo (Ctrl+Y) `edit.redo`                         | Redo puts the undone change back                      | manual | Undo once, then Redo                                  | The change is back, byte for byte                                          | `T-A08\D-006.png` | T-A08 |
-| D-007 | Edit > Cut / Delete Clip (Del) `edit.delete`             | A selected clip is removed                            | manual | Select a clip, press Del                              | The clip leaves the timeline; Undo brings it back                          | `T-A08\D-007.png` | T-A08 |
-| D-008 | Edit > Duplicate Clip (Ctrl+D) `edit.duplicate`          | A clip is copied onto the same track                  | manual | Select a clip, Ctrl+D                                 | A copy follows the original on the same track; one Undo removes both       | `T-A08\D-008.png` | T-A08 |
+| D-007 | Edit > Delete (Del) `clip.delete` (also Clip > Delete)   | A selected clip is removed                            | manual | Select a clip, press Del                              | The clip leaves the timeline; Undo brings it back                          | `T-A08\D-007.png` | T-A08 |
+| D-008 | Clip > Duplicate Clip (Ctrl+D) `clip.duplicate`          | A clip is copied onto the same track                  | manual | Select a clip, Ctrl+D                                 | A copy follows the original on the same track; one Undo removes both       | `T-A08\D-008.png` | T-A08 |
 | D-009 | Edit > Command Palette… (Ctrl+K) `edit.commandPalette`   | The palette opens from the Edit menu                  | manual | Edit > Command Palette…                               | The palette opens and is focused                                           | `T-A08\D-009.png` | T-A08 |
 | D-010 | Edit > Asset Library Folder… `edit.assetLibrarySettings` | The library folder can be pointed at a scratch folder | manual | Edit > Asset Library Folder…, choose a scratch folder | The dialog shows the new path; the Media list re-reads that folder         | `T-A08\D-010.png` | T-A08 |
 
 ### 2.3 Clip
 
-| ID    | Area                                      | Proves                                                          | Run    | Steps                                   | Expected                                                                               | Evidence          | Task  |
-| ----- | ----------------------------------------- | --------------------------------------------------------------- | ------ | --------------------------------------- | -------------------------------------------------------------------------------------- | ----------------- | ----- |
-| D-011 | Clip > Split at Playhead (S) `clip.split` | A clip is cut at the playhead into two source-continuous halves | manual | Put the playhead inside a clip, press S | Two clips on the same track; the second starts where the first ends; Undo restores one | `T-A08\D-011.png` | T-A08 |
+| ID     | Area                                      | Proves                                                                                                   | Run    | Steps                                                                                | Expected                                                                                              | Evidence           | Task  |
+| ------ | ----------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------ | ----- |
+| D-011  | Clip > Split at Playhead (S) `clip.split` | A clip is cut at the playhead into two source-continuous halves                                          | manual | Put the playhead inside a clip, press S                                              | Two clips on the same track; the second starts where the first ends; Undo restores one                | `T-A08\D-011.png`  | T-A08 |
+| D-011a | Clip > Speed… `clip.speed`                | Speed opens the Inspector's Speed tab for a video clip, and is disabled for an image, audio or text clip | manual | Select a video clip, Clip > Speed…; then select an image clip and open the Clip menu | The Speed tab opens on the video clip; Speed… is greyed out for the image clip and in the palette too | `T-A08\D-011a.png` | T-A08 |
 
 ### 2.4 Joy Code
 
@@ -73,10 +74,10 @@ Source of truth: `APP_MENU_GROUPS` in `apps/editor-web/src/app-menu.ts`. The Vie
 
 ### 2.5 View — static items
 
-| ID    | Area                                                   | Proves                                   | Run    | Steps                   | Expected                                          | Evidence          | Task  |
-| ----- | ------------------------------------------------------ | ---------------------------------------- | ------ | ----------------------- | ------------------------------------------------- | ----------------- | ----- |
-| D-017 | View > Command Palette… (Ctrl+K) `view.commandPalette` | The palette opens from the View menu     | manual | View > Command Palette… | The palette opens                                 | `T-A08\D-017.png` | T-A08 |
-| D-018 | View > Toggle Full Screen (F11) `view.fullscreen`      | The window enters and leaves full screen | manual | Press F11 twice         | Full screen on, then back; the layout is not lost | `T-A08\D-018.png` | T-A08 |
+| ID    | Area                                                   | Proves                                   | Run    | Steps           | Expected                                          | Evidence          | Task  |
+| ----- | ------------------------------------------------------ | ---------------------------------------- | ------ | --------------- | ------------------------------------------------- | ----------------- | ----- |
+| D-017 | Retired: the palette has one entry, under Edit (D-009) | —                                        | —      | —               | —                                                 | —                 | —     |
+| D-018 | View > Toggle Full Screen (F11) `view.fullscreen`      | The window enters and leaves full screen | manual | Press F11 twice | Full screen on, then back; the layout is not lost | `T-A08\D-018.png` | T-A08 |
 
 ### 2.6 View — the generated panel entries
 
@@ -352,7 +353,7 @@ Both sets are extracted from the code and compared against the IDs written in th
 
 The two sets are:
 
-- **Menu items — 39.** The 21 static ids in `APP_MENU_GROUPS`, plus the 14 generated `view.panel.*` ids and the 4 generated `window.panel.*` ids. The generated ids are computed from `PANEL_INTENT_ORDER` and `PANEL_METADATA` (nested panels are excluded from the View menu, so they are not menu items).
+- **Menu items — 40.** The 22 static ids in `APP_MENU_GROUPS` (`clip.delete` is written in both Edit and Clip, so it is counted twice), plus the 14 generated `view.panel.*` ids and the 4 generated `window.panel.*` ids. The generated ids are computed from `PANEL_INTENT_ORDER` and `PANEL_METADATA` (nested panels are excluded from the View menu, so they are not menu items).
 - **CLI commands — 10 and 23 subcommands.** The 10 keys of `COMMAND_HELP` (`agent`, `project`, `timeline`, `worker`, `render`, `benchmark`, `doctor`, `doctor-local`, `assets`, `help`) and their 23 subcommand entries.
 
 Result: the diff is empty. The exact output is in `C:\jgp\v111\evidence\T-A01\coverage-diff.txt`.

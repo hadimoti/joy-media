@@ -107,6 +107,18 @@ export interface InspectorTabRequest {
   readonly serial: number;
 }
 
+/**
+ * Clears a request once the Inspector has applied it. A newer request (a higher
+ * serial) that arrived meanwhile stays. Without this, every remount of the
+ * Inspector would show the same tab again.
+ */
+export function consumeInspectorTabRequest(
+  current: InspectorTabRequest | null,
+  appliedSerial: number,
+): InspectorTabRequest | null {
+  return current?.serial === appliedSerial ? null : current;
+}
+
 /** A small, controller-facing change request emitted by the Speed tab. */
 export interface InspectorSpeedChange {
   /** When set, replace the selected clip's constant playback multiplier. */
@@ -211,6 +223,8 @@ interface InspectorPanelProps {
     ((objectId: string, channel: AnimatablePropertyV1) => void) | undefined;
   /** When set, the Inspector switches to the requested tab (if it is visible). */
   readonly tabRequest?: InspectorTabRequest | null | undefined;
+  /** Called once with the serial of a request the Inspector has applied; the owner clears it. */
+  readonly onTabRequestApplied?: ((serial: number) => void) | undefined;
 }
 
 const NUMERIC_PROPERTIES = VISUAL_INSPECTOR.filter((property) => property.kind === 'number');
@@ -459,6 +473,7 @@ export function InspectorPanel({
   onCreateAdjustmentLayer,
   onOpenAnimationGraph,
   tabRequest,
+  onTabRequestApplied,
 }: InspectorPanelProps) {
   const [editingExpression, setEditingExpression] = useState<AnimatablePropertyV1 | undefined>(
     undefined,
@@ -538,8 +553,11 @@ export function InspectorPanel({
 
   useEffect(() => {
     // A tab the selection does not offer is ignored by the visibility effect above.
-    if (tabRequest !== undefined && tabRequest !== null) setTab(tabRequest.tab);
-  }, [tabRequest]);
+    // The owner clears the request on the callback, so a remount does not replay it.
+    if (tabRequest === undefined || tabRequest === null) return;
+    setTab(tabRequest.tab);
+    onTabRequestApplied?.(tabRequest.serial);
+  }, [tabRequest, onTabRequestApplied]);
 
   const dispatchAudio = (command: AudioCommand, label: string) => {
     if (audioState === undefined || onAudioChange === undefined) return;

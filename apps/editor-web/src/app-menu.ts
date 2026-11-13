@@ -24,7 +24,6 @@ export type AppMenuActionId =
   | 'agent.executionMode'
   | 'agent.stop'
   | 'agent.settings'
-  | 'view.commandPalette'
   | 'view.fullscreen'
   | 'window.minimize'
   | 'window.maximize'
@@ -119,12 +118,6 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     id: 'view',
     label: 'View',
     items: [
-      {
-        id: 'view.commandPalette',
-        label: 'Command Palette…',
-        shortcut: 'Ctrl+K',
-        separatorAfter: true,
-      },
       {
         id: 'view.fullscreen',
         label: 'Toggle Full Screen',

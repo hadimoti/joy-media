@@ -255,7 +255,7 @@ import {
 import type { OfflineMp4Capability } from './offline-mp4-export.js';
 import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { waitForContentFonts } from './font-readiness.js';
-import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
+import { EMPTY_EDITOR_STATE, searchActions, selectedClipSupportsSpeed } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { createMissingMediaHost, type MissingMediaHost } from './missing-media-host.js';
 import type { ProjectWriterHandle } from './project-writer.js';
@@ -307,6 +307,7 @@ import { withCaptionBurnInNodes } from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { TextPanel } from './TextPanel.js';
 import {
+  consumeInspectorTabRequest,
   InspectorPanel,
   type InspectorSpeedChange,
   type InspectorTabRequest,
@@ -1073,6 +1074,11 @@ function EditorWorkspace({
   const [agentSettingsTab, setAgentSettingsTab] = useState<JoyAgentSettingsTab>('models');
   // Clip > Speed asks the Inspector to show its Speed tab (a serial makes each request new).
   const [inspectorTabRequest, setInspectorTabRequest] = useState<InspectorTabRequest | null>(null);
+  const onInspectorTabRequestApplied = useCallback(
+    (serial: number) =>
+      setInspectorTabRequest((current) => consumeInspectorTabRequest(current, serial)),
+    [],
+  );
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [assetLibrarySettingsOpen, setAssetLibrarySettingsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -5206,7 +5212,6 @@ function EditorWorkspace({
           }));
           break;
         case 'edit.commandPalette':
-        case 'view.commandPalette':
           openPopup(POPUP_IDS.commandPalette);
           break;
         case 'clip.split':
@@ -5934,7 +5939,8 @@ function EditorWorkspace({
       return (
         <InspectorPanel
           object={object}
-          tabRequest={inspectorTabRequest}
+          tabRequest={context.inspectorTabRequest}
+          onTabRequestApplied={context.onInspectorTabRequestApplied}
           {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
           selectedKind={
             selectedElementKind === undefined
@@ -6988,6 +6994,8 @@ function EditorWorkspace({
     if (processFilter === 'completed') return entry.status === 'completed';
     return true;
   });
+  // Clip > Speed and the palette entry follow the Inspector's rule: only a video clip has a Speed tab.
+  const supportsSpeed = selectedClipSupportsSpeed(session.timelineProject, state.selectedIds);
   const processGroups = [
     {
       id: 'running',
@@ -7062,6 +7070,7 @@ function EditorWorkspace({
                 canUndo={session.canUndo}
                 canRedo={session.canRedo}
                 hasSelection={state.selectedIds.length > 0}
+                supportsSpeed={supportsSpeed}
                 exporting={exporting}
                 onAction={runMenuAction}
               />
@@ -7418,6 +7427,7 @@ function EditorWorkspace({
                   canUndo: session.canUndo,
                   canRedo: session.canRedo,
                   hasSelection: state.selectedIds.length > 0,
+                  supportsSpeed,
                   exporting,
                 });
                 return (
@@ -7517,6 +7527,8 @@ function EditorWorkspace({
               agentContext,
               agentPolicy,
               agentPanelCommand,
+              inspectorTabRequest,
+              onInspectorTabRequestApplied,
               creativeBriefOptedIn,
               creativeBriefRunner,
               onCreativeBriefOptIn,
