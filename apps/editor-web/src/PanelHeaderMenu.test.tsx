@@ -9,7 +9,8 @@ import type {
   IDockviewPanel,
 } from 'dockview';
 import { PopupProvider } from './popup-manager.js';
-import { PanelHeaderMenu } from './PanelHeaderMenu.js';
+import { EditorPanelContext } from './editor-panel-context.js';
+import { PanelHeaderActions, PanelHeaderMenu } from './PanelHeaderMenu.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -45,6 +46,7 @@ async function mountMenu(
     readonly location?: 'grid' | 'floating';
     readonly maximized?: boolean;
     readonly hasDestination?: boolean;
+    readonly throughPanelContext?: boolean;
   } = {},
 ): Promise<MenuRig> {
   const closePanel = vi.fn();
@@ -63,6 +65,7 @@ async function mountMenu(
   const sourceGroup = { id: 'context', api: sourceApi } as unknown as DockviewGroupPanel;
   const destinationGroup = {
     id: 'browser',
+    activePanel: { title: 'Media' },
     api: { location: { type: 'grid' } },
   } as unknown as DockviewGroupPanel;
   const containerApi = {
@@ -88,15 +91,18 @@ async function mountMenu(
   const root = createRoot(host);
   vi.useFakeTimers();
   await act(async () => {
-    root.render(
-      createElement(
-        PopupProvider,
-        null,
-        createElement(PanelHeaderMenu, { ...props, onResetLayout: resetLayout }),
-      ),
-    );
+    const menu = options.throughPanelContext
+      ? createElement(
+          EditorPanelContext.Provider,
+          { value: { resetWorkspace: resetLayout } as never },
+          createElement(PanelHeaderActions, props),
+        )
+      : createElement(PanelHeaderMenu, { ...props, onResetLayout: resetLayout });
+    root.render(createElement(PopupProvider, null, menu));
   });
-  const trigger = host.querySelector<HTMLButtonElement>('[aria-label="More panel actions"]');
+  const trigger = host.querySelector<HTMLButtonElement>(
+    '[aria-label="More actions for Inspector"]',
+  );
   expect(trigger, 'the group header has a panel-actions trigger').not.toBeNull();
 
   const nextRig = {
@@ -121,7 +127,7 @@ async function mountMenu(
 async function openMenu(current: MenuRig): Promise<HTMLButtonElement[]> {
   await act(async () => current.trigger.click());
   await act(async () => vi.runOnlyPendingTimers());
-  return Array.from(current.host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+  return Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
 }
 
 function itemLabel(item: HTMLButtonElement): string {
@@ -135,24 +141,33 @@ async function select(items: readonly HTMLButtonElement[], label: string): Promi
 }
 
 describe('Dockview panel header menu', () => {
+  it('names the action trigger for the active panel', async () => {
+    const current = await mountMenu();
+
+    expect(current.trigger.getAttribute('aria-label')).toBe('More actions for Inspector');
+  });
+
   it('runs only Dockview-supported group actions and the app layout reset', async () => {
     const current = await mountMenu();
     let items = await openMenu(current);
 
     expect(items.map((item) => item.textContent?.trim())).toEqual([
       'Close panel',
-      'Float panel',
+      'Float group',
       'Maximize panel',
-      'Move to left',
-      'Move to right',
-      'Move to bottom',
+      'Move group to left of Media',
+      'Move group to right of Media',
+      'Move group to bottom of Media',
       'Reset layout',
     ]);
+    expect(items.find((item) => itemLabel(item) === 'Float group')?.title).toBe(
+      'Moves the whole panel group into a floating window.',
+    );
     await select(items, 'Close panel');
     expect(current.closePanel).toHaveBeenCalledOnce();
 
     items = await openMenu(current);
-    await select(items, 'Float panel');
+    await select(items, 'Float group');
     expect(current.addFloatingGroup).toHaveBeenCalledWith(current.sourceGroup);
 
     items = await openMenu(current);
@@ -160,9 +175,9 @@ describe('Dockview panel header menu', () => {
     expect(current.maximize).toHaveBeenCalledOnce();
 
     for (const [label, position] of [
-      ['Move to left', 'left'],
-      ['Move to right', 'right'],
-      ['Move to bottom', 'bottom'],
+      ['Move group to left of Media', 'left'],
+      ['Move group to right of Media', 'right'],
+      ['Move group to bottom of Media', 'bottom'],
     ] as const) {
       items = await openMenu(current);
       await select(items, label);
@@ -188,12 +203,22 @@ describe('Dockview panel header menu', () => {
     expect(current.exitMaximized).toHaveBeenCalledOnce();
   });
 
+  it('routes the panel reset action through the workspace context', async () => {
+    const current = await mountMenu({ throughPanelContext: true });
+    const items = await openMenu(current);
+
+    await select(items, 'Reset layout');
+    expect(current.resetLayout).toHaveBeenCalledOnce();
+  });
+
   it('disables actions the current group cannot perform', async () => {
     const current = await mountMenu({ location: 'floating', hasDestination: false });
     const items = await openMenu(current);
 
-    expect(items.find((item) => itemLabel(item) === 'Float panel')?.disabled).toBe(true);
-    expect(items.find((item) => itemLabel(item) === 'Move to left')?.disabled).toBe(true);
+    expect(items.find((item) => itemLabel(item) === 'Float group')?.disabled).toBe(true);
+    expect(
+      items.find((item) => itemLabel(item) === 'Move group to left of another group')?.disabled,
+    ).toBe(true);
     expect(items.find((item) => itemLabel(item) === 'Maximize panel')?.disabled).toBe(true);
   });
 });

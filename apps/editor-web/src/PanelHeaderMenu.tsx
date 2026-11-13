@@ -16,6 +16,8 @@ export function PanelHeaderMenu({
   const moveTarget = containerApi.groups.find(
     (candidate) => candidate !== group && candidate.api.location.type === 'grid',
   );
+  const panelName = activePanel?.title ?? group.activePanel?.title ?? group.id;
+  const moveTargetName = moveTarget?.activePanel?.title ?? moveTarget?.id ?? 'another group';
   const isMaximized = canMaximize && api.isMaximized();
 
   const moveTo = (position: 'left' | 'right' | 'bottom') => {
@@ -32,7 +34,8 @@ export function PanelHeaderMenu({
     },
     {
       id: 'float-panel',
-      label: 'Float panel',
+      label: 'Float group',
+      tooltip: 'Moves the whole panel group into a floating window.',
       disabled: !canFloat,
       disabledReason: 'This group is already outside the dock.',
       onSelect: () => containerApi.addFloatingGroup(group),
@@ -46,7 +49,7 @@ export function PanelHeaderMenu({
     },
     ...(['left', 'right', 'bottom'] as const).map((position) => ({
       id: `move-${position}`,
-      label: `Move to ${position}`,
+      label: `Move group to ${position} of ${moveTargetName}`,
       disabled: moveTarget === undefined,
       disabledReason: 'A second docked group is required.',
       onSelect: () => moveTo(position),
@@ -60,7 +63,7 @@ export function PanelHeaderMenu({
 
   return (
     <ActionOverflowMenu
-      label="More panel actions"
+      label={`More actions for ${panelName}`}
       className="panel-header-action-overflow-menu"
       items={items}
     />
@@ -71,5 +74,5 @@ export function PanelHeaderMenu({
 export function PanelHeaderActions(props: IDockviewHeaderActionsProps) {
   const context = useContext(EditorPanelContext);
   if (context === undefined) return null;
-  return <PanelHeaderMenu {...props} onResetLayout={context.resetDockLayout} />;
+  return <PanelHeaderMenu {...props} onResetLayout={context.resetWorkspace} />;
 }

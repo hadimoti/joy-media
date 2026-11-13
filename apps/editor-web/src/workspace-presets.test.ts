@@ -5,11 +5,11 @@ import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
   persistWorkspacePresetLayout,
-  resetWorkspaceTarget,
+  resetWorkspaceStorage,
   workspacePresetLayoutKey,
   workspacePresetLayout,
 } from './workspace-presets.js';
-import { DEFAULT_EDITOR_UI_PREFERENCES } from './ui-preferences.js';
+import { DEFAULT_EDITOR_UI_PREFERENCES, EDITOR_UI_PREFERENCES_KEY } from './ui-preferences.js';
 import { PANEL_IDS } from './workspace.js';
 
 function leafIds(layout: unknown): string[] {
@@ -227,22 +227,6 @@ describe('first-run layout', () => {
     expect(row[1]!.size).toBeGreaterThan(row[2]!.size);
   });
 
-  it('Reset Workspace applies the mode and preset the preferences are reset to (T-D12 round 2)', async () => {
-    expect(resetWorkspaceTarget()).toEqual({
-      mode: DEFAULT_EDITOR_UI_PREFERENCES.viewMode,
-      preset: DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset,
-    });
-    const appSource = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
-    const start = appSource.indexOf('const resetWorkspace = useCallback');
-    const end = appSource.indexOf('const switchEditorView = useCallback', start);
-    expect(start).toBeGreaterThanOrEqual(0);
-    const block = appSource.slice(start, end);
-    expect(block).toContain('applyDockLayout(api, target.mode, target.preset)');
-    expect(block).not.toContain("applyDockLayout(api, 'vertical'");
-    // The older view-mode key must be cleared too, or a saved 'vertical' comes back on the next launch.
-    expect(block).toContain("storage.removeItem('joy-media.view-mode.v1')");
-  });
-
   it('a stored widescreen layout also loads unchanged (T-D12)', () => {
     const savedWidescreen = JSON.stringify(firstRunWorkspaceLayout('edit', 'widescreen'));
     const storage = memoryStorage({ [dockLayoutKey('widescreen')]: savedWidescreen });
@@ -437,16 +421,27 @@ describe('workspace preset layout persistence', () => {
     );
   });
 
-  it('resets only the active mode and preset from a panel header menu', async () => {
-    const appSource = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
-    const start = appSource.indexOf('const resetDockLayout = useCallback');
-    const end = appSource.indexOf('const switchEditorView = useCallback', start);
-    const block = appSource.slice(start, end);
+  it('resets every saved workspace layout and legacy preference key', () => {
+    const modes = ['vertical', 'widescreen'] as const;
+    const presets = ['edit', 'enhance', 'audio-captions', 'automate', 'custom'] as const;
+    const initial: Record<string, string> = {
+      [EDITOR_UI_PREFERENCES_KEY]: 'custom preferences',
+      'joy-media.view-mode.v1': 'widescreen',
+      'joy-media.unrelated.v1': 'preserve me',
+    };
+    for (const mode of modes) {
+      for (const preset of presets) {
+        initial[workspacePresetLayoutKey(mode, preset)] = `${mode}:${preset}`;
+      }
+    }
+    const storage = memoryStorage(initial);
 
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
-    expect(block).toContain('storage.removeItem(workspacePresetLayoutKey(mode, preset))');
-    expect(block).toContain('applyDockLayout(api, mode, preset)');
-    expect(block).not.toContain('resetWorkspaceTarget()');
+    const target = resetWorkspaceStorage(storage);
+
+    expect(target).toEqual({
+      mode: DEFAULT_EDITOR_UI_PREFERENCES.viewMode,
+      preset: DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset,
+    });
+    expect(storage.entries()).toEqual([['joy-media.unrelated.v1', 'preserve me']]);
   });
 });

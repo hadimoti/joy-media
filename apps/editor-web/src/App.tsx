@@ -423,7 +423,6 @@ import {
   loadEditorUiPreferences,
   saveEditorUiPreferences,
   updateEditorUiPreferences,
-  EDITOR_UI_PREFERENCES_KEY,
 } from './ui-preferences.js';
 import type { EditorUiPreferencesV2 } from './ui-preferences.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
@@ -433,8 +432,7 @@ import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
   persistWorkspacePresetLayout,
-  resetWorkspaceTarget,
-  workspacePresetLayoutKey,
+  resetWorkspaceStorage,
 } from './workspace-presets.js';
 import {
   DOCK_LAYOUT_KEY,
@@ -442,7 +440,6 @@ import {
   DOCK_PANEL_MINIMUM_WIDTH,
   SUPERSEDED_DOCK_LAYOUT_KEYS,
   type EditorViewMode,
-  dockLayoutKey,
   migrateLegacyDockLayout,
   saveViewMode,
 } from './dock-layout.js';
@@ -3695,18 +3692,7 @@ function EditorWorkspace({
   );
 
   const resetWorkspace = useCallback(() => {
-    for (const mode of ['vertical', 'widescreen'] as const) {
-      storage.removeItem(dockLayoutKey(mode));
-      for (const preset of ['enhance', 'audio-captions', 'automate', 'custom'] as const) {
-        storage.removeItem(workspacePresetLayoutKey(mode, preset));
-      }
-    }
-    storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
-    // The older view-mode key would otherwise bring the previous mode back on the next launch.
-    storage.removeItem('joy-media.view-mode.v1');
-    // The same mode and preset as the defaults the preferences were reset to, so the layout and the saved
-    // preferences agree (T-D12 round 2).
-    const target = resetWorkspaceTarget();
+    const target = resetWorkspaceStorage(storage);
     workspacePresetRef.current = target.preset;
     setWorkspacePreset(target.preset);
     setEnhanceTool('effects');
@@ -3714,15 +3700,6 @@ function EditorWorkspace({
     viewModeRef.current = target.mode;
     const api = dockviewApiRef.current;
     if (api !== null) applyDockLayout(api, target.mode, target.preset);
-  }, [applyDockLayout, storage]);
-
-  const resetDockLayout = useCallback(() => {
-    const api = dockviewApiRef.current;
-    if (api === null) return;
-    const mode = viewModeRef.current;
-    const preset = workspacePresetRef.current;
-    storage.removeItem(workspacePresetLayoutKey(mode, preset));
-    applyDockLayout(api, mode, preset);
   }, [applyDockLayout, storage]);
 
   const switchEditorView = useCallback(() => {
@@ -7599,7 +7576,7 @@ function EditorWorkspace({
                 })),
               selectClips,
               clearSelection: () => setState((current) => ({ ...current, selectedIds: [] })),
-              resetDockLayout,
+              resetWorkspace,
               dispatchTimeline,
               dispatchTimelineAndProjectAudio,
               updateVisualProperty,

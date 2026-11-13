@@ -16,13 +16,22 @@ import { PANEL_IDS } from './workspace.js';
 /** jsdom has no ResizeObserver, and the tab only wants it to react to a
  *  strip whose width changes. The stub records that it was asked to watch. */
 class StubResizeObserver {
-  static watched = 0;
-  constructor(_callback: () => void) {}
-  observe(): void {
-    StubResizeObserver.watched += 1;
+  static observed: Element[] = [];
+  static callback: ResizeObserverCallback | undefined;
+
+  constructor(callback: ResizeObserverCallback) {
+    StubResizeObserver.callback = callback;
+  }
+
+  observe(target: Element): void {
+    StubResizeObserver.observed.push(target);
   }
   unobserve(): void {}
   disconnect(): void {}
+
+  static notify(): void {
+    StubResizeObserver.callback?.([], {} as ResizeObserver);
+  }
 }
 
 /**
@@ -68,88 +77,134 @@ describe('PanelTab', () => {
 
 describe('the name on a dock tab (T-D09 review)', () => {
   let root: Root | undefined;
-  let container: HTMLDivElement | undefined;
-  let strip: HTMLDivElement | undefined;
+  let header: HTMLDivElement | undefined;
+  let host: HTMLDivElement | undefined;
 
   beforeEach(() => {
-    StubResizeObserver.watched = 0;
+    StubResizeObserver.observed = [];
+    StubResizeObserver.callback = undefined;
     (globalThis as { ResizeObserver?: unknown }).ResizeObserver = StubResizeObserver;
   });
 
   afterEach(async () => {
     if (root !== undefined) await act(async () => root?.unmount());
-    container?.remove();
-    strip?.remove();
+    header?.remove();
     root = undefined;
-    container = undefined;
-    strip = undefined;
+    header = undefined;
+    host = undefined;
     delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
   });
 
-  /** Render one tab in a header whose tab-list width may differ from its actions. */
-  async function renderTab(
-    stripWidthPx: number,
-    tabListWidthPx = stripWidthPx,
-  ): Promise<HTMLDivElement> {
-    strip = document.createElement('div');
-    strip.className = 'dv-tabs-and-actions-container';
-    Object.defineProperty(strip, 'clientWidth', { value: stripWidthPx, configurable: true });
-    const tabList = document.createElement('div');
-    tabList.className = 'dv-tabs-container';
-    Object.defineProperty(tabList, 'clientWidth', { value: tabListWidthPx, configurable: true });
-    container = document.createElement('div');
-    tabList.append(container);
-    strip.append(tabList);
-    document.body.append(strip);
+  const setClientWidth = (element: HTMLElement, width: number): void => {
+    Object.defineProperty(element, 'clientWidth', { value: width, configurable: true });
+  };
 
-    root = createRoot(container);
+  const setRectWidth = (element: HTMLElement, width: number): void => {
+    element.getBoundingClientRect = () =>
+      ({
+        width,
+        height: 30,
+        top: 0,
+        right: width,
+        bottom: 30,
+        left: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+  };
+
+  /** Mirror Dockview 4.13.1: the content-sized scrollable is inside a fixed-width header. */
+  async function renderTab(headerWidthPx: number): Promise<HTMLDivElement> {
+    header = document.createElement('div');
+    header.className = 'dv-tabs-and-actions-container';
+    setClientWidth(header, headerWidthPx);
+
+    const preActions = document.createElement('div');
+    preActions.className = 'dv-pre-actions-container';
+    setRectWidth(preActions, 0);
+    const scrollable = document.createElement('div');
+    scrollable.className = 'dv-scrollable';
+    setClientWidth(scrollable, 300);
+    const tabList = document.createElement('div');
+    tabList.className = 'dv-tabs-container dv-horizontal';
+    setClientWidth(tabList, 296);
+    host = document.createElement('div');
+    tabList.append(host);
+    scrollable.append(tabList);
+    const leftActions = document.createElement('div');
+    leftActions.className = 'dv-left-actions-container';
+    setRectWidth(leftActions, 0);
+    const voidContainer = document.createElement('div');
+    voidContainer.className = 'dv-void-container';
+    setRectWidth(voidContainer, 200);
+    const rightActions = document.createElement('div');
+    rightActions.className = 'dv-right-actions-container';
+    setRectWidth(rightActions, 70);
+    header.append(preActions, scrollable, leftActions, voidContainer, rightActions);
+    document.body.append(header);
+
+    root = createRoot(host);
     const props = { api: { id: 'media' } } as unknown as IDockviewPanelHeaderProps;
     await act(async () => {
       root?.render(<PanelTab {...props} />);
     });
-    return container;
+    return host;
   }
 
   const tabOf = (host: HTMLElement): HTMLElement | null =>
     host.querySelector<HTMLElement>('.panel-tab');
 
-  it('names every tab when the strip is wide enough', async () => {
-    const host = await renderTab(LABELLED_TAB_STRIP_WIDTH);
+  it('measures available header space, not the content-sized scrollable child', async () => {
+    const host = await renderTab(LABELLED_TAB_STRIP_WIDTH + 80);
     const tab = tabOf(host);
 
     expect(tab, 'the tab must be rendered').toBeTruthy();
-    // The tab carries the mark that shows its name; the stylesheet turns
-    // that mark into a visible label.
     expect(tab?.getAttribute('data-labelled'), 'the wide tab is labelled').toBe('true');
-    expect(StubResizeObserver.watched, 'the tab watches the strip').toBe(1);
+    expect(StubResizeObserver.observed).toContain(header);
+    expect(StubResizeObserver.observed).not.toContain(header?.querySelector('.dv-tabs-container'));
   });
 
-  it('keeps the tab icon-only when the strip is narrow, but still names it', async () => {
-    const host = await renderTab(LABELLED_TAB_STRIP_WIDTH - 1);
+  it('keeps flexible void space available to the tabs', async () => {
+    const host = await renderTab(LABELLED_TAB_STRIP_WIDTH + 69);
     const tab = tabOf(host);
 
     expect(tab, 'the tab must be rendered').toBeTruthy();
-    // No mark, so the stylesheet leaves the name hidden.
     expect(tab?.hasAttribute('data-labelled'), 'the narrow tab is not labelled').toBe(false);
-    // The name is still there for the tooltip and for a screen reader.
     expect(tab?.getAttribute('title')).toBe('Create');
     expect(tab?.getAttribute('aria-label')).toBe('Create');
     expect(host.querySelector('.panel-tab-label')?.textContent).toBe('Create');
   });
 
-  it('does not force every tab label on when header actions leave less room for the tab list', async () => {
-    const host = await renderTab(LABELLED_TAB_STRIP_WIDTH + 80, LABELLED_TAB_STRIP_WIDTH - 1);
+  it('uses hysteresis so names do not flip near the threshold', async () => {
+    const host = await renderTab(LABELLED_TAB_STRIP_WIDTH + 80);
     const tab = tabOf(host);
 
-    expect(tab?.hasAttribute('data-labelled'), 'the available tab list is still narrow').toBe(
-      false,
+    expect(tab?.getAttribute('data-labelled')).toBe('true');
+    setClientWidth(header!, LABELLED_TAB_STRIP_WIDTH + 56);
+    await act(async () => StubResizeObserver.notify());
+    expect(tab?.getAttribute('data-labelled'), 'a labelled tab stays labelled above 456px').toBe(
+      'true',
     );
-    expect(StubResizeObserver.watched, 'the tab watches the actual tab list').toBe(1);
+
+    setClientWidth(header!, LABELLED_TAB_STRIP_WIDTH + 45);
+    await act(async () => StubResizeObserver.notify());
+    expect(tab?.hasAttribute('data-labelled'), 'a labelled tab turns off below 456px').toBe(false);
+
+    setClientWidth(header!, LABELLED_TAB_STRIP_WIDTH + 60);
+    await act(async () => StubResizeObserver.notify());
+    expect(tab?.hasAttribute('data-labelled'), 'an icon tab waits for 480px').toBe(false);
+
+    setClientWidth(header!, LABELLED_TAB_STRIP_WIDTH + 80);
+    await act(async () => StubResizeObserver.notify());
+    expect(tab?.getAttribute('data-labelled')).toBe('true');
   });
 
-  it('knows where the strip stops having room', () => {
+  it('uses separate on and off thresholds', () => {
     expect(stripHasRoomForLabels(LABELLED_TAB_STRIP_WIDTH)).toBe(true);
     expect(stripHasRoomForLabels(LABELLED_TAB_STRIP_WIDTH - 1)).toBe(false);
+    expect(stripHasRoomForLabels(LABELLED_TAB_STRIP_WIDTH - 24, true)).toBe(true);
+    expect(stripHasRoomForLabels(LABELLED_TAB_STRIP_WIDTH - 25, true)).toBe(false);
   });
 
   it('has the stylesheet that shows the name and hides it again', () => {

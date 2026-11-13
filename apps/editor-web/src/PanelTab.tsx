@@ -9,10 +9,25 @@ import type { PanelId } from './workspace.js';
  * name. Header action slots are outside that list and must not count as room.
  */
 export const LABELLED_TAB_STRIP_WIDTH = 480;
+export const TAB_LABEL_HYSTERESIS_PX = 24;
+const TAB_HEADER_ACTION_SLOTS =
+  '.dv-pre-actions-container, .dv-left-actions-container, .dv-right-actions-container';
 
 /** Does a tab strip of this width have room for a name on every tab? */
-export function stripHasRoomForLabels(widthPx: number): boolean {
-  return widthPx >= LABELLED_TAB_STRIP_WIDTH;
+export function stripHasRoomForLabels(widthPx: number, alreadyLabelled = false): boolean {
+  const threshold = alreadyLabelled
+    ? LABELLED_TAB_STRIP_WIDTH - TAB_LABEL_HYSTERESIS_PX
+    : LABELLED_TAB_STRIP_WIDTH;
+  return widthPx >= threshold;
+}
+
+function availableHeaderTabWidth(header: HTMLElement): number {
+  const reservedSlots = header.querySelectorAll<HTMLElement>(TAB_HEADER_ACTION_SLOTS);
+  const reservedWidth = Array.from(reservedSlots).reduce(
+    (total, slot) => total + slot.getBoundingClientRect().width,
+    0,
+  );
+  return header.clientWidth - reservedWidth;
 }
 
 function CloseGlyph() {
@@ -43,13 +58,19 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
   const [namesItsTab, setNamesItsTab] = useState(false);
 
   useEffect(() => {
-    const tabList = tabRef.current?.closest('.dv-tabs-container');
-    if (tabList === undefined || tabList === null) return;
-    const measure = (): void => setNamesItsTab(stripHasRoomForLabels(tabList.clientWidth));
+    const header = tabRef.current?.closest<HTMLElement>('.dv-tabs-and-actions-container');
+    if (header === undefined || header === null) return;
+    const measure = (): void => {
+      const availableWidth = availableHeaderTabWidth(header);
+      setNamesItsTab((alreadyLabelled) => stripHasRoomForLabels(availableWidth, alreadyLabelled));
+    };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
-    observer.observe(tabList);
+    observer.observe(header);
+    header
+      .querySelectorAll<HTMLElement>(TAB_HEADER_ACTION_SLOTS)
+      .forEach((slot) => observer.observe(slot));
     return () => observer.disconnect();
   }, []);
 
