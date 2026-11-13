@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_POLICY_STORAGE_KEY,
   DEFAULT_AGENT_POLICY,
+  DEFAULT_MAX_COST_PER_RUN_USD,
   LEGACY_AGENT_SETTINGS_STORAGE_KEY,
   loadAgentPolicy,
   saveAgentPolicy,
@@ -20,6 +21,25 @@ function storage() {
 describe('AgentPolicyPreferences v2', () => {
   it('loads safe defaults when no policy exists', () => {
     expect(loadAgentPolicy(storage())).toEqual(DEFAULT_AGENT_POLICY);
+  });
+
+  it('keeps the established $10 cost threshold on a fresh install', () => {
+    expect(DEFAULT_MAX_COST_PER_RUN_USD).toBe(10);
+    expect(DEFAULT_AGENT_POLICY.maxCostPerRunUsd).toBe(10);
+    expect(loadAgentPolicy(storage()).maxCostPerRunUsd).toBe(10);
+  });
+
+  it('keeps a cost limit the owner saved, whatever it is', () => {
+    // A limit that was saved is the owner's own, whatever it is.
+    const store = storage();
+    saveAgentPolicy(store, { ...DEFAULT_AGENT_POLICY, maxCostPerRunUsd: 10 });
+
+    expect(loadAgentPolicy(store).maxCostPerRunUsd).toBe(10);
+
+    const half = storage();
+    saveAgentPolicy(half, { ...DEFAULT_AGENT_POLICY, maxCostPerRunUsd: 0.5 });
+
+    expect(loadAgentPolicy(half).maxCostPerRunUsd).toBe(0.5);
   });
 
   it('persists policy without any provider connection fields', () => {
