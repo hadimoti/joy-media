@@ -9,7 +9,7 @@
   margin: 0;
   padding: 0.35rem 0.45rem;
   border-bottom: 1px solid var(--joy-border);
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   font-size: var(--joy-type-2xs);
   line-height: 1.35;
 }
@@ -35,7 +35,7 @@
   margin: 0;
   padding: 0.35rem 0.45rem;
   border-top: 1px solid var(--joy-border);
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   font-size: var(--joy-type-2xs);
 }
 
@@ -80,7 +80,7 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: rgb(20 21 24 / 62%);
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   cursor: pointer;
 }
 

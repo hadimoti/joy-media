@@ -58,7 +58,7 @@
 }
 
 .joy-agent-settings-close-btn {
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
 }
 
 .joy-agent-settings-close-btn:hover {
@@ -211,7 +211,7 @@
 
 .joy-settings-sidebar-status-sub {
   overflow: hidden;
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   font-size: var(--joy-type-2xs);
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -333,7 +333,7 @@
 }
 
 .joy-settings-vault-profiles-header {
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -383,7 +383,7 @@
 }
 
 .joy-settings-provider-meta span {
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
 }
 
@@ -446,7 +446,7 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
 }
 
 .joy-accordion-icon svg {
@@ -469,7 +469,7 @@
   border: 1px solid var(--joy-border-subtle);
   border-radius: var(--radius-xs);
   background: var(--joy-bg-control);
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   font-weight: 500;
 }
@@ -576,7 +576,7 @@
 .joy-provider-route-accordions .joy-accordion-tag {
   border-color: var(--joy-border-strong);
   background: var(--joy-bg-control);
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
 }
 
 .joy-provider-route-accordions .joy-accordion-chevron,
@@ -605,7 +605,7 @@
 .joy-provider-route-accordions .joy-provider-risk-notice {
   max-width: 52ch;
   margin: 0 auto;
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   text-align: center;
 }
 
@@ -794,7 +794,7 @@
   border: 1px solid var(--joy-border-subtle);
   border-radius: var(--radius-xs);
   background: var(--joy-bg-control);
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -816,7 +816,7 @@
 .joy-model-drawer-empty {
   width: 100%;
   padding: 12px;
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   text-align: center;
 }
@@ -881,7 +881,7 @@
 
 .joy-settings-probe-grid dt {
   margin-bottom: 2px;
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
 }
 
@@ -1028,7 +1028,7 @@
 
 .joy-agent-settings-footer-vault svg {
   flex: none;
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
 }
 
 /* ─── The studio preset bar ─────────────────────────────────────────────── */

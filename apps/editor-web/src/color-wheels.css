@@ -41,7 +41,7 @@
 }
 
 .cw-hint {
-  color: var(--joy-text-muted, #9c9ea7);
+  color: var(--joy-text-secondary, #9c9ea7);
   font-size: 0.64rem;
 }
 
@@ -65,7 +65,7 @@
 
 .cw-hue {
   margin: 0;
-  color: var(--joy-text-muted, #9c9ea7);
+  color: var(--joy-text-secondary, #9c9ea7);
   font-size: 0.62rem;
   text-align: center;
   text-transform: capitalize;
@@ -95,7 +95,7 @@
 }
 
 .cw-number-label {
-  color: var(--joy-text-muted, #9c9ea7);
+  color: var(--joy-text-secondary, #9c9ea7);
   font-size: 0.62rem;
 }
 

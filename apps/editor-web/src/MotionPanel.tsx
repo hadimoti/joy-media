@@ -1013,7 +1013,7 @@ function SpatialPathPreview({
   return (
     <section className="motion-spatial">
       <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} role="img" aria-label="XY motion path">
-        <path d={d} fill="none" stroke={JOY_COLORS.textMuted} strokeWidth={1.5} />
+        <path d={d} fill="none" stroke={JOY_COLORS.textSecondary} strokeWidth={1.5} />
         <circle cx={px(now.x)} cy={py(now.y)} r={4} fill={JOY_COLORS.accent} />
       </svg>
     </section>
@@ -1355,7 +1355,7 @@ export function MotionPanel({
                                 width={8}
                                 height={8}
                                 transform={`rotate(45 ${timeToX(kf.timeUs)} 8)`}
-                                fill={JOY_COLORS.textMuted}
+                                fill={JOY_COLORS.textSecondary}
                                 style={{ cursor: 'pointer' }}
                                 onClick={() => onSeek(kf.timeUs)}
                               >
