@@ -8,7 +8,7 @@
 
 **Tech Stack:** React 19, TypeScript, Dockview 4.13.1, Vitest/jsdom, CSS.
 
-**Spec:** `C:\jgp\v111\evidence\T-P04\prompt-fix-cx.txt` and the T-P04 card in `C:\Users\HadiMoti\Desktop\joy-media-temps\fable-plan\07b-NEW-TASK-CARDS-part2.md`.
+**Spec:** the T-P04 card (`07b-NEW-TASK-CARDS-part2.md` in the plan folder) and its fix prompt.
 
 ## Global Constraints
 
