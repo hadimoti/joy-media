@@ -108,6 +108,7 @@ export function MonitorViewMenu({
         role="switch"
         aria-checked={on}
         className="monitor-view-switch"
+        title={`${SWITCH_LABELS[key]}: click to turn it ${on ? 'off' : 'on'}`}
         data-monitor-view-switch={key}
         onClick={() => onChange(withMonitorSwitch(options, key, !on))}
       >
@@ -151,6 +152,7 @@ export function MonitorViewMenu({
             <button
               type="button"
               className="monitor-view-clear"
+              title="Remove every guide you placed on the Monitor (your project is not changed)"
               disabled={options.guides.length === 0}
               onClick={() => onChange(withoutUserGuides(options))}
             >
@@ -170,6 +172,7 @@ export function MonitorViewMenu({
                 role="radio"
                 aria-checked={options.background === background}
                 className="monitor-view-choice"
+                title={`Background: ${BACKGROUND_LABELS[background]}`}
                 data-monitor-background-option={background}
                 onClick={() => onChange(withMonitorBackground(options, background))}
               >
@@ -192,6 +195,7 @@ export function MonitorViewMenu({
                 role="radio"
                 aria-checked={options.previewAspect === aspect}
                 className="monitor-view-choice"
+                title={`Preview aspect: ${ASPECT_LABELS[aspect]}`}
                 data-monitor-preview-aspect={aspect}
                 onClick={() => onChange(withPreviewAspect(options, aspect))}
               >
