@@ -3,6 +3,7 @@ import {
   expect,
   test,
   type ElectronApplication,
+  type Locator,
   type Page,
 } from '@playwright/test';
 import { createRequire } from 'node:module';
@@ -219,6 +220,17 @@ async function openAssets(page: Page): Promise<void> {
   await openPanel(page, 'Assets');
 }
 
+/** The file list lives in the Review dialog; the banner's Review button opens it. */
+async function openMissingMediaReview(page: Page): Promise<Locator> {
+  await page
+    .getByRole('region', { name: 'Missing media' })
+    .getByRole('button', { name: 'Review', exact: true })
+    .click();
+  const dialog = page.getByRole('dialog', { name: 'Missing media' });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
 async function clickMenuItem(page: Page, menu: 'Edit', label: string): Promise<void> {
   const bar = page.getByRole('navigation', { name: 'Application menu' });
   await bar.getByRole('button', { name: menu, exact: true }).click();
@@ -252,14 +264,17 @@ test.describe('desktop.missing-media relink', () => {
       await openAssets(page);
       const region = page.getByRole('region', { name: 'Missing media' });
       await expect(region).toBeVisible();
-      await expect(page.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(1);
+      const dialog = await openMissingMediaReview(page);
+      await expect(
+        dialog.locator('[data-missing-asset-id]', { hasText: mediaName }),
+      ).toHaveCount(1);
 
       await page.getByLabel(`Relink ${mediaName}`).setInputFiles({
         name: mediaName,
         mimeType: 'video/mp4',
         buffer: readFileSync(join(fixtureDirectory, 'video.mp4')),
       });
-      await expect(region.getByRole('status')).toContainText(`Relinked ${mediaName}.`);
+      await expect(dialog.getByRole('status')).toContainText(`Relinked ${mediaName}.`);
       await expect(page.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(0);
 
       await app.close();
@@ -291,6 +306,7 @@ test.describe('desktop.missing-media relink', () => {
       app = opened.app;
       const page = opened.page;
       await openAssets(page);
+      await openMissingMediaReview(page);
       const original = readFileSync(join(fixtureDirectory, 'video.mp4'));
 
       await page.getByLabel(`Relink ${mediaName}`).setInputFiles({
@@ -334,6 +350,7 @@ test.describe('desktop.missing-media relink', () => {
       app = opened.app;
       const page = opened.page;
       await openAssets(page);
+      const dialog = await openMissingMediaReview(page);
       const original = readFileSync(join(fixtureDirectory, 'video.mp4'));
       const replacement = flippedFirstByte(original);
 
@@ -353,11 +370,18 @@ test.describe('desktop.missing-media relink', () => {
       await expect(
         page.getByRole('status').filter({ hasText: 'is now a separate asset' }),
       ).toBeVisible();
-      await expect(page.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(0);
+      await expect(
+        dialog.locator('[data-missing-asset-id]', { hasText: mediaName }),
+      ).toHaveCount(0);
       await expect(page.locator('.timeline-clip').first()).toBeVisible();
 
+      // The modal dialog covers the menu bar: close it before Undo, then reopen it.
+      await dialog.getByRole('button', { name: 'Close missing media' }).click();
       await clickMenuItem(page, 'Edit', 'Undo');
-      await expect(page.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(1);
+      const reopened = await openMissingMediaReview(page);
+      await expect(
+        reopened.locator('[data-missing-asset-id]', { hasText: mediaName }),
+      ).toHaveCount(1);
     } finally {
       await app?.close().catch(() => undefined);
       for (const dir of Object.values(profiles)) rmSync(dir, { recursive: true, force: true });
@@ -379,13 +403,14 @@ test.describe('desktop.missing-media relink', () => {
       app = opened.app;
       const page = opened.page;
       await openAssets(page);
+      const dialog = await openMissingMediaReview(page);
 
       await page.getByLabel(`Relink ${mediaName}`).setInputFiles([]);
-      await expect(page.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(1);
-      await expect(page.getByRole('alert').filter({ hasText: 'does not match' })).toHaveCount(0);
       await expect(
-        page.getByRole('region', { name: 'Missing media' }).getByRole('status'),
-      ).toHaveCount(0);
+        dialog.locator('[data-missing-asset-id]', { hasText: mediaName }),
+      ).toHaveCount(1);
+      await expect(page.getByRole('alert').filter({ hasText: 'does not match' })).toHaveCount(0);
+      await expect(dialog.getByRole('status')).toHaveCount(0);
     } finally {
       await app?.close().catch(() => undefined);
       for (const dir of Object.values(profiles)) rmSync(dir, { recursive: true, force: true });
