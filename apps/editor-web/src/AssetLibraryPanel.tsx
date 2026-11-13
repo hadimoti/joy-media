@@ -177,6 +177,9 @@ export function AssetLibraryPanel({
     readonly host: MissingMediaHost;
     readonly revision: string;
     readonly onChanged?: (() => void) | undefined;
+    /** Raised by the export dialog's Relink; the section opens its Review dialog. */
+    readonly reviewRequested?: boolean | undefined;
+    readonly onReviewRequestHandled?: (() => void) | undefined;
   };
 }) {
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
@@ -930,8 +933,11 @@ export function AssetLibraryPanel({
           {missingMedia !== undefined && (
             <MissingMediaSection
               host={missingMedia.host}
+              projectId={projectId}
               revision={missingMedia.revision}
               onChanged={missingMedia.onChanged}
+              reviewRequested={missingMedia.reviewRequested}
+              onReviewRequestHandled={missingMedia.onReviewRequestHandled}
             />
           )}
           {importProgress !== undefined && (

@@ -6,11 +6,15 @@ import { RELINK_REFUSAL_MESSAGES } from './media-relink.js';
 import type { MissingMediaHost } from './missing-media-host.js';
 
 /**
- * Banners hidden with their close control. One host exists per editor session,
- * so a hidden banner stays hidden when the Assets panel remounts, and returns
- * only after the editor restarts.
+ * Banners hidden with their close control, keyed by the project and the missing set they were hidden
+ * for. Hiding lasts for the editor session: a remount with the same set stays hidden. The banner comes
+ * back as soon as the set changes, including when another project's missing set is shown.
  */
-const hiddenForSession = new WeakSet<MissingMediaHost>();
+const hiddenForMissingSet = new WeakMap<MissingMediaHost, string>();
+
+function missingSetKey(projectId: string, entries: readonly MissingMediaEntry[]): string {
+  return JSON.stringify([projectId, entries.map((entry) => entry.assetId).sort()]);
+}
 
 function missingCountText(count: number): string {
   return `${count} ${count === 1 ? 'file is' : 'files are'} missing from this project`;
@@ -24,38 +28,73 @@ function missingCountText(count: number): string {
  */
 export function MissingMediaSection({
   host,
+  projectId,
   revision,
   onChanged,
+  reviewRequested = false,
+  onReviewRequestHandled,
 }: {
   readonly host: MissingMediaHost;
+  /** The open project, so a banner hidden for another project's missing set is not reused. */
+  readonly projectId: string;
   /** Changes whenever the project changes, so the list reloads after edits and undo. */
   readonly revision: string;
   /** Lets the editor resync the timeline and menus after a project edit. */
   readonly onChanged?: (() => void) | undefined;
+  /** Set by the export dialog's Relink: shows the banner and opens the Review dialog. */
+  readonly reviewRequested?: boolean | undefined;
+  /** Called once a request is taken, so the editor can raise the next one. */
+  readonly onReviewRequestHandled?: (() => void) | undefined;
 }) {
   const [entries, setEntries] = useState<readonly MissingMediaEntry[]>([]);
+  const [hiddenKey, setHiddenKey] = useState(() => hiddenForMissingSet.get(host));
   const [warnings, setWarnings] = useState<Readonly<Record<string, string>>>({});
   const [message, setMessage] = useState<string | undefined>(undefined);
-  const [hidden, setHidden] = useState(() => hiddenForSession.has(host));
   const [reviewOpen, setReviewOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const reviewButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const reload = useCallback(async () => {
-    setEntries(await host.list());
-  }, [host]);
+    const next = await host.list();
+    // A hidden banner returns when the missing set changes, and when another project is open.
+    const stored = hiddenForMissingSet.get(host);
+    if (stored !== undefined && stored !== missingSetKey(projectId, next)) {
+      hiddenForMissingSet.delete(host);
+    }
+    setHiddenKey(hiddenForMissingSet.get(host));
+    setEntries(next);
+  }, [host, projectId]);
 
   useEffect(() => {
     void reload();
   }, [reload, revision]);
 
   useEffect(() => {
+    if (!reviewRequested) return;
+    // The export's Relink must reach the rows even when this banner was hidden.
+    hiddenForMissingSet.delete(host);
+    setHiddenKey(undefined);
+    setReviewOpen(true);
+    onReviewRequestHandled?.();
+  }, [host, reviewRequested, onReviewRequestHandled]);
+
+  useEffect(() => {
     if (!reviewOpen) return;
+    const returnFocusTo = reviewButtonRef.current;
     dialogRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setReviewOpen(false);
+      if (event.key !== 'Escape' || event.isComposing) return;
+      // Captured on window, as the app's other dialogs do, so Escape stops here.
+      event.preventDefault();
+      event.stopPropagation();
+      setReviewOpen(false);
     };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      // However the dialog closed, focus goes back to the Review button in the banner.
+      if (returnFocusTo?.isConnected) returnFocusTo.focus();
+    };
   }, [reviewOpen]);
 
   const relinkOne = async (entry: MissingMediaEntry, file: File | undefined) => {
@@ -107,7 +146,7 @@ export function MissingMediaSection({
     if (relinked > 0) onChanged?.();
   };
 
-  const showBanner = entries.length > 0 && !hidden;
+  const showBanner = entries.length > 0 && hiddenKey !== missingSetKey(projectId, entries);
   // While the dialog is open its own status line is shown; the banner shows the
   // status only when the dialog is closed.
   const showStatus = message !== undefined && !reviewOpen;
@@ -118,6 +157,7 @@ export function MissingMediaSection({
           <div className="missing-media-banner">
             <span className="missing-media-banner-text">{missingCountText(entries.length)}</span>
             <button
+              ref={reviewButtonRef}
               type="button"
               className="missing-media-relink"
               onClick={() => setReviewOpen(true)}
@@ -130,8 +170,9 @@ export function MissingMediaSection({
               aria-label="Hide missing media for this session"
               title="Hide for this session"
               onClick={() => {
-                hiddenForSession.add(host);
-                setHidden(true);
+                const key = missingSetKey(projectId, entries);
+                hiddenForMissingSet.set(host, key);
+                setHiddenKey(key);
               }}
             >
               <CloseIcon />
