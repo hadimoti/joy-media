@@ -70,7 +70,14 @@ export function setVisualProperty(
   );
 }
 
-export type NumericTransformProperty = Exclude<keyof TransformProperties, 'crop'>;
+/**
+ * The numbers one `object.setTransformProperty` writes. The anchor point is
+ * not one of them: it is written with the rest of a Monitor gesture (T-M05b).
+ */
+export type NumericTransformProperty = Exclude<
+  keyof TransformProperties,
+  'crop' | 'anchorX' | 'anchorY'
+>;
 type _VisualObjectCommand =
   | {
       /** Registers a completed generation result and its reproducibility record. */

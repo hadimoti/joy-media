@@ -183,7 +183,13 @@ export {
   audioClipPropertyBinding,
   audioEffectPropertyBinding,
 } from './audio.js';
-export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
+export {
+  validateJoyProjectV1,
+  validateAnimationCurve,
+  ANIMATABLE_PROPERTIES,
+  DEFAULT_TRANSFORM_ANCHOR,
+  transformAnchor,
+} from './v1.js';
 export type {
   PropertyOwnerKindV2,
   AnimationTimeDomainV2,
