@@ -65,6 +65,8 @@ import {
 import { usePopup, type PopupControl } from '../popup-manager.js';
 import { POPUP_IDS } from '../popup-ids.js';
 import { MonitorTransport } from './MonitorTransport.js';
+import { MonitorOverlays } from './MonitorOverlays.js';
+import { useMonitorViewOptions } from './MonitorViewMenu.js';
 import { monitorZoomLabel } from './monitor-view.js';
 import {
   MonitorViewport,
@@ -224,6 +226,8 @@ function MonitorPanelContent({
       : undefined;
   // The zoom drawer is one popup (OB-18): outside click, Escape and a second popup close it.
   const zoomDrawer = usePopup(POPUP_IDS.monitorZoom);
+  // The View menu (T-M08) options are saved per user.
+  const [viewOptions, setViewOptions] = useMonitorViewOptions(storage);
   const panelRef = useRef<HTMLElement | null>(null);
   const initialPreviewPreference = useRef(
     loadEditorUiPreferences(storage).monitorPreview ??
@@ -931,6 +935,7 @@ function MonitorPanelContent({
         onDrop={handleMonitorEffectDrop}
         readThumbnail={readNavigatorThumbnail}
         selection={monitorSelection}
+        background={viewOptions.background}
       >
         <div ref={containerRef} className="monitor-canvas" />
         <div className="monitor-frame" style={frameRect}>
@@ -944,6 +949,13 @@ function MonitorPanelContent({
             />
           )}
         </div>
+        <MonitorOverlays
+          view={monitorView.view}
+          frame={frameSize}
+          viewportSize={monitorView.viewportSize}
+          options={viewOptions}
+          onGuidesChange={(guides) => setViewOptions((current) => ({ ...current, guides }))}
+        />
         <MonitorSelectionOverlay
           overlay={selectionOutline.overlay}
           frame={frameSize}
@@ -995,6 +1007,8 @@ function MonitorPanelContent({
         width={width}
         height={height}
         canvasPresetId={canvasPresetId}
+        viewOptions={viewOptions}
+        onViewOptionsChange={setViewOptions}
       />
     </article>
   );
