@@ -27,6 +27,10 @@ export function composeTransforms(
     rotationDeg: parentWorld.rotationDeg + local.rotationDeg,
     opacity: parentWorld.opacity * local.opacity,
     crop: local.crop,
+    // The anchor point is the child's own (a fraction of its own box, T-M05b);
+    // absent stays absent, so a child without one composes exactly as before.
+    ...(local.anchorX === undefined ? {} : { anchorX: local.anchorX }),
+    ...(local.anchorY === undefined ? {} : { anchorY: local.anchorY }),
   };
 }
 

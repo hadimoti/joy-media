@@ -87,11 +87,36 @@ export interface VisualObjectTransformV1 {
    * a visual effect when a composition has an `activeCameraId`.
    */
   readonly positionZ?: number;
+  /**
+   * The anchor point (T-M05b, ADR-0046 section 5.8): the point the element
+   * turns about, as a fraction of its drawn (cropped) box, 0 at the left (top)
+   * edge and 1 at the right (bottom) edge. Values from -1 through 2 are
+   * allowed. Absent means 0.5, the centre, which
+   * is where every element turned before v1.1.1, so older projects draw and
+   * export exactly as before. It never moves the element by itself (with
+   * rotation 0 it changes nothing) and it is not animatable.
+   */
+  readonly anchorX?: number;
+  readonly anchorY?: number;
   readonly crop: {
     readonly left: number;
     readonly top: number;
     readonly right: number;
     readonly bottom: number;
+  };
+}
+
+/** The anchor fraction an element has when its transform carries none: the centre. */
+export const DEFAULT_TRANSFORM_ANCHOR = 0.5;
+
+/** The anchor point of a transform as fractions of its box (absent means the centre). */
+export function transformAnchor(transform: Pick<VisualObjectTransformV1, 'anchorX' | 'anchorY'>): {
+  readonly x: number;
+  readonly y: number;
+} {
+  return {
+    x: transform.anchorX ?? DEFAULT_TRANSFORM_ANCHOR,
+    y: transform.anchorY ?? DEFAULT_TRANSFORM_ANCHOR,
   };
 }
 
@@ -1143,6 +1168,19 @@ function validateVisualObject(
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'transform positionZ must be finite', path),
     );
+  for (const key of ['anchorX', 'anchorY'] as const) {
+    const anchor = value.transform[key];
+    const label = `visual object "${value.id}" transform ${key}`;
+    if (anchor === undefined) continue;
+    if (typeof anchor !== 'number' || !Number.isFinite(anchor))
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', `${label} must be finite`, path),
+      );
+    else if (anchor < -1 || anchor > 2)
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', `${label} must be within [-1, 2]`, path),
+      );
+  }
   if (typeof value.transform.scaleX === 'number' && value.transform.scaleX <= 0)
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'scaleX must be positive', path),
