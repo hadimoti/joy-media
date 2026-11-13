@@ -18,6 +18,7 @@ import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-en
 import type { VideoFrameNode } from '@joy-media/render-ir';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import type { AgentPanelCommand, JoyAgentAttachedAsset } from './AgentPanel.js';
+import type { InspectorTabRequest } from './InspectorPanel.js';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import type { TreatmentLayerEffectSeed, TreatmentLayerKind } from './adjustment-layer.js';
 import type { DataLane } from './data-lanes.js';
@@ -145,6 +146,9 @@ export interface EditorPanelContextValue {
   readonly agentContext: EditorContext;
   readonly agentPolicy: AgentPolicyPreferences;
   readonly agentPanelCommand: AgentPanelCommand | undefined;
+  /** A pending request to show an Inspector tab (Clip > Speed), cleared once applied. */
+  readonly inspectorTabRequest: InspectorTabRequest | null;
+  readonly onInspectorTabRequestApplied: (serial: number) => void;
   readonly creativeBriefOptedIn: boolean;
   readonly creativeBriefRunner: (requestText: string) => Promise<CreativeBriefV1>;
   readonly onCreativeBriefOptIn: () => Promise<void>;

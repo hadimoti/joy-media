@@ -98,6 +98,27 @@ export interface InspectorClipSpeed {
   readonly sourceInUs?: number | undefined;
 }
 
+/**
+ * Asks the Inspector to show one of its tabs (Clip > Speed uses this). A new
+ * serial makes a repeated request count again.
+ */
+export interface InspectorTabRequest {
+  readonly tab: string;
+  readonly serial: number;
+}
+
+/**
+ * Clears a request once the Inspector has applied it. A newer request (a higher
+ * serial) that arrived meanwhile stays. Without this, every remount of the
+ * Inspector would show the same tab again.
+ */
+export function consumeInspectorTabRequest(
+  current: InspectorTabRequest | null,
+  appliedSerial: number,
+): InspectorTabRequest | null {
+  return current?.serial === appliedSerial ? null : current;
+}
+
 /** A small, controller-facing change request emitted by the Speed tab. */
 export interface InspectorSpeedChange {
   /** When set, replace the selected clip's constant playback multiplier. */
@@ -200,9 +221,17 @@ interface InspectorPanelProps {
   /** Opens a durable animated transform in the shared Motion graph view. */
   readonly onOpenAnimationGraph?:
     ((objectId: string, channel: AnimatablePropertyV1) => void) | undefined;
+  /** When set, the Inspector switches to the requested tab (if it is visible). */
+  readonly tabRequest?: InspectorTabRequest | null | undefined;
+  /** Called once with the serial of a request the Inspector has applied; the owner clears it. */
+  readonly onTabRequestApplied?: ((serial: number) => void) | undefined;
 }
 
 const NUMERIC_PROPERTIES = VISUAL_INSPECTOR.filter((property) => property.kind === 'number');
+function animationPropertyLabel(property: AnimatablePropertyV1): string {
+  return VISUAL_INSPECTOR.find((candidate) => candidate.key === property)?.label ?? property;
+}
+
 const DEFAULTS: Record<string, number> = {
   x: 0,
   y: 0,
@@ -447,6 +476,8 @@ export function InspectorPanel({
   onAdjustmentTargetChange,
   onCreateAdjustmentLayer,
   onOpenAnimationGraph,
+  tabRequest,
+  onTabRequestApplied,
 }: InspectorPanelProps) {
   const [editingExpression, setEditingExpression] = useState<AnimatablePropertyV1 | undefined>(
     undefined,
@@ -477,6 +508,19 @@ export function InspectorPanel({
       : selectedClipId !== undefined
         ? selectedClipId
         : 'Nothing selected');
+  const animatedProperties = Object.entries(target.animations ?? {}).flatMap(
+    ([property, curve]) => {
+      if (curve === undefined || curve.keyframes.length === 0) return [];
+      const propertyId = property as AnimatablePropertyV1;
+      return [
+        {
+          property: propertyId,
+          label: animationPropertyLabel(propertyId),
+          keyframeCount: curve.keyframes.length,
+        },
+      ];
+    },
+  );
 
   const clipAudio =
     selectedClipId !== undefined && audioState !== undefined
@@ -524,6 +568,14 @@ export function InspectorPanel({
     setTab(isAdjustmentLayer ? 'adjust' : 'visual');
   }, [isAdjustmentLayer, target.id]);
 
+  useEffect(() => {
+    // A tab the selection does not offer is ignored by the visibility effect above.
+    // The owner clears the request on the callback, so a remount does not replay it.
+    if (tabRequest === undefined || tabRequest === null) return;
+    setTab(tabRequest.tab);
+    onTabRequestApplied?.(tabRequest.serial);
+  }, [tabRequest, onTabRequestApplied]);
+
   const dispatchAudio = (command: AudioCommand, label: string) => {
     if (audioState === undefined || onAudioChange === undefined) return;
     try {
@@ -561,6 +613,18 @@ export function InspectorPanel({
             curve === undefined
               ? { objectId: target.id, property }
               : { objectId: target.id, property, curve },
+        },
+      ],
+    });
+  };
+
+  const removeAnimation = (property: AnimatablePropertyV1, label: string) => {
+    onDispatch({
+      label: `Remove ${label} animation`,
+      commands: [
+        {
+          type: 'object.replaceAnimation',
+          payload: { objectId: target.id, property },
         },
       ],
     });
@@ -773,6 +837,52 @@ export function InspectorPanel({
                 );
               })}
             </>
+          )}
+        </section>
+      )}
+
+      {tab === 'visual' && !idle && (
+        <section className="inspector-section" aria-label="Animations">
+          <h3>Animations</h3>
+          {animatedProperties.length === 0 ? (
+            <p className="inspector-animation-empty">No keyframed properties.</p>
+          ) : (
+            <div className="inspector-animations-list">
+              {animatedProperties.map(({ property, label, keyframeCount }) => (
+                <div
+                  className="inspector-animation-entry"
+                  data-animation-property={property}
+                  key={property}
+                >
+                  <div className="inspector-animation-property">
+                    <strong>{label}</strong>
+                    <span>
+                      {keyframeCount} {keyframeCount === 1 ? 'keyframe' : 'keyframes'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="inspector-animation-action"
+                    aria-label={`Edit ${label} animation`}
+                    title={`Edit ${label} animation`}
+                    disabled={onOpenAnimationGraph === undefined}
+                    onClick={() => onOpenAnimationGraph?.(target.id, property)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="inspector-animation-action"
+                    aria-label={`Remove ${label} animation`}
+                    title={`Remove ${label} animation`}
+                    disabled={idle}
+                    onClick={() => removeAnimation(property, label)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </section>
       )}

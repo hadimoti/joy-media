@@ -75,7 +75,7 @@ describe('JobsPanel in the local build', () => {
     const tabs = Array.from(panel.querySelectorAll('[role="tab"]')).map((tab) =>
       tab.textContent?.trim(),
     );
-    expect(tabs).toEqual(['Workers', 'Queue']);
+    expect(tabs).toEqual(['Local services', 'Queue']);
     expect(panel.querySelector('[aria-label="One-time pairing code"]')).toBeNull();
     expect(panel.querySelector('[aria-label="Revoke Worker worker-1"]')).toBeNull();
     expect(panel.textContent).toContain('worker-1');

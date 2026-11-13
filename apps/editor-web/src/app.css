@@ -1812,13 +1812,6 @@ h2 {
 .monitor-canvas canvas {
   display: block;
 }
-/* Where the authored frame sits under the view: its shadow and the GPU picture. */
-.monitor-frame {
-  position: absolute;
-  z-index: 1;
-  box-shadow: 0 0.5rem 2rem #000a;
-  pointer-events: none;
-}
 /* View menu (T-M08): the popover over the Monitor bar, saved per user. */
 .monitor-view-root {
   position: relative;
@@ -2126,16 +2119,6 @@ h2 {
   opacity: 0.6;
   cursor: not-allowed;
 }
-.monitor-gpu-frame {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  pointer-events: none;
-  filter: drop-shadow(0 0.5rem 1rem #000a);
-}
 .monitor-transport {
   position: relative;
   display: grid;
@@ -2175,7 +2158,7 @@ h2 {
   font-size: var(--joy-type-xs);
 }
 .monitor-preview-control select {
-  max-width: 6.5rem;
+  max-width: 12rem;
   border: 0;
   background: transparent;
   color: var(--joy-text);
@@ -2186,7 +2169,7 @@ h2 {
   background: var(--joy-bg-panel);
   color: var(--joy-text);
 }
-.monitor-preview-status {
+.monitor-performance-readout {
   display: inline-flex;
   align-items: center;
   padding: 0 0.4rem;
@@ -2194,12 +2177,6 @@ h2 {
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   white-space: nowrap;
-}
-.monitor-preview-status.is-hardware-gpu {
-  color: #65d58a;
-}
-.monitor-preview-status.is-fallback {
-  color: #ffbe55;
 }
 .monitor-transport-btn {
   display: inline-flex;
@@ -2440,15 +2417,7 @@ h2 {
   }
 
   .monitor-preview-control:first-child select {
-    width: 4.5rem;
-  }
-
-  .monitor-preview-control:nth-child(2) select {
-    width: 5.6rem;
-  }
-
-  .monitor-preview-status {
-    padding-inline: 0.25rem;
+    width: 10rem;
   }
 
   .monitor-format-readout-shape {
@@ -2479,6 +2448,8 @@ h2 {
   left: 50%;
   transform: translateX(-50%);
   width: 28rem;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
   padding: 0.75rem;
   background: #2f2f31;
   box-shadow: 0 1rem 3rem #0008;
@@ -10988,11 +10959,11 @@ label {
   color: #f0c346;
 }
 .project-library-create {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
   margin-bottom: 1.25rem;
+  max-width: 100%;
 }
 .project-library-create input {
   min-width: min(100%, 18rem);
@@ -11002,6 +10973,132 @@ label {
   background: #1f1f21;
   color: #e4e4e6;
   font: inherit;
+}
+.new-project-formats {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+.new-project-formats legend {
+  padding: 0;
+  margin-bottom: 0.4rem;
+  color: var(--joy-text-secondary);
+  font-size: 0.78rem;
+}
+.new-project-format-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.5rem;
+  max-width: 100%;
+}
+.new-project-format {
+  position: relative;
+  display: grid;
+  gap: 0.35rem;
+  justify-items: center;
+  align-content: start;
+  padding: 0.6rem 0.5rem 0.55rem;
+  border: 1px solid #2e2e32;
+  border-radius: 0.4rem;
+  background: #1f1f21;
+  color: var(--joy-text);
+  text-align: center;
+  cursor: pointer;
+}
+.new-project-format:hover {
+  border-color: #4a4a50;
+}
+.new-project-format.is-selected {
+  border-color: var(--joy-accent);
+  box-shadow: 0 0 0 1px var(--joy-accent);
+}
+/* The generic `.project-library-create input` rule sizes every input; a radio
+   must reset all of it, or it covers the tile's picture and text. */
+.new-project-format input[type='radio'] {
+  position: absolute;
+  top: 0.45rem;
+  left: 0.45rem;
+  width: 1rem;
+  height: 1rem;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  accent-color: var(--joy-accent);
+}
+.new-project-format:focus-within {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 2px;
+}
+.new-project-format-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 4.5rem;
+}
+.new-project-format-picture {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  border: 1px solid #6b6b73;
+  border-radius: 0.2rem;
+  background: #2a2a2e;
+}
+.new-project-format-picture.is-custom {
+  border-style: dashed;
+  border-color: var(--joy-text-faint);
+  background: transparent;
+}
+.new-project-format-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.new-project-format-detail {
+  color: var(--joy-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+.new-project-custom-size {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+.new-project-custom-size label,
+.new-project-name {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--joy-text-secondary);
+  font-size: 0.78rem;
+}
+.new-project-custom-size input {
+  width: 7.5rem;
+  min-width: 0;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #3a3a3e;
+  border-radius: 0.3rem;
+  background: #1f1f21;
+  color: #e4e4e6;
+  font: inherit;
+}
+.new-project-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+  max-width: 100%;
+}
+.new-project-name-row .icon-button {
+  align-self: flex-end;
 }
 .project-library-grid {
   display: grid;
@@ -13912,6 +14009,46 @@ label {
   text-transform: uppercase;
   color: #8a8a90;
 }
+.inspector-animations-list {
+  display: grid;
+  gap: var(--space-2);
+}
+.inspector-animation-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.inspector-animation-property {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.inspector-animation-property strong {
+  overflow: hidden;
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector-animation-property span {
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+}
+.inspector-animation-action {
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
+.inspector-animation-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 .inspector-prop {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -16763,6 +16900,16 @@ label {
 .shortcut-row:hover {
   background: var(--joy-bg-hover);
 }
+.shortcut-group + .shortcut-group {
+  margin-top: var(--space-2);
+}
+.shortcut-group-heading {
+  margin: 0;
+  padding: 4px var(--space-3);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--joy-text-secondary);
+}
 .shortcut-action {
   font-size: 13px;
   color: var(--joy-text);
@@ -17239,11 +17386,14 @@ label {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  /* Safe margin: the whole picture sits inside the tile, not cut at its edges (T-D15). */
+  padding: var(--space-3);
+  box-sizing: border-box;
 }
 .template-card-preview-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 /* Placeholder glyph for the preview well */
@@ -17773,22 +17923,6 @@ label {
   gap: 0.3rem;
   padding: 0.05rem 0 0.25rem;
 }
-.audio-workflow-button {
-  min-width: 0;
-  min-height: 1.7rem;
-  padding: 0.1rem 0.3rem;
-  border: 1px solid var(--joy-border);
-  border-radius: var(--radius-xs);
-  background: var(--joy-bg-control);
-  color: var(--joy-text-secondary);
-  font-size: var(--joy-type-xs);
-  text-align: center;
-  cursor: pointer;
-}
-.audio-workflow-button[aria-pressed='true'] {
-  border-color: var(--joy-accent);
-  color: var(--joy-accent);
-}
 .audio-workflow-resources,
 .audio-capability-foot,
 .audio-model-caps,
@@ -17960,19 +18094,6 @@ label {
 }
 .audio-workflow-pickers {
   padding: 0 0 0.2rem;
-}
-.audio-workflow-button {
-  border-radius: var(--radius-sm);
-  font: inherit;
-}
-.audio-workflow-button:hover:not(:disabled) {
-  border-color: var(--joy-border-hover);
-  color: var(--joy-text);
-}
-.audio-workflow-button[aria-pressed='true'] {
-  border-color: var(--joy-accent);
-  background: var(--joy-bg-active);
-  color: var(--joy-accent);
 }
 .audio-workflow-card {
   min-width: 0;
@@ -19403,4 +19524,67 @@ label {
 .timeline-timecode,
 .monitor-meta {
   font-variant-numeric: tabular-nums;
+}
+
+/* T-D15: Audio presets as cards in a 2 x 3 grid (three columns, two rows). */
+.audio-workflow-choice {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-secondary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.audio-workflow-choice strong {
+  color: var(--joy-text);
+  font-size: var(--joy-type-sm);
+  font-weight: 600;
+}
+.audio-workflow-choice span {
+  font-size: var(--joy-type-xs);
+}
+.audio-workflow-choice:hover:not(:disabled) {
+  border-color: var(--joy-border-hover);
+}
+.audio-workflow-choice[aria-pressed='true'] {
+  border-color: var(--joy-accent);
+}
+
+/* T-D15: engine status, in a small info popover next to the route pills. */
+.audio-engine-status {
+  position: relative;
+  display: inline-flex;
+}
+.audio-engine-status-popover {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 0.25rem);
+  inset-inline-start: 0;
+  display: grid;
+  gap: 0.35rem;
+  min-width: 13rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-panel);
+  box-shadow: 0 0.25rem 1rem #000a;
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
+.audio-engine-status-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* T-D15: outline text styles sit on a mid-grey tile so the outline can be seen. */
+.text-template-preview.is-outline {
+  background: #7d7f89;
+  border-radius: var(--radius-xs);
 }

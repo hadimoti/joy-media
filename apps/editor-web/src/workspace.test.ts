@@ -14,7 +14,34 @@ describe('editor workspace contracts', () => {
     expect(recoverWorkspaceLayout(legacy)).toMatchObject({ version: 2 });
     expect(recoverWorkspaceLayout(legacy).panels).toContain('scene3d');
   });
+
+  it('drops the removed Animate panel from an older v2 preference', () => {
+    const priorPanels: readonly string[] = DEFAULT_WORKSPACE.panels;
+    const legacy = {
+      version: 2,
+      panels: [...priorPanels.filter((panel) => panel !== 'motion'), 'motion'],
+    };
+
+    const migrated = recoverWorkspaceLayout(legacy);
+
+    expect(migrated.panels).toEqual(DEFAULT_WORKSPACE.panels);
+    expect(migrated.panels).not.toContain('motion');
+  });
+
+  it('drops the removed Animate panel while adding 3D to an older v1 preference', () => {
+    const priorPanels: readonly string[] = DEFAULT_WORKSPACE.panels;
+    const legacy = {
+      version: 1,
+      panels: [...priorPanels.filter((panel) => panel !== 'scene3d'), 'motion'],
+    };
+
+    const migrated = recoverWorkspaceLayout(legacy);
+
+    expect(migrated.panels).toContain('scene3d');
+    expect(migrated.panels).not.toContain('motion');
+  });
+
   it('exposes command-palette actions through one shortcut registry', () => {
-    expect(searchActions('undo')).toMatchObject([{ id: 'history.undo', shortcut: 'Ctrl+Z' }]);
+    expect(searchActions('undo')).toMatchObject([{ id: 'edit.undo', shortcut: 'Ctrl+Z' }]);
   });
 });

@@ -1,7 +1,11 @@
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 
-/** Default monitor / composition size (portrait Reels / Shorts). */
-export const DEFAULT_COMPOSITION_SIZE = Object.freeze({ width: 1080, height: 1920 });
+/**
+ * Canvas for a new project when none is chosen: YouTube 16:9 at 1080p. The
+ * sample projects keep their own sizes; a project's saved canvas is never
+ * rewritten on open.
+ */
+export const DEFAULT_COMPOSITION_SIZE = Object.freeze({ width: 1920, height: 1080 });
 
 /** The project document stays outside React's ephemeral editor state. */
 export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
