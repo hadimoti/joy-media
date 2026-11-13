@@ -228,6 +228,34 @@ describe('LivingLooksPanel', () => {
     expect(updateCall![0].instanceId).toBe('look-1');
   });
 
+  it('keeps the manual Run Look usable with no model connected', () => {
+    const onRun = vi.fn();
+    mount({ onRun });
+
+    act(() => q<HTMLButtonElement>('[role="tab"]:not([aria-selected="true"])').click());
+    const headlineSelect = q<HTMLSelectElement>('.living-look-slot select');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        'value',
+      )!.set!;
+      setter.call(headlineSelect, 'title-1');
+      headlineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    // No agent composer without a model, but the Look itself still runs.
+    expect(container!.querySelector('.living-looks-agent')).toBeNull();
+    const runButton = q<HTMLButtonElement>('.living-look-run');
+    expect(runButton.disabled).toBe(false);
+    act(() => {
+      q<HTMLFormElement>('.living-look-editor').dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+    });
+    expect(onRun).toHaveBeenCalledTimes(1);
+    expect(onRun.mock.calls[0]![0].kind).toBe('apply');
+  });
+
   it('shows the "Ask JOY" agent affordance only when onAgentRun is provided', () => {
     const withoutAgent = renderToStaticMarkup(
       <LivingLooksPanel
