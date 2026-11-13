@@ -545,11 +545,6 @@ export function SelectIcon() {
   );
 }
 
-/** Alias for cut/split affordances (scissors remain the primary glyph). */
-export function CutIcon() {
-  return <ScissorsIcon />;
-}
-
 export function ProjectsIcon() {
   return <PngMaskIcon src={UI_ICONS.assets} />;
 }
@@ -601,6 +596,17 @@ export function PasteIcon() {
       <path d="M5.5 3.5h5v2h-5Z" />
       <path d="M4 4.5h8v10H4Z" />
       <path d="M6.5 8.5h3M6.5 11h3" />
+    </Svg>
+  );
+}
+
+/** Cut: two clip blocks pulled apart over a dashed seam. Not the Split scissors. */
+export function CutIcon() {
+  return (
+    <Svg>
+      <rect x="2" y="4" width="4.5" height="8" rx="1" />
+      <rect x="9.5" y="4" width="4.5" height="8" rx="1" />
+      <path d="M8 2.5v1.5M8 12v1.5" />
     </Svg>
   );
 }

@@ -208,9 +208,9 @@ export function ZoomOutIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-import { CopyIcon, PasteIcon, FitWidthIcon } from '../icons.js';
+import { CopyIcon, CutIcon, PasteIcon, FitWidthIcon } from '../icons.js';
 import { copyTimelineClips } from '../timeline-clip-clipboard.js';
-export { CopyIcon, PasteIcon, FitWidthIcon };
+export { CopyIcon, CutIcon, PasteIcon, FitWidthIcon };
 
 export function MagnetIcon({ className }: { className?: string }) {
   return (
@@ -361,7 +361,7 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
   {
     id: 'clip.cut',
     label: 'Cut clip',
-    icon: ScissorsIcon,
+    icon: CutIcon,
     shortcut: 'Ctrl+X',
     group: 'edit',
     canExecute: (ctx) => !!ctx.selectedClip,
@@ -574,10 +574,21 @@ export interface ContextMenuItem {
   readonly dividerBefore?: boolean;
 }
 
+/**
+ * Copy and Cut from the clip menu. The panel passes callbacks that act on the whole
+ * selection; without them, Copy copies the one clip and Cut is shown disabled (a
+ * cut is a multi-clip transaction, which a single command cannot carry).
+ */
+export interface ClipContextClipboardActions {
+  readonly copy: () => void;
+  readonly cut: () => void;
+}
+
 export function buildClipContextMenu(
   ctx: CommandContext,
   onExecute: (cmd: SpikeCommand) => void,
   trackLocked = false,
+  clipboardActions?: ClipContextClipboardActions,
 ): readonly ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
 
@@ -622,7 +633,8 @@ export function buildClipContextMenu(
       shortcut: 'Ctrl+C',
       disabled: trackLocked,
       action: () => {
-        if (comp && clip) copyTimelineClips(comp, [clip.id]);
+        if (clipboardActions) clipboardActions.copy();
+        else if (comp && clip) copyTimelineClips(comp, [clip.id]);
       },
     });
   }
@@ -630,20 +642,12 @@ export function buildClipContextMenu(
   // Cut
   const cutCmd = TIMELINE_COMMANDS.find((c) => c.id === 'clip.cut')!;
   if (cutCmd.canExecute(ctx)) {
-    const clip = ctx.selectedClip?.clip;
-    const comp = ctx.project.compositions[ctx.compositionId];
     items.push({
       label: 'Cut clip',
-      icon: ScissorsIcon,
+      icon: CutIcon,
       shortcut: 'Ctrl+X',
-      disabled: trackLocked,
-      action: () => {
-        if (comp && clip) {
-          copyTimelineClips(comp, [clip.id]);
-          const result = cutCmd.execute(ctx);
-          if (result) onExecute(result);
-        }
-      },
+      disabled: trackLocked || clipboardActions === undefined,
+      action: () => clipboardActions?.cut(),
     });
   }
 

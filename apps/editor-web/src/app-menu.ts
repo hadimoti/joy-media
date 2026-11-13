@@ -17,8 +17,12 @@ export type AppMenuActionId =
   | 'edit.assetLibrarySettings'
   | 'clip.split'
   | 'clip.duplicate'
+  | 'clip.copy'
+  | 'clip.cut'
+  | 'clip.paste'
   | 'clip.delete'
   | 'clip.speed'
+  | 'snapping.toggle'
   | 'agent.open'
   | 'agent.active'
   | 'agent.executionMode'
@@ -88,7 +92,11 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     items: [
       { id: 'edit.undo', label: 'Undo', shortcut: 'Ctrl+Z' },
       { id: 'edit.redo', label: 'Redo', shortcut: 'Ctrl+Y', separatorAfter: true },
+      { id: 'clip.cut', label: 'Cut', shortcut: 'Ctrl+X' },
+      { id: 'clip.copy', label: 'Copy', shortcut: 'Ctrl+C' },
+      { id: 'clip.paste', label: 'Paste', shortcut: 'Ctrl+V', separatorAfter: true },
       { id: 'clip.delete', label: 'Delete', shortcut: 'Del', separatorAfter: true },
+      { id: 'snapping.toggle', label: 'Toggle Snapping', shortcut: 'N' },
       { id: 'edit.commandPalette', label: 'Command Palette…', shortcut: 'Ctrl+K' },
       { id: 'edit.assetLibrarySettings', label: 'Asset Library Folder…', separatorAfter: true },
     ],

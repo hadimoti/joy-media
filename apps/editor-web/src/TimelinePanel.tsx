@@ -45,6 +45,7 @@ import {
   LayersIcon,
   ChevronLeftIcon,
   CopyIcon,
+  CutIcon,
   PasteIcon,
 } from './icons.js';
 import {
@@ -63,7 +64,6 @@ import {
 } from './timeline-snapping.js';
 import {
   buildTimelineCutPlan,
-  buildTimelinePastePlan,
   copyTimelineClips,
   getTimelineClipClipboard,
 } from './timeline-clip-clipboard.js';
@@ -854,6 +854,7 @@ export function TimelinePanel({
   onCancelDroppedImport,
   onMediaPlaced,
   onMediaPlacement,
+  onPasteClips,
   assetDisplayNames,
   showToast,
   trackFlags: trackFlagsProp,
@@ -921,6 +922,8 @@ export function TimelinePanel({
     placements: readonly TimelineMediaPlacement[],
     transaction: CommandTransaction,
   ) => void;
+  /** Pastes the clipboard at the playhead (the App binds pasted media and copies clip state). */
+  readonly onPasteClips?: () => void;
   /** Human labels from the creative asset catalog, keyed by opaque asset id. */
   readonly assetDisplayNames?: Readonly<Record<string, string>>;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
@@ -1452,8 +1455,10 @@ export function TimelinePanel({
   const clipboardData = getTimelineClipClipboard();
   const canPaste = clipboardData !== undefined && clipboardData.items.length > 0;
 
-  const handleCopy = () => {
-    const ids = selectedIds.length > 0 ? selectedIds : selected ? [selected.clip.id] : [];
+  // Copy and cut act on the whole selection; a clip outside the selection acts alone.
+  const clipIdsFor = (clipId: string): readonly string[] =>
+    selectedIds.includes(clipId) ? selectedIds : [clipId];
+  const copyClipIds = (ids: readonly string[]) => {
     if (ids.length === 0) return;
     const copied = copyTimelineClips(composition, ids);
     if (copied) {
@@ -1463,9 +1468,7 @@ export function TimelinePanel({
       );
     }
   };
-
-  const handleCut = () => {
-    const ids = selectedIds.length > 0 ? selectedIds : selected ? [selected.clip.id] : [];
+  const cutClipIds = (ids: readonly string[]) => {
     if (ids.length === 0) return;
     const plan = buildTimelineCutPlan({
       composition,
@@ -1483,23 +1486,21 @@ export function TimelinePanel({
       showToast?.(plan.reason, 'info');
     }
   };
-
+  const handleCopy = () => {
+    const ids = selectedIds.length > 0 ? selectedIds : selected ? [selected.clip.id] : [];
+    copyClipIds(ids);
+  };
+  const handleCut = () => {
+    const ids = selectedIds.length > 0 ? selectedIds : selected ? [selected.clip.id] : [];
+    cutClipIds(ids);
+  };
+  // Paste is owned by the App: it binds pasted media and copies clip state in one undo step.
   const handlePaste = () => {
-    const plan = buildTimelinePastePlan({
-      composition,
-      playheadUs,
-      tracks,
-    });
-    if (plan.ok) {
-      onDispatch(plan.transaction);
-      onSelectClips?.(plan.pastedClipIds);
-      showToast?.(
-        `Pasted ${plan.pastedClipIds.length} clip${plan.pastedClipIds.length === 1 ? '' : 's'}.`,
-        'info',
-      );
-    } else {
-      showToast?.(plan.reason, 'info');
+    if (onPasteClips === undefined) {
+      showToast?.('Paste is not available in this view.', 'info');
+      return;
     }
+    onPasteClips();
   };
 
   const frameUs = useMemo(() => frameDurationUs(composition.frameRate), [composition.frameRate]);
@@ -2332,6 +2333,10 @@ export function TimelinePanel({
         }
       },
       trackIsLocked,
+      {
+        copy: () => copyClipIds(clipIdsFor(clip.id)),
+        cut: () => cutClipIds(clipIdsFor(clip.id)),
+      },
     );
     // A locked lane must reject every timeline mutation, including mutations
     // reached through a context menu rather than pointer drag/trim. Keep the
@@ -3000,7 +3005,7 @@ export function TimelinePanel({
             title="Cut (Ctrl+X)"
             onClick={handleCut}
           >
-            <ScissorsIcon />
+            <CutIcon />
           </button>
           <button
             className="icon-button"

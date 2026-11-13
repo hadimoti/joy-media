@@ -31,9 +31,27 @@ describe('app-menu catalog', () => {
     ]);
     const edit = APP_MENU_GROUPS.find((group) => group.id === 'edit');
     expect(edit?.items.map((item) => item.label)).toContain('Delete');
-    expect(edit?.items.map((item) => item.label).join('|')).not.toContain('Cut');
+    expect(clip?.items.map((item) => item.label)).not.toContain('Cut');
     expect(clip?.items.find((item) => item.label === 'Delete')?.id).toBe('clip.delete');
     expect(edit?.items.find((item) => item.label === 'Delete')?.id).toBe('clip.delete');
+  });
+
+  it('lists Cut, Copy, Paste and Toggle Snapping in the Edit menu with their shortcuts', () => {
+    const edit = APP_MENU_GROUPS.find((group) => group.id === 'edit');
+    const entry = (label: string) => edit?.items.find((item) => item.label === label);
+    expect(entry('Cut')).toMatchObject({ id: 'clip.cut', shortcut: 'Ctrl+X' });
+    expect(entry('Copy')).toMatchObject({ id: 'clip.copy', shortcut: 'Ctrl+C' });
+    expect(entry('Paste')).toMatchObject({ id: 'clip.paste', shortcut: 'Ctrl+V' });
+    expect(entry('Toggle Snapping')).toMatchObject({ id: 'snapping.toggle', shortcut: 'N' });
+  });
+
+  it('puts the clipboard and snapping commands in the command palette', () => {
+    expect(searchActions('').map((action) => action.id)).toEqual(
+      expect.arrayContaining(['clip.cut', 'clip.copy', 'clip.paste', 'snapping.toggle']),
+    );
+    expect(searchActions('snapping')).toMatchObject([
+      { id: 'snapping.toggle', title: 'Toggle Snapping', shortcut: 'N' },
+    ]);
   });
 
   it('finds palette entries by menu label', () => {
