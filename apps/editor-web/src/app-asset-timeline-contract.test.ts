@@ -39,4 +39,28 @@ describe('App asset timeline integrity contract', () => {
     );
     expect(appSource).not.toContain('handleImportDroppedFiles');
   });
+
+  it('uses renderer File imports only without a desktop bridge and reports a desktop miss', () => {
+    const handlerStart = appSource.indexOf('const handleDroppedFiles =');
+    const handlerEnd = appSource.indexOf("\n    if (api.id === 'timeline')", handlerStart);
+    const handler = appSource.slice(handlerStart, handlerEnd);
+    const fallbackStart = handler.indexOf('} else if (!isDesktopHost()) {');
+    const failureStart = handler.indexOf('} else {', fallbackStart);
+
+    expect(fallbackStart).toBeGreaterThanOrEqual(0);
+    expect(failureStart).toBeGreaterThan(fallbackStart);
+    expect(handler.slice(fallbackStart, fallbackStart + 180)).toContain(
+      'Renderer File imports are a browser-only fallback.',
+    );
+    expect(handler.slice(fallbackStart, failureStart)).toContain(
+      'const asset = await importMediaFile({',
+    );
+    expect(handler.match(/importMediaFile\(/g)).toHaveLength(1);
+    expect(handler.slice(failureStart)).toContain(
+      "message: 'Desktop dropped-file import is unavailable.',",
+    );
+    expect(handler).toContain(
+      "context.showToast(`Failed to import ${failure.displayName}: ${failure.message}`, 'error');",
+    );
+  });
 });

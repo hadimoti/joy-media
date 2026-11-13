@@ -6350,7 +6350,8 @@ function EditorWorkspace({
           if (imported.skippedMessage !== undefined) {
             context.showToast(imported.skippedMessage, 'info');
           }
-        } else {
+        } else if (!isDesktopHost()) {
+          // Renderer File imports are a browser-only fallback.
           for (const [index, file] of orderedFiles.entries()) {
             if (controller.signal.aborted) {
               cancelled = true;
@@ -6387,6 +6388,13 @@ function EditorWorkspace({
                 message: error instanceof Error ? error.message : String(error),
               });
             }
+          }
+        } else {
+          for (const file of orderedFiles) {
+            failures.push({
+              displayName: file.name,
+              message: 'Desktop dropped-file import is unavailable.',
+            });
           }
         }
 
