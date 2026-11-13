@@ -168,10 +168,10 @@ export function useMonitorTransform(
           !event.altKey &&
           !event.ctrlKey &&
           !event.metaKey &&
-          keyboardRotateDegrees(event.key) !== undefined &&
+          keyboardRotateDegrees(event.code ?? '', event.shiftKey) !== undefined &&
           latest.current.readTargets().length > 0,
         run: (event) => {
-          const degrees = keyboardRotateDegrees(event.key);
+          const degrees = keyboardRotateDegrees(event.code ?? '', event.shiftKey);
           if (degrees !== undefined) keyboardChange({ kind: 'rotate', degrees });
         },
       }),
