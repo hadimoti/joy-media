@@ -55,10 +55,7 @@ import {
   withoutVideoNodeGrade,
 } from '../color-grade-bypass.js';
 import { MonitorEyedropper } from './MonitorEyedropper.js';
-import {
-  appAgentPreviewStore,
-  stickerImageCache,
-} from '../editor-runtime-singletons.js';
+import { appAgentPreviewStore, stickerImageCache } from '../editor-runtime-singletons.js';
 import { usePopup, type PopupControl } from '../popup-manager.js';
 import { POPUP_IDS } from '../popup-ids.js';
 import { MonitorTransport } from './MonitorTransport.js';
@@ -257,6 +254,11 @@ function MonitorPanelContent({
     autoPreviewQuality,
     !state.playing,
   );
+  // The renderer effect below is keyed on the chosen mode only; Auto changes the
+  // active quality while it runs, so the effect reads it through a ref instead of
+  // rebuilding the Pixi renderer on every Auto step.
+  const activePreviewQualityRef = useRef(activePreviewQuality);
+  activePreviewQualityRef.current = activePreviewQuality;
   const [performanceStats, setPerformanceStats] = useState({ fps: 0, droppedFrames: 0 });
   const performanceTrackerRef = useRef(createMonitorPerformanceTracker());
   useEffect(() => {
@@ -573,11 +575,11 @@ function MonitorPanelContent({
       if (sample.stats !== undefined) setPerformanceStats(sample.stats);
       if (previewQuality === 'auto') {
         const nextQuality = chooseAutoPreviewQuality(
-          activePreviewQuality,
+          activePreviewQualityRef.current,
           renderedAtMs - renderStartedAtMs,
           previewFrameRate,
         );
-        if (nextQuality !== activePreviewQuality) setAutoPreviewQuality(nextQuality);
+        if (nextQuality !== activePreviewQualityRef.current) setAutoPreviewQuality(nextQuality);
       }
     }
     refreshSelectionOutlineRef.current();
@@ -610,7 +612,7 @@ function MonitorPanelContent({
       rendererPromiseRef.current ??
       createBrowserPixiRenderer({
         parent: container,
-        resolution: previewQualityResolution(activePreviewQuality),
+        resolution: previewQualityResolution(activePreviewQualityRef.current),
         resolveColorLut: (grade) => colorLutResolverRef.current?.resolveColorLut(grade),
       });
     rendererPromiseRef.current = initialization;
