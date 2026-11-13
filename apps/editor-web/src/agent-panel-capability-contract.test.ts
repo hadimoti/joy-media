@@ -45,10 +45,12 @@ describe('Joy Code capability panel contract', () => {
     expect(appCss).toContain('.joy-code-settings-trigger-btn:focus-visible');
   });
 
-  it('requires all four terminal catch paths to use noEditsAppliedFailureMessage', () => {
+  it('requires all four terminal catch paths to use the shared Joy Code failure formatter', () => {
     // Each catch block in the four error paths must invoke the shared
-    // formatter so that every failure notice appends the "no edits were
-    // applied" disclaimer.
+    // formatter so that every failure notice carries the plain message and
+    // its "no edits were applied" disclaimer. The formatter is
+    // joyCodeMessageForThrown (joy-code-messages.ts, T-J01); it never shows
+    // the thrown text itself.
 
     // 1. direct model run
     const region1Start = panelSource.indexOf(
@@ -58,7 +60,7 @@ describe('Joy Code capability panel contract', () => {
     expect(region1Start).toBeGreaterThanOrEqual(0);
     expect(region1End).toBeGreaterThan(region1Start);
     const region1 = panelSource.slice(region1Start, region1End);
-    expect(region1).toContain('noEditsAppliedFailureMessage(error,');
+    expect(region1).toContain('joyCodeMessageForThrown(error)');
 
     // 2. recipe runner
     const region2Start = panelSource.indexOf('async function runRecipe(');
@@ -66,7 +68,7 @@ describe('Joy Code capability panel contract', () => {
     expect(region2Start).toBeGreaterThanOrEqual(0);
     expect(region2End).toBeGreaterThan(region2Start);
     const region2 = panelSource.slice(region2Start, region2End);
-    expect(region2).toContain('noEditsAppliedFailureMessage(error,');
+    expect(region2).toContain('joyCodeMessageForThrown(error)');
 
     // 3. manual Look runner
     const region3Start = panelSource.indexOf('async function runLook(');
@@ -77,7 +79,7 @@ describe('Joy Code capability panel contract', () => {
     expect(region3Start).toBeGreaterThanOrEqual(0);
     expect(region3End).toBeGreaterThan(region3Start);
     const region3 = panelSource.slice(region3Start, region3End);
-    expect(region3).toContain('noEditsAppliedFailureMessage(error,');
+    expect(region3).toContain('joyCodeMessageForThrown(error)');
 
     // 4. JOY-agent Look runner
     const region4Start = panelSource.indexOf('async function runAgentLook(');
@@ -85,10 +87,10 @@ describe('Joy Code capability panel contract', () => {
     expect(region4Start).toBeGreaterThanOrEqual(0);
     expect(region4End).toBeGreaterThan(region4Start);
     const region4 = panelSource.slice(region4Start, region4End);
-    expect(region4).toContain('noEditsAppliedFailureMessage(error,');
+    expect(region4).toContain('joyCodeMessageForThrown(error)');
 
     // Exactly four formatter references across the whole file.
-    const formatterRefs = panelSource.match(/noEditsAppliedFailureMessage\(error\s*,/g);
+    const formatterRefs = panelSource.match(/joyCodeMessageForThrown\(error\)/g);
     expect(formatterRefs).not.toBeNull();
     expect(formatterRefs!.length).toBe(4);
 

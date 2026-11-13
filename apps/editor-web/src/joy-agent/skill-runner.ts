@@ -61,8 +61,16 @@ export interface CreativeSkillCheckpointEvent {
   readonly reason?: CreativeSkillBlockReason;
 }
 
-export type CreativeSkillBlockReason =
-  'cancelled' | 'stale-authority' | 'adapter-unavailable' | 'adapter-failed' | 'invalid-artifact';
+/** Every reason a recipe run can stop short of a result. Joy Code messages cover each one (joy-code-messages.ts). */
+export const CREATIVE_SKILL_BLOCK_REASONS = [
+  'cancelled',
+  'stale-authority',
+  'adapter-unavailable',
+  'adapter-failed',
+  'invalid-artifact',
+] as const;
+
+export type CreativeSkillBlockReason = (typeof CREATIVE_SKILL_BLOCK_REASONS)[number];
 
 export type CreativeSkillRunResult =
   | {
