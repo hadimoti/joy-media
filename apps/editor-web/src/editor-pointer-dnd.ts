@@ -63,6 +63,7 @@ export interface EditorPointerDndHandlers {
     target: EditorPointerDropTarget,
     event: PointerEvent,
   ) => void;
+  readonly onEnd?: () => void;
 }
 
 interface RegisteredRoot {
@@ -209,13 +210,17 @@ function onKeyDown(event: KeyboardEvent): void {
 
 function cancelActiveDrag(): void {
   if (activeDrag === undefined) return;
-  activeDrag.handlers?.onMove(activeDrag.payload, undefined, activeDrag.lastPointerEvent);
-  finishActiveDrag();
+  try {
+    activeDrag.handlers?.onMove(activeDrag.payload, undefined, activeDrag.lastPointerEvent);
+  } finally {
+    finishActiveDrag();
+  }
 }
 
 function finishActiveDrag(): void {
   const drag = activeDrag;
   if (drag === undefined) return;
+  const onEnd = drag.handlers?.onEnd;
   if (drag.targetElement !== undefined) delete drag.targetElement.dataset.editorPointerDndOver;
   drag.source.classList.remove('editor-pointer-dnd-source-active');
   delete document.body.dataset.editorPointerDragging;
@@ -226,6 +231,7 @@ function finishActiveDrag(): void {
   document.removeEventListener('keydown', onKeyDown, true);
   window.removeEventListener('blur', cancelActiveDrag, true);
   activeDrag = undefined;
+  onEnd?.();
 }
 
 function rootAtPoint(

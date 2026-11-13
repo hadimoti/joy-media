@@ -51,7 +51,7 @@ async function dragTo(page, sourceSelector, targetSelector, options = {}) {
   } finally {
     if (modifier !== undefined) await page.keyboard.up(modifier);
   }
-  return target;
+  return { source, target };
 }
 
 async function waitForAttribute(page, selector, name, value) {
@@ -66,6 +66,16 @@ async function clipStart(page, clipId) {
   const value = await page.locator(timelineClip(clipId)).getAttribute('data-start-us');
   if (value === null) throw new Error(`timeline clip ${clipId} has no start time`);
   return Number(value);
+}
+
+async function clipPosition(page, clipId) {
+  return page.locator(timelineClip(clipId)).evaluate((clip) => {
+    const startUs = Number(clip.getAttribute('data-start-us'));
+    const trackId = clip.closest('.timeline-track')?.getAttribute('data-track-id');
+    if (!Number.isFinite(startUs) || trackId === null || trackId === undefined)
+      throw new Error(`timeline clip ${clipId} has incomplete position data`);
+    return { startUs, trackId };
+  });
 }
 
 async function selectedClipIds(page) {
@@ -133,8 +143,50 @@ export async function moveClipGroup(page, { clipIds, primaryClipId, targetFracti
   } finally {
     await page.keyboard.up('Control');
   }
+  const before = await Promise.all(
+    clipIds.map(async (clipId) => ({
+      clipId,
+      ...(await clipPosition(page, clipId)),
+    })),
+  );
+  const pixelsPerSecond = Number(await page.getByLabel('Timeline zoom').inputValue());
+  if (!Number.isFinite(pixelsPerSecond) || pixelsPerSecond <= 0)
+    throw new Error('Timeline zoom has an invalid pixels-per-second value');
   const trackSelector = await timelineTrackForClip(page, primaryClipId);
-  await dragTo(page, timelineClip(primaryClipId), trackSelector, { targetFraction });
+  const { source, target } = await dragTo(page, timelineClip(primaryClipId), trackSelector, {
+    targetFraction,
+  });
+  const expectedDeltaUs = Math.round(((target.x - source.x) / pixelsPerSecond) * 1_000_000);
+  const snapToleranceUs = Math.ceil((8 * 1_000_000) / pixelsPerSecond) + 1;
+  await page.waitForFunction(
+    ({ clips, deltaUs, toleranceUs }) =>
+      clips.every(({ clipId, startUs, trackId }) => {
+        const clip = document.querySelector(
+          `.timeline-clip[data-clip-id=${JSON.stringify(clipId)}]`,
+        );
+        const actualStartUs = Number(clip?.getAttribute('data-start-us'));
+        const actualTrackId = clip?.closest('.timeline-track')?.getAttribute('data-track-id');
+        return (
+          Number.isFinite(actualStartUs) &&
+          Math.abs(actualStartUs - Math.max(0, startUs + deltaUs)) <= toleranceUs &&
+          actualTrackId === trackId
+        );
+      }),
+    { clips: before, deltaUs: expectedDeltaUs, toleranceUs: snapToleranceUs },
+  );
+  const primaryBefore = before.find(({ clipId }) => clipId === primaryClipId);
+  if (primaryBefore === undefined) throw new Error(`primary clip ${primaryClipId} is not in group`);
+  const primaryAfter = await clipPosition(page, primaryClipId);
+  const committedDeltaUs = primaryAfter.startUs - primaryBefore.startUs;
+  for (const expected of before) {
+    const actual = await clipPosition(page, expected.clipId);
+    if (actual.startUs !== expected.startUs + committedDeltaUs)
+      throw new Error(`group member ${expected.clipId} did not move by the primary clip delta`);
+    if (actual.trackId !== expected.trackId)
+      throw new Error(
+        `group member ${expected.clipId} moved to unexpected track ${actual.trackId}`,
+      );
+  }
   for (const clipId of clipIds) {
     const isSelected = await page.locator(timelineClip(clipId)).getAttribute('aria-pressed');
     if (isSelected !== 'true') throw new Error(`group member ${clipId} lost its selection`);
@@ -209,10 +261,10 @@ export async function escapeCancelsClipMove(page, { clipId, targetTrackId }) {
 }
 
 /** D-H03-11: A held drag near the timeline edge keeps auto-scrolling. */
-export async function edgeAutoScroll(page, { clipId, edge = 'right', holdMs = 500 }) {
+export async function edgeAutoScroll(page, { assetId, edge = 'right', holdMs = 500 }) {
   const scroller = '.timeline-tracks';
   const before = await page.locator(scroller).evaluate((element) => element.scrollLeft);
-  const source = pointIn(await box(page, timelineClip(clipId)));
+  const source = pointIn(await box(page, assetCard(assetId)));
   const viewport = await box(page, scroller);
   const x = edge === 'left' ? viewport.x + 2 : viewport.x + viewport.width - 2;
   const y = Math.min(viewport.y + viewport.height - 20, Math.max(viewport.y + 20, source.y));
@@ -225,6 +277,7 @@ export async function edgeAutoScroll(page, { clipId, edge = 'right', holdMs = 50
     if (edge === 'right' ? after <= before : after >= before)
       throw new Error(`timeline did not scroll ${edge} while the pointer was held at its edge`);
   } finally {
+    await page.keyboard.press('Escape');
     await page.mouse.up();
   }
   return `timeline auto-scrolled ${edge}`;

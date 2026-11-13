@@ -118,6 +118,8 @@ import {
 } from './timeline-element-kind.js';
 import { TimelineTransitionJunction } from './TimelineTransitionJunction.js';
 import { TimelineTrackColorMenu } from './TimelineTrackColorMenu.js';
+import { createTimelineEdgeAutoScrollLoop } from './timeline-edge-autoscroll.js';
+import type { TimelineMediaPlacement } from './timeline-media-placement.js';
 import type { TimelineTrackLabelColor } from '@joy-media/project-schema';
 import {
   hasExceededMarqueeThreshold,
@@ -821,6 +823,7 @@ export function TimelinePanel({
   droppedImportProgress,
   onCancelDroppedImport,
   onMediaPlaced,
+  onMediaPlacement,
   assetDisplayNames,
   showToast,
   trackFlags: trackFlagsProp,
@@ -880,6 +883,10 @@ export function TimelinePanel({
   readonly droppedImportProgress?: DroppedImportProgressState;
   readonly onCancelDroppedImport?: () => void;
   readonly onMediaPlaced?: (asset: TimelineMediaAsset, clipId: string) => void;
+  readonly onMediaPlacement?: (
+    placements: readonly TimelineMediaPlacement[],
+    transaction: CommandTransaction,
+  ) => void;
   /** Human labels from the creative asset catalog, keyed by opaque asset id. */
   readonly assetDisplayNames?: Readonly<Record<string, string>>;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
@@ -1469,6 +1476,29 @@ export function TimelinePanel({
     return nearEdge ? root.scrollLeft - previousScrollLeft : undefined;
   }, []);
 
+  const scrollLibraryPointerNearEdge = useCallback(
+    (clientX: number, clientY: number) => {
+      const root = scrollRef.current;
+      if (root === null) return undefined;
+      const rect = root.getBoundingClientRect();
+      if (
+        clientX < rect.left ||
+        clientX > rect.right ||
+        clientY < rect.top ||
+        clientY > rect.bottom
+      ) {
+        return undefined;
+      }
+      return scrollTimelineNearPointer(clientX, clientY);
+    },
+    [scrollTimelineNearPointer],
+  );
+  const libraryDragAutoScroll = useMemo(
+    () => createTimelineEdgeAutoScrollLoop(scrollLibraryPointerNearEdge),
+    [scrollLibraryPointerNearEdge],
+  );
+  useEffect(() => () => libraryDragAutoScroll.stop(), [libraryDragAutoScroll]);
+
   const dispatchSplitAt = useCallback(
     (trackId: string, clipId: string, atUs: number) => {
       if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
@@ -1599,6 +1629,18 @@ export function TimelinePanel({
       }
     };
 
+  const dispatchMediaPlacements = useCallback(
+    (placements: readonly TimelineMediaPlacement[], transaction: CommandTransaction) => {
+      if (onMediaPlacement !== undefined) {
+        onMediaPlacement(placements, transaction);
+        return;
+      }
+      for (const placement of placements) onMediaPlaced?.(placement.asset, placement.clipId);
+      onDispatch(transaction);
+    },
+    [onDispatch, onMediaPlaced, onMediaPlacement],
+  );
+
   const insertAssetOnTrack = useCallback(
     (
       trackId: string,
@@ -1630,16 +1672,13 @@ export function TimelinePanel({
       }
       const isAudio = asset.kind === 'audio';
       const clipId = `${isAudio ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
-      onMediaPlaced?.(
-        {
-          id: asset.assetId,
-          kind: isAudio ? 'audio' : asset.kind === 'image' ? 'image' : 'video',
-          displayName: asset.displayName ?? asset.assetId,
-          descriptor: asset.descriptor ?? {},
-        },
-        clipId,
-      );
-      onDispatch({
+      const timelineAsset: TimelineMediaAsset = {
+        id: asset.assetId,
+        kind: isAudio ? 'audio' : asset.kind === 'image' ? 'image' : 'video',
+        displayName: asset.displayName ?? asset.assetId,
+        descriptor: asset.descriptor ?? {},
+      };
+      dispatchMediaPlacements([{ asset: timelineAsset, clipId }], {
         label: `Insert ${asset.displayName ?? 'media'}`,
         commands: [
           {
@@ -1660,7 +1699,7 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks, elementKinds, onDispatch, onMediaPlaced, showToast],
+    [composition.id, composition.tracks, dispatchMediaPlacements, elementKinds, showToast],
   );
 
   /** Create a NEW real track for a dropped asset and place the clip on it. */
@@ -1684,16 +1723,13 @@ export function TimelinePanel({
       const durationUs = safeAssetDuration(asset);
       const startUs = Math.max(0, Math.round(dropUs));
       const clipId = `${family === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
-      onMediaPlaced?.(
-        {
-          id: asset.assetId,
-          kind: asset.kind === 'audio' ? 'audio' : asset.kind === 'image' ? 'image' : 'video',
-          displayName: asset.displayName ?? asset.assetId,
-          descriptor: asset.descriptor ?? {},
-        },
-        clipId,
-      );
-      onDispatch({
+      const timelineAsset: TimelineMediaAsset = {
+        id: asset.assetId,
+        kind: asset.kind === 'audio' ? 'audio' : asset.kind === 'image' ? 'image' : 'video',
+        displayName: asset.displayName ?? asset.assetId,
+        descriptor: asset.descriptor ?? {},
+      };
+      dispatchMediaPlacements([{ asset: timelineAsset, clipId }], {
         label: `Add ${asset.displayName ?? 'media'}`,
         commands: [
           {
@@ -1729,7 +1765,7 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks, elementKinds, onDispatch, onMediaPlaced],
+    [composition.id, composition.tracks, dispatchMediaPlacements, elementKinds],
   );
 
   const dispatchSplit = (trackId: string, clipId: string) => {
@@ -2256,8 +2292,10 @@ export function TimelinePanel({
               lockedTrackIds,
               (_asset, index) => clipIds[index]!,
             );
-            imported.forEach((asset, index) => onMediaPlaced?.(asset, clipIds[index]!));
-            onDispatch(transaction);
+            dispatchMediaPlacements(
+              imported.map((asset, index) => ({ asset, clipId: clipIds[index]! })),
+              transaction,
+            );
           }
           if (failures.length > 0) {
             showToast?.(
@@ -2282,7 +2320,7 @@ export function TimelinePanel({
       })();
     };
     input.click();
-  }, [onDispatch, onImportMedia, onMediaPlaced, onOpenAssetLibrary, playheadUs, showToast]);
+  }, [dispatchMediaPlacements, onImportMedia, onOpenAssetLibrary, playheadUs, showToast]);
 
   const handleFilesDrop = useCallback(
     (files: readonly File[], position: TimelineEmptyStateFileDropPosition) => {
@@ -2407,8 +2445,8 @@ export function TimelinePanel({
         descriptor: asset.descriptor ?? {},
       };
       const clipId = `${kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
-      onMediaPlaced?.(timelineAsset, clipId);
-      onDispatch(
+      dispatchMediaPlacements(
+        [{ asset: timelineAsset, clipId }],
         buildTimelineMediaImportTransaction(
           composition,
           [timelineAsset],
@@ -2418,7 +2456,7 @@ export function TimelinePanel({
         ),
       );
     },
-    [composition, onDispatch, onMediaPlaced, playheadUs],
+    [composition, dispatchMediaPlacements, playheadUs],
   );
 
   const handleEditorPointerDndMove = useCallback(
@@ -2428,11 +2466,16 @@ export function TimelinePanel({
       event: globalThis.PointerEvent | undefined,
     ) => {
       if (event === undefined) {
+        libraryDragAutoScroll.stop();
         setDragEffectOverClipId(null);
         setFileDropIndicator(undefined);
         return;
       }
-      scrollTimelineNearPointer(event.clientX, event.clientY);
+      if (scrollLibraryPointerNearEdge(event.clientX, event.clientY) === undefined) {
+        libraryDragAutoScroll.stop();
+      } else {
+        libraryDragAutoScroll.move(event.clientX, event.clientY);
+      }
       setDragEffectOverClipId(
         payload.kind === 'effect' && target?.kind === 'timeline-clip'
           ? (target.clipId ?? null)
@@ -2451,7 +2494,7 @@ export function TimelinePanel({
         setFileDropIndicator(undefined);
       }
     },
-    [scrollTimelineNearPointer, timelineDropTimeAt],
+    [libraryDragAutoScroll, scrollLibraryPointerNearEdge, timelineDropTimeAt],
   );
 
   const handleEditorPointerDndDrop = useCallback(
@@ -2460,6 +2503,7 @@ export function TimelinePanel({
       target: EditorPointerDropTarget,
       event: globalThis.PointerEvent,
     ) => {
+      libraryDragAutoScroll.stop();
       setDragEffectOverClipId(null);
       setFileDropIndicator(undefined);
 
@@ -2517,8 +2561,7 @@ export function TimelinePanel({
             displayName: timelineAsset.displayName,
           });
           if (transaction === undefined) return;
-          onMediaPlaced?.(timelineAsset, existingClip.id);
-          onDispatch(transaction);
+          dispatchMediaPlacements([{ asset: timelineAsset, clipId: existingClip.id }], transaction);
           return;
         }
 
@@ -2545,8 +2588,7 @@ export function TimelinePanel({
             showToast?.('Drop in a clear timeline position to insert media.', 'info');
             return;
           }
-          onMediaPlaced?.(timelineAsset, clipId);
-          onDispatch(transaction);
+          dispatchMediaPlacements([{ asset: timelineAsset, clipId }], transaction);
           return;
         }
 
@@ -2577,13 +2619,13 @@ export function TimelinePanel({
     [
       composition,
       elementKinds,
+      dispatchMediaPlacements,
       handleAssetDrop,
       handleRunwayDrop,
       insertAssetOnTrack,
-      onDispatch,
       onEffectDrop,
-      onMediaPlaced,
       onTransitionDrop,
+      libraryDragAutoScroll,
       showToast,
       timelineDropTimeAt,
     ],
@@ -2595,8 +2637,9 @@ export function TimelinePanel({
     return registerEditorPointerDndRoot(root, {
       onMove: handleEditorPointerDndMove,
       onDrop: handleEditorPointerDndDrop,
+      onEnd: libraryDragAutoScroll.stop,
     });
-  }, [handleEditorPointerDndDrop, handleEditorPointerDndMove]);
+  }, [handleEditorPointerDndDrop, handleEditorPointerDndMove, libraryDragAutoScroll]);
 
   const handleAddFromLibrary = useCallback(() => {
     if (onOpenAssetLibrary !== undefined) {

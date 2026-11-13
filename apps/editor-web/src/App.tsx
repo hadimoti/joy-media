@@ -261,6 +261,10 @@ import { createMissingMediaHost, type MissingMediaHost } from './missing-media-h
 import type { ProjectWriterHandle } from './project-writer.js';
 import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js';
 import { prepareTimelinePresentation } from './timeline-presentation.js';
+import {
+  applyTimelineMediaPlacement,
+  type TimelineMediaPlacement,
+} from './timeline-media-placement.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import type { DroppedImportProgressState } from './DroppedImportProgress.js';
 import {
@@ -2829,6 +2833,16 @@ function EditorWorkspace({
       setRevision((revision) => revision + 1);
     },
     [resyncTimelineMedia, session],
+  );
+  const dispatchMediaPlacement = useCallback(
+    (placements: readonly TimelineMediaPlacement[], transaction: CommandTransaction) => {
+      const nextAudio = applyTimelineMediaPlacement(session, audioState, transaction, placements);
+      invalidateAgentPreviewAfterEdit(session);
+      setAudioStateRaw(nextAudio);
+      resyncTimelineMedia();
+      setRevision((revision) => revision + 1);
+    },
+    [audioState, resyncTimelineMedia, session],
   );
   const dispatchGraph = useCallback(
     (transaction: GraphTransaction) => {
@@ -5645,76 +5659,6 @@ function EditorWorkspace({
         ),
       );
     };
-    const bindMediaClip = (
-      asset: {
-        readonly id: string;
-        readonly kind: 'video' | 'audio' | 'image';
-        readonly displayName?: string;
-        readonly sha256?: string;
-        readonly bytes?: number;
-        readonly descriptor?: {
-          readonly mimeType?: string;
-          readonly durationUs?: number;
-          readonly width?: number;
-          readonly height?: number;
-          readonly animation?: AnimationDescriptorV1;
-        };
-      },
-      clipId: string,
-    ) => {
-      const controllerId = `media-controller-${clipId}`;
-      const importedProject = projectWithImportedAsset(context.visualProject, {
-        id: asset.id,
-        kind: asset.kind,
-        displayName: asset.displayName ?? asset.id,
-        ...(asset.sha256 === undefined ? {} : { sha256: asset.sha256 }),
-        ...(asset.bytes === undefined ? {} : { bytes: asset.bytes }),
-        ...(asset.descriptor === undefined ? {} : { descriptor: asset.descriptor }),
-      });
-      const existingController = importedProject.visualObjects[controllerId];
-      if (existingController !== undefined) {
-        context.replaceVisualProject(
-          writeClipMediaKind(
-            {
-              ...importedProject,
-              visualObjects: {
-                ...importedProject.visualObjects,
-                [controllerId]: { ...existingController, assetId: asset.id },
-              },
-            },
-            clipId,
-            asset.kind,
-          ),
-        );
-        return;
-      }
-      context.replaceVisualProject(
-        bindClipToObject(
-          {
-            ...importedProject,
-            visualObjects: {
-              ...importedProject.visualObjects,
-              [controllerId]: {
-                id: controllerId,
-                kind: 'null',
-                assetId: asset.id,
-                transform: {
-                  x: 0,
-                  y: 0,
-                  scaleX: 1,
-                  scaleY: 1,
-                  rotationDeg: 0,
-                  opacity: 1,
-                  crop: { left: 0, top: 0, right: 0, bottom: 0 },
-                },
-              },
-            },
-          },
-          clipId,
-          controllerId,
-        ),
-      );
-    };
     const selectedTimelineEntry = state.selectedIds
       .map((clipId) =>
         Object.values(context.timelineProject.compositions)
@@ -6648,7 +6592,7 @@ function EditorWorkspace({
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
           )}
           onImportFiles={handleDroppedFiles}
-          onMediaPlaced={(asset, clipId) => bindMediaClip(asset, clipId)}
+          onMediaPlacement={context.dispatchMediaPlacement}
           onTogglePlayback={context.togglePlayback}
           onSeek={(timeUs) => context.seek(timelineViewRootTime(activeTimelineView, timeUs))}
           onSelectClips={context.selectClips}
@@ -7516,6 +7460,7 @@ function EditorWorkspace({
               selectClips,
               clearSelection: () => setState((current) => ({ ...current, selectedIds: [] })),
               dispatchTimeline,
+              dispatchMediaPlacement,
               dispatchTimelineAndProjectAudio,
               updateVisualProperty,
               dispatchProject,

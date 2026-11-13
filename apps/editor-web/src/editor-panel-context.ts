@@ -30,6 +30,7 @@ import type { createEditorPluginHost } from './plugin-host.js';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import type { ProjectWriterStorage } from './project-writer.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
+import type { TimelineMediaPlacement } from './timeline-media-placement.js';
 
 export interface EditorRuntimeState {
   readonly selectedIds: readonly string[];
@@ -99,6 +100,10 @@ export interface EditorPanelContextValue {
   readonly selectClips: (clipIds: readonly string[]) => void;
   readonly clearSelection: () => void;
   readonly dispatchTimeline: (transaction: CommandTransaction) => void;
+  readonly dispatchMediaPlacement: (
+    placements: readonly TimelineMediaPlacement[],
+    transaction: CommandTransaction,
+  ) => void;
   readonly dispatchTimelineAndProjectAudio: (
     label: string,
     timeline: CommandTransaction,
