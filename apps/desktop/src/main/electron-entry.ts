@@ -54,6 +54,7 @@ import { createLocalOriginalWriter } from './local-originals.js';
 import { createMediaChannelHandlers } from './media-channel.js';
 import { createAssetLibrary } from '../store/asset-library.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
+import { classifyDriveOfDirectory } from './drive-type-probe.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { createProviderBroker } from './providers/provider-broker.js';
 import { pinnedFetch } from './providers/pinned-transport.js';
@@ -212,6 +213,11 @@ if (!app.requestSingleInstanceLock()) {
         : await dialog.showOpenDialog({ properties: ['openDirectory'] });
       return { canceled: result.canceled, path: result.filePaths[0] };
     },
+    // Opens the asset library folder in the OS file browser. shell.openPath
+    // resolves with the reason it failed, or an empty string when it worked.
+    openDirectory: async (directory) => shell.openPath(directory),
+    // Works out whether the library sits on a drive that is always there.
+    classifyDrive: async (directory) => classifyDriveOfDirectory(directory),
     secretStore,
     providerBroker,
     providerSignIn: createProviderSignIn({

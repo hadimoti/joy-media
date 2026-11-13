@@ -17,7 +17,8 @@ function settings(
     exists: true,
     hasCatalog: true,
     isDefault: true,
-    counts: { total: 12, audio: 7, image: 5 },
+    counts: { total: 12, video: 4, image: 3, audio: 5, other: 0 },
+    driveType: 'fixed',
     ...overrides,
   };
 }
@@ -32,6 +33,7 @@ function installDesktopBridge(
       'desktop.asset-library.set-directory',
       'desktop.asset-library.select-directory',
       'desktop.asset-library.reset-directory',
+      'desktop.asset-library.open-directory',
     ],
     invoke,
   } as NonNullable<typeof window.joyDesktop>;
@@ -101,15 +103,113 @@ describe('AssetLibrarySettingsDialog', () => {
     );
     expect(rendered.textContent).toContain('Default Path');
     expect(rendered.textContent).toContain('Connected & Ready');
-    expect(statValue(rendered, 'Total Assets')).toBe('12');
-    expect(statValue(rendered, 'Audio & SFX')).toBe('7');
-    expect(statValue(rendered, 'Graphic Images')).toBe('5');
+    expect(statValue(rendered, 'Video')).toBe('4');
+    expect(statValue(rendered, 'Images')).toBe('3');
+    expect(statValue(rendered, 'Audio')).toBe('5');
+    expect(statValue(rendered, 'Total')).toBe('12');
+  });
+
+  it('adds the counts up: the kinds shown together make the total', async () => {
+    installDesktopBridge((channel) =>
+      channel === 'desktop.asset-library.get-settings'
+        ? settings({ counts: { total: 9, video: 4, image: 2, audio: 2, other: 1 } })
+        : undefined,
+    );
+
+    const rendered = await renderDialog();
+
+    expect(statValue(rendered, 'Video')).toBe('4');
+    expect(statValue(rendered, 'Images')).toBe('2');
+    expect(statValue(rendered, 'Audio')).toBe('2');
+    expect(statValue(rendered, 'Other')).toBe('1');
+    expect(statValue(rendered, 'Total')).toBe('9');
+  });
+
+  it('leaves out the "Other" count when there is nothing else in the library', async () => {
+    installDesktopBridge((channel) =>
+      channel === 'desktop.asset-library.get-settings' ? settings() : undefined,
+    );
+
+    const rendered = await renderDialog();
+
+    expect(statValue(rendered, 'Other')).toBeNull();
+  });
+
+  it('says the folder holds the imported media', async () => {
+    installDesktopBridge((channel) =>
+      channel === 'desktop.asset-library.get-settings' ? settings() : undefined,
+    );
+
+    const rendered = await renderDialog();
+
+    expect(rendered.textContent).toContain(
+      'Choose the folder where JOY Media keeps your imported media.',
+    );
+  });
+
+  it('warns calmly when the library sits on a drive that is not always there', async () => {
+    installDesktopBridge((channel) =>
+      channel === 'desktop.asset-library.get-settings'
+        ? settings({ driveType: 'removable' })
+        : undefined,
+    );
+
+    const rendered = await renderDialog();
+
+    expect(rendered.textContent).toContain(
+      'This drive is not always connected. Your media will show as missing when it is unplugged.',
+    );
+  });
+
+  it('does not warn about a drive that is always there', async () => {
+    installDesktopBridge((channel) =>
+      channel === 'desktop.asset-library.get-settings'
+        ? settings({ driveType: 'fixed' })
+        : undefined,
+    );
+
+    const rendered = await renderDialog();
+
+    expect(rendered.textContent).not.toContain('This drive is not always connected.');
+  });
+
+  it('does not warn about a drive it could not identify', async () => {
+    installDesktopBridge((channel) =>
+      channel === 'desktop.asset-library.get-settings'
+        ? settings({ driveType: 'unknown' })
+        : undefined,
+    );
+
+    const rendered = await renderDialog();
+
+    expect(rendered.textContent).not.toContain('This drive is not always connected.');
+  });
+
+  it('opens the library folder without naming a path', async () => {
+    const invoke = installDesktopBridge((channel) =>
+      channel === 'desktop.asset-library.get-settings' ? settings() : undefined,
+    );
+    const rendered = await renderDialog();
+
+    await act(async () => {
+      buttonByText(rendered, 'Open folder').click();
+      await Promise.resolve();
+    });
+
+    const call = invoke.mock.calls.find(
+      ([channel]) => channel === 'desktop.asset-library.open-directory',
+    );
+    expect(call).toBeDefined();
+    expect(call?.[1]).toBeUndefined();
   });
 
   it('explains how to reconnect a previous library when the default catalog is missing', async () => {
     installDesktopBridge((channel) =>
       channel === 'desktop.asset-library.get-settings'
-        ? settings({ hasCatalog: false, counts: { total: 0, audio: 0, image: 0 } })
+        ? settings({
+            hasCatalog: false,
+            counts: { total: 0, video: 0, image: 0, audio: 0, other: 0 },
+          })
         : undefined,
     );
 
@@ -238,7 +338,7 @@ describe('AssetLibrarySettingsDialog', () => {
     let current = settings({
       exists: false,
       hasCatalog: false,
-      counts: { total: 0, audio: 0, image: 0 },
+      counts: { total: 0, video: 0, image: 0, audio: 0, other: 0 },
     });
     installDesktopBridge((channel) =>
       channel === 'desktop.asset-library.get-settings' ? current : undefined,
@@ -246,7 +346,7 @@ describe('AssetLibrarySettingsDialog', () => {
     const rendered = await renderDialog();
 
     expect(rendered.textContent).toContain('Directory not found on this system.');
-    expect(statValue(rendered, 'Total Assets')).toBe('0');
+    expect(statValue(rendered, 'Total')).toBe('0');
 
     current = settings({ hasCatalog: false });
     await act(async () => {
