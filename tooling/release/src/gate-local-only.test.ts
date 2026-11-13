@@ -242,9 +242,9 @@ describe('local-only gate profile', () => {
     const swapped = evidence({
       sandboxUpgradeFrom110: upgradeReceipt('1.0.2'),
     });
-    expect(
-      status({ profile: 'local-only', attendedEvidence: swapped }, 'lifecycle-evidence'),
-    ).toBe('failed');
+    expect(status({ profile: 'local-only', attendedEvidence: swapped }, 'lifecycle-evidence')).toBe(
+      'failed',
+    );
   });
 
   it('judges the source as a clean tree and marks the hosted performance check not applicable', () => {

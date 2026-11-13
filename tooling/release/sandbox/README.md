@@ -5,11 +5,11 @@ These scripts produce the receipts that the local-only release gate reads
 with networking off. The Sandbox user is `WDAGUtilityAccount`; the host install, profile and
 `joy://` key are never touched.
 
-| Run                                                                 | Script          | Receipt (file under `docs/release/attended/<candidate-sha>/`) |
-| ------------------------------------------------------------------- | --------------- | ------------------------------------------------------------- |
-| Clean install: install, open, close, uninstall                      | `lifecycle.ps1` | `sandbox-lifecycle.json`                                      |
-| Upgrade from v1.0.2 (zip): v1.0.2 installed and run, the candidate over it, uninstall | `upgrade.ps1` | `sandbox-upgrade.json` |
-| Upgrade from v1.1.0 (setup exe): v1.1.0 installed and run, the candidate over it, uninstall | `upgrade.ps1` | `sandbox-upgrade-from-1.1.0.json` |
+| Run                                                                                         | Script          | Receipt (file under `docs/release/attended/<candidate-sha>/`) |
+| ------------------------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------- |
+| Clean install: install, open, close, uninstall                                              | `lifecycle.ps1` | `sandbox-lifecycle.json`                                      |
+| Upgrade from v1.0.2 (zip): v1.0.2 installed and run, the candidate over it, uninstall       | `upgrade.ps1`   | `sandbox-upgrade.json`                                        |
+| Upgrade from v1.1.0 (setup exe): v1.1.0 installed and run, the candidate over it, uninstall | `upgrade.ps1`   | `sandbox-upgrade-from-1.1.0.json`                             |
 
 Run them with the helper (it starts the Sandbox, waits for the script, copies the receipt out):
 

@@ -1477,9 +1477,9 @@ export function readAttendedEvidence(
   // The desktop package version is the version every Sandbox upgrade must end on.
   let candidateVersion: string | undefined;
   try {
-    const pkg = JSON.parse(
-      readFileSync(join(root, 'apps', 'desktop', 'package.json'), 'utf8'),
-    ) as { version?: unknown };
+    const pkg = JSON.parse(readFileSync(join(root, 'apps', 'desktop', 'package.json'), 'utf8')) as {
+      version?: unknown;
+    };
     candidateVersion = typeof pkg.version === 'string' ? pkg.version : undefined;
   } catch {
     candidateVersion = undefined;
