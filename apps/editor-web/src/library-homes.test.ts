@@ -73,9 +73,23 @@ describe('one home for each library item (T-V06)', () => {
 
   it('states the Filter or Effect rule in one line per panel', () => {
     expect(FILTER_PANEL_RULE).toMatch(/^A Filter changes the look of the picture/);
-    expect(EFFECT_PANEL_RULE).toMatch(/^An Effect changes the picture itself/);
+    expect(EFFECT_PANEL_RULE).toMatch(
+      /^An Effect changes the shape, motion or marks of the picture/,
+    );
     expect(FILTER_PANEL_RULE.split('\n')).toHaveLength(1);
     expect(EFFECT_PANEL_RULE.split('\n')).toHaveLength(1);
+  });
+
+  it('pins the Effect rule to the tone tools Effects keeps, by their registry names', () => {
+    const labels = new Map(
+      listBuiltinEffects().map((descriptor) => [descriptor.id, descriptor.label]),
+    );
+    for (const id of ['brightness-contrast', 'curves']) {
+      expect(libraryHomeOf(id)).toBe('effects');
+      expect(EFFECT_PANEL_RULE).toContain(labels.get(id) ?? '');
+    }
+    expect(EFFECT_PANEL_RULE).toContain('Brightness / Contrast, Curves');
+    expect(EFFECT_PANEL_RULE).not.toMatch(/breaks the image|draws new marks/);
   });
 
   it('names the moved items in the Effects categories that hold them', () => {

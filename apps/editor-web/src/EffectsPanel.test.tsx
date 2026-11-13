@@ -98,7 +98,7 @@ describe('EffectsPanel', () => {
   it('states the Filter or Effect rule under the title', async () => {
     await mountPanel();
     expect(container!.querySelector('.library-rule')?.textContent).toMatch(
-      /^An Effect changes the picture itself/,
+      /^An Effect changes the shape, motion or marks of the picture/,
     );
   });
 

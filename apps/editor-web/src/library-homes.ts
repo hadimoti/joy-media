@@ -7,8 +7,9 @@
  *
  * - A **Filter** changes the look of the picture: colour, softness, grain,
  *   glow. The pixels stay where they are.
- * - An **Effect** changes the picture itself: it bends or moves the pixels,
- *   breaks the image, or draws new marks over it.
+ * - An **Effect** changes the shape, motion or marks of the picture, adds a
+ *   glitch, or applies a basic tone tool (Brightness / Contrast, Curves) that
+ *   needs its own parameters.
  *
  * The registry ids do not change, so an old project that uses a moved item
  * still renders exactly as it did. Only the panel that shows the item moves.
@@ -97,7 +98,7 @@ export const EFFECT_LIBRARY: Readonly<Record<string, readonly string[]>> = Objec
 export const FILTER_PANEL_RULE =
   'A Filter changes the look of the picture — colour, softness, grain, glow. The pixels stay where they are.';
 export const EFFECT_PANEL_RULE =
-  'An Effect changes the picture itself — it moves the pixels, breaks the image, or draws new marks over it.';
+  'An Effect changes the shape, motion or marks of the picture, adds a glitch, or applies a basic tone tool (Brightness / Contrast, Curves) that needs its own parameters.';
 
 /**
  * The five doubles that move to Effects. Their registry ids do not change, so

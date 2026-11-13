@@ -77,7 +77,7 @@ export function FiltersPanel({
   const storage = editorContext?.storage;
   const [group, setGroup] = useState<FilterLibraryGroupId>(DEFAULT_FILTER_GROUP);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const { query, linkedId } = useLibrarySearch();
+  const { query, linkedId, linkedPanel, linkToken } = useLibrarySearch();
 
   // Favourites belong to the item, so they are read from the shared list the
   // Effects panel writes. The list is only read once the writer-gated storage
@@ -85,6 +85,12 @@ export function FiltersPanel({
   useEffect(() => {
     if (storage !== undefined) setFavorites(readEffectFavorites(storage, allLibraryEffectIds()));
   }, [storage]);
+
+  // A link from the Effects panel opens this one: leave the Favorites view, so the
+  // item the link points at is in the list (the search then applies to every filter).
+  useEffect(() => {
+    if (linkedPanel === 'filters' && linkToken !== undefined) setGroup(DEFAULT_FILTER_GROUP);
+  }, [linkedPanel, linkToken]);
 
   const searching = query.trim().length > 0;
 
@@ -114,7 +120,7 @@ export function FiltersPanel({
   };
 
   const openInEffects = (effectId: string) => {
-    pointLibraryAt(effectId, librarySearch);
+    pointLibraryAt(effectId, 'effects');
     editorContext?.onEnhanceToolChange('effects');
   };
 

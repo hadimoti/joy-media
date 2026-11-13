@@ -45,6 +45,9 @@ import {
 } from './library-search.js';
 import './library-panels.css';
 
+/** The panel opens on Colour & Light, its first group. */
+const DEFAULT_EFFECT_CATEGORY = 'colour-light';
+
 const CATEGORIES: readonly { readonly id: string; readonly label: string }[] = [
   { id: 'recipes', label: 'Recipes' },
   { id: 'favorites', label: 'Favorites' },
@@ -96,8 +99,8 @@ export function EffectsPanel({
 }: EffectsPanelProps) {
   const editorContext = useContext(EditorPanelContext);
   const storage = editorContext?.storage;
-  const { query, linkedId } = useLibrarySearch();
-  const [category, setCategory] = useState('colour-light');
+  const { query, linkedId, linkedPanel, linkToken } = useLibrarySearch();
+  const [category, setCategory] = useState(DEFAULT_EFFECT_CATEGORY);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [builtinsReady, setBuiltinsReady] = useState(false);
   const [recipes, setRecipes] = useState<readonly EffectRecipeCatalogEntry[]>(() =>
@@ -130,6 +133,12 @@ export function EffectsPanel({
   useEffect(() => {
     if (storage !== undefined) setFavorites(readEffectFavorites(storage, allLibraryEffectIds()));
   }, [storage]);
+
+  // A link from the Filters panel opens this one: leave the Favorites view, so the
+  // item the link points at is in the list (the search then applies to every effect).
+  useEffect(() => {
+    if (linkedPanel === 'effects' && linkToken !== undefined) setCategory(DEFAULT_EFFECT_CATEGORY);
+  }, [linkedPanel, linkToken]);
 
   const searching = query.trim().length > 0;
 
@@ -174,7 +183,7 @@ export function EffectsPanel({
 
   const openInFilters = useCallback(
     (effectId: string) => {
-      pointLibraryAt(effectId, librarySearch);
+      pointLibraryAt(effectId, 'filters');
       editorContext?.onEnhanceToolChange('filters');
     },
     [editorContext],

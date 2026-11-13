@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EFFECT_FAVORITES_KEY } from './effect-favorites.js';
-import { librarySearch } from './library-search.js';
+import { librarySearch, pointLibraryAt } from './library-search.js';
 
 vi.mock('./editor-panel-context.js', async () => {
   const { createContext } = await import('react');
@@ -120,6 +120,68 @@ describe('the two library panels (T-V06)', () => {
 
     expect(onEnhanceToolChange).toHaveBeenCalledWith('effects');
     expect(librarySearch.get().linkedId).toBe('halftone');
+    expect(librarySearch.get().linkedPanel).toBe('effects');
+  });
+
+  it('shows the target when a link opens Effects on its Favorites view', async () => {
+    storageMap.set(EFFECT_FAVORITES_KEY, JSON.stringify(['sepia']));
+    const panel = await render(
+      <EffectsPanel
+        project={INITIAL_EDITOR_PROJECT}
+        objectId={undefined}
+        canApplyEffects={false}
+        onDispatch={vi.fn()}
+        showToast={vi.fn()}
+      />,
+    );
+    await act(async () => {
+      panel.querySelector<HTMLButtonElement>('button[aria-label^="Favorites ("]')?.click();
+    });
+    await search(panel, 'halftone');
+    // Halftone is not a favourite, so the Favorites view shows nothing for it.
+    expect(panel.querySelector('.effects-grid')?.textContent).not.toContain('Halftone Press');
+
+    // The Filters link: the same pointer the link's click makes.
+    await act(async () => {
+      pointLibraryAt('halftone', 'effects');
+    });
+
+    expect(panel.querySelector('.effects-grid')?.textContent).toContain('Halftone Press');
+  });
+
+  it('shows the target when a link opens Filters on its Favorites view', async () => {
+    storageMap.set(EFFECT_FAVORITES_KEY, JSON.stringify(['sepia']));
+    const panel = await render(
+      <FiltersPanel canCreate={true} targetLabel="Product" onAddFilter={() => undefined} />,
+    );
+    await act(async () => {
+      panel.querySelector<HTMLButtonElement>('button[data-panel-tab-id="favorites"]')?.click();
+    });
+    await search(panel, 'gaussian');
+    expect(panel.querySelector('.filters-grid')?.textContent).not.toContain('Gaussian Blur');
+
+    await act(async () => {
+      pointLibraryAt('gaussian-blur', 'filters');
+    });
+
+    expect(panel.querySelector('.filters-grid')?.textContent).toContain('Gaussian Blur');
+  });
+
+  it('leaves the Favorites view only for the panel the pointer names', async () => {
+    storageMap.set(EFFECT_FAVORITES_KEY, JSON.stringify(['sepia']));
+    const panel = await render(
+      <FiltersPanel canCreate={true} targetLabel="Product" onAddFilter={() => undefined} />,
+    );
+    await act(async () => {
+      panel.querySelector<HTMLButtonElement>('button[data-panel-tab-id="favorites"]')?.click();
+    });
+    await search(panel, 'gaussian');
+
+    // A pointer to Effects does not move the Filters panel off its Favorites view.
+    await act(async () => {
+      pointLibraryAt('halftone', 'effects');
+    });
+    expect(panel.querySelector('.filters-grid')?.textContent).not.toContain('Gaussian Blur');
   });
 
   it('offers the filters when the owner searches in Effects', async () => {
@@ -192,7 +254,7 @@ describe('the two library panels (T-V06)', () => {
       />,
     );
     expect(effects.querySelector('.library-rule')?.textContent).toMatch(
-      /^An Effect changes the picture itself/u,
+      /^An Effect changes the shape, motion or marks of the picture/u,
     );
   });
 });

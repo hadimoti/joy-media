@@ -71,4 +71,69 @@ describe('library favourites (T-V06)', () => {
   it('keeps one copy of an id that is saved twice', () => {
     expect(migrateEffectFavorites(['halftone', 'halftone'], KNOWN)).toEqual(['halftone']);
   });
+
+  it('reading never writes: the legacy key stays until a user action', () => {
+    const storage = memoryStore();
+    storage.setItem('joy-media.effect-favorites', '["sepia"]');
+    expect([...readEffectFavorites(storage, KNOWN)]).toEqual(['sepia']);
+    expect(storage.map.get('joy-media.effect-favorites')).toBe('["sepia"]');
+    expect(storage.map.has(EFFECT_FAVORITES_KEY)).toBe(false);
+  });
+
+  it('a migrated favourite that is removed stays removed after a reload', () => {
+    const storage = memoryStore();
+    storage.setItem('joy-media.effect-favorites', '["sepia"]');
+    const before = readEffectFavorites(storage, KNOWN);
+    expect([...before]).toEqual(['sepia']);
+
+    // The owner removes it; the first write migrates the list and retires the legacy key.
+    const after = toggleEffectFavorite(storage, before, 'sepia');
+    expect([...after]).toEqual([]);
+    expect(storage.map.has('joy-media.effect-favorites')).toBe(false);
+
+    // Reload: the favourite does not come back from the legacy list.
+    expect([...readEffectFavorites(storage, KNOWN)]).toEqual([]);
+  });
+
+  it('keeps the other legacy favourites when the first write migrates them', () => {
+    const storage = memoryStore();
+    storage.setItem('joy-media.effect-favorites', '["sepia"]');
+    const favorites = toggleEffectFavorite(storage, new Set(), 'halftone');
+    expect([...favorites].sort()).toEqual(['halftone', 'sepia']);
+    expect(storage.map.get(EFFECT_FAVORITES_KEY)).toBe('["sepia","halftone"]');
+    expect(storage.map.has('joy-media.effect-favorites')).toBe(false);
+  });
+
+  it('keeps the legacy key when the versioned write fails', () => {
+    const storage = memoryStore();
+    storage.setItem('joy-media.effect-favorites', '["sepia"]');
+    const failing = {
+      ...storage,
+      setItem: () => {
+        throw new Error('quota');
+      },
+    };
+    expect([...toggleEffectFavorite(failing, new Set(['sepia']), 'halftone')].sort()).toEqual([
+      'halftone',
+      'sepia',
+    ]);
+    expect(storage.map.get('joy-media.effect-favorites')).toBe('["sepia"]');
+  });
+
+  it('works when storage throws on every read and write', () => {
+    const broken = {
+      getItem: (): string | null => {
+        throw new Error('storage unavailable');
+      },
+      setItem: (): void => {
+        throw new Error('storage unavailable');
+      },
+      removeItem: (): void => {
+        throw new Error('storage unavailable');
+      },
+    };
+    expect([...readEffectFavorites(broken, KNOWN)]).toEqual([]);
+    expect(() => writeEffectFavorites(broken, new Set(['halftone']))).not.toThrow();
+    expect([...toggleEffectFavorite(broken, new Set(), 'halftone')]).toEqual(['halftone']);
+  });
 });
