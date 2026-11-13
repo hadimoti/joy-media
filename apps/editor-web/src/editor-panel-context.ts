@@ -30,6 +30,7 @@ import type { createEditorPluginHost } from './plugin-host.js';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import type { ProjectWriterStorage } from './project-writer.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
+import type { MonitorTransportControls } from './monitor/useMonitorTransportControls.js';
 
 export interface EditorRuntimeState {
   readonly selectedIds: readonly string[];
@@ -177,6 +178,10 @@ export interface EditorPanelContextValue {
   readonly onTimelineAutoFitChange: (next: boolean) => void;
   readonly activeTimelineCompositionId: string;
   readonly onActiveTimelineCompositionChange: (compositionId: string) => void;
+  /** The Monitor's frame, J K L, in and out, loop and timecode controls (T-M10). */
+  readonly monitorTransport?: MonitorTransportControls;
+  /** Reads the preview audio tap for the Monitor level meter; null until audio starts. */
+  readonly readPreviewMeterAnalyser?: () => AnalyserNode | null;
 }
 
 export const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);

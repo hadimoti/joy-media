@@ -15,6 +15,17 @@ export type ShortcutAction =
   | 'playhead.forwardFine'
   | 'playhead.start'
   | 'playhead.end'
+  | 'playhead.frameBack'
+  | 'playhead.frameForward'
+  | 'jkl.reverse'
+  | 'jkl.stop'
+  | 'jkl.forward'
+  | 'playback.loop'
+  | 'range.in'
+  | 'range.out'
+  | 'range.clear'
+  | 'range.playInOut'
+  | 'monitor.fullscreen'
   | 'shortcuts.toggle';
 
 export interface ShortcutKeyEvent {
@@ -85,6 +96,34 @@ export function resolveShortcut(event: ShortcutKeyEvent): ShortcutAction | undef
       return 'playhead.start';
     case 'End':
       return 'playhead.end';
+    case ',':
+      return 'playhead.frameBack';
+    case '.':
+      return 'playhead.frameForward';
+    case 'j':
+    case 'J':
+      return event.shiftKey ? undefined : 'jkl.reverse';
+    case 'k':
+    case 'K':
+      return event.shiftKey ? undefined : 'jkl.stop';
+    case 'l':
+    case 'L':
+      return event.shiftKey ? undefined : 'jkl.forward';
+    case 'i':
+    case 'I':
+      return event.shiftKey ? undefined : 'range.in';
+    case 'o':
+    case 'O':
+      return event.shiftKey ? undefined : 'range.out';
+    case 'X':
+      return event.shiftKey ? 'range.clear' : undefined;
+    case '\\':
+      return 'playback.loop';
+    case '/':
+      return 'range.playInOut';
+    case 'f':
+    case 'F':
+      return event.shiftKey ? undefined : 'monitor.fullscreen';
     case 'Delete':
     case 'Backspace':
       return 'clip.delete';
@@ -117,6 +156,16 @@ export const SHORTCUT_REFERENCE: readonly ShortcutReferenceGroup[] = [
       { keys: '← / →', action: 'Step back / forward 1s' },
       { keys: 'Shift+← / Shift+→', action: 'Fine step 100ms' },
       { keys: 'Home / End', action: 'Go to start / end' },
+      { keys: ', / .', action: 'Step back / forward one frame' },
+      { keys: '← / → (Monitor)', action: 'Step one frame when the Monitor has focus' },
+      {
+        keys: 'J / K / L',
+        action: 'Reverse / stop / forward; press J or L again to go faster (up to 8x)',
+      },
+      { keys: 'I / O', action: 'Set in point / out point' },
+      { keys: 'Shift+X', action: 'Clear in and out points' },
+      { keys: '/', action: 'Play in to out' },
+      { keys: '\\', action: 'Loop on or off' },
     ],
   },
   {
@@ -133,6 +182,7 @@ export const SHORTCUT_REFERENCE: readonly ShortcutReferenceGroup[] = [
     title: 'View',
     rows: [
       { keys: 'Ctrl+K', action: 'Command palette' },
+      { keys: 'F', action: 'Full-screen preview (Esc leaves)' },
       { keys: '?', action: 'Toggle this panel' },
     ],
   },
