@@ -10,6 +10,7 @@ import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyAgentMediaCapabilityReport } from './joy-agent/protocol.js';
 import { resetCustomEndpointAcknowledgementsForTests } from './custom-endpoint-acknowledgement.js';
+import { SETTINGS_MODELS } from './settings-wording.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -94,7 +95,7 @@ function buttonByText(rendered: HTMLElement, text: string): HTMLButtonElement {
 }
 
 async function selectCustomPreset(rendered: HTMLElement): Promise<void> {
-  const customPreset = buttonByText(rendered, 'Custom BYOK');
+  const customPreset = buttonByText(rendered, SETTINGS_MODELS.presetTitle);
   await act(async () => {
     customPreset.click();
     await Promise.resolve();
@@ -315,8 +316,10 @@ describe('JOY Agent Settings connection status', () => {
     await selectCustomPreset(rendered);
     await connectWithKey(rendered);
 
-    expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Tool loop ready');
-    expect(countLeafTextMatches(rendered, /Tool loop ready/)).toBe(1);
+    expect(rendered.querySelector('[role="status"]')?.textContent).toContain(
+      SETTINGS_MODELS.readyToEdit,
+    );
+    expect(countLeafTextMatches(rendered, /Ready to edit your project/)).toBe(1);
     expect(rendered.textContent).toContain(
       'Connected successfully. JOY is ready to edit in this session.',
     );
@@ -336,8 +339,10 @@ describe('JOY Agent Settings connection status', () => {
     await selectCustomPreset(rendered);
     await connectWithKey(rendered);
 
-    expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Plan-only ready');
-    expect(countLeafTextMatches(rendered, /Plan-only/)).toBe(1);
+    expect(rendered.querySelector('[role="status"]')?.textContent).toContain(
+      SETTINGS_MODELS.briefOnly,
+    );
+    expect(countLeafTextMatches(rendered, /Ready for a creative brief only/)).toBe(1);
     expect(rendered.textContent).toContain('Connected successfully in plan-only mode.');
   });
 
@@ -458,9 +463,11 @@ describe('JOY Agent Settings media capability probe', () => {
     const testConnection = vi.mocked(engineClient.testConnection);
 
     expect(probe).not.toHaveBeenCalled();
-    expect(rendered.textContent).toContain('three tiny product-owned synthetic samples');
-    expect(rendered.textContent).toContain('never sends your project, owner, or uploaded media');
-    expect(rendered.textContent).toContain('may charge or log these requests');
+    expect(rendered.textContent).toContain('three tiny test clips');
+    expect(rendered.textContent).toContain('Your project and your media are never sent');
+    expect(rendered.textContent).toContain(
+      'Your provider may still charge for these three small requests',
+    );
 
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
@@ -730,7 +737,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
 
     await act(async () => {
       const drawer = [...rendered.querySelectorAll('button')].find((button) =>
-        button.textContent?.includes('Discovered Models Drawer'),
+        button.textContent?.includes(SETTINGS_MODELS.modelsTitle),
       );
       drawer?.click();
       await Promise.resolve();
@@ -738,7 +745,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
 
     await act(async () => {
       const discover = [...rendered.querySelectorAll('button')].find((button) =>
-        button.textContent?.includes('Discover Models'),
+        button.textContent?.includes(SETTINGS_MODELS.findModels),
       );
       discover?.click();
       await Promise.resolve();
@@ -755,7 +762,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     const rendered = await render(engineClient, undefined);
     await selectCustomPreset(rendered);
     await changeProvider(rendered, 'openai-compatible');
-    expect(buttonByText(rendered, 'Custom BYOK').className).toContain('is-active');
+    expect(buttonByText(rendered, SETTINGS_MODELS.presetTitle).className).toContain('is-active');
 
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
@@ -893,14 +900,14 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
 
     await act(async () => {
       const drawer = [...rendered.querySelectorAll('button')].find((button) =>
-        button.textContent?.includes('Discovered Models Drawer'),
+        button.textContent?.includes(SETTINGS_MODELS.modelsTitle),
       );
       drawer?.click();
       await Promise.resolve();
     });
     await act(async () => {
       const discover = [...rendered.querySelectorAll('button')].find((button) =>
-        button.textContent?.includes('Discover Models'),
+        button.textContent?.includes(SETTINGS_MODELS.findModels),
       );
       discover?.click();
       await Promise.resolve();
@@ -943,14 +950,14 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
 
     await act(async () => {
       const drawer = [...rendered.querySelectorAll('button')].find((button) =>
-        button.textContent?.includes('Discovered Models Drawer'),
+        button.textContent?.includes(SETTINGS_MODELS.modelsTitle),
       );
       drawer?.click();
       await Promise.resolve();
     });
     await act(async () => {
       const discover = [...rendered.querySelectorAll('button')].find((button) =>
-        button.textContent?.includes('Discover Models'),
+        button.textContent?.includes(SETTINGS_MODELS.findModels),
       );
       discover?.click();
       await Promise.resolve();
@@ -989,14 +996,14 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
 
     await act(async () => {
       const drawer = [...rendered.querySelectorAll('button')].find((button) =>
-        button.textContent?.includes('Discovered Models Drawer'),
+        button.textContent?.includes(SETTINGS_MODELS.modelsTitle),
       );
       drawer?.click();
       await Promise.resolve();
     });
     await act(async () => {
       const discover = [...rendered.querySelectorAll('button')].find((button) =>
-        button.textContent?.includes('Discover Models'),
+        button.textContent?.includes(SETTINGS_MODELS.findModels),
       );
       discover?.click();
       await Promise.resolve();
@@ -1946,7 +1953,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     expect(
       rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]')?.value,
     ).toBe('anthropic/claude-3.5-sonnet');
-    expect(rendered.textContent).toContain('(Saved in desktop vault)');
+    expect(rendered.textContent).toContain('(Saved on this computer)');
   });
 
   it('asks for the key again when a saved profile key cannot be read', async () => {
@@ -1971,7 +1978,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     const rendered = await render(engineClient, undefined);
 
     expect(rendered.textContent).toContain('Saved key could not be read. Enter it again.');
-    expect(rendered.textContent).not.toContain('(Saved in desktop vault)');
+    expect(rendered.textContent).not.toContain('(Saved on this computer)');
   });
 
   it('saves profile to desktop DPAPI when user connects with a key', async () => {
@@ -2049,7 +2056,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
       (candidate) => candidate.textContent?.includes('Old Kilo profile'),
     );
-    expect(card?.textContent).toContain('Disabled legacy profile');
+    expect(card?.textContent).toContain(SETTINGS_MODELS.legacyProfile);
     expect(
       [...(card?.querySelectorAll('button') ?? [])].map((button) => button.textContent?.trim()),
     ).toEqual(['Later']);
@@ -2106,7 +2113,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     });
 
     await act(async () => {
-      buttonByText(rendered, 'Reauthorize').click();
+      buttonByText(rendered, SETTINGS_MODELS.signInAgain).click();
       await Promise.resolve();
     });
 
@@ -2153,7 +2160,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     });
 
     await act(async () => {
-      buttonByText(rendered, 'Sign out & revoke').click();
+      buttonByText(rendered, SETTINGS_MODELS.signOutAndRevoke).click();
       await Promise.resolve();
     });
     await answerDialog(rendered, 'Sign out');

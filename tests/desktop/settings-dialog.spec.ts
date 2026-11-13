@@ -26,9 +26,9 @@ test('the agent settings offer OpenRouter and custom endpoints, and nothing remo
   const dialog = await openJoyCodeSettings(page);
   const text = await dialog.innerText();
 
-  expect(text).toContain('AI Models & APIs');
-  expect(text).toContain('OpenRouter (BYOK)');
-  expect(text).toContain('Custom S3 / OpenAI Compatible');
+  expect(text).toContain('AI models');
+  expect(text).toContain('OpenRouter (your own key)');
+  expect(text).toContain('Another provider (OpenAI compatible)');
   for (const label of REMOVED_LABELS) {
     expect(text, `the settings dialog must not offer "${label}"`).not.toContain(label);
   }

@@ -60,10 +60,25 @@ import {
   requireCustomEndpointAcknowledgement,
 } from './custom-endpoint-acknowledgement.js';
 import { ProviderSignInPanel } from './ProviderSignInPanel.js';
+import {
+  allowedToolsTag,
+  budgetTag,
+  modelsReadyTag,
+  SETTINGS_BUDGET,
+  SETTINGS_DIALOG,
+  SETTINGS_DIAGNOSTICS,
+  SETTINGS_LIVE_PREVIEW,
+  SETTINGS_MEDIA_CHECK,
+  SETTINGS_MODELS,
+  SETTINGS_MODES,
+  SETTINGS_PAGES,
+  SETTINGS_STORAGE,
+  SETTINGS_TOOLS,
+  type SettingsPageId,
+} from './settings-wording.js';
 import './JoyAgentSettingsDialog.css';
 
-export type JoyAgentSettingsTab =
-  'models' | 'execution' | 'experience' | 'permissions' | 'diagnostics';
+export type JoyAgentSettingsTab = SettingsPageId;
 
 type AgentSettingsNotice = {
   readonly kind: 'info' | 'success' | 'error';
@@ -152,24 +167,6 @@ function canUseStoredKey(profile: DesktopProviderProfileState | undefined): bool
   );
 }
 
-const MODES: Readonly<Record<AgentExecutionMode, string>> = {
-  'suggest-only': 'Suggest only',
-  'preview-and-approve': 'Preview and approve',
-  'auto-apply-low-risk': 'Auto-apply low risk',
-  'full-auto-limited': 'Full auto within limits',
-};
-
-const MODE_DESCRIPTIONS: Readonly<Record<AgentExecutionMode, string>> = {
-  'suggest-only':
-    'Joy Code suggests creative plans and edits in chat without touching the timeline.',
-  'preview-and-approve':
-    'Edits are previewed visually in the editor and require explicit approval before applying.',
-  'auto-apply-low-risk':
-    'Automatically executes non-destructive edits (cuts, trims, labeling) while gating large changes.',
-  'full-auto-limited':
-    'Autonomous multi-step execution within your configured cost and token budget limits.',
-};
-
 const TAB_CONFIG: {
   readonly id: JoyAgentSettingsTab;
   readonly label: string;
@@ -180,47 +177,43 @@ const TAB_CONFIG: {
 }[] = [
   {
     id: 'models',
-    label: 'AI Models & APIs',
+    label: SETTINGS_PAGES.models.name,
     icon: <BoltIcon />,
-    kicker: 'Provider & Model Configuration',
-    title: 'AI Models & Custom Links',
-    description:
-      'Configure endpoints, discover available models behind any link, and switch active reasoning brains.',
+    kicker: SETTINGS_PAGES.models.kicker,
+    title: SETTINGS_PAGES.models.title,
+    description: SETTINGS_PAGES.models.description,
   },
   {
     id: 'execution',
-    label: 'Execution & Safety',
+    label: SETTINGS_PAGES.execution.name,
     icon: <ShieldIcon />,
-    kicker: 'Autonomy & Cost Limits',
-    title: 'Execution Policy & Run Budgets',
-    description:
-      'Control how autonomously Joy Code applies timeline edits, cuts, and visual effects.',
+    kicker: SETTINGS_PAGES.execution.kicker,
+    title: SETTINGS_PAGES.execution.title,
+    description: SETTINGS_PAGES.execution.description,
   },
   {
     id: 'experience',
-    label: 'Live Experience',
+    label: SETTINGS_PAGES.experience.name,
     icon: <EyeIcon />,
-    kicker: 'Real-time Interaction',
-    title: 'Live Previews & Experience',
-    description: 'Tune real-time visual ghost overlays and editor presence during agent runs.',
+    kicker: SETTINGS_PAGES.experience.kicker,
+    title: SETTINGS_PAGES.experience.title,
+    description: SETTINGS_PAGES.experience.description,
   },
   {
     id: 'permissions',
-    label: 'Tools & Perms',
+    label: SETTINGS_PAGES.permissions.name,
     icon: <WrenchIcon />,
-    kicker: 'Granular Engine Access',
-    title: 'Tool Capabilities & Access Gates',
-    description:
-      'Toggle permissions for timeline modification, audio processing, and generative vision tools.',
+    kicker: SETTINGS_PAGES.permissions.kicker,
+    title: SETTINGS_PAGES.permissions.title,
+    description: SETTINGS_PAGES.permissions.description,
   },
   {
     id: 'diagnostics',
-    label: 'Media Diagnostics',
+    label: SETTINGS_PAGES.diagnostics.name,
     icon: <FlaskIcon />,
-    kicker: 'Engine & Probe Telemetry',
-    title: 'System Health & Modality Probes',
-    description:
-      'Run synthetic modality probes and inspect local GPU hardware acceleration telemetry.',
+    kicker: SETTINGS_PAGES.diagnostics.kicker,
+    title: SETTINGS_PAGES.diagnostics.title,
+    description: SETTINGS_PAGES.diagnostics.description,
   },
 ];
 
@@ -1048,9 +1041,9 @@ export function JoyAgentSettingsDialog({
               <BoltIcon />
             </span>
             <div>
-              <h2 id="joy-agent-settings-title">Joy Code Settings</h2>
+              <h2 id="joy-agent-settings-title">{SETTINGS_DIALOG.title}</h2>
               <span className="agent-settings-hint joy-settings-header-sub">
-                Professional AI Engine Workspace
+                {SETTINGS_DIALOG.subtitle}
               </span>
             </div>
           </div>
@@ -1068,7 +1061,9 @@ export function JoyAgentSettingsDialog({
         <div className="agent-settings-body joy-agent-settings-body">
           {/* Left Vertical Sidebar (faq-theme tabs navigation) */}
           <nav className="joy-agent-settings-sidebar" aria-label="Settings categories">
-            <div className="joy-settings-sidebar-section-label">Categories</div>
+            <div className="joy-settings-sidebar-section-label">
+              {SETTINGS_DIALOG.categoriesLabel}
+            </div>
             <div className="joy-settings-sidebar-list">
               {TAB_CONFIG.map(({ id, label, icon }) => (
                 <button
@@ -1107,9 +1102,9 @@ export function JoyAgentSettingsDialog({
                   <button
                     className="button-secondary"
                     onClick={onOpenModelDrawer}
-                    aria-label="Browse models & API connections"
+                    aria-label={SETTINGS_MODELS.browseButton}
                   >
-                    Browse models &amp; API connections
+                    {SETTINGS_MODELS.browseButton}
                   </button>
                 )}
                 {/* Studio Presets Picker */}
@@ -1119,8 +1114,8 @@ export function JoyAgentSettingsDialog({
                       <ToolsIcon />
                     </span>
                     <div className="joy-preset-text">
-                      <strong>Custom BYOK</strong>
-                      <span>One API-key provider (OpenRouter or a custom endpoint)</span>
+                      <strong>{SETTINGS_MODELS.presetTitle}</strong>
+                      <span>{SETTINGS_MODELS.presetHint}</span>
                     </div>
                   </button>
                 </div>
@@ -1135,16 +1130,16 @@ export function JoyAgentSettingsDialog({
                       <strong>
                         {connectionStatus?.modelId
                           ? `Active: ${connectionStatus.modelId}`
-                          : 'No Active Model Connected'}
+                          : SETTINGS_MODELS.noModel}
                       </strong>
                       <span role="status">
                         {connectionStatus?.capability === 'tool-loop'
-                          ? 'Tool loop ready · High capabilities'
+                          ? SETTINGS_MODELS.readyToEdit
                           : connectionStatus?.capability === 'plan-only'
-                            ? 'Plan-only ready · Creative brief available'
+                            ? SETTINGS_MODELS.briefOnly
                             : connectionStatus?.capability === 'incompatible'
                               ? 'Connection failed. See the details below.'
-                              : 'Configure an API endpoint below to connect JOY Code.'}
+                              : SETTINGS_MODELS.connectBelow}
                       </span>
                     </div>
                   </div>
@@ -1159,7 +1154,9 @@ export function JoyAgentSettingsDialog({
                 {profiles.length > 0 && (
                   <div className="joy-settings-vault-profiles">
                     <div className="joy-settings-vault-profiles-header">
-                      <span>Saved Vault Profiles ({profiles.length})</span>
+                      <span>
+                        {SETTINGS_MODELS.savedConnections} ({profiles.length})
+                      </span>
                     </div>
                     <div className="joy-settings-vault-profiles-grid">
                       {profiles.map((prof) => {
@@ -1175,7 +1172,7 @@ export function JoyAgentSettingsDialog({
                               <span>{displayModelId(prof.modelId)}</span>
                               {disabledLegacy && (
                                 <span className="joy-settings-legacy-status">
-                                  Disabled legacy profile
+                                  {SETTINGS_MODELS.legacyProfile}
                                 </span>
                               )}
                               {prof.state === 'credential-unavailable' && (
@@ -1219,7 +1216,9 @@ export function JoyAgentSettingsDialog({
                                         disabled={working || profileActionId !== undefined}
                                         onClick={() => void reauthorizeChatGptProfile(prof)}
                                       >
-                                        {profileActionId === prof.id ? 'Working…' : 'Reauthorize'}
+                                        {profileActionId === prof.id
+                                          ? 'Working…'
+                                          : SETTINGS_MODELS.signInAgain}
                                       </button>
                                       <button
                                         type="button"
@@ -1227,7 +1226,7 @@ export function JoyAgentSettingsDialog({
                                         disabled={working || profileActionId !== undefined}
                                         onClick={() => void signOutChatGptProfile(prof)}
                                       >
-                                        Sign out &amp; revoke
+                                        {SETTINGS_MODELS.signOutAndRevoke}
                                       </button>
                                     </>
                                   )}
@@ -1268,7 +1267,7 @@ export function JoyAgentSettingsDialog({
                       <span className="joy-accordion-icon">
                         <PlugIcon />
                       </span>
-                      <span>API Connection &amp; Authentication</span>
+                      <span>{SETTINGS_MODELS.connectionTitle}</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-tag">
@@ -1276,7 +1275,7 @@ export function JoyAgentSettingsDialog({
                           ? 'No provider'
                           : provider === 'openrouter'
                             ? 'OpenRouter'
-                            : 'Custom Endpoint'}
+                            : SETTINGS_MODELS.yourOwnEndpoint}
                       </span>
                       <span className="joy-accordion-chevron">
                         <ChevronDownIcon />
@@ -1293,7 +1292,7 @@ export function JoyAgentSettingsDialog({
                       <div className="joy-settings-form-grid">
                         <div className="joy-settings-field">
                           <label>
-                            <span>Provider Platform</span>
+                            <span>{SETTINGS_MODELS.providerLabel}</span>
                             <select
                               value={provider}
                               onChange={(e) =>
@@ -1303,7 +1302,7 @@ export function JoyAgentSettingsDialog({
                               <option value="" disabled>
                                 Choose a provider
                               </option>
-                              <option value="openrouter">OpenRouter (BYOK)</option>
+                              <option value="openrouter">{SETTINGS_MODELS.openRouterOption}</option>
                               {/* The legacy Grok row uses xAI's API route, whose key entry lives in the xAI accordion.
                                   Source: D22 step 2 brief (2026-10-30) and registry rows `grok`/`xai`. */}
                               {PROVIDER_REGISTRY.filter(
@@ -1318,7 +1317,7 @@ export function JoyAgentSettingsDialog({
                                 </option>
                               ))}
                               <option value="openai-compatible">
-                                Custom S3 / OpenAI Compatible
+                                {SETTINGS_MODELS.otherProviderOption}
                               </option>
                             </select>
                           </label>
@@ -1357,7 +1356,7 @@ export function JoyAgentSettingsDialog({
 
                         <div className="joy-settings-field">
                           <label>
-                            <span>Connection Profile Name (Optional)</span>
+                            <span>{SETTINGS_MODELS.connectionNameLabel}</span>
                             <input
                               type="text"
                               placeholder="e.g. My OpenRouter, Local Ollama"
@@ -1369,7 +1368,7 @@ export function JoyAgentSettingsDialog({
 
                         <div className="joy-settings-field-full joy-settings-field">
                           <label>
-                            <span>Base URL / Endpoint</span>
+                            <span>{SETTINGS_MODELS.serviceAddressLabel}</span>
                             <input
                               type="text"
                               placeholder="https://..."
@@ -1384,7 +1383,7 @@ export function JoyAgentSettingsDialog({
 
                         <div className="joy-settings-field-full joy-settings-field">
                           <label>
-                            <span>API Secret Key</span>
+                            <span>{SETTINGS_MODELS.keyLabel}</span>
                             <input
                               ref={keyRef}
                               type="password"
@@ -1409,12 +1408,11 @@ export function JoyAgentSettingsDialog({
                           {matchedProfile !== undefined &&
                             matchedProfile.state !== 'credential-unavailable' && (
                               <span className="joy-settings-hint-success">
-                                (Saved in desktop vault)
+                                ({SETTINGS_STORAGE.savedNote})
                               </span>
                             )}
                           <span className="joy-settings-hint-muted">
-                            <LockIcon /> Keys are encrypted via Windows DPAPI and never logged or
-                            proxied.
+                            <LockIcon /> {SETTINGS_STORAGE.keyNote}
                           </span>
                         </div>
 
@@ -1458,7 +1456,7 @@ export function JoyAgentSettingsDialog({
                         <div className="joy-settings-field-full joy-settings-field">
                           <label>
                             <div className="joy-settings-field-row">
-                              <span>Model ID (User Editable)</span>
+                              <span>{SETTINGS_MODELS.modelIdLabel}</span>
                               <button
                                 type="button"
                                 className="button-link joy-settings-text-btn"
@@ -1471,11 +1469,11 @@ export function JoyAgentSettingsDialog({
                               >
                                 {openAccordions['models-drawer'] ? (
                                   <>
-                                    <ChevronUpIcon /> Hide Model Drawer
+                                    <ChevronUpIcon /> {SETTINGS_MODELS.hideModelList}
                                   </>
                                 ) : (
                                   <>
-                                    <BoltIcon /> Open Model Drawer <ChevronDownIcon />
+                                    <BoltIcon /> {SETTINGS_MODELS.showModelList} <ChevronDownIcon />
                                   </>
                                 )}
                               </button>
@@ -1493,9 +1491,12 @@ export function JoyAgentSettingsDialog({
                                 className="button-secondary"
                                 onClick={() => void discoverModels()}
                                 disabled={isDiscovering || working}
-                                title="Discover models behind API endpoint"
+                                title={SETTINGS_MODELS.findModelsTooltip}
                               >
-                                <SearchIcon /> {isDiscovering ? 'Scanning…' : 'Discover Models'}
+                                <SearchIcon />{' '}
+                                {isDiscovering
+                                  ? SETTINGS_MODELS.findingModels
+                                  : SETTINGS_MODELS.findModels}
                               </button>
                             </div>
                           </label>
@@ -1552,15 +1553,15 @@ export function JoyAgentSettingsDialog({
                       <span className="joy-accordion-icon">
                         <PaletteIcon />
                       </span>
-                      <span>Discovered Models Drawer</span>
+                      <span>{SETTINGS_MODELS.modelsTitle}</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       {discoveredModels.length > 0 ? (
                         <span className="joy-accordion-tag is-success">
-                          <CheckIcon /> {discoveredModels.length} Models Ready
+                          <CheckIcon /> {modelsReadyTag(discoveredModels.length)}
                         </span>
                       ) : (
-                        <span className="joy-accordion-tag">Click to Resolve</span>
+                        <span className="joy-accordion-tag">{SETTINGS_MODELS.openToFind}</span>
                       )}
                       <span className="joy-accordion-chevron">
                         <ChevronDownIcon />
@@ -1571,10 +1572,7 @@ export function JoyAgentSettingsDialog({
                   {openAccordions['models-drawer'] && (
                     <div className="joy-accordion-content joy-model-drawer-content">
                       <div className="joy-model-drawer-header">
-                        <p className="joy-model-drawer-hint">
-                          Select a discovered model chip to populate the Model ID, or filter by
-                          keyword:
-                        </p>
+                        <p className="joy-model-drawer-hint">{SETTINGS_MODELS.modelsHint}</p>
                         <div className="joy-settings-actions-row-tight">
                           <button
                             type="button"
@@ -1582,7 +1580,10 @@ export function JoyAgentSettingsDialog({
                             onClick={() => void discoverModels()}
                             disabled={isDiscovering || working}
                           >
-                            <RefreshIcon /> {isDiscovering ? 'Refreshing…' : 'Refresh Models'}
+                            <RefreshIcon />{' '}
+                            {isDiscovering
+                              ? SETTINGS_MODELS.checkingAgain
+                              : SETTINGS_MODELS.lookAgain}
                           </button>
                         </div>
                       </div>
@@ -1650,10 +1651,10 @@ export function JoyAgentSettingsDialog({
                         ) : (
                           <div className="joy-model-drawer-empty">
                             {isDiscovering
-                              ? 'Scanning endpoint for available models...'
+                              ? SETTINGS_MODELS.lookingForModels
                               : discoveredModels.length === 0
-                                ? 'No models discovered yet. Enter Base URL and API Key above, then click "Discover Models".'
-                                : 'No models matching current filter.'}
+                                ? SETTINGS_MODELS.noModelsYet
+                                : SETTINGS_MODELS.noModelMatches}
                           </div>
                         )}
                       </div>
@@ -1675,13 +1676,17 @@ export function JoyAgentSettingsDialog({
                       <span className="joy-accordion-icon">
                         <EyeIcon />
                       </span>
-                      <span>Synthetic Media Capability Probe</span>
+                      <span>{SETTINGS_MEDIA_CHECK.modelsTitle}</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       {mediaCapabilities ? (
-                        <span className="joy-accordion-tag is-success">Probe Verified</span>
+                        <span className="joy-accordion-tag is-success">
+                          {SETTINGS_MEDIA_CHECK.checkedTag}
+                        </span>
                       ) : (
-                        <span className="joy-accordion-tag">Unprobed</span>
+                        <span className="joy-accordion-tag">
+                          {SETTINGS_MEDIA_CHECK.notCheckedTag}
+                        </span>
                       )}
                       <span className="joy-accordion-chevron">
                         <ChevronDownIcon />
@@ -1692,10 +1697,7 @@ export function JoyAgentSettingsDialog({
                   {openAccordions['models-probe'] && (
                     <div className="joy-accordion-content">
                       <p className="joy-settings-hint-muted joy-settings-hint-block">
-                        Runs three tiny product-owned synthetic samples to verify multimodal image,
-                        audio, and video understanding. This check never sends your project, owner,
-                        or uploaded media to the provider, but your provider may charge or log these
-                        requests under its standard usage terms.
+                        {SETTINGS_MEDIA_CHECK.modelsHint}
                       </p>
 
                       <div className="joy-settings-actions-row joy-settings-block-gap">
@@ -1750,10 +1752,12 @@ export function JoyAgentSettingsDialog({
                       <span className="joy-accordion-icon">
                         <ShieldIcon />
                       </span>
-                      <span>Execution Mode</span>
+                      <span>{SETTINGS_PAGES.execution.kicker}</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
-                      <span className="joy-accordion-tag">{MODES[policy.executionMode]}</span>
+                      <span className="joy-accordion-tag">
+                        {SETTINGS_MODES[policy.executionMode].name}
+                      </span>
                       <span className="joy-accordion-chevron">
                         <ChevronDownIcon />
                       </span>
@@ -1763,14 +1767,14 @@ export function JoyAgentSettingsDialog({
                   {openAccordions['exec-mode'] && (
                     <div className="joy-accordion-content">
                       <div className="joy-settings-mode-grid">
-                        {(Object.keys(MODES) as AgentExecutionMode[]).map((mode) => (
+                        {(Object.keys(SETTINGS_MODES) as AgentExecutionMode[]).map((mode) => (
                           <div
                             key={mode}
                             className={`joy-settings-mode-card ${policy.executionMode === mode ? 'is-selected' : ''}`}
                             onClick={() => onPolicyChange({ ...policy, executionMode: mode })}
                           >
                             <div className="joy-settings-mode-card-title">
-                              <span>{MODES[mode]}</span>
+                              <span>{SETTINGS_MODES[mode].name}</span>
                               <input
                                 type="radio"
                                 name="executionMode"
@@ -1779,7 +1783,7 @@ export function JoyAgentSettingsDialog({
                               />
                             </div>
                             <div className="joy-settings-mode-card-desc">
-                              {MODE_DESCRIPTIONS[mode]}
+                              {SETTINGS_MODES[mode].sentence}
                             </div>
                           </div>
                         ))}
@@ -1801,11 +1805,11 @@ export function JoyAgentSettingsDialog({
                       <span className="joy-accordion-icon">
                         <CoinIcon />
                       </span>
-                      <span>Run Budget &amp; Spend Safety</span>
+                      <span>{SETTINGS_BUDGET.title}</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-tag">
-                        Max ${policy.maxCostPerRunUsd.toFixed(2)}/run
+                        {budgetTag(policy.maxCostPerRunUsd.toFixed(2))}
                       </span>
                       <span className="joy-accordion-chevron">
                         <ChevronDownIcon />
@@ -1817,7 +1821,7 @@ export function JoyAgentSettingsDialog({
                     <div className="joy-accordion-content">
                       <div className="joy-settings-field">
                         <label>
-                          <span>Max Cost per Run (USD)</span>
+                          <span>{SETTINGS_BUDGET.field}</span>
                           <input
                             type="number"
                             min="0.10"
@@ -1832,9 +1836,7 @@ export function JoyAgentSettingsDialog({
                             }
                           />
                         </label>
-                        <span className="joy-settings-hint-muted">
-                          Limits API provider token consumption per autonomous execution session.
-                        </span>
+                        <span className="joy-settings-hint-muted">{SETTINGS_BUDGET.hint}</span>
                       </div>
                     </div>
                   )}
@@ -1858,7 +1860,7 @@ export function JoyAgentSettingsDialog({
                       <span className="joy-accordion-icon">
                         <EyeIcon />
                       </span>
-                      <span>Real-time Previews &amp; Ghost Overlays</span>
+                      <span>{SETTINGS_LIVE_PREVIEW.title}</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-chevron">
@@ -1878,9 +1880,7 @@ export function JoyAgentSettingsDialog({
                               onPolicyChange({ ...policy, livePreview: e.target.checked })
                             }
                           />
-                          <span>
-                            Show real-time previews on the monitor canvas during agent operations
-                          </span>
+                          <span>{SETTINGS_LIVE_PREVIEW.switchLabel}</span>
                         </label>
                       </div>
                     </div>
@@ -1905,11 +1905,14 @@ export function JoyAgentSettingsDialog({
                       <span className="joy-accordion-icon">
                         <WrenchIcon />
                       </span>
-                      <span>Tool Capabilities Grid</span>
+                      <span>{SETTINGS_TOOLS.title}</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-tag">
-                        {policy.allowedCapabilities.length}/{ALL_TOOL_CAPABILITIES.length} Allowed
+                        {allowedToolsTag(
+                          policy.allowedCapabilities.length,
+                          ALL_TOOL_CAPABILITIES.length,
+                        )}
                       </span>
                       <span className="joy-accordion-chevron">
                         <ChevronDownIcon />
@@ -1936,7 +1939,7 @@ export function JoyAgentSettingsDialog({
                                   onPolicyChange({ ...policy, allowedCapabilities: nextCaps });
                                 }}
                               />
-                              <span>{cap}</span>
+                              <span>{SETTINGS_TOOLS.names[cap]}</span>
                             </label>
                           );
                         })}
@@ -1963,10 +1966,12 @@ export function JoyAgentSettingsDialog({
                       <span className="joy-accordion-icon">
                         <BoltIcon />
                       </span>
-                      <span>Local Hardware &amp; Worker Acceleration</span>
+                      <span>{SETTINGS_DIAGNOSTICS.hardwareTitle}</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
-                      <span className="joy-accordion-tag is-success">Direct3D 11 Active</span>
+                      <span className="joy-accordion-tag is-success">
+                        {SETTINGS_DIAGNOSTICS.accelerationTag}
+                      </span>
                       <span className="joy-accordion-chevron">
                         <ChevronDownIcon />
                       </span>
@@ -1977,25 +1982,25 @@ export function JoyAgentSettingsDialog({
                     <div className="joy-accordion-content">
                       <div className="joy-settings-actions-column">
                         <div className="joy-settings-diagnostic-row">
-                          <span>GPU Device</span>
+                          <span>{SETTINGS_DIAGNOSTICS.graphicsCard}</span>
                           <span className="joy-settings-hint-accent">
                             NVIDIA GeForce RTX 5070 Ti
                           </span>
                         </div>
                         <div className="joy-settings-diagnostic-row">
-                          <span>Rendering Backend</span>
+                          <span>{SETTINGS_DIAGNOSTICS.drawingMethod}</span>
                           <span className="joy-settings-diagnostic-status is-supported">
                             ANGLE D3D11
                           </span>
                         </div>
                         <div className="joy-settings-diagnostic-row">
-                          <span>Local Asset Library</span>
+                          <span>{SETTINGS_DIAGNOSTICS.mediaFolder}</span>
                           <span className="joy-settings-hint-strong">
-                            See Asset Library settings
+                            {SETTINGS_DIAGNOSTICS.mediaFolderHint}
                           </span>
                         </div>
                         <div className="joy-settings-diagnostic-row">
-                          <span>Local Worker SEA</span>
+                          <span>{SETTINGS_DIAGNOSTICS.backgroundWorker}</span>
                           <span className="joy-settings-diagnostic-status is-supported">
                             joy-worker.exe
                           </span>
@@ -2018,7 +2023,7 @@ export function JoyAgentSettingsDialog({
                       <span className="joy-accordion-icon">
                         <FlaskIcon />
                       </span>
-                      <span>Active Model Synthetic Modality Probe</span>
+                      <span>{SETTINGS_MEDIA_CHECK.diagnosticsTitle}</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-chevron">
@@ -2031,8 +2036,7 @@ export function JoyAgentSettingsDialog({
                     <div className="joy-accordion-content">
                       <div className="joy-settings-field-row joy-settings-block-gap">
                         <span className="joy-settings-hint-muted">
-                          Tests whether the active reasoning model parses image, audio, and video
-                          inputs.
+                          {SETTINGS_MEDIA_CHECK.diagnosticsHint}
                         </span>
                         <button
                           type="button"
@@ -2057,7 +2061,7 @@ export function JoyAgentSettingsDialog({
                         </div>
                       ) : (
                         <p className="joy-settings-hint-muted">
-                          No probe run yet for the active model.
+                          {SETTINGS_MEDIA_CHECK.notCheckedYet}
                         </p>
                       )}
                     </div>
@@ -2072,12 +2076,11 @@ export function JoyAgentSettingsDialog({
         <footer className="joy-agent-settings-footer">
           <div className="joy-agent-settings-footer-vault">
             <span>
-              <LockIcon /> Policy saved locally in browser. Sensitive keys secured in Windows DPAPI
-              vault.
+              <LockIcon /> {SETTINGS_STORAGE.footer}
             </span>
           </div>
           <button type="button" className="agent-settings-done button-primary" onClick={close}>
-            Done
+            {SETTINGS_DIALOG.doneLabel}
           </button>
         </footer>
       </section>
