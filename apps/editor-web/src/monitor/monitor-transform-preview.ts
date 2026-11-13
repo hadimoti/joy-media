@@ -4,8 +4,8 @@ import type { VideoFrameNode } from '@joy-media/render-ir';
 import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import { transformToRenderTransform } from '@joy-media/visual-object-renderer';
 import { clipIdToObjectId } from './monitor-ids.js';
-import type { LocalTransform } from './monitor-transform-maths.js';
 import type { TransformPatches } from './monitor-transform-drag.js';
+import { applyTransformPatch, type TransformPatch } from './monitor-transform-keyframes.js';
 
 /**
  * The live values of a Monitor drag (T-M05a). While a drag runs, the Monitor
@@ -51,15 +51,22 @@ export function useMonitorTransformPreview(
 export function useMonitorTransformPreviewFor(
   objectId: string | undefined,
   store: MonitorTransformPreviewStore = monitorTransformPreview,
-): LocalTransform | undefined {
+): TransformPatch | undefined {
   const patches = useMonitorTransformPreview(store);
   return objectId === undefined ? undefined : patches?.get(objectId);
 }
 
-/** The project with the given transform values in place (the same project when there are none). */
+/**
+ * The project with the given transform values in place (the same project when
+ * there are none). With the playhead `timeUs`, a value whose stopwatch is on
+ * (the channel has a curve) is written as a keyframe there instead of a static
+ * value (T-M05b): the Monitor draws a drag that way, and its release writes it
+ * that way, as one undo step.
+ */
 export function withTransformPatches(
   project: JoyProjectV1,
   patches: TransformPatches | undefined,
+  timeUs?: number,
 ): JoyProjectV1 {
   if (patches === undefined || patches.size === 0) return project;
   let visualObjects: Record<string, VisualObjectV1> | undefined;
@@ -67,7 +74,7 @@ export function withTransformPatches(
     const object = project.visualObjects[objectId];
     if (object === undefined) continue;
     visualObjects ??= { ...project.visualObjects };
-    visualObjects[objectId] = { ...object, transform: { ...object.transform, ...values } };
+    visualObjects[objectId] = applyTransformPatch(object, values, timeUs);
   }
   return visualObjects === undefined ? project : { ...project, visualObjects };
 }

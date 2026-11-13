@@ -356,16 +356,30 @@ export async function isDesktopWindowMaximized(): Promise<boolean> {
   return Boolean(isMax);
 }
 
+/**
+ * The kind of drive the asset library sits on. "removable" and "network" come
+ * and go, so the library warns about them; "unknown" means we could not tell,
+ * and stays quiet.
+ */
+export type DesktopAssetLibraryDriveType = 'fixed' | 'removable' | 'network' | 'unknown';
+
+export interface DesktopAssetLibraryCounts {
+  readonly total: number;
+  readonly video: number;
+  readonly image: number;
+  readonly audio: number;
+  /** Items of a kind the dialog does not name separately. */
+  readonly other: number;
+}
+
 export interface DesktopAssetLibrarySettings {
   readonly directory: string;
   readonly exists: boolean;
   readonly hasCatalog: boolean;
   readonly isDefault: boolean;
-  readonly counts: {
-    readonly total: number;
-    readonly audio: number;
-    readonly image: number;
-  };
+  readonly counts: DesktopAssetLibraryCounts;
+  /** Absent on builds that cannot tell, which is treated as "unknown". */
+  readonly driveType?: DesktopAssetLibraryDriveType;
 }
 
 export interface DesktopAssetCatalog {
@@ -375,6 +389,7 @@ export interface DesktopAssetCatalog {
     readonly total: number;
     readonly audio: number;
     readonly image: number;
+    readonly video?: number;
   };
   readonly assets: readonly unknown[];
 }
@@ -421,6 +436,14 @@ export async function resetDesktopAssetLibraryDirectory(): Promise<DesktopAssetL
  */
 export async function getDesktopAssetLibraryCatalog(): Promise<DesktopAssetCatalog> {
   return (await requireBridge().invoke('desktop.asset-library.get-catalog')) as DesktopAssetCatalog;
+}
+
+/**
+ * Opens the asset library folder in the OS file browser. The desktop decides
+ * which folder that is; the renderer never names a path.
+ */
+export async function openDesktopAssetLibraryDirectory(): Promise<void> {
+  await requireBridge().invoke('desktop.asset-library.open-directory');
 }
 
 /**

@@ -7,7 +7,9 @@ import {
   type Transform2D,
   type VideoFrameNode,
 } from '@joy-media/render-ir';
+import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import { bindClipToObject } from '../sticker-bindings.js';
+import { groupGeometry } from './monitor-transform-group.js';
 import { captionNodeId } from './monitor-ids.js';
 import { buildMonitorElements } from './monitor-selection.js';
 import {
@@ -113,13 +115,13 @@ const TRANSFORMS: Record<string, Transform2D> = {
   [CAPTION]: { translateX: 0, translateY: 1500, scaleX: 1, scaleY: 1 },
 };
 
-function frame(): RenderFrameIR {
+function frame(transforms: Record<string, Transform2D> = TRANSFORMS): RenderFrameIR {
   return {
     version: 1,
     compositionId: 'root',
     timeUs: 0,
     viewport: { width: 1080, height: 1920, dpr: 1 },
-    nodes: Object.entries(TRANSFORMS).map(
+    nodes: Object.entries(transforms).map(
       ([id, transform], index) =>
         ({
           id,
@@ -141,14 +143,16 @@ function targets(
     project?: JoyProjectV1;
     locked?: readonly string[];
     agentPreviewOnScreen?: boolean;
+    transforms?: Record<string, Transform2D>;
   } = {},
 ) {
   const visual = options.project ?? project();
-  const drawn = frame();
+  const transforms = options.transforms ?? TRANSFORMS;
+  const drawn = frame(transforms);
   const elements = buildMonitorElements({
     frame: drawn,
     nodeBounds: (id) =>
-      TRANSFORMS[id] === undefined ? undefined : nodeBoundsFromBox(id, TRANSFORMS[id]!, BOX),
+      transforms[id] === undefined ? undefined : nodeBoundsFromBox(id, transforms[id]!, BOX),
     project: visual,
     timeline: timeline(options.locked),
   });
@@ -206,7 +210,7 @@ describe('transform targets', () => {
     expect(TRANSFORM_BLOCK_MESSAGES['agent-preview']).toMatch(/agent preview/);
   });
 
-  it('a value from an expression or animated by keyframes greys the gestures that write it', () => {
+  it('a value from an expression greys the gestures that write it; a keyframed one does not (T-M05b)', () => {
     const expression = targets(['clip-shape'], {
       project: project({ objects: { shape: { expressions: { x: 'time * 10' } } } }),
     })[0]!;
@@ -222,7 +226,8 @@ describe('transform targets', () => {
         },
       }),
     })[0]!;
-    expect(animated.blocked).toEqual({ rotate: 'animated' });
+    // T-M05b: a keyframed value is edited on the Monitor and keyed on release.
+    expect(animated.blocked).toEqual({});
   });
 
   it("a parented object carries its parent's world values; a parent with no size blocks moving", () => {
@@ -429,5 +434,261 @@ describe('live values', () => {
       scaleY: 2,
       rotationDeg: 30,
     });
+  });
+});
+
+describe('T-M05b: keyframed values and the anchor point on the targets', () => {
+  const curve = (value: number) => ({
+    keyframes: [
+      { timeUs: 0, value, interpolation: 'linear' as const },
+      { timeUs: 1_000_000, value: value + 100, interpolation: 'linear' as const },
+    ],
+  });
+
+  it('a keyframed value is read from its curve at the playhead, not from the static value', () => {
+    const [shape] = targets(['clip-shape'], {
+      project: project({
+        objects: {
+          shape: {
+            animations: { x: curve(140), rotationDeg: curve(5) },
+          } as Partial<VisualObjectV1>,
+        },
+      }),
+    });
+    expect(shape!.local).toEqual({ x: 140, y: 200, scaleX: 1, scaleY: 1, rotationDeg: 5 });
+    expect(shape!.blocked).toEqual({});
+  });
+
+  it('carries the saved anchor (the centre when there is none)', () => {
+    expect(targets(['clip-shape'])[0]!.anchor).toEqual({ x: 0.5, y: 0.5 });
+    const [anchored] = targets(['clip-shape'], {
+      project: project({
+        objects: { shape: { transform: t(100, 200, { anchorX: 0, anchorY: 1 }) } },
+      }),
+    });
+    expect(anchored!.anchor).toEqual({ x: 0, y: 1 });
+    expect(anchored!.anchorBlocked).toBeUndefined();
+  });
+
+  it('the anchor of an element that is not turned can move even with position keyframes', () => {
+    const [shape] = targets(['clip-shape'], {
+      project: project({
+        objects: { shape: { animations: { x: curve(100) } } as Partial<VisualObjectV1> },
+      }),
+    });
+    expect(shape!.anchorBlocked).toBeUndefined();
+  });
+
+  it('an animated rotation, or a turned element with an animated position, blocks the anchor', () => {
+    const rotating = targets(['clip-shape'], {
+      project: project({
+        objects: { shape: { animations: { rotationDeg: curve(0) } } as Partial<VisualObjectV1> },
+      }),
+    })[0]!;
+    expect(rotating.anchorBlocked).toBe('animated');
+    // The child is drawn turned a quarter (by its parent): its position must hold still too.
+    const child = targets(['clip-child'], {
+      project: project({
+        objects: { child: { animations: { y: curve(0) } } as Partial<VisualObjectV1> },
+      }),
+    })[0]!;
+    expect(child.anchorBlocked).toBe('animated');
+    expect(TRANSFORM_BLOCK_MESSAGES.animated).toMatch(/anchor point/);
+  });
+
+  it('an animated parent rotation or any farther ancestor scale blocks the anchor', () => {
+    const animatedParent = targets(['clip-child'], {
+      project: project({
+        objects: {
+          holder: { animations: { rotationDeg: curve(90) } } as Partial<VisualObjectV1>,
+        },
+      }),
+    })[0]!;
+    expect(animatedParent.anchorBlocked).toBe('animated');
+
+    const animatedGrandparent = targets(['clip-child'], {
+      project: project({
+        objects: {
+          holder: { parentId: 'outer' } as Partial<VisualObjectV1>,
+          outer: {
+            id: 'outer',
+            kind: 'null',
+            transform: t(0, 0),
+            animations: { scaleX: curve(1) },
+          } as Partial<VisualObjectV1>,
+        },
+      }),
+    })[0]!;
+    expect(animatedGrandparent.ancestorObjectIds).toEqual(['holder', 'outer']);
+    expect(animatedGrandparent.anchorBlocked).toBe('animated');
+    expect(TRANSFORM_BLOCK_MESSAGES.animated).toMatch(/picture later/i);
+  });
+
+  it('an animated scale on a turned object blocks moving its anchor', () => {
+    for (const channel of ['scaleX', 'scaleY'] as const) {
+      const turned = targets(['clip-shape'], {
+        project: project({
+          objects: {
+            shape: { animations: { [channel]: curve(1) } } as Partial<VisualObjectV1>,
+          },
+        }),
+        transforms: {
+          ...TRANSFORMS,
+          shape: { translateX: 100, translateY: 200, scaleX: 1, scaleY: 1, rotationDeg: 45 },
+        },
+      })[0]!;
+
+      expect(turned.anchorBlocked, channel).toBe('animated');
+    }
+  });
+
+  it('an expression-driven rotation on the selected object blocks moving its anchor', () => {
+    const scripted = targets(['clip-shape'], {
+      project: project({ objects: { shape: { expressions: { rotationDeg: 'time' } } } }),
+    })[0]!;
+
+    expect(scripted.anchorBlocked).toBe('expression');
+  });
+
+  it('an expression-driven scale on the selected object blocks moving its anchor', () => {
+    for (const channel of ['scaleX', 'scaleY'] as const) {
+      const scripted = targets(['clip-shape'], {
+        project: project({ objects: { shape: { expressions: { [channel]: '2' } } } }),
+      })[0]!;
+
+      expect(scripted.anchorBlocked, channel).toBe('expression');
+    }
+  });
+
+  it('expression-driven scale or rotation on an ancestor blocks moving the child anchor', () => {
+    for (const channel of ['scaleX', 'scaleY', 'rotationDeg'] as const) {
+      const scriptedAncestor = targets(['clip-child'], {
+        project: project({
+          objects: { holder: { expressions: { [channel]: 'time' } } },
+        }),
+      })[0]!;
+
+      expect(scriptedAncestor.anchorBlocked, channel).toBe('expression');
+    }
+  });
+
+  it('leaves anchor movement available when transforms are not animated or expression-driven', () => {
+    const [shape] = targets(['clip-shape']);
+
+    expect(shape!.anchorBlocked).toBeUndefined();
+  });
+
+  it('what greys everything greys the anchor too', () => {
+    expect(targets(['clip-shape'], { locked: ['clip-shape'] })[0]!.anchorBlocked).toBe('locked');
+    expect(targets(['clip-shape'], { project: project({ camera: true }) })[0]!.anchorBlocked).toBe(
+      'camera',
+    );
+    expect(targets(['clip-shape'], { agentPreviewOnScreen: true })[0]!.anchorBlocked).toBe(
+      'agent-preview',
+    );
+    expect(targets(['clip-captions'])[0]!.anchorBlocked).toBe('no-object');
+    const flat = targets(['clip-child'], {
+      project: project({ objects: { holder: { transform: t(0, 0, { scaleX: 0 }) } } }),
+    })[0]!;
+    expect(flat.anchorBlocked).toBe('parent-zero-scale');
+  });
+
+  it('a parent and its child both selected: only the parent is written, the child follows (review fix)', () => {
+    // The child hangs from the shape (at 100, 200, not turned): drawn at 110, 200.
+    const visual = project({
+      objects: { child: { parentId: 'shape', transform: t(10, 0) } as Partial<VisualObjectV1> },
+    });
+    const transforms = {
+      ...TRANSFORMS,
+      child: { translateX: 110, translateY: 200, scaleX: 1, scaleY: 1 },
+    };
+    const list = targets(['clip-shape', 'clip-child'], { project: visual, transforms });
+    expect(list.find((target) => target.objectId === 'child')!.ancestorObjectIds).toEqual([
+      'shape',
+    ]);
+    const group = groupGeometry(list.map((target) => target.geometry))!;
+    const none = { shift: false, alt: false };
+    const world = (objects: JoyProjectV1['visualObjects'], id: string) =>
+      evaluateCameraExpressionTransform(id, undefined, objects, 0, 1920).transform;
+    const before = world(visual.visualObjects, 'child');
+    const written = (patches: ReturnType<typeof gesturePatches>) => {
+      expect(patches).toBeDefined();
+      expect([...patches!.keys()]).toEqual(['shape']);
+      const next = withTransformPatches(visual, patches!, 0).visualObjects;
+      // The child's own values are untouched: it follows its parent.
+      expect(next.child).toEqual(visual.visualObjects.child);
+      return { next, parent: patches!.get('shape')! };
+    };
+
+    // Move: the child moves by the drag once (not twice, as when both were patched).
+    const moved = written(
+      gesturePatches(list, { kind: 'move' }, { x: 0, y: 0 }, { x: 10, y: 5 }, none),
+    );
+    const movedChild = world(moved.next, 'child');
+    expect(movedChild.x).toBeCloseTo(before.x + 10, 9);
+    expect(movedChild.y).toBeCloseTo(before.y + 5, 9);
+
+    // Scale: the child is scaled by the parent's factor once.
+    const corner = group.corners[2];
+    const scaled = written(
+      gesturePatches(
+        list,
+        { kind: 'group-scale', handle: 'se' },
+        corner,
+        { x: corner.x + 40, y: corner.y + 40 },
+        none,
+      ),
+    );
+    expect(scaled.parent.scaleX).not.toBeCloseTo(1, 6);
+    expect(world(scaled.next, 'child').scaleX).toBeCloseTo(scaled.parent.scaleX, 9);
+    expect(world(scaled.next, 'child').scaleY).toBeCloseTo(scaled.parent.scaleY, 9);
+
+    // Rotate: the child turns by the parent's turn once, rigidly about the group.
+    const { center } = group;
+    const turned = written(
+      gesturePatches(
+        list,
+        { kind: 'group-rotate' },
+        { x: center.x, y: center.y - 100 },
+        { x: center.x + 100, y: center.y },
+        none,
+      ),
+    );
+    expect(turned.parent.rotationDeg).toBeCloseTo(90, 6);
+    const turnedChild = world(turned.next, 'child');
+    const turnedParent = world(turned.next, 'shape');
+    expect(turnedChild.rotationDeg).toBeCloseTo(90, 6);
+    // The child stays 10 px from its parent along the parent's turned x axis.
+    expect(turnedChild.x - turnedParent.x).toBeCloseTo(0, 6);
+    expect(turnedChild.y - turnedParent.y).toBeCloseTo(10, 6);
+
+    // A nudge follows the same rule.
+    expect([...nudgePatches(list, { x: 1, y: 0 })!.keys()]).toEqual(['shape']);
+  });
+
+  it('the release writes a key on the keyframed channel and a static value on the others', () => {
+    const visual = project({
+      objects: { shape: { animations: { x: curve(100) } } as Partial<VisualObjectV1> },
+    });
+    const list = targets(['clip-shape'], { project: visual });
+    const patches = gesturePatches(
+      list,
+      { kind: 'move' },
+      { x: 0, y: 0 },
+      { x: 15, y: 5 },
+      {
+        shift: false,
+        alt: false,
+      },
+    )!;
+    const written = withTransformPatches(visual, patches, 0).visualObjects.shape!;
+    expect(written.animations!.x!.keyframes[0]).toEqual({
+      timeUs: 0,
+      value: 115,
+      interpolation: 'linear',
+    });
+    expect(written.animations!.x!.keyframes).toHaveLength(2);
+    expect(written.transform.x).toBe(100);
+    expect(written.transform.y).toBe(205);
   });
 });

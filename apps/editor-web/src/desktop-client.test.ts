@@ -14,6 +14,7 @@ import {
   setDesktopAssetLibraryDirectory,
   selectDesktopAssetLibraryDirectory,
   resetDesktopAssetLibraryDirectory,
+  openDesktopAssetLibraryDirectory,
   getDesktopAssetLibraryCatalog,
   resolveDesktopAssetUrl,
   prepareDesktopDroppedFiles,
@@ -237,7 +238,8 @@ describe('asset library helpers', () => {
       exists: true,
       hasCatalog: true,
       isDefault: true,
-      counts: { total: 3075, audio: 1805, image: 1270 },
+      counts: { total: 3075, video: 1805, image: 1270, audio: 0, other: 0 },
+      driveType: 'fixed',
     };
     const invoke = vi.fn().mockResolvedValue(settings);
     window.joyDesktop = { channels: ['desktop.asset-library.get-settings'], invoke };
@@ -274,7 +276,7 @@ describe('asset library helpers', () => {
       exists: true,
       hasCatalog: true,
       isDefault: true,
-      counts: { total: 0, audio: 0, image: 0 },
+      counts: { total: 0, video: 0, image: 0, audio: 0, other: 0 },
     };
     const invoke = vi.fn().mockResolvedValue(defaultSettings);
     window.joyDesktop = {
@@ -284,6 +286,15 @@ describe('asset library helpers', () => {
 
     await expect(resetDesktopAssetLibraryDirectory()).resolves.toEqual(defaultSettings);
     expect(invoke).toHaveBeenCalledWith('desktop.asset-library.reset-directory');
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('openDesktopAssetLibraryDirectory invokes the open channel with no path argument', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    window.joyDesktop = { channels: ['desktop.asset-library.open-directory'], invoke };
+
+    await expect(openDesktopAssetLibraryDirectory()).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledWith('desktop.asset-library.open-directory');
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 

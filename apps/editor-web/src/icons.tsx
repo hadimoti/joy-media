@@ -1172,3 +1172,91 @@ export function ChevronDownIcon() {
     </Svg>
   );
 }
+
+/**
+ * Outline glyphs for the Joy Code Settings dialog (T-P06). They replace the
+ * colour emoji the dialog used to show in its left list and in its accordions,
+ * so the dialog reads in the app's one icon set. Same 16 px box and 1.5 px
+ * stroke as the rest of the set.
+ */
+
+/** A bolt — the active model and the AI models page. */
+export function BoltIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M9 1.5 3.5 9h3.75L7 14.5 12.5 7H8.75Z" />
+    </Svg>
+  );
+}
+
+/** A shield — execution and safety. */
+export function ShieldIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M8 1.75 13.25 4v4c0 3.1-2.1 5.3-5.25 6.25C4.85 13.3 2.75 11.1 2.75 8V4Z" />
+      <path d="m5.75 8 1.6 1.6L10.5 6.5" />
+    </Svg>
+  );
+}
+
+/** A spanner — tools and permissions. */
+export function WrenchIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M10.4 2.2a3.6 3.6 0 0 0-4.2 4.5L2 10.9a1.35 1.35 0 0 0 1.9 1.9l4.2-4.2a3.6 3.6 0 0 0 4.5-4.2l-2 2-1.9-.5-.5-1.9Z" />
+    </Svg>
+  );
+}
+
+/** A test tube — the media diagnostics page. */
+export function FlaskIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M6.25 1.75h3.5M7 1.75v4.1L3.6 11.4a1.4 1.4 0 0 0 1.15 2.25h6.5a1.4 1.4 0 0 0 1.15-2.25L9 5.85V1.75" />
+      <path d="M4.9 9.75h6.2" />
+    </Svg>
+  );
+}
+
+/** A plug — the API connection accordion. */
+export function PlugIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M6 1.75v3M10 1.75v3" />
+      <path d="M4.25 4.75h7.5v2.5a3.75 3.75 0 0 1-3.75 3.75A3.75 3.75 0 0 1 4.25 7.25Z" />
+      <path d="M8 11v3.25" />
+    </Svg>
+  );
+}
+
+/** A palette — the model discovery accordion. */
+export function PaletteIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M8 1.75a6.25 6.25 0 0 0 0 12.5c.8 0 1.3-.5 1.3-1.2 0-.35-.15-.6-.35-.85-.2-.25-.3-.5-.3-.8 0-.7.55-1.2 1.25-1.2h1.15a3.2 3.2 0 0 0 3.2-3.2c0-2.9-2.7-5.25-6.25-5.25Z" />
+      <circle cx="5.4" cy="6.4" r=".85" fill="currentColor" stroke="none" />
+      <circle cx="8.2" cy="4.9" r=".85" fill="currentColor" stroke="none" />
+      <circle cx="10.9" cy="6.2" r=".85" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+/** A coin — the cost and budget accordion. */
+export function CoinIcon() {
+  return (
+    <Svg size={16}>
+      <circle cx="8" cy="8" r="6.25" />
+      <path d="M8 4.25v7.5M9.75 6.1c-.35-.6-1-.95-1.85-.95-1.05 0-1.75.5-1.75 1.3 0 .75.6 1.1 1.85 1.35 1.2.25 1.8.6 1.8 1.4 0 .85-.75 1.35-1.9 1.35-.9 0-1.6-.35-1.95-1" />
+    </Svg>
+  );
+}
+
+/** A hammer and wrench — the custom BYOK preset. */
+export function ToolsIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M9.9 2.1a3.1 3.1 0 0 0-3.6 3.9L2 10.3a1.25 1.25 0 0 0 1.75 1.75l4.3-4.3a3.1 3.1 0 0 0 3.9-3.6l-1.8 1.8-1.6-.4-.4-1.6Z" />
+      <path d="m10.6 9.4 4 4M13.2 6.8l-3.4 3.4" />
+    </Svg>
+  );
+}

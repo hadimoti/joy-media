@@ -1,8 +1,15 @@
 import type { JoyProjectV1, VisualObjectV1 } from '@joy-media/project-schema';
-import { flattenRenderNodes, type RenderFrameIR, type Transform2D } from '@joy-media/render-ir';
+import { transformAnchor } from '@joy-media/project-schema';
+import {
+  flattenRenderNodes,
+  type NodePoint,
+  type RenderFrameIR,
+  type Transform2D,
+} from '@joy-media/render-ir';
 import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import { clipIdToObjectId, isCaptionNodeId } from './monitor-ids.js';
 import type { MonitorElement } from './monitor-selection.js';
+import { localValuesAt } from './monitor-transform-keyframes.js';
 import {
   boxGeometry,
   parentSpaceInvertible,
@@ -16,6 +23,11 @@ import {
  * one target per drawn node of a selected clip, with the document object it
  * writes, the box the renderer drew, the parent the values are local to, and,
  * for each gesture, why it is not allowed when it is not.
+ *
+ * T-M05b: a keyframed value is no longer blocked; the gesture writes a
+ * keyframe at the playhead on release (`monitor-transform-keyframes.ts`), so
+ * the object's values here are its values at the playhead. The anchor point
+ * has its own block reason.
  */
 
 export type MonitorTransformGestureKind = 'move' | 'scale' | 'rotate';
@@ -37,7 +49,8 @@ export const TRANSFORM_BLOCK_MESSAGES: Readonly<Record<TransformBlockReason, str
   camera: 'The camera places this element. Change the camera instead.',
   'parent-zero-scale': 'The parent has no size, so this element cannot be moved or scaled here.',
   expression: 'An expression sets this value. Edit the expression in the Inspector.',
-  animated: 'This value is animated. Change it with keyframes in the Inspector for now.',
+  animated:
+    'Position, size, or rotation is animated, so moving the anchor point could move the picture later. Remove those keyframes first.',
 };
 
 /** The document values each gesture writes. */
@@ -58,10 +71,20 @@ export interface MonitorTransformTarget {
   readonly objectId?: string;
   /** The box as drawn. */
   readonly geometry: TransformBoxGeometry;
-  /** The object's own (document) values, local to its parent. */
+  /** The object's own (document) values at the playhead, local to its parent. */
   readonly local: LocalTransform;
+  /** The saved anchor point as box fractions (the centre when absent; T-M05b). */
+  readonly anchor?: NodePoint;
+  /** Why the anchor point cannot be moved, when it cannot (T-M05b). */
+  readonly anchorBlocked?: TransformBlockReason;
   /** The parent's world values, when the object has a parent. */
   readonly parent?: ParentTransform;
+  /**
+   * The object's parent, grandparent and so on, nearest first (absent when it
+   * has no parent). A gesture on a selection that holds an ancestor too
+   * writes only the ancestor: this element follows it through the hierarchy.
+   */
+  readonly ancestorObjectIds?: readonly string[];
   /** Why a gesture is not allowed, per gesture. */
   readonly blocked: Readonly<Partial<Record<MonitorTransformGestureKind, TransformBlockReason>>>;
 }
@@ -92,6 +115,19 @@ export function objectIdForNode(
   return nodeId === clipId ? clipIdToObjectId(project, clipId) : undefined;
 }
 
+/** The object's parent, grandparent and so on, nearest first (a loop or a missing parent ends it). */
+export function ancestorObjectIds(project: JoyProjectV1, object: VisualObjectV1): string[] {
+  const ids: string[] = [];
+  let parentId = object.parentId;
+  while (parentId !== undefined && parentId !== object.id && !ids.includes(parentId)) {
+    const parent = project.visualObjects[parentId];
+    if (parent === undefined) break;
+    ids.push(parentId);
+    parentId = parent.parentId;
+  }
+  return ids;
+}
+
 function parentWorld(
   project: JoyProjectV1,
   object: VisualObjectV1,
@@ -116,12 +152,49 @@ function parentWorld(
   };
 }
 
+/** An expression blocks the gestures that write its value; a curve does not (T-M05b). */
 function channelReason(
   object: VisualObjectV1,
   channels: readonly (keyof LocalTransform)[],
 ): TransformBlockReason | undefined {
   if (channels.some((channel) => object.expressions?.[channel] !== undefined)) return 'expression';
-  if (channels.some((channel) => object.animations?.[channel] !== undefined)) return 'animated';
+  return undefined;
+}
+
+/**
+ * Why the anchor point cannot be moved. Moving it keeps the picture still by
+ * changing the position by an amount that depends on the rotation, so it needs
+ * a rotation that is not animated, and, when the element is turned, a
+ * position that is not animated either (one key at the playhead would only
+ * hold the picture still at that moment).
+ */
+function anchorReason(
+  reasonForAll: TransformBlockReason | undefined,
+  object: VisualObjectV1 | undefined,
+  ancestors: readonly VisualObjectV1[],
+  parent: ParentTransform | undefined,
+  drawnRotationDeg: number,
+): TransformBlockReason | undefined {
+  if (reasonForAll !== undefined) return reasonForAll;
+  if (object === undefined) return 'no-object';
+  if (!parentSpaceInvertible(parent)) return 'parent-zero-scale';
+  const channels: (keyof LocalTransform)[] = ['rotationDeg', 'scaleX', 'scaleY'];
+  if (drawnRotationDeg !== 0) channels.push('x', 'y');
+  const ancestorChannels = ['rotationDeg', 'scaleX', 'scaleY'] as const;
+  if (
+    channels.some((channel) => object.expressions?.[channel] !== undefined) ||
+    ancestors.some((ancestor) =>
+      ancestorChannels.some((channel) => ancestor.expressions?.[channel] !== undefined),
+    )
+  )
+    return 'expression';
+  if (
+    channels.some((channel) => object.animations?.[channel] !== undefined) ||
+    ancestors.some((ancestor) =>
+      ancestorChannels.some((channel) => ancestor.animations?.[channel] !== undefined),
+    )
+  )
+    return 'animated';
   return undefined;
 }
 
@@ -179,20 +252,27 @@ export function buildTransformTargets(
     const local: LocalTransform =
       object === undefined
         ? { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0 }
-        : {
-            x: object.transform.x,
-            y: object.transform.y,
-            scaleX: object.transform.scaleX,
-            scaleY: object.transform.scaleY,
-            rotationDeg: object.transform.rotationDeg,
-          };
+        : localValuesAt(object, input.timeUs);
+    const ancestors = object === undefined ? [] : ancestorObjectIds(input.project, object);
+    const ancestorObjects = ancestors.map((id) => input.project.visualObjects[id]!);
+    const geometry = boxGeometry(element.bounds, transform);
+    const anchorBlocked = anchorReason(
+      reasonForAll,
+      object,
+      ancestorObjects,
+      parent,
+      geometry.transform.rotationDeg,
+    );
     targets.push({
       nodeId: element.id,
       clipId: element.clipId,
       ...(objectId === undefined ? {} : { objectId }),
-      geometry: boxGeometry(element.bounds, transform),
+      geometry,
       local,
+      ...(object === undefined ? {} : { anchor: transformAnchor(object.transform) }),
+      ...(anchorBlocked === undefined ? {} : { anchorBlocked }),
       ...(parent === undefined ? {} : { parent }),
+      ...(ancestors.length === 0 ? {} : { ancestorObjectIds: ancestors }),
       blocked: blockedGestures(reasonForAll, object, parent),
     });
   }

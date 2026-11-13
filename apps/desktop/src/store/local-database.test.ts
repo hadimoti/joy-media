@@ -1,6 +1,7 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LocalDatabase } from './local-database.js';
 import type { ProviderProfile } from './local-database.js';
 
@@ -261,5 +262,28 @@ describe('LocalDatabase provider profiles', () => {
     db.resetAssetLibraryDirectory();
     expect(db.getAssetLibraryDirectory()).toBe(defaultDir);
     expect(db.getAssetLibraryInfo().isDefault).toBe(true);
+  });
+
+  it('treats a catalogue without an assets array as an empty library, ignoring stored counts', () => {
+    const db = testDb();
+    const existsSync = vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    const readFileSync = vi
+      .spyOn(fs, 'readFileSync')
+      .mockReturnValue(
+        JSON.stringify({ counts: { total: 37, audio: 12, image: 9, video: 8 } }) as never,
+      );
+
+    try {
+      expect(db.getAssetLibraryInfo('/test-assets/library').counts).toEqual({
+        total: 0,
+        video: 0,
+        image: 0,
+        audio: 0,
+        other: 0,
+      });
+    } finally {
+      existsSync.mockRestore();
+      readFileSync.mockRestore();
+    }
   });
 });

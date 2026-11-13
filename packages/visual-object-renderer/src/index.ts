@@ -22,7 +22,7 @@ import type {
   VisualObjectTransformV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
-import { resolveContentFontFamily } from '@joy-media/project-schema';
+import { DEFAULT_TRANSFORM_ANCHOR, resolveContentFontFamily } from '@joy-media/project-schema';
 import type {
   RenderNode,
   RenderFrameIR,
@@ -476,8 +476,22 @@ export function transformToRenderTransform(t: VisualObjectTransformV1): Transfor
     ...(Number.isFinite(t.rotationDeg) && t.rotationDeg !== 0
       ? { rotationDeg: t.rotationDeg }
       : {}),
+    ...renderOrigin(t),
     ...(hasCrop ? { crop } : {}),
   };
+}
+
+/**
+ * The anchor point as the render origin (T-M05b): only when one was saved and
+ * it is not the centre, so a transform without an anchor (every project before
+ * v1.1.1) converts exactly as before.
+ */
+function renderOrigin(t: VisualObjectTransformV1): Pick<Transform2D, 'origin'> {
+  const x = Number.isFinite(t.anchorX) ? (t.anchorX as number) : DEFAULT_TRANSFORM_ANCHOR;
+  const y = Number.isFinite(t.anchorY) ? (t.anchorY as number) : DEFAULT_TRANSFORM_ANCHOR;
+  return x === DEFAULT_TRANSFORM_ANCHOR && y === DEFAULT_TRANSFORM_ANCHOR
+    ? {}
+    : { origin: { x, y } };
 }
 
 export function evaluateEffectInstances(
