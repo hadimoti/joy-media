@@ -13,17 +13,17 @@ export type AppMenuActionId =
   | 'file.export'
   | 'edit.undo'
   | 'edit.redo'
-  | 'edit.delete'
-  | 'edit.duplicate'
   | 'edit.commandPalette'
   | 'edit.assetLibrarySettings'
   | 'clip.split'
+  | 'clip.duplicate'
+  | 'clip.delete'
+  | 'clip.speed'
   | 'agent.open'
   | 'agent.active'
   | 'agent.executionMode'
   | 'agent.stop'
   | 'agent.settings'
-  | 'view.commandPalette'
   | 'view.fullscreen'
   | 'window.minimize'
   | 'window.maximize'
@@ -88,8 +88,7 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     items: [
       { id: 'edit.undo', label: 'Undo', shortcut: 'Ctrl+Z' },
       { id: 'edit.redo', label: 'Redo', shortcut: 'Ctrl+Y', separatorAfter: true },
-      { id: 'edit.delete', label: 'Cut / Delete Clip', shortcut: 'Del' },
-      { id: 'edit.duplicate', label: 'Duplicate Clip', shortcut: 'Ctrl+D', separatorAfter: true },
+      { id: 'clip.delete', label: 'Delete', shortcut: 'Del', separatorAfter: true },
       { id: 'edit.commandPalette', label: 'Command Palette…', shortcut: 'Ctrl+K' },
       { id: 'edit.assetLibrarySettings', label: 'Asset Library Folder…', separatorAfter: true },
     ],
@@ -97,7 +96,12 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
   {
     id: 'clip',
     label: 'Clip',
-    items: [{ id: 'clip.split', label: 'Split at Playhead', shortcut: 'S' }],
+    items: [
+      { id: 'clip.split', label: 'Split at Playhead', shortcut: 'S' },
+      { id: 'clip.duplicate', label: 'Duplicate Clip', shortcut: 'Ctrl+D' },
+      { id: 'clip.delete', label: 'Delete', shortcut: 'Del', separatorAfter: true },
+      { id: 'clip.speed', label: 'Speed…' },
+    ],
   },
   {
     id: 'agent',
@@ -114,12 +118,6 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     id: 'view',
     label: 'View',
     items: [
-      {
-        id: 'view.commandPalette',
-        label: 'Command Palette…',
-        shortcut: 'Ctrl+K',
-        separatorAfter: true,
-      },
       {
         id: 'view.fullscreen',
         label: 'Toggle Full Screen',

@@ -110,7 +110,8 @@ test.describe('JOY Live Director runtime boundary', () => {
     await requestPreview(page, 'Update the selected caption style.');
     const clip = page.locator('.timeline-clip[data-clip-id]').first();
     await clip.click();
-    await page.locator('.app-menu-trigger').filter({ hasText: 'Edit' }).click();
+    // Duplicate Clip lives in the Clip menu (app-menu.ts), not Edit.
+    await page.locator('.app-menu-trigger').filter({ hasText: 'Clip' }).click();
     await page.getByRole('menuitem', { name: /Duplicate Clip/ }).click();
 
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
