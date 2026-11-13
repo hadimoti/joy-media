@@ -66,7 +66,7 @@ export interface DesktopWorkerStatus {
   readonly workerId?: string;
   readonly capabilities: readonly string[];
   readonly lastSeenAt?: string;
-  /** Why the Worker stopped on its own. Shown with a retry action once the automatic restarts are used up. */
+  /** Why the local service stopped. Logged for diagnostics; the Jobs panel shows plain status text. */
   readonly lastError?: string;
 }
 

@@ -48,7 +48,7 @@ describe('App export recovery contract', () => {
     const encode = exportCallback.indexOf('const encodeSource = {');
     const encodeSignal = exportCallback.indexOf('signal: abortController.signal', encode);
     const stage = exportCallback.indexOf(
-      "setExportStatus('Staging export for Worker verification…')",
+      "setExportStatus('Staging export for verification…')",
       encodeSignal,
     );
     const workerEnqueue = exportCallback.indexOf(

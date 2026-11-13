@@ -23,7 +23,7 @@ import {
 } from './editor-panel-context.js';
 export { EditorPanelContext };
 export type { AnimationGraphFocusRequest };
-import { AppMenuBar } from './AppMenuBar.js';
+import { AppMenuBar, itemDisabled } from './AppMenuBar.js';
 import { panelIdFromMenuAction, type AppMenuActionId } from './app-menu.js';
 import {
   createHtmlMediaDecoder,
@@ -255,7 +255,7 @@ import {
 import type { OfflineMp4Capability } from './offline-mp4-export.js';
 import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { waitForContentFonts } from './font-readiness.js';
-import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
+import { EMPTY_EDITOR_STATE, searchActions, selectedClipSupportsSpeed } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { createMissingMediaHost, type MissingMediaHost } from './missing-media-host.js';
 import type { ProjectWriterHandle } from './project-writer.js';
@@ -306,7 +306,12 @@ import {
 import { withCaptionBurnInNodes } from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { TextPanel } from './TextPanel.js';
-import { InspectorPanel, type InspectorSpeedChange } from './InspectorPanel.js';
+import {
+  consumeInspectorTabRequest,
+  InspectorPanel,
+  type InspectorSpeedChange,
+  type InspectorTabRequest,
+} from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
@@ -442,6 +447,7 @@ import {
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
 import {
+  SHORTCUT_REFERENCE,
   isEditableTarget,
   isInteractiveTarget,
   resolveShortcut,
@@ -1066,6 +1072,13 @@ function EditorWorkspace({
   }, [agentPolicy, storage]);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentSettingsTab, setAgentSettingsTab] = useState<JoyAgentSettingsTab>('models');
+  // Clip > Speed asks the Inspector to show its Speed tab (a serial makes each request new).
+  const [inspectorTabRequest, setInspectorTabRequest] = useState<InspectorTabRequest | null>(null);
+  const onInspectorTabRequestApplied = useCallback(
+    (serial: number) =>
+      setInspectorTabRequest((current) => consumeInspectorTabRequest(current, serial)),
+    [],
+  );
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [assetLibrarySettingsOpen, setAssetLibrarySettingsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -3391,14 +3404,6 @@ function EditorWorkspace({
     },
     [projectId, reconcileSelection, reconcileWorkerResultOperations, session, storage],
   );
-  const executeAction = useCallback(
-    (id: string) => {
-      if (id === 'history.undo') undo();
-      if (id === 'history.redo') redo();
-      closePopup(POPUP_IDS.commandPalette);
-    },
-    [closePopup, redo, undo],
-  );
   const activatePanel = useCallback((panelId: string) => {
     const route = featureActivationRoute(panelId);
     if (route?.hub === 'create') setCreateTool(route.toolId);
@@ -4784,7 +4789,7 @@ function EditorWorkspace({
         }
         if (browserExportResult.blob === undefined)
           throw new Error('Browser export did not produce a downloadable MP4');
-        setExportStatus('Staging export for Worker verification…');
+        setExportStatus('Staging export for verification…');
         // Hashed in slices: the staged file is never copied into script memory as one buffer.
         const stagedBlob = browserExportResult.blob;
         const stagedSha256 = await sha256OfBlob(stagedBlob, { signal: abortController.signal });
@@ -4851,7 +4856,7 @@ function EditorWorkspace({
             audio,
           }),
         );
-        setExportStatus('Waiting for Worker export verification…');
+        setExportStatus('Waiting for export verification…');
         let workerJob: BrowserJob | undefined;
         // A Worker outage must surface as a retryable export failure instead
         // of leaving the editor in an unbounded polling loop.  The browser
@@ -4862,7 +4867,7 @@ function EditorWorkspace({
           workerJob = (
             await mediaControlPlaneClient.jobs(controlPlaneProject.controlPlaneProjectId)
           ).find((candidate) => candidate.id === workerJobId);
-          if (workerJob === undefined) throw new Error('Export Worker job disappeared');
+          if (workerJob === undefined) throw new Error('Export job disappeared');
           if (
             workerJob.state === 'completed' ||
             workerJob.state === 'failed' ||
@@ -4870,9 +4875,7 @@ function EditorWorkspace({
           )
             break;
           if (Date.now() >= workerExportDeadline)
-            throw new Error(
-              'Export Worker verification timed out. Check Worker connectivity and retry.',
-            );
+            throw new Error('Export verification timed out. Check the connection and retry.');
           setExportProgress(0.98);
           await new Promise<void>((resolve, reject) => {
             let settled = false;
@@ -4892,12 +4895,12 @@ function EditorWorkspace({
           });
         }
         abortController.signal.throwIfAborted();
-        if (workerJob === undefined) throw new Error('Export Worker job was not found');
+        if (workerJob === undefined) throw new Error('Export job was not found');
         if (workerJob.state === 'failed')
-          throw new Error(workerJob.error ?? 'Worker export verification failed');
-        if (workerJob.state === 'canceled') throw new Error('Worker export was canceled');
+          throw new Error(workerJob.error ?? 'Export verification failed');
+        if (workerJob.state === 'canceled') throw new Error('Export was canceled');
         if (workerJob.derivative === undefined)
-          throw new Error('Worker export completed without a verified derivative');
+          throw new Error('Export completed without a verified derivative');
         const remuxedBlob = await mediaControlPlaneClient.derivativeBytes(
           controlPlaneProject.controlPlaneProjectId,
           stagedExportAssetId,
@@ -5195,14 +5198,20 @@ function EditorWorkspace({
         case 'edit.redo':
           redo();
           break;
-        case 'edit.delete':
+        case 'clip.delete':
           runSelectedClipAction('delete');
           break;
-        case 'edit.duplicate':
+        case 'clip.duplicate':
           runSelectedClipAction('duplicate');
           break;
+        case 'clip.speed':
+          activatePanel('inspector');
+          setInspectorTabRequest((current) => ({
+            tab: 'speed',
+            serial: (current?.serial ?? 0) + 1,
+          }));
+          break;
         case 'edit.commandPalette':
-        case 'view.commandPalette':
           openPopup(POPUP_IDS.commandPalette);
           break;
         case 'clip.split':
@@ -5259,6 +5268,13 @@ function EditorWorkspace({
       runSelectedClipAction,
       undo,
     ],
+  );
+  const runPaletteAction = useCallback(
+    (id: AppMenuActionId) => {
+      closePopup(POPUP_IDS.commandPalette);
+      runMenuAction(id);
+    },
+    [closePopup, runMenuAction],
   );
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -5924,6 +5940,8 @@ function EditorWorkspace({
       return (
         <InspectorPanel
           object={object}
+          tabRequest={context.inspectorTabRequest}
+          onTabRequestApplied={context.onInspectorTabRequestApplied}
           {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
           selectedKind={
             selectedElementKind === undefined
@@ -6977,6 +6995,8 @@ function EditorWorkspace({
     if (processFilter === 'completed') return entry.status === 'completed';
     return true;
   });
+  // Clip > Speed and the palette entry follow the Inspector's rule: only a video clip has a Speed tab.
+  const supportsSpeed = selectedClipSupportsSpeed(session.timelineProject, state.selectedIds);
   const processGroups = [
     {
       id: 'running',
@@ -7051,6 +7071,7 @@ function EditorWorkspace({
                 canUndo={session.canUndo}
                 canRedo={session.canRedo}
                 hasSelection={state.selectedIds.length > 0}
+                supportsSpeed={supportsSpeed}
                 exporting={exporting}
                 onAction={runMenuAction}
               />
@@ -7210,26 +7231,28 @@ function EditorWorkspace({
                 {processesMenu.open && (
                   <section className="header-dropdown" role="dialog" aria-label="Recent processes">
                     <h3>Process Center</h3>
-                    <div className="process-filter-row" role="group" aria-label="Process filter">
-                      {(
-                        [
-                          ['active', 'Active', processCounts.active],
-                          ['attention', 'Needs attention', processCounts.attention],
-                          ['completed', 'Completed', processCounts.completed],
-                          ['all', 'All', exportHistory.length],
-                        ] as const
-                      ).map(([id, label, count]) => (
-                        <button
-                          key={id}
-                          type="button"
-                          className="process-filter-button"
-                          aria-pressed={processFilter === id}
-                          onClick={() => setProcessFilter(id)}
-                        >
-                          {label} <span>{count}</span>
-                        </button>
-                      ))}
-                    </div>
+                    {exportHistory.length > 0 && (
+                      <div className="process-filter-row" role="group" aria-label="Process filter">
+                        {(
+                          [
+                            ['active', 'Active', processCounts.active],
+                            ['attention', 'Needs attention', processCounts.attention],
+                            ['completed', 'Completed', processCounts.completed],
+                            ['all', 'All', exportHistory.length],
+                          ] as const
+                        ).map(([id, label, count]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            className="process-filter-button"
+                            aria-pressed={processFilter === id}
+                            onClick={() => setProcessFilter(id)}
+                          >
+                            {label} <span>{count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     {visibleProcesses.length === 0 ? (
                       <p className="empty-hint">No exports yet. Use Export to create an MP4.</p>
                     ) : (
@@ -7400,12 +7423,26 @@ function EditorWorkspace({
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search commands"
               />
-              {searchActions(query).map((action) => (
-                <button key={action.id} onClick={() => executeAction(action.id)}>
-                  {action.title}
-                  <kbd>{action.shortcut}</kbd>
-                </button>
-              ))}
+              {searchActions(query).map((action) => {
+                const disabled = itemDisabled(action.item, {
+                  canUndo: session.canUndo,
+                  canRedo: session.canRedo,
+                  hasSelection: state.selectedIds.length > 0,
+                  supportsSpeed,
+                  exporting,
+                });
+                return (
+                  <button
+                    key={action.id}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => runPaletteAction(action.id)}
+                  >
+                    {action.title}
+                    {action.shortcut !== '' && <kbd>{action.shortcut}</kbd>}
+                  </button>
+                );
+              })}
             </section>
           )}
           <video ref={playbackVideoRef} className="playback-media" playsInline muted={false} />
@@ -7491,6 +7528,8 @@ function EditorWorkspace({
               agentContext,
               agentPolicy,
               agentPanelCommand,
+              inspectorTabRequest,
+              onInspectorTabRequestApplied,
               creativeBriefOptedIn,
               creativeBriefRunner,
               onCreativeBriefOptIn,
@@ -7673,23 +7712,16 @@ function EditorWorkspace({
                   </button>
                 </header>
                 <div className="shortcuts-list">
-                  {[
-                    { keys: 'Ctrl+Z', action: 'Undo' },
-                    { keys: 'Ctrl+Y', action: 'Redo' },
-                    { keys: 'Ctrl+K', action: 'Command palette' },
-                    { keys: 'Ctrl+D', action: 'Duplicate clip' },
-                    { keys: 'Space', action: 'Toggle playback' },
-                    { keys: '← / →', action: 'Step back / forward 1s' },
-                    { keys: 'Shift+← / Shift+→', action: 'Fine step 100ms' },
-                    { keys: 'Home / End', action: 'Go to start / end' },
-                    { keys: 'Delete / Backspace', action: 'Delete selected clip or marker' },
-                    { keys: 'S', action: 'Split clip at playhead' },
-                    { keys: '?', action: 'Toggle this panel' },
-                  ].map(({ keys, action }) => (
-                    <div key={keys} className="shortcut-row">
-                      <span className="shortcut-action">{action}</span>
-                      <kbd className="shortcut-keys">{keys}</kbd>
-                    </div>
+                  {SHORTCUT_REFERENCE.map((group) => (
+                    <section key={group.title} className="shortcut-group" aria-label={group.title}>
+                      <h3 className="shortcut-group-heading">{group.title}</h3>
+                      {group.rows.map(({ keys, action }) => (
+                        <div key={keys} className="shortcut-row">
+                          <span className="shortcut-action">{action}</span>
+                          <kbd className="shortcut-keys">{keys}</kbd>
+                        </div>
+                      ))}
+                    </section>
                   ))}
                 </div>
               </div>

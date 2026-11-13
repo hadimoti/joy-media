@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolvePreviewQuality } from '../preview-quality.js';
 import { monitorPixelScale } from './monitor-pixel-scale.js';
 
 describe('monitorPixelScale', () => {
@@ -12,6 +13,11 @@ describe('monitorPixelScale', () => {
 
   it('gives one device pixel per CSS pixel at full quality on a 1x screen', () => {
     expect(monitorPixelScale('full', 1)).toBe(1);
+  });
+
+  it('uses the same full-resolution pixel scale for Auto while paused', () => {
+    const autoWhenPaused = resolvePreviewQuality('auto', 'quarter', true);
+    expect(monitorPixelScale(autoWhenPaused, 1.5)).toBe(monitorPixelScale('full', 1.5));
   });
 
   it('treats a missing or broken pixel ratio as 1 and keeps the 0.1 floor', () => {

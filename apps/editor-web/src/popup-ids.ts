@@ -15,6 +15,7 @@ export const POPUP_IDS = {
   recentProcesses: 'recent-processes',
   workspaceSwitcher: 'workspace-switcher',
   canvasFormat: 'canvas-format',
+  audioEngineStatus: 'audio-engine-status',
 } as const;
 
 const APP_MENU_PREFIX = 'app-menu:';

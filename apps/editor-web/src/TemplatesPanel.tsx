@@ -211,6 +211,12 @@ export function TemplatesPanel({ onApplyTemplate, showToast, storage }: Template
   );
 }
 
+/**
+ * The thumbnail is requested 240 px high so it stays sharp on dense screens;
+ * it was 120 px before (T-D15).
+ */
+export const TEMPLATE_THUMB_PX = 240;
+
 function TemplatePreviewThumb({
   template,
 }: {
@@ -235,7 +241,7 @@ function TemplatePreviewThumb({
   useEffect(() => {
     if (!firstSceneId) return;
     let cancelled = false;
-    void getFirstPartySceneThumbUrl(firstSceneId, 120).then((next) => {
+    void getFirstPartySceneThumbUrl(firstSceneId, TEMPLATE_THUMB_PX).then((next) => {
       if (!cancelled) setUrl(next);
     });
     return () => {
