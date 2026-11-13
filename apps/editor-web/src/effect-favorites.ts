@@ -55,8 +55,11 @@ export function migrateEffectFavorites(
 }
 
 /**
- * The saved favourites for the library. This only reads: the legacy list is
- * merged in on every read, and it is retired by the first write (see
+ * The saved favourites for the library. This only reads. The versioned key is
+ * authoritative once it exists, even when it is empty: the legacy list is then
+ * ignored, so a favourite removed after the migration cannot come back if the
+ * legacy key was never deleted. The legacy list is read only while the versioned
+ * key is absent, and it is retired by the first write (see
  * {@link writeEffectFavorites}), never here.
  */
 export function readEffectFavorites(
@@ -64,11 +67,25 @@ export function readEffectFavorites(
   knownIds: readonly string[] = [],
 ): Set<string> {
   if (storage === undefined) return new Set();
-  const stored = [
-    ...parseIds(readKey(storage, LEGACY_EFFECT_FAVORITES_KEY)),
-    ...parseIds(readKey(storage, EFFECT_FAVORITES_KEY)),
-  ];
-  return new Set(migrateEffectFavorites(stored, knownIds));
+  const versioned = readVersionedKey(storage);
+  // Unreadable is not absent: never fall back to the legacy list then.
+  if (versioned === undefined) return new Set();
+  const raw = versioned.value ?? readKey(storage, LEGACY_EFFECT_FAVORITES_KEY);
+  return new Set(migrateEffectFavorites(parseIds(raw), knownIds));
+}
+
+/**
+ * The versioned key's value: `null` when the key is absent, `undefined` when the
+ * storage could not be read at all (so it must not be treated as absent).
+ */
+function readVersionedKey(
+  storage: FavoritesStorage,
+): { readonly value: string | null } | undefined {
+  try {
+    return { value: storage.getItem(EFFECT_FAVORITES_KEY) };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -95,17 +112,22 @@ export function writeEffectFavorites(
 }
 
 /**
- * Add or remove one favourite and save the result. This is a user action, so it
- * is where the legacy list is merged in before the change: the write then keeps
- * every legacy favourite and retires the legacy key.
+ * Add or remove one favourite and save the result. While the versioned key is
+ * absent, this is the one-time migration: the legacy list is merged in before
+ * the change, and the write keeps every legacy favourite. Once the versioned key
+ * exists, the legacy list is never merged again.
  */
 export function toggleEffectFavorite(
   storage: FavoritesStorage | undefined,
   favorites: ReadonlySet<string>,
   effectId: string,
 ): Set<string> {
+  const versioned = storage === undefined ? undefined : readVersionedKey(storage);
+  const migrating = versioned?.value === null;
   const legacy =
-    storage === undefined ? [] : parseIds(readKey(storage, LEGACY_EFFECT_FAVORITES_KEY));
+    storage === undefined || !migrating
+      ? []
+      : parseIds(readKey(storage, LEGACY_EFFECT_FAVORITES_KEY));
   const next = new Set([...favorites, ...legacy]);
   if (next.has(effectId)) next.delete(effectId);
   else next.add(effectId);

@@ -1,9 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { validateJoyProjectV1 } from '@joy-media/project-schema';
 import { effectRegistry, registerBuiltins } from '@joy-media/visual-effects';
 import { buildTimelineElementsShowcase } from './timeline-elements-showcase.js';
 import { effectsByObjectIdAt } from './adjustment-render.js';
 import { libraryHomeOf } from './library-homes.js';
+import { importProjectPackage, parseProjectPackage } from './project-package.js';
+import { readProjectBundle } from './project-lifecycle.js';
 
 const HALFTONE_PARAMS = {
   cellSize: 10,
@@ -87,6 +91,67 @@ describe('a project that uses a moved item (T-V06)', () => {
       expect(effectRegistry.getEffect(effect.effectId)?.id).toBe(effect.effectId);
     }
     expect(libraryHomeOf('halftone')).toBe('effects');
+    expect(libraryHomeOf('gaussian-blur')).toBe('filters');
+  });
+});
+
+/**
+ * A real file in the shape the previous release saved (a JOY project package,
+ * schemaVersion 1), with a moved item (halftone), an Effect that never moved
+ * (brightness-contrast) and a Filter that stayed (gaussian-blur). It is loaded
+ * through the same path a user's opened file takes: parse, import, read the bundle.
+ */
+const OLD_RELEASE_PACKAGE = fileURLToPath(
+  new URL('./fixtures/old-release-moved-items-package.json', import.meta.url),
+);
+
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+    removeItem: (key: string) => {
+      values.delete(key);
+    },
+  };
+}
+
+describe('an old-release project file with moved items (T-V06 fixture)', () => {
+  it('loads through the project loader and resolves each effect node exactly as saved', async () => {
+    registerBuiltins();
+    const storage = memoryStorage();
+    const pkg = parseProjectPackage(JSON.parse(readFileSync(OLD_RELEASE_PACKAGE, 'utf8')));
+    const imported = await importProjectPackage(storage, pkg, {
+      createId: () => 'old-release-project',
+      now: () => '2026-11-13T00:00:00.000Z',
+    });
+    const bundle = readProjectBundle(storage, imported.entry);
+
+    const resolved = effectsByObjectIdAt(bundle.visual, bundle.timeline, 1_000_000)['image-object'];
+    expect(resolved).toEqual([
+      { id: 'old-halftone', effectId: 'halftone', enabled: true, params: HALFTONE_PARAMS },
+      {
+        id: 'old-brightness',
+        effectId: 'brightness-contrast',
+        enabled: true,
+        params: { brightness: 0.1, contrast: -0.2 },
+      },
+      { id: 'old-blur', effectId: 'gaussian-blur', enabled: true, params: { amount: 4 } },
+    ]);
+  });
+
+  it('keeps each registry category, so the render routing is unchanged', () => {
+    registerBuiltins();
+    expect(effectRegistry.getEffect('halftone')?.category).toBe('artistic');
+    expect(effectRegistry.getEffect('brightness-contrast')?.category).toBe('color');
+    expect(effectRegistry.getEffect('gaussian-blur')?.category).toBe('blur');
+  });
+
+  it('shows the moved item in Effects and the kept Filter in Filters', () => {
+    expect(libraryHomeOf('halftone')).toBe('effects');
+    expect(libraryHomeOf('brightness-contrast')).toBe('effects');
     expect(libraryHomeOf('gaussian-blur')).toBe('filters');
   });
 });

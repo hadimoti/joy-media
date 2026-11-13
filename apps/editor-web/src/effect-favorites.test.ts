@@ -50,11 +50,55 @@ describe('library favourites (T-V06)', () => {
     expect([...readEffectFavorites(storage, KNOWN)]).toEqual(['halftone']);
   });
 
-  it('merges an unversioned list written by an earlier build', () => {
+  it('reads an unversioned list written by an earlier build while the versioned key is absent', () => {
     const storage = memoryStore();
     storage.setItem('joy-media.effect-favorites', '["sepia"]');
+    expect([...readEffectFavorites(storage, KNOWN)]).toEqual(['sepia']);
+  });
+
+  it('ignores legacy ids once the versioned key exists, even if it is empty', () => {
+    const storage = memoryStore();
+    storage.setItem('joy-media.effect-favorites', '["sepia","halftone"]');
     storage.setItem(EFFECT_FAVORITES_KEY, '["halftone"]');
-    expect([...readEffectFavorites(storage, KNOWN)].sort()).toEqual(['halftone', 'sepia']);
+    expect([...readEffectFavorites(storage, KNOWN)]).toEqual(['halftone']);
+
+    storage.setItem(EFFECT_FAVORITES_KEY, '[]');
+    expect([...readEffectFavorites(storage, KNOWN)]).toEqual([]);
+  });
+
+  it('a removed favourite stays removed after reload when removing the legacy key fails', () => {
+    const storage = memoryStore();
+    storage.setItem('joy-media.effect-favorites', '["sepia"]');
+    const failingRemove = {
+      ...storage,
+      removeItem: () => {
+        throw new Error('storage unavailable');
+      },
+    };
+    const before = readEffectFavorites(failingRemove, KNOWN);
+    expect([...before]).toEqual(['sepia']);
+
+    // The versioned write succeeds; the legacy key cannot be deleted.
+    expect([...toggleEffectFavorite(failingRemove, before, 'sepia')]).toEqual([]);
+    expect(storage.map.get(EFFECT_FAVORITES_KEY)).toBe('[]');
+    expect(storage.map.get('joy-media.effect-favorites')).toBe('["sepia"]');
+
+    // Reload: the stale legacy favourite is not merged back in.
+    expect([...readEffectFavorites(storage, KNOWN)]).toEqual([]);
+  });
+
+  it('does not restore legacy favourites when the versioned key cannot be read', () => {
+    const storage = memoryStore();
+    storage.setItem('joy-media.effect-favorites', '["sepia"]');
+    const unreadable = {
+      ...storage,
+      getItem: (key: string) => {
+        if (key === EFFECT_FAVORITES_KEY) throw new Error('storage unavailable');
+        return storage.getItem(key);
+      },
+    };
+    expect([...readEffectFavorites(unreadable, KNOWN)]).toEqual([]);
+    expect([...toggleEffectFavorite(unreadable, new Set(), 'halftone')]).toEqual(['halftone']);
   });
 
   it('tolerates malformed storage', () => {
