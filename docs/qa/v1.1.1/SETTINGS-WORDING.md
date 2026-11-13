@@ -109,6 +109,32 @@ Each one has one plain sentence, and the default says so.
 
 ---
 
+## 4a. The quality check and where its pictures go (T-B05)
+
+These words are new in T-B05. There was no old text. The quality check is not available yet; T-B05 saves preferences for it. These words describe saved limits and privacy choices and do not mean picture handling is implemented. They are not prices or caps on run cost. The defaults are the ones in ADR-0045 section 8: 12 frames a check, 16 frames a run, 3 fix rounds, and the switch off. A policy saved before these settings loads with those defaults, and nothing else already saved changes.
+
+| Old text       | New text                                                                                                                                           | Where it is                                                         | Owner's answer |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------- |
+| (new in T-B05) | **Quality check**                                                                                                                                  | Safety and limits page, the third block                             |                |
+| (new in T-B05) | **{frameCount} a check, {fixRoundCount}**                                                                                                          | Safety and limits page, the small tag on that block                 |                |
+| (new in T-B05) | These settings are saved for a future quality check. They set how many pictures a check may send to a model and how many fix rounds a run may use. | Safety and limits page, under the block's title                     |                |
+| (new in T-B05) | **Frames per check**                                                                                                                               | Safety and limits page, the first field of the block                |                |
+| (new in T-B05) | Saved limit for pictures in one future check. Stays between 1 and 16.                                                                              | Safety and limits page, under the first field                       |                |
+| (new in T-B05) | **Frames per run**                                                                                                                                 | Safety and limits page, the second field of the block               |                |
+| (new in T-B05) | Saved limit for all pictures in one future run, across every fix round. Stays between 12 and 48.                                                   | Safety and limits page, under the second field                      |                |
+| (new in T-B05) | **Fix rounds**                                                                                                                                     | Safety and limits page, the third field of the block                |                |
+| (new in T-B05) | Saved limit for how many times a future run may fix what it finds and check again. Stays between 1 and 3.                                          | Safety and limits page, under the third field                       |                |
+| (new in T-B05) | **Never send frames to a remote model**                                                                                                            | Safety and limits page, the switch at the foot of the block         |                |
+| (new in T-B05) | Saved for the quality check. Once the quality check exists it will keep pictures on this PC.                                                       | Safety and limits page, under the switch                            |                |
+| (new in T-B05) | **Quality check privacy notice**                                                                                                                   | The notice at the foot of the block                                 |                |
+| (new in T-B05) | For a future quality check, the saved limits are {perCheck} pictures per check and {perRun} across the run, with {provider}, model {model}.        | The notice at the foot of the block, when a model is connected      |                |
+| (new in T-B05) | No model is connected. These settings are saved for a future quality check.                                                                        | The notice at the foot of the block, when no model is connected     |                |
+| (new in T-B05) | Saved for the quality check. Once the quality check exists it will keep pictures on this PC.                                                       | The notice at the foot of the block, when the switch is on          |                |
+| (new in T-B05) | Local-only mode is saved for the quality check. Once it exists, pictures will stay on this PC.                                                     | The notice at the foot of the block, in local-only mode             |                |
+| (new in T-B05) | Picture approval is not available yet. This notice only shows saved settings.                                                                      | The notice at the foot of the block, under the saved model settings |                |
+
+---
+
 ## 5. Where the settings and the keys are kept
 
 | Old text                                                                        | New text                                                               | Where it is                                          | Owner's answer |
