@@ -927,10 +927,10 @@ main {
   transform: translateX(-50%);
   z-index: 40;
   padding: 0.28rem 0.45rem;
-  border: 1px solid #5a5a60;
+  border: 1px solid var(--joy-border-hover);
   border-radius: 0.25rem;
-  background: #1c1c1e;
-  color: #e8e8ea;
+  background: var(--joy-bg-panel);
+  color: var(--joy-text);
   font-size: var(--joy-type-xs);
   font-weight: 500;
   line-height: 1.2;
@@ -1408,7 +1408,7 @@ a.icon-button {
   border: 0;
   border-radius: 0.2rem;
   background: transparent;
-  color: #9d9da1;
+  color: var(--joy-text-secondary);
   box-sizing: border-box;
   box-shadow: none;
   cursor: pointer;
@@ -1424,13 +1424,13 @@ a.icon-button {
   padding: 0 0.45rem;
   font-size: var(--joy-type-xs);
   font-weight: 550;
-  color: #c8c8cc;
+  color: var(--joy-text-secondary);
 }
 .icon-button:hover:not(:disabled) {
-  background: #2a2a2e;
+  background: var(--joy-bg-elevated);
   border: 0;
   box-shadow: none;
-  color: #e8e8ea;
+  color: var(--joy-text);
 }
 .icon-button:disabled {
   opacity: 0.35;
@@ -1443,7 +1443,7 @@ a.icon-button {
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: var(--joy-accent, var(--joy-accent));
+  color: var(--joy-accent);
 }
 .icon-button svg {
   flex: none;
@@ -1473,10 +1473,10 @@ a.icon-button {
   transform: translateX(-50%);
   z-index: 40;
   padding: 0.28rem 0.45rem;
-  border: 1px solid #5a5a60;
+  border: 1px solid var(--joy-border-hover);
   border-radius: 0.25rem;
-  background: #1c1c1e;
-  color: #e8e8ea;
+  background: var(--joy-bg-panel);
+  color: var(--joy-text);
   font-size: var(--joy-type-xs);
   font-weight: 500;
   line-height: 1.2;
@@ -1494,12 +1494,12 @@ a.icon-button {
   border: 1px solid transparent;
   border-radius: 0.3rem;
   background: transparent;
-  color: #c8c8cc;
+  color: var(--joy-text-secondary);
 }
 .icon-tool:hover,
 .icon-tool[aria-pressed='true'] {
-  border-color: #5a5a60;
-  background: #252528;
+  border-color: var(--joy-border-hover);
+  background: var(--joy-bg-hover);
   color: var(--joy-accent);
 }
 .control-row {
@@ -1989,10 +1989,10 @@ h2 {
   transform: translateX(-50%);
   z-index: 40;
   padding: 0.2rem 0.35rem;
-  border: 1px solid #5a5a60;
+  border: 1px solid var(--joy-border-hover);
   border-radius: 0.25rem;
-  background: #1c1c1e;
-  color: #e8e8ea;
+  background: var(--joy-bg-panel);
+  color: var(--joy-text);
   font-size: var(--joy-type-xs);
   font-weight: 500;
   line-height: 1.2;
@@ -6906,7 +6906,7 @@ label {
   letter-spacing: 0.02em;
 }
 .asset-bulk-bar .icon-button {
-  color: #b0b0b4;
+  color: var(--joy-text-secondary);
 }
 .asset-card-tick {
   display: grid;
@@ -7083,8 +7083,8 @@ label {
   height: 1.55rem;
   margin: 0;
   border: 0;
-  background: rgb(14 14 16 / 72%);
-  color: #c8c8cc;
+  background: color-mix(in srgb, var(--joy-bg-inset) 72%, transparent);
+  color: var(--joy-text-secondary);
 }
 .asset-card-media:disabled {
   opacity: 1;
@@ -8119,10 +8119,10 @@ label {
   transform: translateX(-50%);
   z-index: 40;
   padding: 0.28rem 0.45rem;
-  border: 1px solid #5a5a60;
+  border: 1px solid var(--joy-border-hover);
   border-radius: 0.25rem;
-  background: #1c1c1e;
-  color: #e8e8ea;
+  background: var(--joy-bg-panel);
+  color: var(--joy-text);
   font-size: var(--joy-type-xs);
   font-weight: 500;
   line-height: 1.2;
@@ -13058,7 +13058,7 @@ label {
   min-height: 0;
   overflow: auto;
   padding: 0.55rem 0.65rem;
-  color: var(--joy-text-primary);
+  color: var(--joy-text);
 }
 .color-target-bar,
 .scope-source {
@@ -16042,6 +16042,9 @@ label {
 .workflow-badge.is-group {
   color: var(--joy-text-secondary);
   background: rgba(255, 255, 255, 0.07);
+  /* This variant shows a name, not an uppercase label, so it takes the
+     ordinary text step rather than the 11 px one. */
+  font-size: var(--joy-type-xs);
   text-transform: none;
   letter-spacing: 0;
 }
@@ -16937,8 +16940,8 @@ label {
   margin: 0;
   padding: 0.3rem 0.5rem;
   font-size: var(--joy-type-xs);
-  color: var(--joy-text-error, #e05);
-  background: color-mix(in srgb, var(--joy-text-error, #e05) 10%, transparent);
+  color: var(--joy-danger);
+  background: color-mix(in srgb, var(--joy-danger) 10%, transparent);
   border-radius: var(--radius-xs);
 }
 

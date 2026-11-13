@@ -117,6 +117,24 @@ describe('the three text roles (T-D09)', () => {
     expect(luminanceOf(secondary!)).toBeGreaterThan(luminanceOf(faint!));
   });
 
+  it('names no text role that does not exist', () => {
+    // A role that is used but never declared paints nothing at all, so the
+    // text falls back to whatever the element inherits. Every --joy-text-*
+    // a stylesheet names has to be one of the roles above.
+    const declared = new Set([...tokens.keys()].filter((name) => name.startsWith('--joy-text')));
+    const offenders: string[] = [];
+
+    for (const stylesheet of stylesheets()) {
+      const source = sourceOf(stylesheet);
+      for (const match of source.matchAll(/var\(\s*(--joy-text[\w-]*)/g)) {
+        const name = match[1] ?? '';
+        if (!declared.has(name)) offenders.push(`${stylesheet} names ${name}`);
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
   it('holds primary and secondary to 4.5:1 on the panel background', () => {
     const panel = tokens.get('--joy-bg-panel');
     expect(panel, 'the panel background must be a token').toBeTruthy();
