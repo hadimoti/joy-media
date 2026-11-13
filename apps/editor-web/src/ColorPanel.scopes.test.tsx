@@ -176,6 +176,46 @@ describe('Color panel scopes', () => {
     expect(width).toBeGreaterThanOrEqual(300);
   });
 
+  it('moves the focus into the scopes window and gives it back on close', async () => {
+    const { container: panel } = await mountPanel();
+    const openScopes = panel.querySelector<HTMLButtonElement>(
+      'button[title*="scopes in a window"]',
+    );
+
+    await act(async () => {
+      openScopes?.click();
+    });
+    const closeButton = document.body.querySelector<HTMLButtonElement>(
+      '[aria-label="Close scopes window"]',
+    );
+    expect(closeButton).not.toBeNull();
+    // The focus is inside the window, not left behind in the panel.
+    expect(document.activeElement).toBe(closeButton);
+
+    await act(async () => {
+      closeButton?.click();
+    });
+    expect(document.body.querySelector('.scope-window')).toBeNull();
+    expect(document.activeElement).toBe(openScopes);
+  });
+
+  it('gives the focus back when the window closes with Escape', async () => {
+    const { container: panel } = await mountPanel();
+    const openScopes = panel.querySelector<HTMLButtonElement>(
+      'button[title*="scopes in a window"]',
+    );
+    await act(async () => {
+      openScopes?.click();
+    });
+    expect(document.activeElement).not.toBe(openScopes);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(document.body.querySelector('.scope-window')).toBeNull();
+    expect(document.activeElement).toBe(openScopes);
+  });
+
   it('offers an Undo toast when the grade is reset', async () => {
     const grade = createIdentityColorGrade();
     const project: JoyProjectV1 = {

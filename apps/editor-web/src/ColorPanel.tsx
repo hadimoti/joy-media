@@ -160,6 +160,8 @@ export function ColorPanel({
   const editorContext = useContext(EditorPanelContext);
   const showToast = editorContext?.showToast;
   const [scopesWindowOpen, setScopesWindowOpen] = useState(false);
+  const scopesButtonRef = useRef<HTMLButtonElement>(null);
+  const scopesWindowWasOpen = useRef(false);
   const [scopesWindowGeometry, setScopesWindowGeometry] = useState<ColorScopesWindowGeometry>(
     () => {
       // A position remembered on a bigger screen is fitted back into this one,
@@ -213,6 +215,13 @@ export function ColorPanel({
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  // The window takes the focus when it opens, so it has to give it back when
+  // it closes: the colourist continues where they left off.
+  useEffect(() => {
+    if (scopesWindowWasOpen.current && !scopesWindowOpen) scopesButtonRef.current?.focus();
+    scopesWindowWasOpen.current = scopesWindowOpen;
+  }, [scopesWindowOpen]);
 
   const commit = (next: ColorGradeV2 = draft) => {
     if (target === 'clip' && (!clipAvailable || selectedClipId === undefined)) return;
@@ -475,6 +484,7 @@ export function ColorPanel({
           )}
           <button
             type="button"
+            ref={scopesButtonRef}
             className="color-header-button"
             aria-pressed={scopesWindowOpen}
             title="Open the scopes in a window you can move and resize"
@@ -1460,6 +1470,7 @@ function FloatingScopesWindow({
   readonly onClose: () => void;
 }) {
   const [scope, setScope] = useState<ScopeKind>('waveform');
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dragRef = useRef<
     | {
         readonly mode: 'move' | 'resize';
@@ -1469,6 +1480,12 @@ function FloatingScopesWindow({
       }
     | undefined
   >(undefined);
+
+  // The window takes the focus when it opens, so the colourist can reach every
+  // scope control with the keyboard straight away.
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1541,6 +1558,7 @@ function FloatingScopesWindow({
         <span className="scope-window-hint">Drag to move</span>
         <button
           type="button"
+          ref={closeButtonRef}
           className="icon-button"
           aria-label="Close scopes window"
           title="Close the scopes window"
