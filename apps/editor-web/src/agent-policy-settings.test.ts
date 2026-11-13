@@ -30,7 +30,7 @@ describe('AgentPolicyPreferences v2', () => {
   });
 
   it('keeps a cost limit the owner saved, whatever it is', () => {
-    // Only the default changes. A limit that was saved is the owner's own.
+    // A limit that was saved is the owner's own, whatever it is.
     const store = storage();
     saveAgentPolicy(store, { ...DEFAULT_AGENT_POLICY, maxCostPerRunUsd: 10 });
 

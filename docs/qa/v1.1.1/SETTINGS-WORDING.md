@@ -104,7 +104,7 @@ Each one has one plain sentence, and the default says so.
 **The default number stays at $10.00.**
 
 - A **fresh install** starts at $10.00.
-- **A number you already saved stays as it is.** Nothing is raised or lowered behind your back; only the default for a new install changes.
+- **A number you already saved stays as it is.** Nothing is raised or lowered behind your back; no default changes in this card.
 - The line "Prices are estimates from the provider. JOY Media itself charges nothing." is there because the number is an estimate set by the provider, not a bill from JOY Media.
 
 ---
