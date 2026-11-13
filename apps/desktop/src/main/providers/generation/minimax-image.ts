@@ -16,7 +16,7 @@ import { parseReply, replyFailure } from './minimax-reply.js';
 import { sniffImageMime, type GenerationOutcome, type GenerationRoute } from './types.js';
 
 export interface MiniMaxImageInput {
-  /** The region base URL of the profile, e.g. `https://api.minimax.io/v1`. */
+  /** The region base URL of the profile, e.g. the MiniMax API address for its region. */
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly prompt: string;

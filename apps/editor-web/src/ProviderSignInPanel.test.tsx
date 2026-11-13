@@ -177,6 +177,25 @@ describe('ProviderSignInPanel', () => {
     ).toHaveLength(1);
   });
 
+  it('says on the ChatGPT card that the sign-in cannot make pictures, and on no other card', async () => {
+    installDesktopBridge();
+    await mount();
+
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) await openAccordion(provider);
+
+    const note = 'ChatGPT sign-in cannot make pictures. Use MiniMax or an API key.';
+    const chatGptCard = container
+      .querySelector('button[aria-label="Toggle ChatGPT connection routes"]')
+      ?.closest('.joy-accordion-item');
+    expect(chatGptCard?.textContent).toContain(note);
+    expect(
+      [...container.querySelectorAll('p')].filter((paragraph) => paragraph.textContent === note),
+    ).toHaveLength(1);
+    expect(container.textContent).not.toContain('Kimi cannot make');
+    expect(container.textContent).not.toContain('xAI cannot make');
+    expect(container.textContent).not.toContain('Can make:');
+  });
+
   it('signs in with xAI from the primary route and reports the result there', async () => {
     const invoke = installDesktopBridge();
     const onSignedIn = vi.fn();
