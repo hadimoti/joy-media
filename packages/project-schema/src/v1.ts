@@ -451,7 +451,16 @@ export interface TransitionV1 {
 }
 
 export type ExportPresetId =
-  'social-h264-aac' | 'reels-1080' | 'shorts-1080' | 'youtube-1080' | 'high-bitrate';
+  | 'social-h264-aac'
+  | 'reels-1080'
+  | 'shorts-1080'
+  | 'youtube-1080'
+  | 'high-bitrate'
+  | 'tiktok-1080'
+  | 'instagram-feed-4x5'
+  | 'square-1080'
+  | 'landscape-4k'
+  | 'custom';
 
 export type JsonValue =
   null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };

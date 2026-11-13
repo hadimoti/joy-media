@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { ChevronDownIcon } from './icons.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
+import { usePopup } from './popup-manager.js';
+import { POPUP_IDS } from './popup-ids.js';
 import { WORKSPACE_PRESETS, workspacePresetLabel } from './workspace-presets.js';
 
 export function WorkspaceSwitcher({
@@ -12,21 +14,14 @@ export function WorkspaceSwitcher({
   readonly onChange: (value: WorkspacePresetId) => void;
   readonly onReset: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  // Opening this menu closes any other header popup; outside click and Escape close it (OB-18).
+  const popup = usePopup(POPUP_IDS.workspaceSwitcher);
+  const open = popup.open;
   const optionRefs = useRef(new Map<WorkspacePresetId, HTMLButtonElement>());
 
   useEffect(() => {
     if (!open) return;
-    const closeOnOutside = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setOpen(false);
-        return;
-      }
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
       const index = WORKSPACE_PRESETS.findIndex((preset) => preset.id === value);
@@ -40,17 +35,15 @@ export function WorkspaceSwitcher({
       const nextPreset = WORKSPACE_PRESETS[next];
       if (nextPreset !== undefined) optionRefs.current.get(nextPreset.id)?.focus();
     };
-    document.addEventListener('pointerdown', closeOnOutside);
     document.addEventListener('keydown', onKeyDown);
     window.setTimeout(() => optionRefs.current.get(value)?.focus(), 0);
     return () => {
-      document.removeEventListener('pointerdown', closeOnOutside);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open, value]);
 
   return (
-    <div className="workspace-switcher" ref={rootRef}>
+    <div className="workspace-switcher" ref={popup.rootRef}>
       <button
         type="button"
         className="workspace-switcher-trigger"
@@ -58,7 +51,7 @@ export function WorkspaceSwitcher({
         aria-expanded={open}
         aria-label="Workspace preset"
         title="Workspace preset"
-        onClick={() => setOpen((current) => !current)}
+        onClick={(event) => popup.toggle(event.currentTarget)}
       >
         <span className="workspace-switcher-chevron" aria-hidden="true">
           <ChevronDownIcon />
@@ -79,7 +72,7 @@ export function WorkspaceSwitcher({
               }}
               onClick={() => {
                 onChange(preset.id);
-                setOpen(false);
+                popup.close();
               }}
             >
               <span>
@@ -89,7 +82,14 @@ export function WorkspaceSwitcher({
               {preset.id === value && <span aria-label="Current workspace">✓</span>}
             </button>
           ))}
-          <button type="button" className="workspace-switcher-reset" onClick={onReset}>
+          <button
+            type="button"
+            className="workspace-switcher-reset"
+            onClick={() => {
+              popup.close();
+              onReset();
+            }}
+          >
             Reset Workspace
           </button>
         </div>

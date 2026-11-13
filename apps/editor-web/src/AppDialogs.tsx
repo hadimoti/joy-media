@@ -6,6 +6,7 @@ import {
   type ConfirmDialogOptions,
   type PromptDialogOptions,
 } from './app-dialogs.js';
+import { usePopupsClosedWhile } from './popup-manager.js';
 import './AppDialogs.css';
 
 const FOCUSABLE_SELECTOR =
@@ -237,6 +238,8 @@ export function PromptDialog({
 export function AppDialogHost() {
   const queue = useSyncExternalStore(subscribeAppDialogs, getAppDialogQueue, getAppDialogQueue);
   const active = queue[0];
+  // A confirm or prompt dialog is modal: it closes every open popup (OB-18).
+  usePopupsClosedWhile(active !== undefined);
   if (active === undefined) return null;
   if (active.kind === 'confirm') {
     return (

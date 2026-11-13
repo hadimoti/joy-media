@@ -1,6 +1,8 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { APP_MENU_GROUPS, type AppMenuActionId, type AppMenuItem } from './app-menu.js';
 import { PANEL_INTENT_LABELS } from './panel-metadata.js';
+import { usePopupManager } from './popup-manager.js';
+import { appMenuPopupId } from './popup-ids.js';
 
 export interface AppMenuBarProps {
   readonly canUndo: boolean;
@@ -33,26 +35,18 @@ function itemDisabled(
 
 export function AppMenuBar(props: AppMenuBarProps) {
   const { onAction } = props;
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const rootRef = useRef<HTMLElement | null>(null);
+  const { openId, open, toggle, close, registerRoot } = usePopupManager();
   const menuRefs = useRef(new Map<string, HTMLUListElement>());
   const baseId = useId();
+  // Which menu-bar group is open, if any. Outside click and Escape are handled by the manager.
+  const openGroupId =
+    APP_MENU_GROUPS.find((group) => appMenuPopupId(group.id) === openId)?.id ?? null;
 
   useEffect(() => {
-    if (openMenu === null) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const root = rootRef.current;
-      if (root === null || root.contains(event.target as Node)) return;
-      setOpenMenu(null);
-    };
+    if (openGroupId === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setOpenMenu(null);
-        return;
-      }
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-      const menu = openMenu === null ? undefined : menuRefs.current.get(openMenu);
+      const menu = menuRefs.current.get(openGroupId);
       if (menu === undefined) return;
       const buttons = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
       if (buttons.length === 0) return;
@@ -66,41 +60,34 @@ export function AppMenuBar(props: AppMenuBarProps) {
             : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
       buttons[next]?.focus();
     };
-    window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [openMenu]);
-
-  useEffect(() => {
-    if (openMenu === null) return;
     window.setTimeout(() => {
       menuRefs.current
-        .get(openMenu)
+        .get(openGroupId)
         ?.querySelector<HTMLButtonElement>('button:not(:disabled)')
         ?.focus();
     }, 0);
-  }, [openMenu]);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [openGroupId]);
 
   return (
-    <nav className="app-menubar" aria-label="Application menu" ref={rootRef}>
+    <nav className="app-menubar" aria-label="Application menu">
       {APP_MENU_GROUPS.map((group) => {
+        const popupId = appMenuPopupId(group.id);
         const menuId = `${baseId}-${group.id}`;
-        const isOpen = openMenu === group.id;
+        const isOpen = openGroupId === group.id;
         const items = group.items;
         return (
-          <div key={group.id} className="app-menu">
+          <div key={group.id} className="app-menu" ref={registerRoot(popupId)}>
             <button
               type="button"
               className="app-menu-trigger"
               aria-haspopup="menu"
               aria-expanded={isOpen}
               aria-controls={menuId}
-              onClick={() => setOpenMenu(isOpen ? null : group.id)}
-              onMouseEnter={() => {
-                if (openMenu !== null) setOpenMenu(group.id);
+              onClick={(event) => toggle(popupId, event.currentTarget)}
+              onMouseEnter={(event) => {
+                if (openGroupId !== null) open(popupId, event.currentTarget);
               }}
             >
               {group.label}
@@ -136,14 +123,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
                         onClick={() => {
                           if (disabled) return;
                           onAction(item.id);
-                          setOpenMenu(null);
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') return;
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            setOpenMenu(null);
-                          }
+                          close(popupId);
                         }}
                       >
                         <span className="app-menu-item-label">{item.label}</span>
