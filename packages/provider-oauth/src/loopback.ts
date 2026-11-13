@@ -14,6 +14,8 @@ export interface LoopbackCallbackOptions {
   /** 0, the default, picks a free port. A provider that registers one fixed port passes it. */
   readonly port?: number;
   readonly timeoutMs?: number;
+  /** Aborting it cancels the flow: the listener closes and the port is freed (T-J03). */
+  readonly signal?: AbortSignal;
 }
 
 export interface LoopbackCallback {
@@ -28,6 +30,11 @@ export interface LoopbackCallback {
   readonly clientId: Promise<string | undefined>;
   /** Stops listening. A flow still waiting is cancelled. Safe to call more than once. */
   close(): void;
+  /**
+   * Resolves once the listener is really closed and the port is free. A new listener on the same
+   * fixed port must wait for it (T-J03): `server.close()` alone releases the port asynchronously.
+   */
+  readonly closed: Promise<void>;
 }
 
 /** The JOY Media look for the sign-in page: black ground, light text, the gold accent of the app (app.css). */
@@ -106,6 +113,11 @@ export async function startLoopbackCallback(
   let finished = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const server = createServer((request, response) => answer(request, response));
+  let resolveClosed: () => void = () => undefined;
+  const closed = new Promise<void>((resolve) => {
+    resolveClosed = resolve;
+  });
+  server.once('close', () => resolveClosed());
 
   const hostHeader = (): string => {
     const address = server.address();
@@ -184,11 +196,17 @@ export async function startLoopbackCallback(
     settle(new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.'));
   };
 
+  if (options.signal !== undefined) {
+    if (options.signal.aborted) close();
+    else options.signal.addEventListener('abort', close, { once: true });
+  }
+
   return {
     redirectUri: `http://${LOOPBACK_HOST}:${address.port}${options.path}`,
     code,
     clientId,
     close,
+    closed,
   };
 }
 

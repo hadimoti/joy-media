@@ -84,6 +84,8 @@ export interface ChatGptSignInOptions {
   readonly timeoutMs?: number;
   /** Defaults to the fixed callback port. Tests pass 0. */
   readonly port?: number;
+  /** Aborting cancels the sign-in and frees the callback port before the call returns (T-J03). */
+  readonly signal?: AbortSignal;
 }
 
 export interface ChatGptTokenKeeperDeps {
@@ -388,6 +390,7 @@ export async function signInWithChatGpt(
     expectedState: state,
     port: options.port ?? CHATGPT_CALLBACK_PORT,
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
   try {
     await options.openExternal(
@@ -441,6 +444,8 @@ export async function signInWithChatGpt(
     };
   } finally {
     callback.close();
+    // The port is free when the sign-in returns, so a second attempt can listen on it (T-J03).
+    await callback.closed;
   }
 }
 
