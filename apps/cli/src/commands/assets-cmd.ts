@@ -22,18 +22,23 @@ export function resolveAssetLibraryDirectory(override?: string, homeDirectory = 
 }
 
 /**
- * Reads the library catalog once and returns a checker: true when the catalog lists the asset
- * and its file is on disk (T-R04, the render's missing-media check). An unsafe or unreadable
- * entry counts as missing. A library with no catalog has no files.
+ * Returns a checker: true when the catalog lists the asset and its file is on disk (T-R04, the
+ * render's missing-media check). An unsafe or missing entry counts as missing. A library with no
+ * catalog has no files. The catalog is read on the first call only, so a project that uses no
+ * file assets never reads it, and a corrupt catalog cannot stop such a render.
  */
 export function createAssetLibraryFileCheck(
   libraryDirectory: string,
 ): (assetId: string) => boolean {
-  const catalog = readCatalog(libraryDirectory);
-  const entries = new Map(
-    (catalog?.assets ?? []).filter(isAssetEntry).map((entry) => [entry.id, entry] as const),
-  );
+  let entries: ReadonlyMap<string, AssetEntry> | undefined;
+  const loadEntries = (): ReadonlyMap<string, AssetEntry> => {
+    const catalog = readCatalog(libraryDirectory);
+    return new Map(
+      (catalog?.assets ?? []).filter(isAssetEntry).map((entry) => [entry.id, entry] as const),
+    );
+  };
   return (assetId) => {
+    entries ??= loadEntries();
     const entry = entries.get(assetId);
     if (entry === undefined) return false;
     try {

@@ -151,6 +151,18 @@ describe('createAssetLibraryFileCheck', () => {
       rmSync(library, { recursive: true, force: true });
     }
   });
+
+  it('reads the catalog lazily: creating the check is safe, the first check reads it', () => {
+    const library = mkdtempSync(join(tmpdir(), 'joy-render-corrupt-library-'));
+    try {
+      writeFileSync(join(library, 'catalog.json'), '{ not json');
+      const hasFile = createAssetLibraryFileCheck(library);
+
+      expect(() => hasFile('x')).toThrow('Asset catalog is not valid JSON.');
+    } finally {
+      rmSync(library, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('runHeadlessRender with a missing clip file', () => {
@@ -188,7 +200,7 @@ describe('runHeadlessRender with a missing clip file', () => {
     }
   });
 
-  it('with allowMissing renders, and lists the clip as a warning in the complete event', async () => {
+  it('with allowMissing renders and records the clip as a warning', async () => {
     const library = mkdtempSync(join(tmpdir(), 'joy-render-allow-'));
     const outDir = join(library, 'renders');
     const capture = new StringWritable();
@@ -208,6 +220,30 @@ describe('runHeadlessRender with a missing clip file', () => {
       expect(result.manifestWritten).toBe(true);
       expect(readdirSync(outDir)).toEqual(['missing-allowed.mp4.manifest.json']);
       expect(result.warnings.join('\n')).toContain('intro.mp4 at 00:00:02:00 - 00:00:05:00');
+    } finally {
+      restore();
+      rmSync(library, { recursive: true, force: true });
+    }
+  });
+
+  it('a corrupt catalog does not stop a project that uses no file assets', async () => {
+    const library = mkdtempSync(join(tmpdir(), 'joy-render-corrupt-nofiles-'));
+    const outDir = join(library, 'renders');
+    writeFileSync(join(library, 'catalog.json'), '{ not json');
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    try {
+      const result = await runHeadlessRender({
+        project: createDefaultProject('No files', { id: 'no-files' }),
+        preset: 'mp4',
+        outDir,
+        concurrency: 2,
+        json: true,
+        libraryDirectory: library,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(capture.text()).not.toContain('Asset catalog is not valid JSON');
     } finally {
       restore();
       rmSync(library, { recursive: true, force: true });

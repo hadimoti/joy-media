@@ -1,4 +1,4 @@
-import type { SpikeProject } from '@joy-media/project-schema';
+import type { SpikeProject, TransitionV1 } from '@joy-media/project-schema';
 import type { MissingMediaEntry } from './missing-media.js';
 import { formatMonitorTimecode } from './monitor/monitor-timecode.js';
 import { flattenRootTimelineVideoClips } from './timeline-nested-playback.js';
@@ -51,4 +51,32 @@ export function missingExportClipIds(clips: readonly MissingExportClip[]): Reado
 /** `hh:mm:ss:ff - hh:mm:ss:ff` for a listed clip, at the project's frame rate. */
 export function formatMissingExportRange(clip: MissingExportClip, fps: number): string {
   return `${formatMonitorTimecode(clip.startUs, fps)} - ${formatMonitorTimecode(clip.endUs, fps)}`;
+}
+
+/**
+ * True when the export has nothing to draw and must stop. With missing clips accepted ("Export
+ * anyway") an empty visual set is allowed: the export draws the timeline's background for the
+ * full duration, and the missing clips' places stay empty.
+ */
+export function exportLacksVisualSource(
+  sourcedVisualClipCount: number,
+  hasHtmlScenes: boolean,
+  missingClipCount: number,
+): boolean {
+  return sourcedVisualClipCount === 0 && !hasHtmlScenes && missingClipCount === 0;
+}
+
+/**
+ * The transitions the export may draw. A transition with a missing clip on either side is
+ * dropped, so the clip that is present plays as a plain cut and nothing blends against nothing.
+ */
+export function transitionsWithoutMissingClips(
+  transitions: readonly TransitionV1[],
+  missingClipIds: ReadonlySet<string>,
+): readonly TransitionV1[] {
+  if (missingClipIds.size === 0) return transitions;
+  return transitions.filter(
+    (transition) =>
+      !missingClipIds.has(transition.leftClipId) && !missingClipIds.has(transition.rightClipId),
+  );
 }

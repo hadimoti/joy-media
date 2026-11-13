@@ -25,6 +25,10 @@ describe('App MP4 export negotiation contract', () => {
     expect(exportCallback).toMatch(
       /sourcedTimelineClips = allTimelineClips\.filter\(\s*\(clip\) => !missingExportIds\.has\(clip\.id\),?\s*\)/,
     );
+    // T-R04: the duration still comes from every clip, so a missing clip keeps its length.
+    expect(exportCallback).toMatch(/durationTimelineClips = allTimelineClips\.filter\(/);
+    // T-R04: an all-missing export is allowed when the owner accepted the missing clips.
+    expect(exportCallback).toContain('exportLacksVisualSource(');
     expect(exportCallback).toContain('audioClipIds.has(media.clip.id)');
     expect(exportCallback).toContain('visualClipIds.has(clip.id) && assetKind');
     expect(exportCallback).toContain('visualClipIds.has(media.clip.id)');

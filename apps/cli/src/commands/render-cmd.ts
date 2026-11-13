@@ -490,6 +490,10 @@ const NON_FILE_ASSET_KINDS: ReadonlySet<unknown> = new Set(['lut', 'other']);
  * The root-track clips whose file is missing. Only a clip whose project asset is a file asset
  * counts: a clip with no declared asset, or a text-like asset, is not checked. `hasFile` says
  * whether the asset library holds the file. Never throws.
+ *
+ * Scope differs from the editor on purpose: this checks only the direct clips of enabled root
+ * tracks. The editor's missing list also follows clips inside nested compositions
+ * (flattenRootTimelineVideoClips), so a nested clip with a missing file is reported there only.
  */
 export function missingRenderClips(
   project: unknown,

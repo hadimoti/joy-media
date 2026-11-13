@@ -578,8 +578,10 @@ import { useMonitorTransportControls } from './monitor/useMonitorTransportContro
 import { monitorFps } from './monitor/monitor-timecode.js';
 import { MONITOR_FULLSCREEN_EVENT } from './monitor/monitor-transport-model.js';
 import {
+  exportLacksVisualSource,
   missingExportClipIds,
   missingExportClips,
+  transitionsWithoutMissingClips,
   type MissingExportClip,
 } from './export-missing-media.js';
 import { MissingExportDialog } from './MissingExportDialog.js';
@@ -4037,7 +4039,8 @@ function EditorWorkspace({
       }
       const activeExportPreset = retryPreset ?? exportPreset;
       const exportTimelineProject = structuredClone(session.timelineProject);
-      const exportVisualProject = structuredClone(session.visualProject);
+      // A let: the missing-clip check below may replace the transitions on this private copy.
+      let exportVisualProject = structuredClone(session.visualProject);
       const exportAudioState = structuredClone(audioState);
       const compositionV1 = exportVisualProject.compositions[exportVisualProject.rootCompositionId];
       const exportSettings = resolveExportSettings(activeExportPreset, {
@@ -4115,6 +4118,16 @@ function EditorWorkspace({
         return;
       }
       const missingExportIds = missingExportClipIds(missingClips);
+      // T-R04: a transition with a missing side is dropped, so the present clip plays as a cut.
+      if (missingExportIds.size > 0 && exportVisualProject.transitions !== undefined) {
+        exportVisualProject = {
+          ...exportVisualProject,
+          transitions: transitionsWithoutMissingClips(
+            exportVisualProject.transitions,
+            missingExportIds,
+          ),
+        };
+      }
       const abortController = new AbortController();
       exportAbortRef.current = abortController;
       setExporting(true);
@@ -4277,7 +4290,8 @@ function EditorWorkspace({
         const hasHtmlScenes = Object.values(exportVisualProject.visualObjects).some(
           (object) => object.kind === 'html-scene',
         );
-        if (exportClips.length === 0 && !hasHtmlScenes)
+        // All used clips missing and accepted ("Export anyway") is valid: black and silent.
+        if (exportLacksVisualSource(exportClips.length, hasHtmlScenes, missingExportIds.size))
           throw new Error('No playable visual clips are available for export');
         // Audio lanes use video leaves in the timeline model, but have no visual
         // boundary. Keep their mix inputs independent of visual preparation.
