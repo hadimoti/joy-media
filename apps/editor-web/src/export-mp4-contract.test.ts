@@ -37,7 +37,9 @@ describe('App MP4 export negotiation contract', () => {
     expect(selector).toBeLessThan(exportCallback.indexOf('new AbortController()'));
     expect(selector).toBeLessThan(exportCallback.indexOf('setExporting(true)'));
     expect(sourcePreflight).toBeLessThan(
-      exportCallback.indexOf('const audioContext = new AudioContext()'),
+      exportCallback.indexOf(
+        'const audioContext = new AudioContext({ sampleRate: audio.sampleRate })',
+      ),
     );
     expect(sourcePreflight).toBeLessThan(exportCallback.indexOf('recordExportEntry({'));
     expect(exportCallback).not.toContain('MediaRecorder.isTypeSupported');
@@ -60,6 +62,14 @@ describe('App MP4 export negotiation contract', () => {
     expect(canonicalStagedExportMimeType('video/mp4;codecs=avc1.42E01E,mp4a.40.2')).toBe(
       'video/mp4',
     );
+  });
+
+  it('encodes the authored canvas size with the selected preset rate and audio profile', () => {
+    expect(exportCallback).toContain('resolveExportSettings(activeExportPreset');
+    expect(exportCallback).toContain('const { width, height, frameRate, videoBitrate, audio }');
+    expect(exportCallback).toContain('videoBitrate,');
+    expect(exportCallback).toContain('audioChannels: audio.channels');
+    expect(exportCallback).toContain('audioBitrate: audio.bitrate');
   });
 
   it('persists the export preset only after preload, Worker verification, and verified durable caching', () => {

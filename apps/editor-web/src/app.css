@@ -861,6 +861,22 @@ main {
   width: 1rem;
   height: 1rem;
 }
+.header-export-warning-badge {
+  position: absolute;
+  top: -0.2rem;
+  right: -0.2rem;
+  display: grid;
+  width: 0.8rem;
+  height: 0.8rem;
+  place-items: center;
+  border: 1px solid var(--joy-bg-panel);
+  border-radius: 50%;
+  background: #b42318;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1;
+}
 .header-export-preset-trigger {
   width: auto !important;
   min-width: 0 !important;

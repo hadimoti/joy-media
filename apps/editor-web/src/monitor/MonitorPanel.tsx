@@ -103,6 +103,7 @@ import {
 } from './monitor-selection.js';
 import { monitorPixelScale } from './monitor-pixel-scale.js';
 import { createProjectColorLutResolver } from '../project-color-luts.js';
+import { applyCanvasDimensions } from '../export-format-actions.js';
 
 /**
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
@@ -901,43 +902,13 @@ function MonitorPanelContent({
         showToast('The root composition is unavailable for this aspect-ratio change.', 'error');
         return;
       }
-      if (
-        visualComposition.width === dimensions.width &&
-        visualComposition.height === dimensions.height &&
-        timelineComposition.width === dimensions.width &&
-        timelineComposition.height === dimensions.height
-      ) {
-        setMonitorFitView(false);
-        return;
-      }
       try {
-        session.dispatchCompound(`Change canvas aspect ratio to ${nextAspectRatio}`, {
-          document: {
-            ...visualProject,
-            updatedAt: new Date().toISOString(),
-            compositions: {
-              ...visualProject.compositions,
-              [visualComposition.id]: {
-                ...visualComposition,
-                width: dimensions.width,
-                height: dimensions.height,
-              },
-            },
-          },
-          timeline: {
-            label: `Change canvas aspect ratio to ${nextAspectRatio}`,
-            commands: [
-              {
-                type: 'timeline.setCompositionDimensions',
-                payload: {
-                  compositionId: timelineComposition.id,
-                  width: dimensions.width,
-                  height: dimensions.height,
-                },
-              },
-            ],
-          },
-        });
+        applyCanvasDimensions(
+          session,
+          dimensions.width,
+          dimensions.height,
+          `Change canvas aspect ratio to ${nextAspectRatio}`,
+        );
         setMonitorFitView(false);
         bumpProjectRevision();
         showToast(`Canvas changed to ${nextAspectRatio}.`, 'success');
