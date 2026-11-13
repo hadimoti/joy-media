@@ -23,10 +23,10 @@ function target(
   return {
     nodeId: objectId ?? 'clip-only',
     clipId: `clip-${objectId ?? 'only'}`,
-    objectId,
+    ...(objectId === undefined ? {} : { objectId }),
     geometry: boxGeometry(nodeBoundsFromBox(objectId ?? 'n', transform, BOX), transform),
     local,
-    ancestorObjectIds,
+    ...(ancestorObjectIds === undefined ? {} : { ancestorObjectIds }),
     blocked: {},
   };
 }
