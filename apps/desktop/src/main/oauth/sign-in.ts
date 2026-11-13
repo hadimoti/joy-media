@@ -51,6 +51,15 @@ export interface SignInResult {
   readonly secret: string;
 }
 
+/**
+ * Per-attempt options (T-J03). The signal cancels this attempt; openExternal, when given, opens the sign-in page
+ * for this attempt instead of the one in the dependencies, so the attempt can remember the page.
+ */
+export interface ProviderSignInCall {
+  readonly signal?: AbortSignal;
+  readonly openExternal?: (url: string) => void | Promise<void>;
+}
+
 /** Main-process-only identity used to reauthorize an existing ChatGPT profile. */
 export interface ProviderSignInContext {
   readonly savedChatGptAccount?: {
@@ -79,8 +88,12 @@ export interface ProviderSignInDeps {
  */
 export function createProviderSignIn(
   deps: ProviderSignInDeps,
-): (provider: SignInProvider, context?: ProviderSignInContext) => Promise<SignInResult> {
-  return async (provider, context) => {
+): (
+  provider: SignInProvider,
+  context?: ProviderSignInContext,
+  call?: ProviderSignInCall,
+) => Promise<SignInResult> {
+  return async (provider, context, call) => {
     // D20: only a provider whose registry row permits a subscription sign-in may be signed in to (PLAN-v4 §6d-1 rule 5).
     // Every other provider, OpenRouter included, is set up with an API key instead.
     if (!signInProviders().includes(provider)) {
@@ -93,11 +106,15 @@ export function createProviderSignIn(
       const clientId = configuredOAuthClientId('xai');
       const record = await signInWithXai({
         ...(clientId === undefined ? {} : { clientId }),
-        openExternal: deps.openExternal,
+        openExternal: call?.openExternal ?? deps.openExternal,
         fetch: deps.fetch,
         now: deps.now,
+
+        ...(call?.signal === undefined ? {} : { signal: call.signal }),
       });
-      const modelId = await firstXaiModel(record, deps.fetch);
+      throwIfCancelled(call?.signal);
+      const modelId = await firstXaiModel(record, deps.fetch, call?.signal);
+      throwIfCancelled(call?.signal);
       return {
         provider,
         baseUrl: XAI_OAUTH_INFERENCE_BASE_URL,
@@ -109,11 +126,15 @@ export function createProviderSignIn(
       const clientId = configuredOAuthClientId('kimi');
       const record = await signInWithKimiCode({
         ...(clientId === undefined ? {} : { clientId }),
-        openExternal: deps.openExternal,
+        openExternal: call?.openExternal ?? deps.openExternal,
         fetch: deps.fetch,
         now: deps.now,
+
+        ...(call?.signal === undefined ? {} : { signal: call.signal }),
       });
-      const modelId = await firstKimiCodeModel(record, deps.fetch);
+      throwIfCancelled(call?.signal);
+      const modelId = await firstKimiCodeModel(record, deps.fetch, call?.signal);
+      throwIfCancelled(call?.signal);
       return {
         provider,
         baseUrl: KIMI_CODE_BASE_URL,
@@ -130,12 +151,16 @@ export function createProviderSignIn(
     const record = await signInWithChatGpt({
       issuedClientId: context?.savedChatGptAccount?.clientId ?? configuredOAuthClientId('chatgpt'),
       extAgentHostId: deps.installId(),
-      openExternal: deps.openExternal,
+      openExternal: call?.openExternal ?? deps.openExternal,
       fetch: deps.fetch,
       now: deps.now,
+
+      ...(call?.signal === undefined ? {} : { signal: call.signal }),
       ...(deps.chatGptPort === undefined ? {} : { port: deps.chatGptPort }),
     });
-    const choice = await chatGptModelChoice(record, deps.fetch);
+    throwIfCancelled(call?.signal);
+    const choice = await chatGptModelChoice(record, deps.fetch, call?.signal);
+    throwIfCancelled(call?.signal);
     return {
       provider,
       baseUrl: CHATGPT_RESPONSES_BASE_URL,
@@ -171,10 +196,12 @@ const PREFERRED_CHATGPT_MODEL = 'gpt-6-luna';
 async function chatGptModelChoice(
   record: ChatGptTokenRecord,
   fetch: FetchLike,
+  signal?: AbortSignal,
 ): Promise<{ readonly modelId: string; readonly models: readonly string[] }> {
   const listing = await chatGptCatalogText(
     prepareChatGptModels({ accessToken: record.accessToken }),
     fetch,
+    signal,
   );
   const listed = listedChatGptModels(listing);
   if (listed.length === 0) {
@@ -198,9 +225,13 @@ async function chatGptModelChoice(
 async function chatGptCatalogText(
   call: ReturnType<typeof prepareChatGptModels>,
   fetch: FetchLike,
+  signal?: AbortSignal,
 ): Promise<string> {
+  throwIfCancelled(signal);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
+  const onCancel = (): void => controller.abort();
+  signal?.addEventListener('abort', onCancel, { once: true });
   try {
     let response: Response;
     try {
@@ -211,8 +242,10 @@ async function chatGptCatalogText(
         signal: controller.signal,
       });
     } catch {
+      throwIfCancelled(signal);
       throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT could not be reached.');
     }
+    throwIfCancelled(signal);
     if (!response.ok) {
       throw new OAuthFlowError(
         'EXCHANGE_FAILED',
@@ -220,13 +253,17 @@ async function chatGptCatalogText(
       );
     }
     try {
-      return await replyText(response, MAX_CATALOG_CHARS);
+      const body = await replyText(response, MAX_CATALOG_CHARS);
+      throwIfCancelled(signal);
+      return body;
     } catch (error) {
+      throwIfCancelled(signal);
       if (error instanceof OAuthFlowError) throw error;
       throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT could not be reached.');
     }
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onCancel);
   }
 }
 
@@ -239,9 +276,13 @@ async function boundedModelList(
   url: string,
   accessToken: string,
   failure: string,
+  signal?: AbortSignal,
 ): Promise<ReturnType<typeof parseChatModels>> {
+  throwIfCancelled(signal);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
+  const onCancel = (): void => controller.abort();
+  signal?.addEventListener('abort', onCancel, { once: true });
   try {
     const response = await fetch(url, {
       method: 'GET',
@@ -249,22 +290,32 @@ async function boundedModelList(
       redirect: 'manual',
       signal: controller.signal,
     });
+    throwIfCancelled(signal);
     if (!response.ok) throw new Error('model list request failed');
-    return parseChatModels(await replyText(response, MAX_CATALOG_CHARS));
+    const body = await replyText(response, MAX_CATALOG_CHARS);
+    throwIfCancelled(signal);
+    return parseChatModels(body);
   } catch {
+    throwIfCancelled(signal);
     throw new OAuthFlowError('EXCHANGE_FAILED', failure);
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onCancel);
   }
 }
 
 /** The first usable model xAI lists for this account; token values can never become model IDs. */
-export async function firstXaiModel(record: XaiTokenRecord, fetch: FetchLike): Promise<string> {
+export async function firstXaiModel(
+  record: XaiTokenRecord,
+  fetch: FetchLike,
+  signal?: AbortSignal,
+): Promise<string> {
   const models = await boundedModelList(
     fetch,
     `${XAI_OAUTH_INFERENCE_BASE_URL}/models`,
     record.accessToken,
     'xAI lists no usable model for this account.',
+    signal,
   );
   const tokens = [record.accessToken, record.refreshToken];
   const first = models.find((model) => !tokens.some((token) => holdsCredential(model.id, token)));
@@ -278,12 +329,14 @@ export async function firstXaiModel(record: XaiTokenRecord, fetch: FetchLike): P
 export async function firstKimiCodeModel(
   record: KimiTokenRecord,
   fetch: FetchLike,
+  signal?: AbortSignal,
 ): Promise<string> {
   const models = await boundedModelList(
     fetch,
     `${KIMI_CODE_BASE_URL}/models`,
     record.accessToken,
     'Kimi lists no usable model for this account.',
+    signal,
   );
   const tokens = [record.accessToken, record.refreshToken];
   const first = models.find((model) => !tokens.some((token) => holdsCredential(model.id, token)));
@@ -302,6 +355,12 @@ function listedChatGptModels(text: string): ReturnType<typeof readChatGptModels>
       'EXCHANGE_FAILED',
       'ChatGPT returned a model list this app cannot read.',
     );
+  }
+}
+
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    throw new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.');
   }
 }
 

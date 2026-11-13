@@ -352,6 +352,94 @@ describe('exchangeChatGptCode', () => {
 });
 
 describe('signInWithChatGpt', () => {
+  it('does not open the sign-in page when the attempt was already cancelled', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const openExternal = vi.fn();
+    const fetch = vi.fn<FetchLike>();
+
+    await expect(
+      signInWithChatGpt({
+        issuedClientId: CLIENT_ID,
+        extAgentHostId: HOST_ID,
+        openExternal,
+        fetch,
+        now,
+        port: 0,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('stops a token exchange when the attempt is cancelled', async () => {
+    const controller = new AbortController();
+    let authUrl = '';
+    let tokenSignal: AbortSignal | undefined;
+    let releaseToken: (response: Response) => void = () => undefined;
+    const tokenResponse = new Promise<Response>((resolve) => {
+      releaseToken = resolve;
+    });
+    const fetch: FetchLike = async (url, init) => {
+      if (url === CHATGPT_TOKEN_URL) {
+        tokenSignal = init.signal ?? undefined;
+        return tokenResponse;
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const pending = signInWithChatGpt({
+      issuedClientId: CLIENT_ID,
+      extAgentHostId: HOST_ID,
+      openExternal: async (url) => {
+        authUrl = url;
+        await returnFromBrowser(url, (state) => `code=the-code&state=${state}`);
+      },
+      fetch,
+      now,
+      port: 0,
+      signal: controller.signal,
+      timeoutMs: 5_000,
+    });
+    await vi.waitFor(() => expect(tokenSignal).toBeDefined());
+
+    controller.abort();
+    releaseToken(jsonReply({ error: 'invalid_grant' }, 400));
+
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(authUrl).toContain('/authorize?');
+    expect(tokenSignal?.aborted).toBe(true);
+  });
+
+  it('stops identity-key lookup when the attempt is cancelled', async () => {
+    const controller = new AbortController();
+    let jwksSignal: AbortSignal | undefined;
+    let releaseKeys: (response: Response) => void = () => undefined;
+    const keyResponse = new Promise<Response>((resolve) => {
+      releaseKeys = resolve;
+    });
+    const fetch: FetchLike = async (url, init) => {
+      expect(url).toBe(CHATGPT_JWKS_URL);
+      jwksSignal = init.signal ?? undefined;
+      return keyResponse;
+    };
+    const verification = verifyIdToken({
+      idToken: signed(claimsFor('test-nonce')),
+      clientId: CLIENT_ID,
+      nonce: 'test-nonce',
+      fetch,
+      nowSeconds: nowSeconds(),
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(jwksSignal).toBeDefined());
+
+    controller.abort();
+    releaseKeys(jsonReply({ keys: [JWK] }));
+
+    await expect(verification).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(jwksSignal?.aborted).toBe(true);
+  });
+
   it('persists a newly issued client before a failed code exchange', async () => {
     const issued = 'oaiapp_recovery-test';
     const events: string[] = [];

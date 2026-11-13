@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   findRegistryProvider,
+  SIGN_IN_WAIT_MS,
   generationSupport,
   signInProviders,
   type ProviderRegion,
@@ -9,7 +10,9 @@ import {
   type RegistryProviderId,
 } from '@joy-media/provider-sdk';
 import {
+  cancelDesktopSignIn,
   isDesktopHost,
+  reopenDesktopSignIn,
   saveDesktopProviderProfile,
   signInDesktopProviderProfile,
   type DesktopProviderProfile,
@@ -17,6 +20,12 @@ import {
 import { providerLabel } from './provider-labels.js';
 import { ChevronDownIcon } from './icons.js';
 import { SETTINGS_PROVIDER_SIGN_IN } from './settings-wording.js';
+
+/** Minutes and seconds, such as 4:59. */
+export function formatSignInCountdown(ms: number): string {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
 
 /** Only xAI's sign-in shows the risk notice (owner decision 2026-11-05). ChatGPT and Kimi show none. */
 const RISK_NOTICE_PROVIDERS: ReadonlySet<RegistryProviderId> = new Set<RegistryProviderId>(['xai']);
@@ -53,6 +62,16 @@ export function ProviderSignInPanel({
   const [signInStatus, setSignInStatus] = useState<
     { readonly provider: RegistryProviderId; readonly message: string } | undefined
   >(undefined);
+  // When the wait for the browser began, and the clock the countdown reads (T-J03).
+  const [waitingSince, setWaitingSince] = useState<number | undefined>(undefined);
+  const [clock, setClock] = useState(() => Date.now());
+  // The provider the person cancelled, so its sign-in reports cancelled rather than a failure.
+  const cancelledRef = useRef<RegistryProviderId | undefined>(undefined);
+  useEffect(() => {
+    if (busy === undefined) return undefined;
+    const tick = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [busy]);
   const providers = [...signInProviders()]
     .sort((first, second) => rank(first) - rank(second))
     .map((provider) => findRegistryProvider(provider))
@@ -61,7 +80,11 @@ export function ProviderSignInPanel({
   if (!isDesktopHost()) return null;
 
   const signIn = async (target: RegistryProviderId): Promise<void> => {
+    cancelledRef.current = undefined;
+    const startedAt = Date.now();
     setBusy(target);
+    setWaitingSince(startedAt);
+    setClock(startedAt);
     setSignInStatus(undefined);
     try {
       const profile = await signInDesktopProviderProfile({ provider: target });
@@ -73,18 +96,42 @@ export function ProviderSignInPanel({
         ),
       });
     } catch (error) {
+      // The main process ends the sign-in no earlier than the same wait after this click, so a failure after the
+      // whole wait is the timeout: it gets the start-again message (T-J03).
+      // A later failure (for example the model list after a sign-in that finished just before the limit) keeps its own
+      // message: only the timeout errors of the flows count, and only after the whole wait.
+      const failureText = error instanceof Error ? error.message : '';
+      const timedOut =
+        Date.now() - startedAt >= SIGN_IN_WAIT_MS &&
+        /timed out|not finished in time/i.test(failureText);
       setSignInStatus({
         provider: target,
         message:
-          error instanceof Error
-            ? error.message
-            : SETTINGS_PROVIDER_SIGN_IN.signInFailed.replace('{provider}', () =>
-                providerLabel(target),
-              ),
+          cancelledRef.current === target
+            ? SETTINGS_PROVIDER_SIGN_IN.signInCancelled
+            : timedOut
+              ? SETTINGS_PROVIDER_SIGN_IN.signInTimedOut.replace('{provider}', () =>
+                  providerLabel(target),
+                )
+              : error instanceof Error
+                ? error.message
+                : SETTINGS_PROVIDER_SIGN_IN.signInFailed.replace('{provider}', () =>
+                    providerLabel(target),
+                  ),
       });
     } finally {
       setBusy(undefined);
+      setWaitingSince(undefined);
     }
+  };
+
+  const cancelSignIn = (target: RegistryProviderId): void => {
+    cancelledRef.current = target;
+    void cancelDesktopSignIn(target).catch(() => undefined);
+  };
+
+  const reopenSignIn = (target: RegistryProviderId): void => {
+    void reopenDesktopSignIn(target).catch(() => undefined);
   };
 
   return (
@@ -96,7 +143,14 @@ export function ProviderSignInPanel({
           signInBusy={busy === provider.id}
           signInDisabled={busy !== undefined}
           signInMessage={signInStatus?.provider === provider.id ? signInStatus.message : undefined}
+          signInRemainingMs={
+            busy === provider.id && waitingSince !== undefined
+              ? SIGN_IN_WAIT_MS - (clock - waitingSince)
+              : undefined
+          }
           onSignIn={() => void signIn(provider.id)}
+          onCancelSignIn={() => cancelSignIn(provider.id)}
+          onReopenSignIn={() => reopenSignIn(provider.id)}
           onSaved={onSaved}
         />
       ))}
@@ -109,14 +163,21 @@ function ProviderRouteAccordion({
   signInBusy,
   signInDisabled,
   signInMessage,
+  signInRemainingMs,
   onSignIn,
+  onCancelSignIn,
+  onReopenSignIn,
   onSaved,
 }: {
   readonly provider: RegistryProvider;
   readonly signInBusy: boolean;
   readonly signInDisabled: boolean;
   readonly signInMessage?: string | undefined;
+  /** Time left in the wait for the browser, while this provider's sign-in runs. */
+  readonly signInRemainingMs?: number | undefined;
   readonly onSignIn: () => void;
+  readonly onCancelSignIn: () => void;
+  readonly onReopenSignIn: () => void;
   readonly onSaved?: ((profile: DesktopProviderProfile) => void) | undefined;
 }) {
   const label = providerLabel(provider.id);
@@ -222,6 +283,21 @@ function ProviderRouteAccordion({
                 : SETTINGS_PROVIDER_SIGN_IN.signInButton
               ).replace('{provider}', () => label)}
             </button>
+            {signInBusy && signInRemainingMs !== undefined && (
+              <div className="joy-provider-sign-in-waiting">
+                <p role="status">
+                  {SETTINGS_PROVIDER_SIGN_IN.waitingForBrowser.replace('{time}', () =>
+                    formatSignInCountdown(signInRemainingMs),
+                  )}
+                </p>
+                <button type="button" className="button-secondary" onClick={onReopenSignIn}>
+                  {SETTINGS_PROVIDER_SIGN_IN.openSignInPageAgain}
+                </button>
+                <button type="button" className="button-secondary" onClick={onCancelSignIn}>
+                  {SETTINGS_PROVIDER_SIGN_IN.cancelSignIn}
+                </button>
+              </div>
+            )}
             {RISK_NOTICE_PROVIDERS.has(provider.id) && (
               <p className="joy-provider-risk-notice">
                 {SETTINGS_PROVIDER_SIGN_IN.oauthRiskNotice}

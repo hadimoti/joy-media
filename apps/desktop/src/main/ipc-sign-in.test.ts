@@ -119,7 +119,7 @@ describe('desktop.provider-profile.sign-in', () => {
 
     expect(result.ok).toBe(true);
     expect(JSON.stringify(result)).not.toContain(CHATGPT_SECRET);
-    expect(providerSignIn).toHaveBeenCalledWith('chatgpt');
+    expect(providerSignIn).toHaveBeenCalledWith('chatgpt', undefined, undefined);
     const [profile] = localDatabase.listProviderProfiles();
     expect(profile).toMatchObject({
       provider: 'chatgpt',

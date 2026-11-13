@@ -482,9 +482,13 @@ describe('IPC dispatch', () => {
     });
 
     expect(result).toMatchObject({ ok: true, data: { id: profile.id, provider: 'chatgpt' } });
-    expect(providerSignIn).toHaveBeenCalledWith('chatgpt', {
-      savedChatGptAccount: { clientId: record.clientId, accountId: record.accountId },
-    });
+    expect(providerSignIn).toHaveBeenCalledWith(
+      'chatgpt',
+      {
+        savedChatGptAccount: { clientId: record.clientId, accountId: record.accountId },
+      },
+      undefined,
+    );
     expect(await d.secretStore.get(profile.secretHandleId)).not.toBe(encodeTokenRecord(record));
     expect(d.localDatabase.getProviderProfile(profile.id)?.modelId).toBe('gpt-4.1');
   });
@@ -542,9 +546,13 @@ describe('IPC dispatch', () => {
     });
 
     expect(result).toMatchObject({ ok: false });
-    expect(providerSignIn).toHaveBeenCalledWith('chatgpt', {
-      savedChatGptAccount: { clientId: record.clientId, accountId: record.accountId },
-    });
+    expect(providerSignIn).toHaveBeenCalledWith(
+      'chatgpt',
+      {
+        savedChatGptAccount: { clientId: record.clientId, accountId: record.accountId },
+      },
+      undefined,
+    );
     expect(providerSignOut).toHaveBeenCalledWith(unexpectedClient);
     expect(d.localDatabase.getProviderProfile(profile.id)?.modelId).toBe('gpt-4o-mini');
     expect(await d.secretStore.get(profile.secretHandleId)).toBe(encodeTokenRecord(record));

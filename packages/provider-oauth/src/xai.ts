@@ -1,4 +1,8 @@
-import { getOAuthClient, XAI_OAUTH_INFERENCE_BASE_URL } from '@joy-media/provider-sdk';
+import {
+  getOAuthClient,
+  SIGN_IN_WAIT_MS,
+  XAI_OAUTH_INFERENCE_BASE_URL,
+} from '@joy-media/provider-sdk';
 import { OAuthFlowError } from './errors.js';
 import {
   type FetchLike,
@@ -22,9 +26,6 @@ export { XAI_OAUTH_INFERENCE_BASE_URL };
 export const XAI_OAUTH_REFRESH_MARGIN_MS = 60_000;
 /** No OAuth HTTP request is allowed to hang beyond this time. */
 export const XAI_OAUTH_REQUEST_TIMEOUT_MS = 30_000;
-/** Device authorization is bounded even if xAI omits an expiry. */
-const XAI_OAUTH_MAX_DEVICE_WAIT_MS = 15 * 60_000;
-const XAI_OAUTH_DEFAULT_DEVICE_WAIT_MS = 5 * 60_000;
 const XAI_OAUTH_DEFAULT_POLL_INTERVAL_MS = 5_000;
 
 /** xAI OAuth tokens and their metadata are kept together as one profile secret. */
@@ -50,6 +51,8 @@ export interface XaiSignInOptions {
   /** Reports the first slow_down status without changing the provider's polling interval. */
   readonly onSlowDown?: () => void;
   readonly pollIntervalMs?: number;
+  /** Aborting cancels the sign-in: the polling stops and an in-flight request is aborted (T-J03). */
+  readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
 }
 
@@ -84,18 +87,22 @@ interface XaiEndpoints {
 
 /** Runs xAI's attended OIDC device-code flow and returns a record for the local secret store. */
 export async function signInWithXai(options: XaiSignInOptions): Promise<XaiTokenRecord> {
+  throwIfCancelled(options.signal);
   const requestedAt = options.now();
   const clientId = nonEmptyString(options.clientId) ?? XAI_OAUTH_CLIENT_ID;
   if (clientId.length === 0) {
     throw new OAuthFlowError('NOT_CONFIGURED', 'xAI sign-in needs an OAuth client ID.');
   }
-  const endpoints = await discoverEndpoints(options.fetch);
+  const endpoints = await discoverEndpoints(options.fetch, options.signal);
   const device = await requestDeviceCode(options, clientId, endpoints);
+  throwIfCancelled(options.signal);
   try {
     await options.openExternal(device.approvalUrl);
   } catch {
+    if (isCancelled(options.signal)) throw cancelled();
     throw new OAuthFlowError('EXCHANGE_FAILED', 'xAI approval page could not be opened.');
   }
+  throwIfCancelled(options.signal);
   try {
     options.onAuthorization?.({
       url: device.approvalUrl,
@@ -114,19 +121,23 @@ export async function signInWithXai(options: XaiSignInOptions): Promise<XaiToken
       ? configuredInterval
       : 0,
   );
+  // The same wait the countdown shows: polling stops when it ends, whatever the server's expiry says (T-J03).
   const configuredTimeout = options.timeoutMs;
   const flowTimeout =
     typeof configuredTimeout === 'number' && Number.isFinite(configuredTimeout)
-      ? Math.min(XAI_OAUTH_MAX_DEVICE_WAIT_MS, Math.max(0, configuredTimeout))
-      : XAI_OAUTH_MAX_DEVICE_WAIT_MS;
+      ? Math.min(SIGN_IN_WAIT_MS, Math.max(0, configuredTimeout))
+      : SIGN_IN_WAIT_MS;
   const deadline = Math.min(device.expiresAt, requestedAt + flowTimeout);
   let pollImmediately = true;
   let slowDownReported = false;
 
   while (true) {
+    if (isCancelled(options.signal)) {
+      throw new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.');
+    }
     const remaining = deadline - options.now();
     if (remaining <= 0) throw deviceTimeout();
-    if (!pollImmediately) await wait(Math.min(intervalMs, remaining));
+    if (!pollImmediately) await wait(Math.min(intervalMs, remaining), options.signal);
     pollImmediately = false;
     const pollRemaining = deadline - options.now();
     if (pollRemaining < 1_000) throw deviceTimeout();
@@ -142,8 +153,12 @@ export async function signInWithXai(options: XaiSignInOptions): Promise<XaiToken
           grant_type: XAI_OAUTH_DEVICE_GRANT_TYPE,
         }),
         Math.min(XAI_OAUTH_REQUEST_TIMEOUT_MS, pollRemaining),
+        options.signal,
       );
     } catch (error) {
+      if (isCancelled(options.signal)) {
+        throw new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.');
+      }
       if (options.now() >= deadline) throw deviceTimeout();
       throw error;
     }
@@ -154,6 +169,7 @@ export async function signInWithXai(options: XaiSignInOptions): Promise<XaiToken
     }
 
     if (result.response.ok && typeof reply.access_token === 'string') {
+      throwIfCancelled(options.signal);
       return tokenRecordFromReply(reply, clientId, options.now());
     }
     const error = nonEmptyString(reply.error);
@@ -290,9 +306,12 @@ export function decodeXaiTokenRecord(text: string): XaiTokenRecord | undefined {
   };
 }
 
-async function discoverEndpoints(fetch: FetchLike): Promise<XaiEndpoints> {
+async function discoverEndpoints(fetch: FetchLike, signal?: AbortSignal): Promise<XaiEndpoints> {
+  throwIfCancelled(signal);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), XAI_OAUTH_REQUEST_TIMEOUT_MS);
+  const onCancel = (): void => controller.abort();
+  signal?.addEventListener('abort', onCancel, { once: true });
   try {
     let response: Response;
     try {
@@ -303,12 +322,21 @@ async function discoverEndpoints(fetch: FetchLike): Promise<XaiEndpoints> {
         signal: controller.signal,
       });
     } catch {
+      if (isCancelled(signal)) throw cancelled();
       throw new OAuthFlowError(
         'EXCHANGE_FAILED',
         'xAI authorization service could not be reached.',
       );
     }
-    const reply = parseReplyObject(await replyText(response));
+    throwIfCancelled(signal);
+    let reply: Record<string, unknown> | undefined;
+    try {
+      reply = parseReplyObject(await replyText(response));
+    } catch (error) {
+      throwIfCancelled(signal);
+      throw error;
+    }
+    throwIfCancelled(signal);
     if (!response.ok || reply === undefined) {
       throw new OAuthFlowError('EXCHANGE_FAILED', 'xAI returned an unreadable discovery reply.');
     }
@@ -323,6 +351,7 @@ async function discoverEndpoints(fetch: FetchLike): Promise<XaiEndpoints> {
     return { deviceAuthorizationEndpoint, tokenEndpoint };
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onCancel);
   }
 }
 
@@ -337,6 +366,7 @@ async function requestDeviceCode(
     endpoints.deviceAuthorizationEndpoint,
     new URLSearchParams({ client_id: clientId, scope: XAI_OAUTH_SCOPE }),
     XAI_OAUTH_REQUEST_TIMEOUT_MS,
+    options.signal,
   );
   if (!result.response.ok || result.reply === undefined) {
     throw new OAuthFlowError(
@@ -355,11 +385,7 @@ async function requestDeviceCode(
   const approvalUrl = approvalUrlFor(verificationUri, userCode);
   const expiresInSeconds = positiveNumber(result.reply.expires_in);
   const expiresAt =
-    requestedAt +
-    Math.min(
-      XAI_OAUTH_MAX_DEVICE_WAIT_MS,
-      (expiresInSeconds ?? XAI_OAUTH_DEFAULT_DEVICE_WAIT_MS / 1000) * 1000,
-    );
+    requestedAt + Math.min(SIGN_IN_WAIT_MS, (expiresInSeconds ?? SIGN_IN_WAIT_MS / 1000) * 1000);
   if (expiresAt <= options.now()) throw deviceTimeout();
   const intervalSeconds =
     positiveNumber(result.reply.interval) ?? XAI_OAUTH_DEFAULT_POLL_INTERVAL_MS / 1000;
@@ -430,9 +456,14 @@ async function postForm(
   endpoint: string,
   body: URLSearchParams,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<FormReply> {
+  throwIfCancelled(signal);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // A cancelled sign-in stops the request in flight too (T-J03).
+  const onCancel = (): void => controller.abort();
+  signal?.addEventListener('abort', onCancel, { once: true });
   try {
     let response: Response;
     try {
@@ -447,14 +478,24 @@ async function postForm(
         signal: controller.signal,
       });
     } catch {
+      if (isCancelled(signal)) throw cancelled();
       throw new OAuthFlowError(
         'EXCHANGE_FAILED',
         'xAI authorization service could not be reached.',
       );
     }
-    return { response, reply: parseReplyObject(await replyText(response)) };
+    throwIfCancelled(signal);
+    try {
+      const reply = parseReplyObject(await replyText(response));
+      throwIfCancelled(signal);
+      return { response, reply };
+    } catch (error) {
+      if (isCancelled(signal)) throw cancelled();
+      throw error;
+    }
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onCancel);
   }
 }
 
@@ -499,6 +540,34 @@ function deviceTimeout(): OAuthFlowError {
   return new OAuthFlowError('TIMEOUT', 'xAI device authorization timed out.');
 }
 
-function wait(durationMs: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, durationMs));
+/** True once a cancelled sign-in has aborted its signal (T-J03). */
+function isCancelled(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+function cancelled(): OAuthFlowError {
+  return new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.');
+}
+
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+  if (isCancelled(signal)) throw cancelled();
+}
+
+/** Waits, or rejects with CANCELLED as soon as the signal aborts (T-J03). */
+function wait(durationMs: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.'));
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, durationMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }

@@ -399,6 +399,11 @@ export const SETTINGS_PROVIDER_SIGN_IN = {
   oauthRiskNotice:
     'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.',
   signedIn: 'Signed in to {provider}.',
+  waitingForBrowser: 'Waiting for the browser. {time} left.',
+  openSignInPageAgain: 'Open the sign-in page again',
+  cancelSignIn: 'Cancel',
+  signInCancelled: 'Sign-in cancelled. You can start again.',
+  signInTimedOut: 'The {provider} sign-in ran out of time. Sign in again to start over.',
   signInFailed: 'The {provider} sign-in did not complete.',
   modelIdRequired: 'Enter a model ID before saving.',
   apiKeyRequired: 'Enter an API key before saving.',
