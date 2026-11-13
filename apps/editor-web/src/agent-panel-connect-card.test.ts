@@ -60,6 +60,14 @@ describe('Joy Code not-connected card wiring', () => {
     expect(panelSource).toContain('noModelConnected={capability === undefined}');
   });
 
+  it('states an incompatible model in plain words, with no fallback sentence', () => {
+    // Four incompatible-model messages (chat, Recipes, Looks, send guard) share this copy.
+    expect(panelSource).not.toContain('no fallback provider was selected');
+    expect(panelSource).toContain(
+      'The configured model is incompatible. Test another model in Agent Settings.',
+    );
+  });
+
   it('keeps one message and one action for the not-connected state', () => {
     expect(cardSource.match(/Joy Code is optional\. Connect your own AI model/g)).toHaveLength(1);
     expect(cardSource.match(/'Connect a model'/g)).toHaveLength(1);

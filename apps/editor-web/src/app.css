@@ -3897,6 +3897,10 @@ label {
   gap: 3px;
   margin-inline-start: 6px;
   vertical-align: middle;
+  /* The gutter is narrow (168 px) and rows can be 44 px: pills shrink and
+     truncate on one line instead of pushing the row wider. */
+  max-width: 100%;
+  min-width: 0;
 }
 .audio-dsp-pill {
   font-size: var(--joy-type-xs);
@@ -3906,17 +3910,22 @@ label {
   border-radius: 3px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.05);
-  color: #a0aec0;
+  color: var(--joy-text-secondary);
   line-height: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .audio-dsp-pill.is-active {
   background: rgba(247, 245, 134, 0.15);
-  color: #f7f586;
+  color: var(--joy-text);
   border-color: rgba(244, 183, 47, 0.4);
 }
 .audio-dsp-pill.is-ready {
   background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
+  color: var(--joy-text-secondary);
   border-color: rgba(16, 185, 129, 0.3);
 }
 /* Keep the track identity readable at rest. Controls are an interaction

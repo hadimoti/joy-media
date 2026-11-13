@@ -89,7 +89,7 @@ import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
 import type { DataLane } from './data-lanes.js';
 import { countLaneItems } from './data-lanes.js';
 import { DataLaneDrawer } from './DataLaneDrawer.js';
-import { polishMediaLabel } from './media-label.js';
+import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
 import {
   buildTimelineMediaImportTransaction,
   snapTimelineDropTimeUs,
@@ -129,6 +129,18 @@ import { diffAgentTimeline, type AgentPreviewTimeline } from './agent-timeline-p
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
 
+/** History entries name a clip by its media name, never by its id. */
+function clipHistoryName(
+  tracks: readonly { readonly clips: readonly Clip[] }[],
+  clipId: string,
+  assetDisplayNames: Readonly<Record<string, string>> | undefined,
+): string {
+  const clip = tracks.flatMap((track) => track.clips).find((item) => item.id === clipId);
+  const mediaName =
+    clip !== undefined && 'assetId' in clip ? assetDisplayNames?.[clip.assetId] : undefined;
+  return clipNameFromMedia(mediaName, 'clip');
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -151,10 +163,6 @@ function snapSplitUs(
   if (maxUs < minUs) return undefined;
   if (snapped < minUs || snapped > maxUs) return undefined;
   return snapped;
-}
-
-function clipDisplayName(id: string): string {
-  return polishMediaLabel(id);
 }
 
 function TimelineTrackKindIcon({ kind }: { readonly kind: TimelineTrackKind }) {
@@ -300,8 +308,8 @@ function TimelineClip({
   /** Half-gap between adjacent clips; start edge stays flush with timeToPixel. */
   const gapPx = 1;
   const layoutWidthPx = Math.max(6, widthPx - gapPx);
-  const label =
-    displayName?.trim() || clipDisplayName(clip.id.replace(/^voice-/, '').replace(/^clip-/, ''));
+  // The clip's name is its file name without the extension; ids are never shown.
+  const label = clipNameWithoutExtension(displayName ?? '') || 'Clip';
   const durationLabel = `${(displayDurationUs / 1_000_000).toFixed(1)}s`;
   const startLabel = `${(clip.startUs / 1_000_000).toFixed(1)}s`;
   const endLabel = `${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`;
@@ -317,7 +325,7 @@ function TimelineClip({
       tabIndex={0}
       className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}${isDragOver ? ' is-drag-over' : ''}`}
       aria-pressed={selected}
-      aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}, clip ${clip.id}`}
+      aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}`}
       aria-roledescription="timeline clip"
       data-clip-id={clip.id}
       data-element-kind={elementKind}
@@ -466,7 +474,7 @@ function TimelineClip({
             type="button"
             className="timeline-clip-trim timeline-clip-trim-start"
             data-trim-edge="start"
-            aria-label={`Trim start of ${clip.id}`}
+            aria-label={`Trim start of ${label}`}
             aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"
             title="Trim start · Arrow keys nudge 0.1s; Shift nudges 1s"
             onPointerDown={(event) => {
@@ -494,7 +502,7 @@ function TimelineClip({
             type="button"
             className="timeline-clip-trim timeline-clip-trim-end"
             data-trim-edge="end"
-            aria-label={`Trim end of ${clip.id}`}
+            aria-label={`Trim end of ${label}`}
             aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"
             title="Trim end · Arrow keys nudge 0.1s; Shift nudges 1s"
             onPointerDown={(event) => {
@@ -1055,11 +1063,19 @@ export function TimelinePanel({
     if (Math.abs(next - root.scrollLeft) >= 1) root.scrollLeft = next;
   }, [autoFit, playing, playheadUs, timelineDurationUs, viewport.pixelsPerSecond]);
 
+  // Undo labels and menus name a track by its code (V1, A1), never by its id.
+  const trackCodeFor = (id: string): string => {
+    const shown = tracks.find((track) => track.id === id);
+    return shown === undefined ? 'track' : professionalTrackCode(shown.family, shown.familyIndex);
+  };
+
   const toggle = (id: string, flag: 'locked' | 'muted' | 'solo') => {
+    const toggledTrack = composition.tracks.find((track) => track.id === id);
+    const shownTrack = trackCodeFor(id);
     if (flag === 'locked') {
-      const current = composition.tracks.find((track) => track.id === id)?.locked === true;
+      const current = toggledTrack?.locked === true;
       onDispatch({
-        label: current ? `Unlock ${id}` : `Lock ${id}`,
+        label: current ? `Unlock ${shownTrack}` : `Lock ${shownTrack}`,
         commands: [
           {
             type: 'timeline.setTrackLocked',
@@ -1070,9 +1086,9 @@ export function TimelinePanel({
       return;
     }
     if (flag === 'muted') {
-      const current = composition.tracks.find((track) => track.id === id)?.muted === true;
+      const current = toggledTrack?.muted === true;
       onDispatch({
-        label: current ? `Unmute ${id}` : `Mute ${id}`,
+        label: current ? `Unmute ${shownTrack}` : `Mute ${shownTrack}`,
         commands: [
           {
             type: 'timeline.setTrackMuted',
@@ -1096,8 +1112,9 @@ export function TimelinePanel({
 
   const setVisibility = (id: string, visible: boolean) => {
     if (composition.tracks.find((track) => track.id === id) === undefined) return;
+    const shownCode = trackCodeFor(id);
     onDispatch({
-      label: visible ? `Show ${id}` : `Hide ${id}`,
+      label: visible ? `Show ${shownCode}` : `Hide ${shownCode}`,
       commands: [
         {
           type: 'property.setTrackEnabled',
@@ -1291,7 +1308,7 @@ export function TimelinePanel({
     (trackId: string, clipId: string, atUs: number) => {
       if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
       onDispatch({
-        label: `Split ${clipId}`,
+        label: `Split ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
         commands: [
           {
             type: 'timeline.splitClip',
@@ -1306,7 +1323,7 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks, onDispatch],
+    [assetDisplayNames, composition.id, composition.tracks, onDispatch],
   );
 
   const moveClip =
@@ -1408,7 +1425,7 @@ export function TimelinePanel({
       try {
         if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return false;
         onDispatch({
-          label: `Trim ${edge} ${clipId}`,
+          label: `Trim ${edge} ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
           commands: [trimCommand(composition.id, trackId, clipId, edge, timeUs)],
         });
         return true;
@@ -1459,7 +1476,7 @@ export function TimelinePanel({
         clipId,
       );
       onDispatch({
-        label: `Insert ${asset.displayName ?? asset.assetId}`,
+        label: `Insert ${asset.displayName ?? 'media'}`,
         commands: [
           {
             type: 'timeline.insertClip',
@@ -1513,7 +1530,7 @@ export function TimelinePanel({
         clipId,
       );
       onDispatch({
-        label: `Add ${asset.displayName ?? asset.assetId}`,
+        label: `Add ${asset.displayName ?? 'media'}`,
         commands: [
           {
             type: 'timeline.addTrack',
@@ -1587,8 +1604,11 @@ export function TimelinePanel({
   const dispatchDuplicate = (trackId: string, clip: Clip) => {
     const source = composition.tracks.find((t) => t.id === trackId);
     if (source === undefined || source.locked === true) return;
+    // The history entry names the clip by its media name, never by its id.
+    const mediaName = 'assetId' in clip ? assetDisplayNames?.[clip.assetId] : undefined;
+    const clipName = clipNameWithoutExtension(mediaName ?? '') || 'clip';
     onDispatch({
-      label: `Duplicate ${clip.id}`,
+      label: `Duplicate ${clipName}`,
       commands: [
         duplicateClipCommand(
           composition.id,
@@ -1778,7 +1798,7 @@ export function TimelinePanel({
       return;
     }
     onDispatch({
-      label: `Freeze ${clipId}`,
+      label: `Freeze ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
       commands: [
         freezeFrameCommand(
           composition.id,
@@ -1795,7 +1815,7 @@ export function TimelinePanel({
   const dispatchReverse = (trackId: string, clipId: string) => {
     if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
     onDispatch({
-      label: `Reverse ${clipId}`,
+      label: `Reverse ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
       commands: [toggleClipReverseCommand(composition.id, trackId, clipId)],
     });
     showToast?.(
@@ -1842,7 +1862,7 @@ export function TimelinePanel({
     const clip = track?.clips.find((c) => c.id === clipId);
     const fromFreeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
     onDispatch({
-      label: `Speed ${clipId} → ${playbackRate}×`,
+      label: `Speed ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)} → ${playbackRate}×`,
       commands: [
         {
           type: 'timeline.setClipRate',
@@ -2643,12 +2663,9 @@ export function TimelinePanel({
             const trackLabelColor =
               localTrackLabelColors[track.id] ?? trackLabelColors?.[track.id] ?? source.labelColor;
             const kind: TimelineTrackKind = track.family === 'audio' ? 'audio' : 'video';
-            const trackName = professionalTrackName(
-              track.family,
-              track.familyIndex,
-              source.name ?? source.id,
-            );
             const trackCode = professionalTrackCode(track.family, track.familyIndex);
+            // An unnamed track shows its track code (V1, A1), never its id.
+            const trackName = source.name?.trim() ? source.name.trim() : trackCode;
             const startsAudioStack =
               track.family === 'audio' && (index === 0 || visible[index - 1]?.family !== 'audio');
             return (
@@ -2720,7 +2737,7 @@ export function TimelinePanel({
                       () => {},
                       () =>
                         onDispatch({
-                          label: `Remove ${source.name ?? source.id}`,
+                          label: `Remove ${trackName}`,
                           commands: [
                             {
                               type: 'timeline.removeTrack',
@@ -2749,7 +2766,7 @@ export function TimelinePanel({
                     <span className="track-code" dir="ltr">
                       {professionalTrackCode(track.family, track.familyIndex)}
                     </span>
-                    <span className="track-name" dir="ltr" title={track.id}>
+                    <span className="track-name" dir="ltr" title={trackCode}>
                       {trackName}
                     </span>
                     {track.family === 'audio' && (
@@ -2759,28 +2776,30 @@ export function TimelinePanel({
                       >
                         <span
                           className={`audio-dsp-pill dsp-dfn ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
-                          title="DeepFilterNet (DFN) Active"
+                          title="Noise reduction (DeepFilterNet) active"
+                          aria-label="Noise reduction (DeepFilterNet) active"
                         >
-                          DFN
+                          Noise reduction
                         </span>
                         <span
                           className={`audio-dsp-pill dsp-norm ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
-                          title="Volume Normalization (NORM) Active"
+                          title="Loudness normalization (EBU R128) active"
+                          aria-label="Loudness normalization (EBU R128) active"
                         >
-                          NORM
+                          Loudness
                         </span>
                       </div>
                     )}
                   </div>
                   <div
                     className="timeline-track-controls"
-                    aria-label={`${track.id} track controls`}
+                    aria-label={`${trackCode} track controls`}
                   >
                     <button
                       type="button"
                       className="timeline-track-kind-icon timeline-track-kind-button"
                       title="Change track color"
-                      aria-label={`Change label color for ${source.name ?? source.id}`}
+                      aria-label={`Change label color for ${trackName}`}
                       aria-haspopup="menu"
                       aria-expanded={colorMenuTrackId === track.id}
                       onClick={(event) => {
@@ -2796,14 +2815,14 @@ export function TimelinePanel({
                       type="button"
                       className="icon-button"
                       aria-pressed={track.locked}
-                      aria-label={`Lock ${track.id}`}
+                      aria-label={`Lock ${trackCode}`}
                       title={track.locked ? 'Unlock track' : 'Lock track'}
                       onClick={() => toggle(track.id, 'locked')}
                     >
                       <LockIcon />
                     </button>
                     <TimelineTrackVisibilityButton
-                      trackId={track.id}
+                      trackLabel={trackCode}
                       visible={track.visible}
                       onToggle={(visible) => setVisibility(track.id, visible)}
                     />
@@ -2811,7 +2830,7 @@ export function TimelinePanel({
                       type="button"
                       className="icon-button"
                       aria-pressed={track.muted === true}
-                      aria-label={`${track.muted ? 'Unmute' : 'Mute'} ${track.id}`}
+                      aria-label={`${track.muted ? 'Unmute' : 'Mute'} ${trackCode}`}
                       title={track.muted ? 'Unmute track' : 'Mute track'}
                       onClick={() => toggle(track.id, 'muted')}
                     >
@@ -2821,7 +2840,7 @@ export function TimelinePanel({
                       type="button"
                       className="icon-button"
                       aria-pressed={track.solo}
-                      aria-label={`Solo ${track.id}`}
+                      aria-label={`Solo ${trackCode}`}
                       title={track.solo ? 'Unsolo track' : 'Solo track'}
                       onClick={() => toggle(track.id, 'solo')}
                     >
@@ -2836,7 +2855,7 @@ export function TimelinePanel({
                             [track.id]: labelColor,
                           }));
                           onDispatch({
-                            label: `Color ${source.name ?? source.id}`,
+                            label: `Color ${trackName}`,
                             commands: [
                               {
                                 type: 'timeline.setTrackLabelColor',
@@ -2859,9 +2878,9 @@ export function TimelinePanel({
                   data-track-id={track.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={`Insert media on ${track.id} track`}
+                  aria-label={`Insert media on ${trackCode} track`}
                   aria-keyshortcuts="Enter Space"
-                  title={`Insert media on ${track.id} track (Enter or Space)`}
+                  title={`Insert media on ${trackCode} track (Enter or Space)`}
                   style={{ minWidth: `${laneWidthPx}px` }}
                   onKeyDown={(event) => {
                     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -3149,7 +3168,8 @@ export function TimelinePanel({
                       key={clip.id}
                       clip={clip}
                       elementKind={timelineElementKindForClip(clip, elementKinds)}
-                      {...(clip.kind === 'video' && assetDisplayNames?.[clip.assetId] !== undefined
+                      {...(clip.kind !== 'composition' &&
+                      assetDisplayNames?.[clip.assetId] !== undefined
                         ? { displayName: assetDisplayNames[clip.assetId] }
                         : {})}
                       selected={selectedIds.includes(clip.id)}
