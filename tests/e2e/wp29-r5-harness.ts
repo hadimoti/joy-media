@@ -379,7 +379,11 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
   const liveLabel = label;
   let tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();
   if (!(await tab.isVisible())) {
-    await page.getByRole('button', { name: 'View', exact: true }).click();
+    // The Monitor transport has its own "View" button; scope to the app menu bar.
+    await page
+      .getByRole('group', { name: 'Brand' })
+      .getByRole('button', { name: 'View', exact: true })
+      .click();
     const menuItem = page.getByRole('menuitem', { name: liveLabel, exact: true });
     await expect(menuItem).toBeVisible();
     await menuItem.click();

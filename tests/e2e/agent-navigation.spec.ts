@@ -19,7 +19,10 @@ test.describe('JOY Agent navigation', () => {
     await expect(page.locator('.panel-tab[aria-label="Joy Code"]')).toHaveCount(0);
 
     // It opens on demand and gets a column of its own.
-    await page.getByRole('button', { name: 'View', exact: true }).click();
+    await page
+      .getByRole('group', { name: 'Brand' })
+      .getByRole('button', { name: 'View', exact: true })
+      .click();
     await page.getByRole('menuitem', { name: 'Joy Code', exact: true }).click();
     const tab = page.locator('.panel-tab[aria-label="Joy Code"]').first();
     await expect(tab).toBeVisible();
