@@ -1,6 +1,11 @@
 import type { EditorViewMode } from './dock-layout.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
 import type { PreviewQuality } from './preview-quality.js';
+import {
+  DEFAULT_MONITOR_VIEW_OPTIONS,
+  sanitizeMonitorViewOptions,
+  type MonitorViewOptions,
+} from './monitor/monitor-view-options.js';
 
 export const EDITOR_UI_PREFERENCES_KEY = 'joy-media.editor-ui-preferences.v2';
 
@@ -33,6 +38,8 @@ export interface EditorUiPreferencesV2 {
     readonly quality: PreviewQuality;
     readonly renderer: 'auto' | 'gpu-worker' | 'local';
   };
+  /** The Monitor's View menu (overlays, guides, background); per user, never project data. */
+  readonly monitorView?: MonitorViewOptions;
 }
 
 export interface UiPreferenceStorage {
@@ -59,6 +66,7 @@ export const DEFAULT_EDITOR_UI_PREFERENCES: EditorUiPreferencesV2 = {
   panelTabs: {},
   disclosures: {},
   monitorPreview: { quality: 'quarter', renderer: 'auto' },
+  monitorView: DEFAULT_MONITOR_VIEW_OPTIONS,
 };
 
 export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiPreferencesV2 {
@@ -74,6 +82,7 @@ export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiP
         return {
           ...parsed,
           monitorPreview,
+          monitorView: sanitizeMonitorViewOptions(parsed.monitorView),
         };
       }
     } catch {
