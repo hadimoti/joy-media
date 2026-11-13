@@ -32,6 +32,8 @@ import {
   WorkflowPathIcon,
 } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { usePopup } from './popup-manager.js';
+import { POPUP_IDS } from './popup-ids.js';
 import { panelTabIconUrl, panelTabSvgIcon } from './panel-tab-icons.js';
 import {
   BrowserControlPlaneClient,
@@ -268,7 +270,8 @@ export function AudioPanel({
   const [workflowId, setWorkflowId] = useState(AUDIO_WORKFLOW_PRESETS[0]!.id);
   // The processing plan and Apply appear only after a preset is chosen (T-D15).
   const [chosenWorkflowId, setChosenWorkflowId] = useState<string | null>(null);
-  const [engineInfoOpen, setEngineInfoOpen] = useState(false);
+  // The engine status is one shared popup: Escape, an outside click and a second popup close it (T-P05).
+  const engineStatus = usePopup(POPUP_IDS.audioEngineStatus);
   const [scopeId, setScopeId] = useState<AudioEnhanceScopeId>('timeline');
   const [device, setDevice] = useState<'gpu' | 'cpu'>('gpu');
   const [modelCachePath, setModelCachePath] = useState(DEFAULT_MODEL_CACHE_PATH);
@@ -542,19 +545,21 @@ export function AudioPanel({
           </section>
 
           <section className="audio-enhance-route-summary" aria-label="Enhancement runtime summary">
-            <div className="audio-engine-status">
+            <div className="audio-engine-status" ref={engineStatus.rootRef}>
               <button
                 type="button"
                 className="icon-button audio-engine-status-button"
                 aria-label="Engine status"
                 title="Engine status"
-                aria-expanded={engineInfoOpen}
+                aria-expanded={engineStatus.open}
+                aria-haspopup="dialog"
                 aria-controls="audio-engine-status-popover"
-                onClick={() => setEngineInfoOpen((open) => !open)}
+                data-popup-trigger={POPUP_IDS.audioEngineStatus}
+                onClick={(event) => engineStatus.toggle(event.currentTarget)}
               >
                 <InfoIcon />
               </button>
-              {engineInfoOpen && (
+              {engineStatus.open && (
                 <section
                   id="audio-engine-status-popover"
                   className="audio-engine-status-popover"
@@ -567,7 +572,7 @@ export function AudioPanel({
                       className="icon-button"
                       aria-label="Close engine status"
                       title="Close"
-                      onClick={() => setEngineInfoOpen(false)}
+                      onClick={() => engineStatus.close()}
                     >
                       <CloseIcon />
                     </button>
