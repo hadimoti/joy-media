@@ -341,8 +341,6 @@ These are the sentences the dialog says when it answers, refuses or reports. The
 
 The `{label}`, `{model}`, `{provider}` and `{reason}` parts are filled in by the app.
 
-<<<<<<< HEAD
-
 | Old text                                                                                                                                           | New text                                                                                                                                           | Where it is                                                       | Owner's answer |
 | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | -------------- |
 | Agent slots                                                                                                                                        | Agent slots                                                                                                                                        | Models page, agent section name                                   |                |
