@@ -1,4 +1,4 @@
-import type { EditorViewMode } from './dock-layout.js';
+import { dockLayoutKey, type EditorViewMode } from './dock-layout.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
 import type { PreviewQuality } from './preview-quality.js';
 import {
@@ -36,7 +36,6 @@ export interface EditorUiPreferencesV2 {
   readonly disclosures: Readonly<Record<string, boolean>>;
   readonly monitorPreview?: {
     readonly quality: PreviewQuality;
-    readonly renderer: 'auto' | 'gpu-worker' | 'local';
   };
   /** The Monitor's View menu (overlays, guides, background); per user, never project data. */
   readonly monitorView?: MonitorViewOptions;
@@ -51,7 +50,8 @@ export interface UiPreferenceStorage {
 export const DEFAULT_EDITOR_UI_PREFERENCES: EditorUiPreferencesV2 = {
   version: 2,
   workspacePreset: 'edit',
-  viewMode: 'vertical',
+  // Preview-first: the widescreen seed puts the monitor top-centre (T-D12).
+  viewMode: 'widescreen',
   projectLibrary: { view: 'grid', sort: 'updated-desc' },
   assetLibrary: {
     source: 'cloud',
@@ -65,7 +65,7 @@ export const DEFAULT_EDITOR_UI_PREFERENCES: EditorUiPreferencesV2 = {
   jobsFilter: 'all',
   panelTabs: {},
   disclosures: {},
-  monitorPreview: { quality: 'quarter', renderer: 'auto' },
+  monitorPreview: { quality: 'auto' },
   monitorView: DEFAULT_MONITOR_VIEW_OPTIONS,
 };
 
@@ -75,9 +75,9 @@ export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiP
     try {
       const parsed: unknown = JSON.parse(raw);
       if (isEditorUiPreferencesV2(parsed)) {
-        const monitorPreview = parsed.monitorPreview ?? {
-          quality: 'quarter' as const,
-          renderer: 'auto' as const,
+        const savedQuality = parsed.monitorPreview?.quality;
+        const monitorPreview = {
+          quality: savedQuality === undefined || savedQuality === 'quarter' ? 'auto' : savedQuality,
         };
         return {
           ...parsed,
@@ -90,11 +90,26 @@ export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiP
     }
   }
 
+  // A profile with no readable preferences: an older saved choice (the legacy key) is honoured; otherwise the
+  // mode is inferred from the saved layouts, so a saved vertical layout is still used (T-D12 round 2).
   const legacyViewMode = storage.getItem('joy-media.view-mode.v1');
   return {
     ...DEFAULT_EDITOR_UI_PREFERENCES,
-    viewMode: legacyViewMode === 'widescreen' ? 'widescreen' : 'vertical',
+    viewMode:
+      legacyViewMode === 'widescreen' || legacyViewMode === 'vertical'
+        ? legacyViewMode
+        : inferredViewMode(storage),
   };
+}
+
+/**
+ * The mode a profile was using, from the layouts it saved: a vertical layout with no widescreen layout means
+ * vertical. Otherwise the default (T-D12 round 2).
+ */
+function inferredViewMode(storage: UiPreferenceStorage): EditorViewMode {
+  const hasVertical = storage.getItem(dockLayoutKey('vertical')) !== null;
+  const hasWidescreen = storage.getItem(dockLayoutKey('widescreen')) !== null;
+  return hasVertical && !hasWidescreen ? 'vertical' : DEFAULT_EDITOR_UI_PREFERENCES.viewMode;
 }
 
 export function saveEditorUiPreferences(
@@ -168,8 +183,10 @@ function isEditorUiPreferencesV2(value: unknown): value is EditorUiPreferencesV2
       (isRecord(value.monitorPreview) &&
         (value.monitorPreview.quality === 'quarter' ||
           value.monitorPreview.quality === 'half' ||
-          value.monitorPreview.quality === 'full') &&
-        (value.monitorPreview.renderer === 'auto' ||
+          value.monitorPreview.quality === 'full' ||
+          value.monitorPreview.quality === 'auto') &&
+        (value.monitorPreview.renderer === undefined ||
+          value.monitorPreview.renderer === 'auto' ||
           value.monitorPreview.renderer === 'gpu-worker' ||
           value.monitorPreview.renderer === 'local')))
   );

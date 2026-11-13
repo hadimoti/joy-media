@@ -23,7 +23,8 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
 
     await expect(page.getByRole('button', { name: 'Export MP4' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Recent processes' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Workspace preset' })).toBeVisible();
+    // The visible name is "Workspace: <preset>" (WorkspaceSwitcher.tsx); "Workspace preset" is only its tooltip.
+    await expect(page.getByRole('button', { name: /^Workspace: / })).toBeVisible();
 
     // Every panel: reachable AND opening it introduces no overflow at this
     // viewport (previously overflow was measured once, in the default layout).

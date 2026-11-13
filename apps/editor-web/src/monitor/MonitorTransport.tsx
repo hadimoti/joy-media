@@ -1,11 +1,15 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { ExportPresetId } from '@joy-media/project-schema';
 import type { PopupControl } from '../popup-manager.js';
 import { POPUP_IDS } from '../popup-ids.js';
 import { canvasFormatReadout, canvasShapeLabel } from '../canvas-format.js';
 import { CANVAS_FORMAT_POPOVER_ID } from '../CanvasFormatMenu.js';
-import type { BrowserGpuPreviewSession } from '../control-plane-client.js';
-import { previewQualityLabel, type PreviewQuality } from '../preview-quality.js';
+import {
+  previewDimensions,
+  previewQualityLabel,
+  type FixedPreviewQuality,
+  type PreviewQuality,
+} from '../preview-quality.js';
 import {
   AspectRatioIcon,
   CloseIcon,
@@ -16,8 +20,10 @@ import {
   SkipForwardIcon,
   ZoomInIcon,
 } from '../icons.js';
-import type { MonitorGpuPreviewStatus, MonitorPreviewRenderer } from './monitor-view.js';
+import type { MonitorPerformanceStats } from './monitor-performance.js';
 import { MonitorViewMenu } from './MonitorViewMenu.js';
+import { MonitorTimeControls } from './MonitorTimeControls.js';
+import { MONITOR_FULLSCREEN_EVENT } from './monitor-transport-model.js';
 import type { MonitorViewOptions } from './monitor-view-options.js';
 import { MONITOR_ZOOM_PRESETS, formatZoomPercent, parseZoomPercent } from './monitor-view-state.js';
 
@@ -40,11 +46,9 @@ export interface MonitorTransportProps {
   readonly seek: (timeUs: number) => void;
   readonly togglePlayback: () => void;
   readonly previewQuality: PreviewQuality;
+  readonly activePreviewQuality: FixedPreviewQuality;
   readonly setPreviewQuality: Dispatch<SetStateAction<PreviewQuality>>;
-  readonly previewRenderer: MonitorPreviewRenderer;
-  readonly setPreviewRenderer: Dispatch<SetStateAction<MonitorPreviewRenderer>>;
-  readonly gpuPreviewStatus: MonitorGpuPreviewStatus;
-  readonly gpuSession: BrowserGpuPreviewSession | undefined;
+  readonly performanceStats: MonitorPerformanceStats;
   /** The Format popup, owned by the App header, which also renders the popover. */
   readonly formatMenu: PopupControl;
   readonly width: number;
@@ -56,7 +60,7 @@ export interface MonitorTransportProps {
   readonly onViewOptionsChange: (next: MonitorViewOptions) => void;
 }
 
-/** The bar under the monitor: zoom drawer, play controls, quality, renderer, ratio. */
+/** The bar under the monitor: zoom drawer, play controls, preview quality and format. */
 export function MonitorTransport({
   zoomDrawer,
   zoomFit,
@@ -73,11 +77,9 @@ export function MonitorTransport({
   seek,
   togglePlayback,
   previewQuality,
+  activePreviewQuality,
   setPreviewQuality,
-  previewRenderer,
-  setPreviewRenderer,
-  gpuPreviewStatus,
-  gpuSession,
+  performanceStats,
   formatMenu,
   width,
   height,
@@ -99,6 +101,14 @@ export function MonitorTransport({
     setTypedZoom(formatZoomPercent(parsed));
     onZoomSet(parsed);
   };
+  // F (and the palette) asks for the full-screen preview through a window event.
+  const toggleFullscreenRef = useRef(toggleFullscreen);
+  toggleFullscreenRef.current = toggleFullscreen;
+  useEffect(() => {
+    const onRequest = () => toggleFullscreenRef.current();
+    window.addEventListener(MONITOR_FULLSCREEN_EVENT, onRequest);
+    return () => window.removeEventListener(MONITOR_FULLSCREEN_EVENT, onRequest);
+  }, []);
   return (
     <div className="monitor-transport" ref={zoomDrawer.rootRef}>
       {zoomDrawer.open && (
@@ -174,6 +184,7 @@ export function MonitorTransport({
               className="monitor-transport-btn"
               aria-pressed={fullscreen}
               aria-label="Fullscreen preview"
+              title="Fullscreen preview (F, Esc leaves)"
               data-guide="Full"
               onClick={() => {
                 toggleFullscreen();
@@ -214,49 +225,45 @@ export function MonitorTransport({
         >
           <SkipForwardIcon />
         </button>
+        <MonitorTimeControls />
       </div>
       <div className="monitor-transport-end">
         <label className="monitor-preview-control">
-          <span>Quality</span>
+          <span>Preview quality</span>
           <select
-            aria-label="Monitor preview quality"
+            aria-label="Preview quality"
             value={previewQuality}
             onChange={(event) => setPreviewQuality(event.target.value as PreviewQuality)}
           >
-            {(['quarter', 'half', 'full'] as const).map((quality) => (
-              <option key={quality} value={quality}>
-                {previewQualityLabel(quality)}
-              </option>
-            ))}
+            {(['auto', 'full', 'half', 'quarter'] as const).map((quality) => {
+              const resolvedQuality = quality === 'auto' ? activePreviewQuality : quality;
+              const dimensions = previewDimensions(width, height, resolvedQuality);
+              return (
+                <option
+                  key={quality}
+                  value={quality}
+                  title={
+                    quality === 'quarter'
+                      ? 'Quarter uses fewer pixels for speed, so the picture looks softer.'
+                      : undefined
+                  }
+                >
+                  {previewQualityLabel(quality)} ({dimensions.width} × {dimensions.height})
+                </option>
+              );
+            })}
           </select>
         </label>
-        <label className="monitor-preview-control">
-          <span>Renderer</span>
-          <select
-            aria-label="Monitor preview renderer"
-            value={previewRenderer}
-            onChange={(event) =>
-              setPreviewRenderer(event.target.value as 'auto' | 'gpu-worker' | 'local')
-            }
-          >
-            <option value="auto">Auto</option>
-            <option value="gpu-worker">GPU Worker</option>
-            <option value="local">Local</option>
-          </select>
-        </label>
-        <span
-          className={`monitor-preview-status is-${gpuPreviewStatus}`}
-          title={gpuSession === undefined ? undefined : `Worker ${gpuSession.workerId}`}
-        >
-          {gpuPreviewStatus === 'hardware-gpu'
-            ? 'GPU'
-            : gpuPreviewStatus === 'connecting'
-              ? 'Connecting'
-              : gpuPreviewStatus === 'fallback'
-                ? 'Local fallback'
-                : 'Local'}
-        </span>
         <MonitorViewMenu options={viewOptions} onChange={onViewOptionsChange} />
+        {viewOptions.showPerformanceStats && (
+          <span
+            className="monitor-performance-readout"
+            aria-label={`Preview performance: ${performanceStats.fps} frames per second; ${performanceStats.droppedFrames} dropped frames`}
+            title="Rendered frame rate and dropped frames during playback"
+          >
+            {performanceStats.fps} FPS · {performanceStats.droppedFrames} dropped
+          </span>
+        )}
         <button
           type="button"
           className="monitor-transport-btn"

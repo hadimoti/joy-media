@@ -3,7 +3,12 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createLiveDriver, EXPECTED_JOY_HASH, verifyAfterRun } from './driver.mjs';
+import {
+  buildLaunchEnvironment,
+  createLiveDriver,
+  EXPECTED_JOY_HASH,
+  verifyAfterRun,
+} from './driver.mjs';
 import * as liveDriver from './driver.mjs';
 
 test('the expected joy protocol hash is the owner baseline', () => {
@@ -131,6 +136,119 @@ test('defines a drop target for the timeline, monitor, and media panel', () => {
     monitor: '.monitor-canvas-wrap',
     media: '.asset-library-main',
   });
+});
+
+const REAL_LOCAL_APP_DATA = join('C:', 'Users', 'Tester', 'AppData', 'Local');
+const SCRATCH_ROOT = join('C:', 'jgp', 'v111', 'codex', 'profiles', 'env-run', 'environment');
+const ELECTRON_DIR = join('C:', 'jgp', 'electron-44.3.0');
+const SCRATCH_KEYS = ['USERPROFILE', 'HOME', 'APPDATA', 'TEMP', 'TMP'];
+
+function baseEnvironment() {
+  return {
+    PATH: 'C:\\Windows\\System32',
+    USERPROFILE: join('C:', 'Users', 'Tester'),
+    APPDATA: join('C:', 'Users', 'Tester', 'AppData', 'Roaming'),
+    TEMP: join('C:', 'Users', 'Tester', 'AppData', 'Local', 'Temp'),
+    LOCALAPPDATA: REAL_LOCAL_APP_DATA,
+  };
+}
+
+test('scratch mode: every folder, LOCALAPPDATA included, is under the run environment', () => {
+  const base = baseEnvironment();
+  const launch = buildLaunchEnvironment({
+    baseEnv: base,
+    envRoot: SCRATCH_ROOT,
+    needsSignIn: false,
+    electronDir: ELECTRON_DIR,
+  });
+
+  assert.equal(launch.mode, 'scratch');
+  assert.match(launch.modeLine, /^mode: scratch/u);
+  for (const key of [...SCRATCH_KEYS, 'LOCALAPPDATA']) {
+    assert.ok(launch.env[key].startsWith(SCRATCH_ROOT), `${key} must be scratch`);
+    assert.notEqual(launch.env[key], base.LOCALAPPDATA);
+  }
+  assert.equal(launch.env.LOCALAPPDATA, join(SCRATCH_ROOT, 'Local'));
+  assert.ok(launch.scratchDirs.includes(join(SCRATCH_ROOT, 'Local')));
+  assert.equal(launch.env.ELECTRON_OVERRIDE_DIST_PATH, ELECTRON_DIR);
+  assert.equal(launch.env.PATH, base.PATH);
+});
+
+test('sign-in mode: LOCALAPPDATA is the real one and every other folder is scratch', () => {
+  const base = baseEnvironment();
+  const launch = buildLaunchEnvironment({
+    baseEnv: base,
+    envRoot: SCRATCH_ROOT,
+    needsSignIn: true,
+    electronDir: ELECTRON_DIR,
+  });
+
+  assert.equal(launch.mode, 'sign-in');
+  assert.match(launch.modeLine, /^mode: sign-in/u);
+  assert.match(launch.modeLine, /LOCALAPPDATA is the real one/u);
+  assert.equal(launch.env.LOCALAPPDATA, REAL_LOCAL_APP_DATA);
+  for (const key of SCRATCH_KEYS) {
+    assert.ok(launch.env[key].startsWith(SCRATCH_ROOT), `${key} must stay scratch`);
+  }
+  assert.equal(launch.env.ELECTRON_OVERRIDE_DIST_PATH, ELECTRON_DIR);
+  assert.equal(launch.env.PATH, base.PATH);
+});
+
+test('sign-in mode creates only scratch folders, never the real LOCALAPPDATA', () => {
+  const launch = buildLaunchEnvironment({
+    baseEnv: baseEnvironment(),
+    envRoot: SCRATCH_ROOT,
+    needsSignIn: true,
+    electronDir: ELECTRON_DIR,
+  });
+
+  assert.deepEqual(launch.scratchDirs, [
+    join(SCRATCH_ROOT, 'User'),
+    join(SCRATCH_ROOT, 'Roaming'),
+    join(SCRATCH_ROOT, 'Temp'),
+  ]);
+  assert.ok(!launch.scratchDirs.includes(REAL_LOCAL_APP_DATA));
+});
+
+test('scratch mode creates the scratch LOCALAPPDATA folder with the others', () => {
+  const launch = buildLaunchEnvironment({
+    baseEnv: baseEnvironment(),
+    envRoot: SCRATCH_ROOT,
+    needsSignIn: false,
+    electronDir: ELECTRON_DIR,
+  });
+
+  assert.equal(launch.scratchDirs.length, 4);
+  assert.ok(launch.scratchDirs.includes(join(SCRATCH_ROOT, 'Local')));
+});
+
+test('sign-in mode refuses when no real LOCALAPPDATA is set', () => {
+  const base = baseEnvironment();
+  delete base.LOCALAPPDATA;
+
+  assert.throws(
+    () =>
+      buildLaunchEnvironment({
+        baseEnv: base,
+        envRoot: SCRATCH_ROOT,
+        needsSignIn: true,
+        electronDir: ELECTRON_DIR,
+      }),
+    /--needs-sign-in needs the real LOCALAPPDATA/u,
+  );
+});
+
+test('building the environment does not change the base environment', () => {
+  const base = baseEnvironment();
+  const before = { ...base };
+  buildLaunchEnvironment({
+    baseEnv: base,
+    envRoot: SCRATCH_ROOT,
+    needsSignIn: true,
+    electronDir: ELECTRON_DIR,
+  });
+
+  assert.deepEqual(base, before);
 });
 
 test('dispatches trusted CDP file-drop events with real scratch file paths', async (t) => {

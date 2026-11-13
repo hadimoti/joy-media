@@ -8,24 +8,31 @@ export interface AppMenuBarProps {
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly hasSelection: boolean;
+  /** True when the selected clip is a video clip, the only kind with a Speed tab. */
+  readonly supportsSpeed: boolean;
   readonly exporting: boolean;
   readonly onAction: (id: AppMenuActionId) => void;
 }
 
-function itemDisabled(
-  item: AppMenuItem,
-  props: Pick<AppMenuBarProps, 'canUndo' | 'canRedo' | 'hasSelection' | 'exporting'>,
-): boolean {
+export type MenuRuleState = Pick<
+  AppMenuBarProps,
+  'canUndo' | 'canRedo' | 'hasSelection' | 'supportsSpeed' | 'exporting'
+>;
+
+/** Whether a menu item is greyed out right now. The command palette uses the same rule. */
+export function itemDisabled(item: AppMenuItem, props: MenuRuleState): boolean {
   if (item.disabled === true) return true;
   switch (item.id) {
     case 'edit.undo':
       return !props.canUndo;
     case 'edit.redo':
       return !props.canRedo;
-    case 'edit.delete':
-    case 'edit.duplicate':
+    case 'clip.delete':
+    case 'clip.duplicate':
     case 'clip.split':
       return !props.hasSelection;
+    case 'clip.speed':
+      return !props.hasSelection || !props.supportsSpeed;
     case 'file.export':
       return props.exporting;
     default:

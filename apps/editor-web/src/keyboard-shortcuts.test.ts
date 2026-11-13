@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isEditableTarget, isInteractiveTarget, resolveShortcut } from './keyboard-shortcuts.js';
+import {
+  SHORTCUT_REFERENCE,
+  isEditableTarget,
+  isInteractiveTarget,
+  resolveShortcut,
+} from './keyboard-shortcuts.js';
 
 const key = (
   k: string,
@@ -11,6 +16,31 @@ const key = (
   shiftKey: false,
   altKey: false,
   ...mods,
+});
+
+describe('resolveShortcut for the Monitor transport (T-M10)', () => {
+  it('maps frame steps, J K L, in and out, loop, play in to out and full screen', () => {
+    expect(resolveShortcut(key(','))).toBe('playhead.frameBack');
+    expect(resolveShortcut(key('.'))).toBe('playhead.frameForward');
+    expect(resolveShortcut(key('j'))).toBe('jkl.reverse');
+    expect(resolveShortcut(key('K'))).toBe('jkl.stop');
+    expect(resolveShortcut(key('l'))).toBe('jkl.forward');
+    expect(resolveShortcut(key('i'))).toBe('range.in');
+    expect(resolveShortcut(key('O'))).toBe('range.out');
+    expect(resolveShortcut(key('X', { shiftKey: true }))).toBe('range.clear');
+    expect(resolveShortcut(key('x'))).toBeUndefined();
+    expect(resolveShortcut(key('\\'))).toBe('playback.loop');
+    expect(resolveShortcut(key('/'))).toBe('range.playInOut');
+    expect(resolveShortcut(key('f'))).toBe('monitor.fullscreen');
+  });
+
+  it('leaves Shift and Ctrl combinations to other actions', () => {
+    expect(resolveShortcut(key('J', { shiftKey: true }))).toBeUndefined();
+    expect(resolveShortcut(key('F', { shiftKey: true }))).toBeUndefined();
+    expect(resolveShortcut(key('k', { ctrlKey: true }))).toBe('palette.toggle');
+    expect(resolveShortcut(key('i', { ctrlKey: true }))).toBeUndefined();
+    expect(resolveShortcut(key('l', { altKey: true }))).toBeUndefined();
+  });
 });
 
 describe('resolveShortcut', () => {
@@ -73,5 +103,16 @@ describe('isInteractiveTarget', () => {
     const button = { tagName: 'BUTTON', parentElement: null };
     const icon = { tagName: 'SPAN', parentElement: button };
     expect(isInteractiveTarget(icon as unknown as EventTarget)).toBe(true);
+  });
+});
+
+describe('shortcut reference', () => {
+  it('groups the shortcuts under Playback, Editing and View, in that order', () => {
+    expect(SHORTCUT_REFERENCE.map((group) => group.title)).toEqual(['Playback', 'Editing', 'View']);
+    const keysIn = (title: string) =>
+      SHORTCUT_REFERENCE.find((group) => group.title === title)?.rows.map((row) => row.keys);
+    expect(keysIn('Playback')).toContain('Space');
+    expect(keysIn('Editing')).toContain('Ctrl+Z');
+    expect(keysIn('View')).toContain('Ctrl+K');
   });
 });
