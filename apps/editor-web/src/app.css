@@ -1510,7 +1510,12 @@ a.icon-button {
   background: transparent;
   color: var(--joy-text-secondary);
 }
-.icon-tool:hover,
+/* Hovering a tool shows it; only the tool that is actually on shows gold. */
+.icon-tool:hover {
+  border-color: var(--joy-border-hover);
+  background: var(--joy-bg-hover);
+  color: var(--joy-text);
+}
 .icon-tool[aria-pressed='true'] {
   border-color: var(--joy-border-hover);
   background: var(--joy-bg-hover);

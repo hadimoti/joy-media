@@ -359,6 +359,36 @@ describe('the app-wide icon buttons (T-D09)', () => {
       value: 'var(--joy-accent)',
     });
   });
+
+  it('keeps gold for the tool that is on, not for the one under the pointer', () => {
+    const rules = cssRules(sourceOf(APP_STYLESHEET)).filter(isIconRule);
+
+    // Hovering a tool shows it in the primary text colour: hovering is not
+    // the same as being on.
+    const hovered = rules.find((rule) => rule.selector.trim() === '.icon-tool:hover');
+    expect(hovered, 'the hovered icon tool rule must be found').toBeTruthy();
+    expect(hovered?.declarations).toContainEqual({
+      property: 'color',
+      value: 'var(--joy-text)',
+    });
+    expect(hovered?.declarations).not.toContainEqual({
+      property: 'color',
+      value: 'var(--joy-accent)',
+    });
+
+    // The tool that is on is the gold one.
+    const pressed = rules.find(
+      (rule) => rule.selector.trim() === ".icon-tool[aria-pressed='true']",
+    );
+    expect(pressed, 'the pressed icon tool rule must be found').toBeTruthy();
+    expect(pressed?.declarations).toContainEqual({
+      property: 'color',
+      value: 'var(--joy-accent)',
+    });
+
+    // The two rules are separate, so hovering cannot turn a tool gold.
+    expect(hovered).not.toBe(pressed);
+  });
 });
 
 describe('the colour reader (T-P06 review)', () => {
