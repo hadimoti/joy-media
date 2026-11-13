@@ -49,6 +49,8 @@ export interface CliFlags {
   json: boolean;
   system: boolean;
   'media-engine': boolean;
+  /** `render`: render even when a used clip's file is missing (black and silent). */
+  allowMissing?: boolean | undefined;
   slot?: string | undefined;
   acceptPublicEndpoint?: boolean | undefined;
   oauth: boolean;
@@ -95,6 +97,7 @@ export const CLI_OPTIONS = {
   concurrency: { type: 'string', numeric: true },
   system: { type: 'boolean' },
   'media-engine': { type: 'boolean' },
+  'allow-missing': { type: 'boolean' },
   slot: { type: 'string' },
   'accept-public-endpoint': { type: 'boolean' },
   oauth: { type: 'boolean' },
@@ -204,6 +207,7 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--preset <mp4|webm|prores>', 'Output preset (default mp4)'],
       ['--out <dir>', 'Output directory (default ./renders)'],
       ['--concurrency <1-32>', 'Parallel clips (default 2)'],
+      ['--allow-missing', 'Render even when a used clip has no file (it renders black and silent)'],
       ['--sqlite-path <path>', 'Project database'],
       ['--json', 'Newline-delimited JSON progress events'],
     ],
@@ -378,6 +382,7 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     json: v.json === true,
     system: v.system === true,
     'media-engine': v['media-engine'] === true,
+    allowMissing: v['allow-missing'] === true,
     slot: str('slot'),
     acceptPublicEndpoint: v['accept-public-endpoint'] === true,
     oauth: v.oauth === true,

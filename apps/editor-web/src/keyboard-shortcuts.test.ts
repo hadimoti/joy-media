@@ -115,4 +115,18 @@ describe('shortcut reference', () => {
     expect(keysIn('Editing')).toContain('Ctrl+Z');
     expect(keysIn('View')).toContain('Ctrl+K');
   });
+
+  it('lists the Monitor keyboard edits: Tab, Alt+arrows, [ ] and Esc (T-M12)', () => {
+    const editing = SHORTCUT_REFERENCE.find((group) => group.title === 'Editing')?.rows.map(
+      (row) => row.keys,
+    );
+    expect(editing).toEqual(
+      expect.arrayContaining([
+        'Tab / Shift+Tab (Monitor picture)',
+        'Alt+← ↑ → ↓ (Monitor picture)',
+        '[ / ] (Monitor picture)',
+        'Esc (Monitor picture)',
+      ]),
+    );
+  });
 });

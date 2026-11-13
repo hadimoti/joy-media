@@ -315,10 +315,15 @@ test.describe('desktop.file-project-package', () => {
       // durable place to see what needs relinking is the Missing media section,
       // not the import toast, which disappears after about four seconds.
       await openPanel(freshPage, 'Assets');
-      await expect(freshPage.getByRole('region', { name: 'Missing media' })).toBeVisible();
-      await expect(
-        freshPage.locator('[data-missing-asset-id]', { hasText: mediaName }),
-      ).toHaveCount(1);
+      const missingRegion = freshPage.getByRole('region', { name: 'Missing media' });
+      await expect(missingRegion).toBeVisible();
+      // The rows live in the Review dialog, so open it to see the file.
+      await missingRegion.getByRole('button', { name: 'Review', exact: true }).click();
+      const review = freshPage.getByRole('dialog', { name: 'Missing media' });
+      await expect(review.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(
+        1,
+      );
+      await review.getByRole('button', { name: 'Close missing media' }).click();
       await expect(freshPage.getByRole('dialog')).toHaveCount(0);
       await expect(freshPage.getByRole('heading', { name: projectTitle, level: 1 })).toBeVisible();
       await expect(

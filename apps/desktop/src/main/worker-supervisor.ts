@@ -24,12 +24,15 @@ export interface WorkerSupervisorOptions {
    * loopback URL and token exist only after the local job API has started (see localWorkerEnv).
    */
   readonly env?: () => NodeJS.ProcessEnv | undefined;
-  /** Consecutive crash-restarts allowed before the worker is marked degraded. Default 3. */
+  /**
+   * Automatic restarts allowed before the Local service is marked degraded. Default 2: the first two
+   * crashes restart it and the third crash stops it, where the owner's Retry starts it again (T-F24).
+   */
   readonly maxRestarts?: number;
   /** Schedules a restart attempt; overridable so tests can run synchronously. */
   readonly scheduleRestart?: (run: () => void, delayMs: number) => void;
   readonly restartDelayMs?: number;
-  /** A run that lasted this long was healthy: its crash does not use up the restart budget. Default 60 s. */
+  /** A run that lasted this long was healthy: its crash starts the restart budget again. Default 10 min. */
   readonly stableRunMs?: number;
   readonly now?: () => string;
   readonly workerId?: () => string;
@@ -45,9 +48,9 @@ export interface WorkerSupervisor {
   status(): WorkerStatus;
 }
 
-const DEFAULT_MAX_RESTARTS = 3;
+const DEFAULT_MAX_RESTARTS = 2;
 const DEFAULT_RESTART_DELAY_MS = 1000;
-const DEFAULT_STABLE_RUN_MS = 60_000;
+const DEFAULT_STABLE_RUN_MS = 10 * 60_000;
 
 export function createWorkerSupervisor(options: WorkerSupervisorOptions): WorkerSupervisor {
   const {
@@ -93,9 +96,9 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     function onChildError(error: Error): void {
       if (child !== proc) return;
       if (proc.pid === undefined) {
-        handleExit(proc, `Worker could not run: ${error.message}`);
+        handleExit(proc, `Local service could not run: ${error.message}`);
       } else {
-        lastError = `Worker process error: ${error.message}`;
+        lastError = `Local service process error: ${error.message}`;
         if (!stopRequested) connection = 'degraded';
         proc.once('error', onChildError);
       }
@@ -105,8 +108,8 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
       handleExit(
         proc,
         signal === null
-          ? `Worker exited with code ${code ?? 'unknown'}`
-          : `Worker was stopped by ${signal}`,
+          ? `Local service exited with code ${code ?? 'unknown'}`
+          : `Local service was stopped by ${signal}`,
       );
     });
     connection = 'online';
@@ -163,7 +166,7 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     try {
       signalled = proc.kill('SIGTERM');
     } catch (error) {
-      lastError = `Worker stop request failed: ${String(error)}`;
+      lastError = `Local service stop request failed: ${String(error)}`;
     }
     if (!signalled && proc.pid !== undefined) proc.kill('SIGKILL');
     setTimeout(() => {
@@ -171,7 +174,7 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
         try {
           proc.kill('SIGKILL');
         } catch (error) {
-          lastError = `Worker could not be stopped: ${String(error)}`;
+          lastError = `Local service could not be stopped: ${String(error)}`;
         }
       }
     }, killTimeoutMs).unref();
@@ -194,7 +197,7 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
       }
       return new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(
-          () => reject(new Error('Worker did not stop')),
+          () => reject(new Error('Local service did not stop')),
           killTimeoutMs + 5000,
         );
         proc.once('exit', () => {

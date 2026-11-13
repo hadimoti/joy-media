@@ -239,7 +239,7 @@ describe('createWorkerSupervisor', () => {
     exits[1]?.(137, null); // no attempts left: degraded, and the reason is kept
     expect(supervisor.status()).toMatchObject({
       connection: 'degraded',
-      lastError: 'Worker exited with code 137',
+      lastError: 'Local service exited with code 137',
     });
     expect(pendingRestarts).toHaveLength(0);
 
@@ -304,6 +304,88 @@ describe('createWorkerSupervisor', () => {
     exits[1]?.(1, null);
     expect(supervisor.status().connection).toBe('starting');
     expect(pendingRestarts).toHaveLength(1);
+  });
+
+  describe('card defaults with fake timers (T-F24)', () => {
+    // Crash the child most recently spawned, with exit code 1.
+    function harness() {
+      const exits: Array<(code: number | null, signal: string | null) => void> = [];
+      const supervisor = createWorkerSupervisor({
+        spawn: () => ({
+          once: (event, listener) => {
+            if (event === 'exit')
+              exits.push(listener as (code: number | null, signal: string | null) => void);
+          },
+          kill: () => true,
+        }),
+        command: 'node',
+        now: () => new Date(Date.now()).toISOString(),
+      });
+      const crash = () => exits[exits.length - 1]?.(1, null);
+      return { supervisor, exits, crash };
+    }
+
+    it('three crashes stop the Local service: two restarts, then the third crash is final', () => {
+      vi.useFakeTimers();
+      try {
+        const { supervisor, exits, crash } = harness();
+        supervisor.start();
+        crash(); // quick crash 1: restart after 1 s
+        vi.advanceTimersByTime(1_000);
+        crash(); // quick crash 2: restart after 2 s
+        vi.advanceTimersByTime(2_000);
+        expect(exits).toHaveLength(3);
+        crash(); // quick crash 3: no restart
+        vi.advanceTimersByTime(60_000);
+        expect(exits).toHaveLength(3);
+        expect(supervisor.status()).toMatchObject({
+          connection: 'degraded',
+          lastError: 'Local service exited with code 1',
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('ten minutes of stable running starts the crash budget again', () => {
+      vi.useFakeTimers();
+      try {
+        const { supervisor, exits, crash } = harness();
+        supervisor.start();
+        crash(); // quick crash 1
+        vi.advanceTimersByTime(1_000);
+        vi.advanceTimersByTime(600_000); // the second run was healthy for ten minutes
+        crash(); // crash 2 after a stable run: the budget starts again
+        expect(supervisor.status().connection).toBe('starting');
+        vi.advanceTimersByTime(1_000);
+        crash(); // quick crash 3: a restart is still allowed
+        expect(supervisor.status().connection).toBe('starting');
+        vi.advanceTimersByTime(2_000);
+        crash(); // quick crash 4: the budget is spent
+        expect(supervisor.status().connection).toBe('degraded');
+        expect(exits).toHaveLength(4);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('nine minutes fifty-nine seconds is not stable: the crash counts', () => {
+      vi.useFakeTimers();
+      try {
+        const { supervisor, crash } = harness();
+        supervisor.start();
+        crash(); // quick crash 1
+        vi.advanceTimersByTime(1_000);
+        vi.advanceTimersByTime(599_000);
+        crash(); // crash 2 after 9 min 59 s: no reset, one restart left
+        expect(supervisor.status().connection).toBe('starting');
+        vi.advanceTimersByTime(2_000);
+        crash(); // quick crash 3: the budget is spent
+        expect(supervisor.status().connection).toBe('degraded');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('does not start a second child when a retry arrives during an automatic restart delay', () => {
@@ -416,7 +498,7 @@ describe('createWorkerSupervisor', () => {
     expect(pendingRestarts).toHaveLength(1);
     expect(supervisor.status()).toMatchObject({
       connection: 'starting',
-      lastError: 'Worker could not run: spawn ENOENT',
+      lastError: 'Local service could not run: spawn ENOENT',
     });
   });
 });

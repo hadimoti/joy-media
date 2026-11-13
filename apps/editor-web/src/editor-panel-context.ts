@@ -30,6 +30,7 @@ import type { createEditorPluginHost } from './plugin-host.js';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import type { ProjectWriterStorage } from './project-writer.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
+import type { TimelineMediaPlacement } from './timeline-media-placement.js';
 import type { MonitorTransportControls } from './monitor/useMonitorTransportControls.js';
 
 export interface EditorRuntimeState {
@@ -99,7 +100,13 @@ export interface EditorPanelContextValue {
   readonly toggleSelection: (id: string) => void;
   readonly selectClips: (clipIds: readonly string[]) => void;
   readonly clearSelection: () => void;
+  /** Restores the default workspace layout and clears saved workspace preferences. */
+  readonly resetWorkspace: () => void;
   readonly dispatchTimeline: (transaction: CommandTransaction) => void;
+  readonly dispatchMediaPlacement: (
+    placements: readonly TimelineMediaPlacement[],
+    transaction: CommandTransaction,
+  ) => void;
   readonly dispatchTimelineAndProjectAudio: (
     label: string,
     timeline: CommandTransaction,

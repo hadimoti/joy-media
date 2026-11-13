@@ -17,13 +17,14 @@ import {
 } from './gate.ts';
 import {
   REQUIRED_LIFECYCLE_STEPS,
-  REQUIRED_UPGRADE_STEPS,
+  requiredUpgradeSteps,
   SANDBOX_LIFECYCLE_SCHEMA,
   SANDBOX_UPGRADE_SCHEMA,
 } from './sandbox-lifecycle-receipt.ts';
 
 const CANDIDATE = 'a'.repeat(40);
 const SETUP = 'c'.repeat(64);
+const CANDIDATE_VERSION = '1.1.1';
 
 function attendedReceipt(scenarioId: keyof typeof LOCAL_ONLY_ATTENDED_SCENARIOS) {
   return {
@@ -80,20 +81,30 @@ function lifecycleReceipt() {
   };
 }
 
-function upgradeReceipt() {
+/** A fake upgrade receipt from `from` to the candidate version. */
+function upgradeReceipt(from: '1.0.2' | '1.1.0') {
+  const fromTag = from === '1.0.2' ? 'v102' : 'v110';
+  const toTag = 'v111';
   return {
     schema: SANDBOX_UPGRADE_SCHEMA,
     startedAt: '2026-11-12T10:00:00.000Z',
     finishedAt: '2026-11-12T10:02:00.000Z',
     identity: { user: 'WDAGUtilityAccount' },
-    steps: REQUIRED_UPGRADE_STEPS.map((id) => ({
-      id,
-      result: 'pass',
-      detail: id === 'new-setup-digest' ? SETUP : 'ok',
-    })),
-    'S1-v102-installed': { appPackageVersion: '1.0.2' },
-    'S3-upgraded': { appPackageVersion: '1.1.0', uninstallDisplayVersion: '1.1.0' },
-    'S4-v110-after-run': { dataFolderExists: true },
+    fromVersion: from,
+    fromMode: from === '1.0.2' ? 'zip' : 'setup',
+    steps: requiredUpgradeSteps(from, CANDIDATE_VERSION, from === '1.0.2' ? 'zip' : 'setup').map(
+      (id) => ({
+        id,
+        result: 'pass',
+        detail: id === 'new-setup-digest' ? SETUP : 'ok',
+      }),
+    ),
+    [`S1-${fromTag}-installed`]: { appPackageVersion: from },
+    'S3-upgraded': {
+      appPackageVersion: CANDIDATE_VERSION,
+      uninstallDisplayVersion: CANDIDATE_VERSION,
+    },
+    [`S4-${toTag}-after-run`]: { dataFolderExists: true },
     'S5-uninstalled': {
       installFolderExists: false,
       dataFolderExists: true,
@@ -112,7 +123,9 @@ function evidence(overrides: Partial<ReleaseAttendedEvidence> = {}): ReleaseAtte
       'project.persistence.fresh-process': attendedReceipt('project.persistence.fresh-process'),
     },
     sandboxLifecycle: lifecycleReceipt(),
-    sandboxUpgrade: upgradeReceipt(),
+    sandboxUpgrade: upgradeReceipt('1.0.2'),
+    sandboxUpgradeFrom110: upgradeReceipt('1.1.0'),
+    candidateVersion: CANDIDATE_VERSION,
     ...overrides,
   };
 }
@@ -216,6 +229,24 @@ describe('local-only gate profile', () => {
     ).toBe('failed');
   });
 
+  it('fails the lifecycle check when the upgrade from v1.1.0 is missing or ends on another version', () => {
+    const noFrom110 = evidence({ sandboxUpgradeFrom110: undefined });
+    expect(
+      status({ profile: 'local-only', attendedEvidence: noFrom110 }, 'lifecycle-evidence'),
+    ).toBe('failed');
+    const noCandidateVersion = evidence({ candidateVersion: undefined });
+    expect(
+      status({ profile: 'local-only', attendedEvidence: noCandidateVersion }, 'lifecycle-evidence'),
+    ).toBe('failed');
+    // A v1.0.2 receipt filed as the v1.1.0 receipt is refused: the receipt names its start version.
+    const swapped = evidence({
+      sandboxUpgradeFrom110: upgradeReceipt('1.0.2'),
+    });
+    expect(status({ profile: 'local-only', attendedEvidence: swapped }, 'lifecycle-evidence')).toBe(
+      'failed',
+    );
+  });
+
   it('judges the source as a clean tree and marks the hosted performance check not applicable', () => {
     const source = {
       commitSha: 'a'.repeat(40),
@@ -258,6 +289,12 @@ describe('readAttendedEvidence', () => {
         String.fromCharCode(0xfeff) + JSON.stringify({ b: 2 }),
       );
       writeFileSync(join(folder, 'sandbox-upgrade.json'), '{not json');
+      writeFileSync(join(folder, 'sandbox-upgrade-from-1.1.0.json'), JSON.stringify({ x: 3 }));
+      mkdirSync(join(root, 'apps', 'desktop'), { recursive: true });
+      writeFileSync(
+        join(root, 'apps', 'desktop', 'package.json'),
+        JSON.stringify({ version: CANDIDATE_VERSION }),
+      );
       const releases = join(root, 'apps', 'desktop', 'dist', 'releases');
       mkdirSync(releases, { recursive: true });
       writeFileSync(
@@ -270,6 +307,8 @@ describe('readAttendedEvidence', () => {
       expect(found?.receipts['project.persistence.fresh-process']).toBeUndefined();
       expect(found?.sandboxLifecycle).toEqual({ b: 2 });
       expect(found?.sandboxUpgrade).toBeNull();
+      expect(found?.sandboxUpgradeFrom110).toEqual({ x: 3 });
+      expect(found?.candidateVersion).toBe(CANDIDATE_VERSION);
       expect(readAttendedEvidence(root, 'b'.repeat(40))).toBeNull();
       // The digest in SHA256SUMS.txt must describe the installer that is really there.
       expect(found?.bindingProblems?.join(';')).toMatch(/missing from the releases folder/u);

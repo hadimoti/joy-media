@@ -26,6 +26,22 @@ export async function importThroughLeftPanel(page, filePath) {
   await page.locator('.asset-card', { hasText: filename }).first().waitFor();
 }
 
+/**
+ * Adds an already-imported media file to the timeline through its asset card
+ * (the `Add <file name> to timeline` button; its displayName is the file name).
+ * Play stays disabled until a clip exists, so cases that need playback call this
+ * after `importThroughLeftPanel`.
+ */
+export async function addToTimelineThroughLeftPanel(page, filePath) {
+  const filename = resolve(filePath).split(/[\\/]/u).at(-1);
+  await page.locator('.asset-card', { hasText: filename }).first().hover();
+  await page
+    .getByRole('button', { name: `Add ${filename} to timeline`, exact: true })
+    .first()
+    .click();
+  await page.locator('.timeline-clip[data-clip-id]').first().waitFor({ state: 'attached' });
+}
+
 export async function setScratchLibrary(page, libraryDir) {
   await openMenu(page, 'Edit');
   await page.getByRole('menuitem', { name: /Asset Library Folder/u }).click();

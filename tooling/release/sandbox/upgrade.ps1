@@ -1,5 +1,8 @@
-# Windows Sandbox upgrade run: install v1.0.2 (from the released zip) and run it once, then install the candidate setup over it, run it, uninstall.
-# Inputs in C:in: v102.zip, joy-media-setup.exe, expected-v102.sha256, expected-new.sha256. Output in C:out: upgrade.json (schema joy-media.sandbox-upgrade/1).
+# Windows Sandbox upgrade run: install an older release (v1.0.2 from the released zip, or v1.1.0 or 1.0.2 from its setup exe) and run it once, then install the candidate setup over it, run it, uninstall.
+# Inputs in C:\in: upgrade-plan.json (fromVersion, fromMode, toVersion), joy-media-setup.exe, expected-new.sha256, and either
+#   zip mode:   v102.zip + expected-v102.sha256
+#   setup mode: from-setup.exe + expected-from.sha256
+# Output in C:\out: upgrade.json (schema joy-media.sandbox-upgrade/1).
 # Every step is logged, every wait has a timeout, and nothing here changes a security setting.
 $ErrorActionPreference = 'Stop'
 $out = 'C:\out'
@@ -77,40 +80,67 @@ try {
   if ($env:USERPROFILE -match '(?i)HadiMoti') { throw 'Refusing to run: the host profile is visible.' }
   $record.identity = [ordered]@{ user = $env:USERNAME; computer = $env:COMPUTERNAME }
   Add-Step 'sandbox-identity' $true "$env:USERNAME on $env:COMPUTERNAME"
+
+  # The versions come from the plan file that run-sandbox.ps1 wrote; they are never assumed here.
+  $plan = Get-Content 'C:\in\upgrade-plan.json' -Raw | ConvertFrom-Json
+  $fromVersion = [string]$plan.fromVersion
+  $fromMode = [string]$plan.fromMode
+  $toVersion = [string]$plan.toVersion
+  if ($fromVersion -notin @('1.0.2', '1.1.0')) { throw "Refusing to run: unsupported start version $fromVersion." }
+  if ($fromMode -notin @('zip', 'setup')) { throw "Refusing to run: unknown install mode $fromMode." }
+  if ($fromMode -eq 'zip' -and $fromVersion -ne '1.0.2') { throw 'Refusing to run: only v1.0.2 comes from a zip.' }
+  if ($toVersion -notmatch '^\d+\.\d+\.\d+$' -or $toVersion -eq $fromVersion) { throw "Refusing to run: bad after version $toVersion." }
+  $fromTag = 'v' + ($fromVersion -replace '\.', '')
+  $toTag = 'v' + ($toVersion -replace '\.', '')
+  $record.fromVersion = $fromVersion
+  $record.fromMode = $fromMode
+  $record.toVersion = $toVersion
+  Save-Record
+
   Snap 'S0-clean'
 
-  # Digests of both inputs.
-  $zipH = (Get-FileHash -Algorithm SHA256 'C:\in\v102.zip').Hash.ToLower()
-  Add-Step 'v102-zip-digest' ($zipH -eq (Get-Content 'C:\in\expected-v102.sha256' -Raw).Trim()) $zipH
+  # Digests of the inputs.
+  if ($fromMode -eq 'zip') {
+    $zipH = (Get-FileHash -Algorithm SHA256 'C:\in\v102.zip').Hash.ToLower()
+    Add-Step "$fromTag-zip-digest" ($zipH -eq (Get-Content 'C:\in\expected-v102.sha256' -Raw).Trim()) $zipH
+  } else {
+    $fromH = (Get-FileHash -Algorithm SHA256 'C:\in\from-setup.exe').Hash.ToLower()
+    Add-Step "$fromTag-setup-digest" ($fromH -eq (Get-Content 'C:\in\expected-from.sha256' -Raw).Trim()) $fromH
+  }
   $newH = (Get-FileHash -Algorithm SHA256 'C:\in\joy-media-setup.exe').Hash.ToLower()
   Add-Step 'new-setup-digest' ($newH -eq (Get-Content 'C:\in\expected-new.sha256' -Raw).Trim()) $newH
 
-  # Phase A: v1.0.2 install and first run.
-  New-Item -ItemType Directory -Force 'C:\work' | Out-Null
-  Expand-Archive -Path 'C:\in\v102.zip' -DestinationPath 'C:\work\v102' -Force
-  $setupPs1 = 'C:\work\v102\joy-media-win32-x64\Setup-JoyMedia.ps1'
-  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $setupPs1, '-Silent' -PassThru -Wait
-  Add-Step 'v102-install' ($p.ExitCode -eq 0 -and (Test-Path (Join-Path $root 'joy-media.exe'))) "exit $($p.ExitCode)"
-  Snap 'S1-v102-installed'
-  Run-App 'v102' 20
-  Snap 'S2-v102-after-run'
+  # Phase A: the older release installed and first run.
+  if ($fromMode -eq 'zip') {
+    New-Item -ItemType Directory -Force 'C:\work' | Out-Null
+    Expand-Archive -Path 'C:\in\v102.zip' -DestinationPath 'C:\work\v102' -Force
+    $setupPs1 = 'C:\work\v102\joy-media-win32-x64\Setup-JoyMedia.ps1'
+    $p = Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $setupPs1, '-Silent' -PassThru -Wait
+  } else {
+    $p = Start-Process -FilePath 'C:\in\from-setup.exe' -ArgumentList '/s' -PassThru
+    if (-not $p.WaitForExit(600000)) { try { $p.Kill() } catch { }; Add-Step "$fromTag-install" $false 'timed out after 600 s'; throw 'from-version install timed out' }
+  }
+  Add-Step "$fromTag-install" ($p.ExitCode -eq 0 -and (Test-Path (Join-Path $root 'joy-media.exe'))) "exit $($p.ExitCode)"
+  Snap "S1-$fromTag-installed"
+  Run-App $fromTag 20
+  Snap "S2-$fromTag-after-run"
 
   # Plant a marker in the app data folder to see whether an upgrade keeps it.
   New-Item -ItemType Directory -Force $data | Out-Null
-  Set-Content (Join-Path $data 'upgrade-marker.txt') 'marker created before the v1.1.0 upgrade' -Encoding utf8
+  Set-Content (Join-Path $data 'upgrade-marker.txt') "marker created before the upgrade from $fromVersion" -Encoding utf8
   $beforeData = Listing $data
 
-  # Phase B: v1.1.0 setup over the top.
+  # Phase B: candidate setup over the top.
   $p2 = Start-Process -FilePath 'C:\in\joy-media-setup.exe' -ArgumentList '/s' -PassThru
   if (-not $p2.WaitForExit(600000)) { try { $p2.Kill() } catch { }; Add-Step 'new-install-over' $false 'timed out after 600 s'; throw 'upgrade install timed out' }
   Add-Step 'new-install-over' ($p2.ExitCode -eq 0) "exit $($p2.ExitCode)"
   Snap 'S3-upgraded'
-  $v102Files = Get-Content (Join-Path $out 'install-listing-S2-v102-after-run.txt')
+  $fromFiles = Get-Content (Join-Path $out "install-listing-S2-$fromTag-after-run.txt")
   $newFiles = Get-Content (Join-Path $out 'install-listing-S3-upgraded.txt')
-  $names102 = $v102Files | ForEach-Object { ($_ -split '\|')[0] }
+  $namesFrom = $fromFiles | ForEach-Object { ($_ -split '\|')[0] }
   $namesNew = $newFiles | ForEach-Object { ($_ -split '\|')[0] }
-  $stale = @($names102 | Where-Object { $_ -notin $namesNew })
-  Add-Step 'stale-files-from-v102' $true "files in v1.0.2 but not in the upgraded folder: $($stale.Count)"
+  $stale = @($namesFrom | Where-Object { $_ -notin $namesNew })
+  Add-Step "stale-files-from-$fromTag" $true "files in v$fromVersion but not in the upgraded folder: $($stale.Count)"
   $stale | Select-Object -First 60 | Set-Content (Join-Path $out 'stale-files.txt') -Encoding utf8
   $marker = Test-Path (Join-Path $data 'upgrade-marker.txt')
   Add-Step 'data-marker-kept' $marker 'upgrade-marker.txt'
@@ -118,9 +148,9 @@ try {
   $lost = @($beforeData | Where-Object { $_ -notin $afterData })
   Add-Step 'data-files-lost' ($lost.Count -eq 0) "files from before the upgrade missing afterwards: $($lost.Count)"
 
-  # Phase C: new app on the existing data.
-  Run-App 'v110' 45
-  Snap 'S4-v110-after-run'
+  # Phase C: candidate app on the existing data.
+  Run-App $toTag 45
+  Snap "S4-$toTag-after-run"
 
   # Phase D: uninstall, then check data.
   $uninstall = Join-Path $root 'uninstall.cmd'

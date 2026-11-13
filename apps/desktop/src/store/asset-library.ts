@@ -10,6 +10,8 @@ export interface AssetLibraryPort {
     assetId: string,
   ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
   removeEntry(id: string): Promise<{ readonly removed: boolean }>;
+  removeInternalAsset(assetId: string): Promise<{ readonly removed: boolean }>;
+  removeInternalEntries(): Promise<void>;
 }
 
 interface AssetLibraryOptions {
@@ -41,6 +43,8 @@ interface LibraryEntry {
   readonly relativePath: string;
   readonly displayName: string;
   readonly sortName: string;
+  readonly internal?: true;
+  readonly internalAssetIds?: readonly string[];
 }
 
 const BUSY_MESSAGE = 'The asset library is busy. Try the import again.';
@@ -48,6 +52,119 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const LIBRARY_ENTRY_ID_PATTERN = /^joylib-[a-f0-9]{64}$/;
 const STALE_LOCK_MS = 60_000;
 const LOCK_POLL_MS = 100;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isInternalEntry(value: unknown): boolean {
+  return isRecord(value) && value['internal'] === true;
+}
+
+function catalogCounts(assets: readonly unknown[]): {
+  total: number;
+  audio: number;
+  image: number;
+  video: number;
+} {
+  const visible = assets.filter((asset) => !isInternalEntry(asset));
+  return {
+    total: visible.length,
+    audio: visible.filter((asset) => isRecord(asset) && asset['kind'] === 'audio').length,
+    image: visible.filter((asset) => isRecord(asset) && asset['kind'] === 'image').length,
+    video: visible.filter((asset) => isRecord(asset) && asset['kind'] === 'video').length,
+  };
+}
+
+interface CatalogAssetUpdate {
+  readonly assets: unknown[];
+  readonly changed: boolean;
+}
+
+async function updateCatalogAssets(
+  options: AssetLibraryOptions,
+  update: (assets: readonly unknown[]) => CatalogAssetUpdate,
+): Promise<boolean> {
+  const directory = options.directory();
+  const catalogPath = path.join(directory, 'catalog.json');
+  const backupPath = `${catalogPath}.joy-media-backup`;
+  const lockPath = `${catalogPath}.lock`;
+  const ownerToken = randomUUID();
+  let locked = false;
+  let temporaryPath: string | undefined;
+  let catalogWritten = false;
+  let cleanupError: unknown;
+  let operationError: unknown;
+  try {
+    await mkdir(directory, { recursive: true });
+    locked = await acquireLock(
+      lockPath,
+      options.lockWaitMs ?? 10_000,
+      ownerToken,
+      () => {
+        locked = true;
+      },
+      options.writeOwnerToken ?? ((handle, token) => handle.writeFile(token)),
+    );
+    if (!locked) throw new Error(BUSY_MESSAGE);
+
+    let catalog: Record<string, unknown> & { assets: unknown[] };
+    let catalogExists = true;
+    try {
+      const parsed: unknown = JSON.parse(await readFile(catalogPath, 'utf8'));
+      if (!isRecord(parsed) || !Array.isArray(parsed['assets'])) {
+        throw new Error('catalog.json does not contain an assets array');
+      }
+      catalog = parsed as Record<string, unknown> & { assets: unknown[] };
+    } catch (error) {
+      if (isNotFound(error)) {
+        catalogExists = false;
+        catalog = { version: 1, assets: [] };
+      } else {
+        throw error;
+      }
+    }
+
+    const result = update(catalog.assets);
+    if (result.changed) {
+      if (catalogExists) {
+        try {
+          await copyFile(catalogPath, backupPath, constants.COPYFILE_EXCL);
+        } catch (error) {
+          if (!isAlreadyExists(error)) throw error;
+        }
+      }
+      temporaryPath = `${catalogPath}.${process.pid}.${randomUUID()}.tmp`;
+      await (options.writeCatalogTemporaryFile ?? ((filePath, data) => writeFile(filePath, data)))(
+        temporaryPath,
+        JSON.stringify(
+          { ...catalog, assets: result.assets, counts: catalogCounts(result.assets) },
+          null,
+          2,
+        ),
+      );
+      await (options.renameCatalogTemporaryFile ?? rename)(temporaryPath, catalogPath);
+      temporaryPath = undefined;
+      catalogWritten = true;
+    }
+  } catch (error) {
+    operationError = error;
+  } finally {
+    if (temporaryPath !== undefined) await unlink(temporaryPath).catch(() => undefined);
+    if (locked) {
+      try {
+        if ((await readFile(lockPath, 'utf8')) === ownerToken) {
+          await (options.unlinkLock ?? unlink)(lockPath);
+        }
+      } catch (error) {
+        if (!isNotFound(error)) cleanupError = error;
+      }
+    }
+  }
+  if (operationError !== undefined) throw operationError;
+  if (cleanupError !== undefined && !catalogWritten) throw cleanupError;
+  return catalogWritten;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -227,19 +344,83 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
             }
           }
 
-          const isEntryForId = (entry: unknown): boolean =>
-            typeof entry === 'object' &&
-            entry !== null &&
-            (entry as Record<string, unknown>).id === id;
-          const hasEntry = catalog.assets.some(isEntryForId);
-          const namesAreCurrent = catalog.assets.every(
-            (entry) =>
-              !isEntryForId(entry) ||
-              (entry as Record<string, unknown>).displayName === registration.displayName,
+          const isEntryForId = (entry: unknown): boolean => isRecord(entry) && entry['id'] === id;
+          const matchingEntries = catalog.assets.filter(isEntryForId);
+          const hasEntry = matchingEntries.length > 0;
+          const hasUserEntry = matchingEntries.some((entry) => !isInternalEntry(entry));
+          const namesAreCurrent = matchingEntries.every(
+            (entry) => isRecord(entry) && entry['displayName'] === registration.displayName,
           );
-          if (hasEntry && namesAreCurrent) {
+
+          const entry: LibraryEntry = {
+            id,
+            projectId: '',
+            kind: registration.kind,
+            sha256: registration.sha256,
+            bytes: registration.bytes,
+            descriptor: { mimeType: 'application/octet-stream', ...registration.descriptor },
+            tags: [],
+            createdAt: Date.now(),
+            cloudBacked: false,
+            relativePath,
+            displayName: registration.displayName,
+            sortName: registration.displayName.toLowerCase(),
+          };
+
+          let assets = catalog.assets;
+          let changed = false;
+          if (registration.internal === true) {
+            const internalEntries = matchingEntries.filter(isInternalEntry);
+            if (internalEntries.length > 0) {
+              let addedReference = false;
+              assets = catalog.assets.map((item) => {
+                if (!isEntryForId(item) || !isInternalEntry(item) || !isRecord(item)) return item;
+                const previousIds = Array.isArray(item['internalAssetIds'])
+                  ? item['internalAssetIds'].filter(
+                      (candidate): candidate is string => typeof candidate === 'string',
+                    )
+                  : [];
+                if (previousIds.includes(registration.id)) return item;
+                addedReference = true;
+                return {
+                  ...item,
+                  internal: true,
+                  internalAssetIds: [...previousIds, registration.id],
+                };
+              });
+              changed = addedReference;
+            } else if (!hasUserEntry) {
+              assets = [
+                ...catalog.assets,
+                { ...entry, internal: true, internalAssetIds: [registration.id] },
+              ];
+              changed = true;
+            }
+          } else if (hasEntry && namesAreCurrent && !matchingEntries.some(isInternalEntry)) {
             result = { ok: true };
           } else {
+            // One entry per content. A later import of the same bytes under another name renames
+            // regular entries for them. An internal export never changes a user's row.
+            assets = hasEntry
+              ? catalog.assets.map((item) =>
+                  isEntryForId(item) && isRecord(item)
+                    ? (() => {
+                        const publicEntry = { ...item };
+                        delete publicEntry['internal'];
+                        delete publicEntry['internalAssetIds'];
+                        return {
+                          ...publicEntry,
+                          displayName: entry.displayName,
+                          sortName: entry.sortName,
+                        };
+                      })()
+                    : item,
+                )
+              : [...catalog.assets, entry];
+            changed = true;
+          }
+
+          if (changed) {
             if (catalogExists && previousCatalog !== undefined) {
               try {
                 await copyFile(catalogPath, backupPath, constants.COPYFILE_EXCL);
@@ -247,60 +428,14 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
                 if (!isAlreadyExists(error)) throw error;
               }
             }
-            const entry: LibraryEntry = {
-              id,
-              projectId: '',
-              kind: registration.kind,
-              sha256: registration.sha256,
-              bytes: registration.bytes,
-              descriptor: { mimeType: 'application/octet-stream', ...registration.descriptor },
-              tags: [],
-              createdAt: Date.now(),
-              cloudBacked: false,
-              relativePath,
-              displayName: registration.displayName,
-              sortName: registration.displayName.toLowerCase(),
-            };
-            // One entry per content. A later import of the same bytes under another name renames
-            // every entry for them, so the Media list shows the file that was just imported.
-            const assets = hasEntry
-              ? catalog.assets.map((item) =>
-                  isEntryForId(item)
-                    ? {
-                        ...(item as Record<string, unknown>),
-                        displayName: entry.displayName,
-                        sortName: entry.sortName,
-                      }
-                    : item,
-                )
-              : [...catalog.assets, entry];
-            const counts = {
-              total: assets.length,
-              audio: assets.filter(
-                (item) =>
-                  typeof item === 'object' &&
-                  item !== null &&
-                  (item as Record<string, unknown>).kind === 'audio',
-              ).length,
-              image: assets.filter(
-                (item) =>
-                  typeof item === 'object' &&
-                  item !== null &&
-                  (item as Record<string, unknown>).kind === 'image',
-              ).length,
-              video: assets.filter(
-                (item) =>
-                  typeof item === 'object' &&
-                  item !== null &&
-                  (item as Record<string, unknown>).kind === 'video',
-              ).length,
-            };
-            const updatedCatalog = { ...catalog, counts, assets };
+            const updatedCatalog = { ...catalog, counts: catalogCounts(assets), assets };
             temporaryPath = `${catalogPath}.${process.pid}.${randomUUID()}.tmp`;
             await writeFile(temporaryPath, JSON.stringify(updatedCatalog, null, 2));
             await rename(temporaryPath, catalogPath);
             temporaryPath = undefined;
             catalogWritten = true;
+            result = { ok: true };
+          } else if (result === undefined) {
             result = { ok: true };
           }
         }
@@ -391,31 +526,13 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
             ),
         );
         if (assets.length !== catalog.assets.length) {
-          const counts = {
-            total: assets.length,
-            audio: assets.filter(
-              (entry) =>
-                typeof entry === 'object' &&
-                entry !== null &&
-                (entry as Record<string, unknown>).kind === 'audio',
-            ).length,
-            image: assets.filter(
-              (entry) =>
-                typeof entry === 'object' &&
-                entry !== null &&
-                (entry as Record<string, unknown>).kind === 'image',
-            ).length,
-            video: assets.filter(
-              (entry) =>
-                typeof entry === 'object' &&
-                entry !== null &&
-                (entry as Record<string, unknown>).kind === 'video',
-            ).length,
-          };
           temporaryPath = `${catalogPath}.${process.pid}.${randomUUID()}.tmp`;
           await (
             options.writeCatalogTemporaryFile ?? ((filePath, data) => writeFile(filePath, data))
-          )(temporaryPath, JSON.stringify({ ...catalog, assets, counts }, null, 2));
+          )(
+            temporaryPath,
+            JSON.stringify({ ...catalog, assets, counts: catalogCounts(assets) }, null, 2),
+          );
           await (options.renameCatalogTemporaryFile ?? rename)(temporaryPath, catalogPath);
           temporaryPath = undefined;
           removed = true;
@@ -434,6 +551,35 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
       }
       if (cleanupError !== undefined && !removed) throw cleanupError;
       return { removed };
+    },
+    async removeInternalAsset(assetId) {
+      let removed = false;
+      await updateCatalogAssets(options, (assets) => {
+        let found = false;
+        const updated = assets.flatMap((entry) => {
+          if (!isInternalEntry(entry) || !isRecord(entry)) return [entry];
+          const ids = Array.isArray(entry['internalAssetIds'])
+            ? entry['internalAssetIds'].filter(
+                (candidate): candidate is string => typeof candidate === 'string',
+              )
+            : [];
+          if (!ids.includes(assetId)) return [entry];
+          found = true;
+          const remainingIds = ids.filter((candidate) => candidate !== assetId);
+          return remainingIds.length === 0
+            ? []
+            : [{ ...entry, internal: true, internalAssetIds: remainingIds }];
+        });
+        removed = found;
+        return { assets: updated, changed: found };
+      });
+      return { removed };
+    },
+    async removeInternalEntries() {
+      await updateCatalogAssets(options, (assets) => {
+        const updated = assets.filter((entry) => !isInternalEntry(entry));
+        return { assets: updated, changed: updated.length !== assets.length };
+      });
     },
   };
 }

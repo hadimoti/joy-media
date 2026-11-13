@@ -3,9 +3,26 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createLiveDriver } from './driver.mjs';
-import { importThroughLeftPanel, newProject, screenshot, setScratchLibrary } from './steps.mjs';
+import {
+  addToTimelineThroughLeftPanel,
+  importThroughLeftPanel,
+  newProject,
+  screenshot,
+  setScratchLibrary,
+} from './steps.mjs';
+import {
+  MONITOR_MEDIA_IDS,
+  MONITOR_SUITE_CASES,
+  MONITOR_SUITE_IDS,
+  zoomShots,
+} from './monitor-suite-steps.mjs';
 
-const KNOWN_TESTS = new Set(['D-000', 'D-001', 'D-002']);
+const KNOWN_TESTS = new Set(['D-000', 'D-001', 'D-002', ...MONITOR_SUITE_IDS]);
+
+// `D-M*` expands to every known id with that prefix (T-M13 suite).
+function expandPrefix(prefix) {
+  return [...KNOWN_TESTS].filter((id) => id.startsWith(prefix));
+}
 
 function parseArgs(argv) {
   const options = { needsSignIn: false, simulateWrongJoyHash: false };
@@ -39,7 +56,8 @@ function parseArgs(argv) {
   options.testIds = options.tests
     .split(',')
     .map((id) => id.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .flatMap((id) => (id.endsWith('*') ? expandPrefix(id.slice(0, -1)) : [id]));
   if (options.testIds.length === 0 || options.testIds.some((id) => !KNOWN_TESTS.has(id))) {
     throw new Error(`unknown test id; known tests: ${[...KNOWN_TESTS].join(', ')}`);
   }
@@ -97,6 +115,16 @@ async function run() {
         .split('\n')[0]
         .slice(0, 400);
     }
+    if (!setupProblem && options.testIds.some((id) => id in MONITOR_SUITE_CASES)) {
+      try {
+        await newProject(session.page, `T-M13 ${runId.slice(0, 8)}`);
+      } catch (error) {
+        setupProblem = String(error?.message ?? error)
+          .split('\n')[0]
+          .slice(0, 400);
+      }
+    }
+    let mediaImported = false;
     for (const id of options.testIds) {
       const startedAt = Date.now();
       let message = setupProblem ?? '';
@@ -115,12 +143,31 @@ async function run() {
         } else if (id === 'D-002') {
           await importThroughLeftPanel(session.page, options.media);
           message = `imported ${options.media.split(/[\\/]/u).at(-1)} through the Media panel`;
+        } else if (id in MONITOR_SUITE_CASES) {
+          if (MONITOR_MEDIA_IDS.has(id)) {
+            if (!options.media)
+              throw new Error(
+                `BLOCKED-on-fixture ${id}: needs --media <file in C:\\jgp\\v111\\fixtures>; run.mjs imports it and adds it to the timeline first, because Play is disabled on an empty timeline`,
+              );
+            if (!mediaImported) {
+              await importThroughLeftPanel(session.page, options.media);
+              await addToTimelineThroughLeftPanel(session.page, options.media);
+              mediaImported = true;
+            }
+          }
+          const caseDir = join(outDir, id);
+          await zoomShots(session.page, caseDir, 'before');
+          try {
+            message = await MONITOR_SUITE_CASES[id](session.page, {});
+          } finally {
+            await zoomShots(session.page, caseDir, 'after').catch(() => null);
+          }
         }
       } catch (error) {
-        status = 'failed';
         message = String(error?.message ?? error)
           .split('\n')[0]
           .slice(0, 400);
+        status = /^BLOCKED/u.test(message) ? 'blocked' : 'failed';
       }
       const screenshotPath = await screenshot(session.page, shotPath).catch(() => null);
       results.push({ id, status, message, screenshot: screenshotPath, ms: Date.now() - startedAt });

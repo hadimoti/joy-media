@@ -2,7 +2,8 @@
  * Receipts for the Windows Sandbox installed-lifecycle runs of the local-only release gate.
  *
  * Two scripted runs write them (tooling/release/sandbox): the clean lifecycle (install, open, close,
- * uninstall) and the upgrade (v1.0.2 installed and run, then the candidate over it, then uninstall).
+ * uninstall) and the upgrade (an older release installed and run, then the candidate over it, then
+ * uninstall). The upgrade starts from v1.0.2 or v1.1.0; the candidate's version is a parameter.
  * A receipt is accepted only when it names the Sandbox identity, binds to the candidate's setup
  * digest, and every required step passed. Anything missing, failed, or unexpected is a blocker.
  */
@@ -10,6 +11,48 @@
 export const SANDBOX_LIFECYCLE_SCHEMA = 'joy-media.sandbox-lifecycle/1';
 export const SANDBOX_UPGRADE_SCHEMA = 'joy-media.sandbox-upgrade/1';
 export const SANDBOX_USER = 'WDAGUtilityAccount';
+
+/** Versions the upgrade run may start from. */
+export const SUPPORTED_UPGRADE_FROM_VERSIONS: readonly string[] = ['1.0.2', '1.1.0'];
+
+/** How the older release was installed: from the released zip (v1.0.2 only) or from its setup exe. */
+export type UpgradeFromMode = 'zip' | 'setup';
+
+const VERSION = /^\d+\.\d+\.\d+$/u;
+
+/** Step and snapshot id prefix for a version, e.g. 1.0.2 -> v102, 1.1.0 -> v110. */
+export function versionTag(version: string): string {
+  return `v${version.replace(/\./gu, '')}`;
+}
+
+/** Steps the upgrade run must report as passed, by id, for one from-version and one candidate version. */
+export function requiredUpgradeSteps(
+  fromVersion: string,
+  toVersion: string,
+  fromMode: UpgradeFromMode,
+): string[] {
+  const from = versionTag(fromVersion);
+  const to = versionTag(toVersion);
+  return [
+    'sandbox-identity',
+    fromMode === 'zip' ? `${from}-zip-digest` : `${from}-setup-digest`,
+    'new-setup-digest',
+    `${from}-install`,
+    `${from}-open-window`,
+    `${from}-close`,
+    `${from}-no-process-left`,
+    'new-install-over',
+    `stale-files-from-${from}`,
+    'data-marker-kept',
+    'data-files-lost',
+    `${to}-open-window`,
+    `${to}-still-running`,
+    `${to}-close`,
+    `${to}-no-process-left`,
+    'uninstall',
+    'folder-removed',
+  ];
+}
 
 /** Steps the clean lifecycle run must report as passed, by id. */
 export const REQUIRED_LIFECYCLE_STEPS: readonly string[] = [
@@ -25,32 +68,18 @@ export const REQUIRED_LIFECYCLE_STEPS: readonly string[] = [
   'folder-removed',
 ];
 
-/** Steps the upgrade run must report as passed, by id. */
-export const REQUIRED_UPGRADE_STEPS: readonly string[] = [
-  'sandbox-identity',
-  'v102-zip-digest',
-  'new-setup-digest',
-  'v102-install',
-  'v102-open-window',
-  'v102-close',
-  'v102-no-process-left',
-  'new-install-over',
-  'stale-files-from-v102',
-  'data-marker-kept',
-  'data-files-lost',
-  'v110-open-window',
-  'v110-still-running',
-  'v110-close',
-  'v110-no-process-left',
-  'uninstall',
-  'folder-removed',
-];
-
 export interface SandboxReceiptExpectation {
   /** SHA-256 (lowercase hex) of the candidate's joy-media-setup.exe. */
   readonly setupSha256: string;
-  /** Version the installed package must report after the upgrade. Used by the upgrade receipt. */
-  readonly version?: string;
+}
+
+export interface SandboxUpgradeExpectation extends SandboxReceiptExpectation {
+  /** The release the run must start from: 1.0.2 or 1.1.0. */
+  readonly fromVersion: string;
+  /** Version the installed package must report after the upgrade: the candidate's version. */
+  readonly toVersion: string;
+  /** SHA-256 of the from-version setup exe, when the run used one. Checked when given. */
+  readonly fromSha256?: string;
 }
 
 const HEX64 = /^[0-9a-f]{64}$/u;
@@ -174,29 +203,61 @@ export function validateSandboxLifecycle(
 /** Returns the reasons the upgrade receipt must be refused. An empty list means accepted. */
 export function validateSandboxUpgrade(
   value: unknown,
-  expected: SandboxReceiptExpectation,
+  expected: SandboxUpgradeExpectation,
 ): string[] {
   const record = asRecord(value);
   if (record === undefined) return ['receipt is not a JSON object'];
   const blockers: string[] = [];
-  commonChecks(
+  // Receipts written before the run recorded its versions were all v1.0.2 zip runs.
+  const fromVersion = record.fromVersion ?? '1.0.2';
+  const fromMode = record.fromMode ?? 'zip';
+  const toVersion = expected.toVersion;
+  if (!SUPPORTED_UPGRADE_FROM_VERSIONS.includes(String(fromVersion))) {
+    blockers.push(
+      `the upgrade must start from ${SUPPORTED_UPGRADE_FROM_VERSIONS.join(' or ')}, not ${String(fromVersion)}`,
+    );
+  }
+  if (fromVersion !== expected.fromVersion) {
+    blockers.push(
+      `the receipt is for an upgrade from ${String(fromVersion)}, not ${expected.fromVersion}`,
+    );
+  }
+  if (fromMode !== 'zip' && fromMode !== 'setup') blockers.push('the from-install mode is unknown');
+  if (fromMode === 'zip' && fromVersion !== '1.0.2') blockers.push('only v1.0.2 comes from a zip');
+  if (!VERSION.test(toVersion)) blockers.push('the expected after version is not x.y.z');
+  if (toVersion === fromVersion) blockers.push('the upgrade must end on a different version');
+  if (record.toVersion !== undefined && record.toVersion !== toVersion) {
+    blockers.push(`the run recorded version ${String(record.toVersion)} as the after version`);
+  }
+  if (!SUPPORTED_UPGRADE_FROM_VERSIONS.includes(String(fromVersion))) return blockers;
+
+  const from = versionTag(String(fromVersion));
+  const to = versionTag(toVersion);
+  const fromDigestId = fromMode === 'zip' ? `${from}-zip-digest` : `${from}-setup-digest`;
+  const steps = commonChecks(
     record,
     SANDBOX_UPGRADE_SCHEMA,
-    REQUIRED_UPGRADE_STEPS,
+    requiredUpgradeSteps(String(fromVersion), toVersion, fromMode === 'zip' ? 'zip' : 'setup'),
     'new-setup-digest',
     expected,
     blockers,
   );
-  const version = expected.version ?? '1.1.0';
-  const first = snapshotOf(record, 'S1-v102-installed');
-  if (first.appPackageVersion !== '1.0.2') blockers.push('the first install was not v1.0.2');
-  const upgraded = snapshotOf(record, 'S3-upgraded');
-  if (upgraded.appPackageVersion !== version)
-    blockers.push(`the upgrade did not leave version ${version}`);
-  if (upgraded.uninstallDisplayVersion !== version) {
-    blockers.push(`the uninstaller registration does not say ${version} after the upgrade`);
+  const fromDigest = steps.get(fromDigestId);
+  if (expected.fromSha256 !== undefined && fromDigest !== undefined) {
+    if (fromDigest.detail.toLowerCase() !== expected.fromSha256.toLowerCase()) {
+      blockers.push(`the from-version install is not the ${String(fromVersion)} setup given`);
+    }
   }
-  const data = snapshotOf(record, 'S4-v110-after-run');
+  const first = snapshotOf(record, `S1-${from}-installed`);
+  if (first.appPackageVersion !== fromVersion)
+    blockers.push(`the first install was not v${String(fromVersion)}`);
+  const upgraded = snapshotOf(record, 'S3-upgraded');
+  if (upgraded.appPackageVersion !== toVersion)
+    blockers.push(`the upgrade did not leave version ${toVersion}`);
+  if (upgraded.uninstallDisplayVersion !== toVersion) {
+    blockers.push(`the uninstaller registration does not say ${toVersion} after the upgrade`);
+  }
+  const data = snapshotOf(record, `S4-${to}-after-run`);
   if (data.dataFolderExists !== true)
     blockers.push('the app data folder is gone after the upgrade');
   const removed = snapshotOf(record, 'S5-uninstalled');

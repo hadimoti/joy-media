@@ -267,6 +267,7 @@ export function MonitorTransport({
         <button
           type="button"
           className="monitor-transport-btn"
+          title={`Preview scale ${zoomLabel}: Ctrl+plus and Ctrl+minus zoom, Ctrl+0 fits`}
           aria-label={`Preview scale (${zoomLabel})`}
           aria-expanded={zoomDrawer.open}
           aria-controls="monitor-zoom-drawer"

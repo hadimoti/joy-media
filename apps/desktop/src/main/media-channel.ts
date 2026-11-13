@@ -6,6 +6,7 @@ import { ProviderUnavailableError, evaluateEndpoint } from '@joy-media/provider-
 import type { DispatchJob, JobDispatchStore } from '../jobs/job-dispatch.js';
 import type { CancelResult, JobOrchestrator, SubmitResult } from '../jobs/job-orchestrator.js';
 import type {
+  LocalAsset,
   LocalAssetRegistration,
   LocalAssetRegistrationResult,
 } from '../store/local-assets.js';
@@ -39,6 +40,7 @@ export type MediaResult = {
 
 export const MEDIA_CHANNELS = [
   'desktop.asset-library.remove-entry',
+  'desktop.media.asset.remove-internal',
   'desktop.media.speech.transcribe',
   'desktop.media.asset.register',
   'desktop.media.asset.upload-original',
@@ -68,6 +70,7 @@ export interface ProjectDocumentPort {
 
 export interface LocalAssetPort {
   register(asset: LocalAssetRegistration): LocalAssetRegistrationResult;
+  get(assetId: string): LocalAsset | undefined;
 }
 
 export interface MediaChannelDeps {
@@ -339,6 +342,7 @@ function asAssetRegistration(payload: unknown): LocalAssetRegistration | undefin
   const sha256 = candidate['sha256'];
   const bytes = candidate['bytes'];
   const descriptor = candidate['descriptor'];
+  const internal = candidate['internal'];
   if (id === undefined || typeof kind !== 'string' || !ASSET_KIND_PATTERN.test(kind)) {
     return undefined;
   }
@@ -349,6 +353,7 @@ function asAssetRegistration(payload: unknown): LocalAssetRegistration | undefin
   if (typeof bytes !== 'number' || !Number.isSafeInteger(bytes)) return undefined;
   if (bytes < 0 || bytes > MAX_LOCAL_ORIGINAL_BYTES) return undefined;
   if (descriptor !== undefined && !isPlainObject(descriptor)) return undefined;
+  if (internal !== undefined && typeof internal !== 'boolean') return undefined;
   return {
     id,
     kind,
@@ -356,6 +361,7 @@ function asAssetRegistration(payload: unknown): LocalAssetRegistration | undefin
     sha256,
     bytes,
     ...(descriptor === undefined ? {} : { descriptor }),
+    ...(internal === true ? { internal: true } : {}),
   };
 }
 
@@ -463,6 +469,26 @@ export function createMediaChannelHandlers(
         return { ok: false, error: errorMessage };
       }
       return { ok: false, error: 'Catalog removal failed' };
+    }
+  };
+
+  const removeInternalAsset = async (payload: unknown): Promise<MediaResult> => {
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'Invalid internal asset id' };
+    }
+    const assetId = asId((payload as Record<string, unknown>)['assetId']);
+    if (assetId === undefined) return { ok: false, error: 'Invalid internal asset id' };
+    if (deps.assets.get(assetId)?.internal !== true) {
+      return { ok: true, data: { removed: false } };
+    }
+    if (deps.library === undefined) {
+      return { ok: false, error: 'Asset library is not available in this build' };
+    }
+    try {
+      return { ok: true, data: await deps.library.removeInternalAsset(assetId) };
+    } catch (error) {
+      console.error('Internal asset cleanup failed', error);
+      return { ok: false, error: 'Internal asset cleanup failed' };
     }
   };
 
@@ -739,6 +765,7 @@ export function createMediaChannelHandlers(
 
   return {
     'desktop.asset-library.remove-entry': removeLibraryEntry,
+    'desktop.media.asset.remove-internal': removeInternalAsset,
     'desktop.media.speech.transcribe': transcribeSpeech,
     'desktop.media.asset.register': registerAsset,
     'desktop.media.asset.upload-original': storeOriginal,

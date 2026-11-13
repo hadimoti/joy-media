@@ -39,6 +39,7 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.asset-library.remove-entry',
   'desktop.asset-library.open-directory',
   'desktop.media.asset.register',
+  'desktop.media.asset.remove-internal',
   'desktop.media.asset.upload-original',
   'desktop.media.asset.upload-original-chunk',
   'desktop.media.asset.upload-original-finish',

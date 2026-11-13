@@ -32,6 +32,10 @@ import { saveWorkflow } from './workflow-recorder.js';
 import type { EditorSession } from './editor-session.js';
 import type { ProjectWriterStorage } from './project-writer.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
+import {
+  registerEditorPointerDndRoot,
+  type EditorPointerDragPayload,
+} from './editor-pointer-dnd.js';
 import { PanelShell } from './PanelShell.js';
 import { objectDisplayLabel, objectDisplayLabels } from './object-display-label.js';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
@@ -586,6 +590,7 @@ export function AgentPanel({
   const thinkingTimerRef = useRef<number | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
+  const joyCodeDropTargetRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
   const [lastRun, setLastRun] = useState<LastRun | undefined>(undefined);
   const [thinkingThreadId, setThinkingThreadId] = useState<string | undefined>(undefined);
@@ -3368,10 +3373,34 @@ export function AgentPanel({
     }
   };
 
+  useEffect(() => {
+    const root = joyCodeDropTargetRef.current;
+    if (root === null) return;
+    return registerEditorPointerDndRoot(root, {
+      onMove: () => undefined,
+      onDrop: (payload: EditorPointerDragPayload) => {
+        if (
+          payload.kind !== 'media' ||
+          onAttachAsset === undefined ||
+          (payload.asset.kind !== 'image' && payload.asset.kind !== 'video')
+        )
+          return;
+        onAttachAsset({
+          assetId: payload.asset.assetId,
+          kind: payload.asset.kind,
+          displayName: payload.asset.displayName,
+        });
+      },
+    });
+  }, [onAttachAsset]);
+
   return (
     <PanelShell title="Joy Code" className="joy-code-panel">
       <div
+        ref={joyCodeDropTargetRef}
         className="joy-code-drop-target"
+        data-editor-pointer-dnd-root=""
+        data-editor-pointer-dnd-target="joy-code-attach"
         onDragOver={(event) => {
           if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
           event.preventDefault();

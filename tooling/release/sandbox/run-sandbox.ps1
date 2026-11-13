@@ -1,8 +1,15 @@
 # Runs one scripted Windows Sandbox lifecycle run for a release candidate and copies its receipt out.
 #
 #   run-sandbox.ps1 -Kind lifecycle -SetupExe <joy-media-setup.exe> -OutDir <new folder> -Receipt <path>
-#   run-sandbox.ps1 -Kind upgrade   -SetupExe <joy-media-setup.exe> -V102Zip <joy-media-windows-x64-v1.0.2.zip> `
+#   run-sandbox.ps1 -Kind upgrade   -SetupExe <joy-media-setup.exe> -ToVersion <candidate x.y.z> `
+#                   -V102Zip <joy-media-windows-x64-v1.0.2.zip> -OutDir <new folder> -Receipt <path>
+#   run-sandbox.ps1 -Kind upgrade   -SetupExe <joy-media-setup.exe> -ToVersion <candidate x.y.z> `
+#                   -FromSetupExe <joy-media-setup-from.exe> -FromVersion 1.1.0 -FromSha256 <hash> `
 #                   -OutDir <new folder> -Receipt <path>
+#
+# -FromVersion is 1.0.2 or 1.1.0. The zip is the released v1.0.2 zip (-V102Zip, which implies 1.0.2); a
+# setup exe needs -FromVersion and -FromSha256, and the exe's own digest must match -FromSha256.
+# -ToVersion is the candidate's version. It is a parameter so that no version is written into the script.
 #
 # The Sandbox has networking off and sees two folders: in (read-only) and out. The script refuses to start when a
 # Sandbox is already running, because Windows allows only one. The Sandbox is NOT closed here: close its window
@@ -11,6 +18,10 @@ param(
     [Parameter(Mandatory = $true)][ValidateSet('lifecycle', 'upgrade')][string]$Kind,
     [Parameter(Mandatory = $true)][string]$SetupExe,
     [string]$V102Zip = '',
+    [string]$FromSetupExe = '',
+    [string]$FromVersion = '',
+    [string]$FromSha256 = '',
+    [string]$ToVersion = '',
     [Parameter(Mandatory = $true)][string]$OutDir,
     [Parameter(Mandatory = $true)][string]$Receipt,
     [int]$TimeoutSeconds = 900
@@ -22,7 +33,31 @@ if (Get-Process -Name 'WindowsSandboxRemoteSession', 'vmmemWindowsSandbox' -Erro
 }
 if (-not (Test-Path -LiteralPath $SetupExe -PathType Leaf)) { throw "Setup exe not found: $SetupExe" }
 if (Test-Path -LiteralPath $OutDir) { throw "OutDir must be a new folder (nothing is deleted): $OutDir" }
-if ($Kind -eq 'upgrade' -and -not (Test-Path -LiteralPath $V102Zip -PathType Leaf)) { throw 'upgrade needs -V102Zip' }
+
+# Which older release the upgrade starts from, and how it is installed.
+$upgradeFrom = $null
+$fromMode = $null
+if ($Kind -eq 'upgrade') {
+    if ($V102Zip -ne '' -and $FromSetupExe -ne '') { throw 'Use either -V102Zip or -FromSetupExe, not both.' }
+    if ($V102Zip -ne '') {
+        if (-not (Test-Path -LiteralPath $V102Zip -PathType Leaf)) { throw "V102Zip not found: $V102Zip" }
+        if ($FromVersion -ne '' -and $FromVersion -ne '1.0.2') { throw '-V102Zip is v1.0.2; use -FromSetupExe for another start version.' }
+        $upgradeFrom = '1.0.2'
+        $fromMode = 'zip'
+    } elseif ($FromSetupExe -ne '') {
+        if (-not (Test-Path -LiteralPath $FromSetupExe -PathType Leaf)) { throw "FromSetupExe not found: $FromSetupExe" }
+        if ($FromVersion -notin @('1.0.2', '1.1.0')) { throw '-FromSetupExe needs -FromVersion 1.0.2 or 1.1.0.' }
+        if ($FromSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw '-FromSetupExe needs -FromSha256 (64 hex characters).' }
+        $fromHash = (Get-FileHash -LiteralPath $FromSetupExe -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($fromHash -ne $FromSha256.ToLowerInvariant()) { throw "FromSetupExe does not match -FromSha256 (its digest is $fromHash)." }
+        $upgradeFrom = $FromVersion
+        $fromMode = 'setup'
+    } else {
+        throw 'upgrade needs -V102Zip, or -FromSetupExe with -FromVersion and -FromSha256.'
+    }
+    if ($ToVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'upgrade needs -ToVersion x.y.z (the candidate version).' }
+    if ($ToVersion -eq $upgradeFrom) { throw "-ToVersion must differ from the start version $upgradeFrom." }
+}
 
 $in = Join-Path $OutDir 'in'
 $out = Join-Path $OutDir 'out'
@@ -34,10 +69,17 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot $script) -Destination (Join-Path
 if ($Kind -eq 'lifecycle') {
     Set-Content -LiteralPath (Join-Path $in 'expected.sha256') -Value $setupHash -NoNewline
 } else {
-    Copy-Item -LiteralPath $V102Zip -Destination (Join-Path $in 'v102.zip')
     Set-Content -LiteralPath (Join-Path $in 'expected-new.sha256') -Value $setupHash -NoNewline
-    $zipHash = (Get-FileHash -LiteralPath $V102Zip -Algorithm SHA256).Hash.ToLowerInvariant()
-    Set-Content -LiteralPath (Join-Path $in 'expected-v102.sha256') -Value $zipHash -NoNewline
+    $plan = [ordered]@{ fromVersion = $upgradeFrom; fromMode = $fromMode; toVersion = $ToVersion }
+    Set-Content -LiteralPath (Join-Path $in 'upgrade-plan.json') -Value ($plan | ConvertTo-Json) -Encoding UTF8
+    if ($fromMode -eq 'zip') {
+        Copy-Item -LiteralPath $V102Zip -Destination (Join-Path $in 'v102.zip')
+        $zipHash = (Get-FileHash -LiteralPath $V102Zip -Algorithm SHA256).Hash.ToLowerInvariant()
+        Set-Content -LiteralPath (Join-Path $in 'expected-v102.sha256') -Value $zipHash -NoNewline
+    } else {
+        Copy-Item -LiteralPath $FromSetupExe -Destination (Join-Path $in 'from-setup.exe')
+        Set-Content -LiteralPath (Join-Path $in 'expected-from.sha256') -Value $FromSha256.ToLowerInvariant() -NoNewline
+    }
 }
 
 $wsb = @"
