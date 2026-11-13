@@ -150,6 +150,31 @@ function isOwnerVisibleDockviewPanel(api: IDockviewPanelProps['api']): boolean {
   return api.isVisible;
 }
 
+/**
+ * Where a panel lands when it is opened on demand.
+ *
+ * Joy Code is collapsed on the first run, so opening it has to put it back
+ * where it belongs: a column of its own, the way the seed layout had it. The
+ * neighbour depends on the view mode (the Inspector group in the vertical
+ * layout, the timeline row in the widescreen one). A layout without that
+ * neighbour keeps the default placement.
+ */
+function joyCodeDockPosition(
+  api: DockviewApi,
+  panelId: string,
+  mode: EditorViewMode,
+): {
+  readonly position?: {
+    readonly referencePanel: string;
+    readonly direction: 'right';
+  };
+} {
+  if (panelId !== 'agent') return {};
+  const reference = mode === 'widescreen' ? 'timeline' : 'inspector';
+  if (api.getPanel(reference) === undefined) return {};
+  return { position: { referencePanel: reference, direction: 'right' } };
+}
+
 function useOwnerVisibleDockviewPanel(api: IDockviewPanelProps['api']): boolean {
   const [ownerVisible, setOwnerVisible] = useState(() => isOwnerVisibleDockviewPanel(api));
   useEffect(() => {
@@ -388,7 +413,12 @@ import type { EditorUiPreferencesV2 } from './ui-preferences.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
 import { usePopup, usePopupManager, usePopupsClosedWhile } from './popup-manager.js';
 import { POPUP_IDS } from './popup-ids.js';
-import { workspacePresetLayout, workspacePresetLayoutKey } from './workspace-presets.js';
+import {
+  firstRunWorkspaceLayout,
+  planWorkspaceLayout,
+  persistWorkspacePresetLayout,
+  workspacePresetLayoutKey,
+} from './workspace-presets.js';
 import {
   DOCK_LAYOUT_KEY,
   DOCK_PANEL_MINIMUM_HEIGHT,
@@ -397,10 +427,7 @@ import {
   type EditorViewMode,
   dockLayoutKey,
   migrateLegacyDockLayout,
-  migrateDockLayout,
-  serializeDockLayout,
   saveViewMode,
-  seedDockLayout,
 } from './dock-layout.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
@@ -3372,6 +3399,7 @@ function EditorWorkspace({
         title: panelLabel(dockPanelId),
         minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
         minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
+        ...joyCodeDockPosition(api, dockPanelId, viewModeRef.current),
       });
       panel = api.getPanel(dockPanelId);
     }
@@ -3491,6 +3519,9 @@ function EditorWorkspace({
     };
 
     for (const panel of CORE_WORKSPACE_PANELS) {
+      // Joy Code is optional: a layout without its group keeps it out of the
+      // dock until the user opens it from the menu.
+      if (panel === 'agent' && api.getPanel('agent') === undefined) continue;
       addPanel(panel, {
         inactive: true,
         ...(panel === 'flow' && api.getPanel('timeline') !== undefined
@@ -3502,35 +3533,29 @@ function EditorWorkspace({
 
   const applyDockLayout = useCallback(
     (api: DockviewApi, mode: EditorViewMode, preset = workspacePresetRef.current) => {
-      const layoutKey =
-        preset === 'edit' ? dockLayoutKey(mode) : workspacePresetLayoutKey(mode, preset);
-      const saved = storage.getItem(layoutKey);
-      let restored = false;
-      if (saved !== null) {
-        try {
-          api.fromJSON(migrateDockLayout(JSON.parse(saved)) as never, {
-            reuseExistingPanels: false,
-          });
-          restored = true;
-        } catch {
-          storage.removeItem(layoutKey);
-        }
-      }
-      if (!restored) {
-        try {
-          api.fromJSON(
-            (preset === 'edit'
-              ? seedDockLayout(mode)
-              : workspacePresetLayout(preset, mode)) as never,
-            { reuseExistingPanels: false },
-          );
-        } catch (error) {
+      // A saved layout always wins; the first-run layout (Joy Code collapsed)
+      // applies only when nothing is saved for this workspace yet.
+      const plan = planWorkspaceLayout(storage, preset, mode);
+      try {
+        api.fromJSON(plan.layout as never, { reuseExistingPanels: false });
+      } catch (error) {
+        if (plan.restored) {
+          // A saved layout the editor cannot read: drop it and use the default.
+          storage.removeItem(plan.key);
+          try {
+            api.fromJSON(firstRunWorkspaceLayout(preset, mode) as never, {
+              reuseExistingPanels: false,
+            });
+          } catch (fallbackError) {
+            console.warn('default dock layout rejected, falling back to a stack', fallbackError);
+          }
+        } else {
           console.warn('default dock layout rejected, falling back to a stack', error);
         }
       }
       ensureDockPanels(api);
       api.getPanel('monitor')?.api.setActive();
-      storage.setItem(layoutKey, serializeDockLayout(api.toJSON()));
+      persistWorkspacePresetLayout(storage, preset, mode, api.toJSON());
     },
     [ensureDockPanels, storage],
   );
@@ -3552,11 +3577,8 @@ function EditorWorkspace({
       const api = dockviewApiRef.current;
       const current = workspacePresetRef.current;
       const mode = viewModeRef.current;
-      if (api !== null && current !== 'custom') {
-        storage.setItem(
-          workspacePresetLayoutKey(mode, 'custom'),
-          serializeDockLayout(api.toJSON()),
-        );
+      if (api !== null) {
+        persistWorkspacePresetLayout(storage, current, mode, api.toJSON());
       }
       workspacePresetRef.current = next;
       setWorkspacePreset(next);
@@ -3586,10 +3608,11 @@ function EditorWorkspace({
     const api = dockviewApiRef.current;
     if (api === null) return;
     const current = viewModeRef.current;
-    storage.setItem(dockLayoutKey(current), serializeDockLayout(api.toJSON()));
+    persistWorkspacePresetLayout(storage, workspacePresetRef.current, current, api.toJSON());
     const next: EditorViewMode = current === 'vertical' ? 'widescreen' : 'vertical';
     saveViewMode(storage, next);
     persistUiPreferences({ viewMode: next });
+    viewModeRef.current = next;
     setViewMode(next);
     applyDockLayout(api, next, workspacePresetRef.current);
   }, [applyDockLayout, persistUiPreferences, storage]);
@@ -5208,9 +5231,11 @@ function EditorWorkspace({
       applyDockLayout(event.api, mode, preset);
 
       const persistDockLayout = () => {
-        storage.setItem(
-          dockLayoutKey(viewModeRef.current),
-          serializeDockLayout(event.api.toJSON()),
+        persistWorkspacePresetLayout(
+          storage,
+          workspacePresetRef.current,
+          viewModeRef.current,
+          event.api.toJSON(),
         );
       };
       event.api.onDidLayoutChange(persistDockLayout);

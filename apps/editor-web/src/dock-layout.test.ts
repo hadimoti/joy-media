@@ -3,6 +3,7 @@ import {
   DOCK_LAYOUT_KEY,
   DOCK_PANEL_MINIMUM_HEIGHT,
   DOCK_PANEL_MINIMUM_WIDTH,
+  collapseJoyCodeGroup,
   defaultDockLayout,
   dockLayoutKey,
   loadViewMode,
@@ -194,6 +195,36 @@ describe('dock layout constraints', () => {
     }) as LayoutWithPanels;
     expect(leafViews(migrated, 'context')).toEqual(['inspector', 'scene3d', 'motion']);
     expect(migrated.panels.scene3d).toMatchObject({ id: 'scene3d' });
+  });
+});
+
+describe('Joy Code collapsed layout', () => {
+  it('takes the Joy Code group out of the grid but keeps the panel registered', () => {
+    const collapsed = collapseJoyCodeGroup(verticalDockLayout()) as LayoutWithPanels;
+
+    expect(leafIds(collapsed)).not.toContain('agent-col');
+    expect(Object.keys(collapsed.panels)).toEqual(PANEL_IDS);
+    // The rest of the workspace is untouched.
+    expect(leafIds(collapsed)).toContain('monitor-col');
+    expect(leafIds(collapsed)).toContain('timeline-row');
+    expect(collapsed.activeGroup).toBe('monitor-col');
+  });
+
+  it('collapses the widescreen seed as well', () => {
+    const collapsed = collapseJoyCodeGroup(widescreenDockLayout()) as LayoutWithPanels;
+
+    expect(leafIds(collapsed)).not.toContain('agent-col');
+    expect(leafIds(collapsed)).toContain('monitor-row');
+    expect(Object.keys(collapsed.panels)).toEqual(PANEL_IDS);
+  });
+
+  it('leaves a layout without a Joy Code group alone', () => {
+    const withoutJoyCode = {
+      grid: { root: { type: 'leaf', data: { id: 'monitor-col', views: ['monitor'] } } },
+      panels: { monitor: { id: 'monitor' } },
+    };
+
+    expect(collapseJoyCodeGroup(withoutJoyCode)).toEqual(withoutJoyCode);
   });
 });
 
