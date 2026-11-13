@@ -44,9 +44,12 @@ import {
 import {
   clampColorScopesWindowGeometry,
   DEFAULT_COLOR_SCOPES_WINDOW_GEOMETRY,
+  fitColorScopesWindowGeometry,
   loadColorScopesWindowGeometry,
+  sameColorScopesWindowGeometry,
   saveColorScopesWindowGeometry,
   type ColorScopesWindowGeometry,
+  type ViewportSize,
 } from './color-scopes-window.js';
 
 export type { ScopePixels };
@@ -129,6 +132,12 @@ function v2From(value: ColorGradeV1 | ColorGradeV2 | undefined): ColorGradeV2 {
   };
 }
 
+/** The size of the screen the floating window has to stay inside. */
+function scopesWindowViewport(): ViewportSize | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
 export function ColorPanel({
   title = 'Color',
   project,
@@ -152,8 +161,16 @@ export function ColorPanel({
   const showToast = editorContext?.showToast;
   const [scopesWindowOpen, setScopesWindowOpen] = useState(false);
   const [scopesWindowGeometry, setScopesWindowGeometry] = useState<ColorScopesWindowGeometry>(
-    () =>
-      loadColorScopesWindowGeometry(editorContext?.storage) ?? DEFAULT_COLOR_SCOPES_WINDOW_GEOMETRY,
+    () => {
+      // A position remembered on a bigger screen is fitted back into this one,
+      // so the window never comes back where it cannot be reached.
+      const viewport = scopesWindowViewport();
+      const stored = loadColorScopesWindowGeometry(editorContext?.storage, viewport);
+      if (stored !== undefined) return stored;
+      return viewport === undefined
+        ? DEFAULT_COLOR_SCOPES_WINDOW_GEOMETRY
+        : fitColorScopesWindowGeometry(DEFAULT_COLOR_SCOPES_WINDOW_GEOMETRY, viewport);
+    },
   );
   const source =
     target === 'clip'
@@ -181,6 +198,21 @@ export function ColorPanel({
     }, 400);
     return () => window.clearTimeout(timer);
   }, [editorContext?.storage, scopesWindowGeometry]);
+
+  // A window that was on screen when the viewport was larger has to follow
+  // the screen down: it is pulled back inside whenever the viewport changes.
+  useEffect(() => {
+    const onResize = () => {
+      const viewport = scopesWindowViewport();
+      if (viewport === undefined) return;
+      setScopesWindowGeometry((current) => {
+        const next = fitColorScopesWindowGeometry(current, viewport);
+        return sameColorScopesWindowGeometry(current, next) ? current : next;
+      });
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const commit = (next: ColorGradeV2 = draft) => {
     if (target === 'clip' && (!clipAvailable || selectedClipId === undefined)) return;
@@ -1464,7 +1496,8 @@ function FloatingScopesWindow({
     if (drag === undefined) return;
     const deltaX = event.clientX - drag.startX;
     const deltaY = event.clientY - drag.startY;
-    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const viewport = scopesWindowViewport();
+    if (viewport === undefined) return;
     onGeometryChange(
       clampColorScopesWindowGeometry(
         drag.mode === 'move'

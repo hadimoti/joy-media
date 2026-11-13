@@ -14,6 +14,7 @@ import {
   type EditorPanelContextValue,
   type ToastAction,
 } from './editor-panel-context.js';
+import { COLOR_SCOPES_WINDOW_KEY, type WindowGeometryStorage } from './color-scopes-window.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -31,12 +32,19 @@ beforeAll(() => {
   });
 });
 
+/** jsdom keeps the viewport at a fixed size, so the tests set it themselves. */
+function resizeViewport(width: number, height: number): void {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+}
+
 afterEach(async () => {
   if (root !== undefined) await act(async () => root?.unmount());
   container?.remove();
   root = undefined;
   container = undefined;
   document.body.innerHTML = '';
+  resizeViewport(1024, 768);
   vi.restoreAllMocks();
 });
 
@@ -49,6 +57,7 @@ async function mountPanel(
       kind?: 'info' | 'success' | 'error',
       action?: ToastAction,
     ) => void;
+    readonly storage?: WindowGeometryStorage;
   } = {},
 ) {
   container = document.createElement('div');
@@ -56,7 +65,10 @@ async function mountPanel(
   root = createRoot(container);
   const showToast = options.showToast ?? vi.fn();
   // The panel only reads the toast and the storage from the context.
-  const context = { showToast } as unknown as EditorPanelContextValue;
+  const context = {
+    showToast,
+    ...(options.storage === undefined ? {} : { storage: options.storage }),
+  } as unknown as EditorPanelContextValue;
   await act(async () => {
     root?.render(
       <EditorPanelContext.Provider value={context}>
@@ -116,6 +128,52 @@ describe('Color panel scopes', () => {
       document.body.querySelector<HTMLButtonElement>('[aria-label="Close scopes window"]')?.click();
     });
     expect(document.body.querySelector('.scope-window')).toBeNull();
+  });
+
+  it('fits a remembered position from a bigger screen back into the viewport', async () => {
+    resizeViewport(480, 360);
+    const store: WindowGeometryStorage = {
+      getItem: (key) =>
+        key === COLOR_SCOPES_WINDOW_KEY
+          ? JSON.stringify({ x: 5000, y: 4000, width: 900, height: 700 })
+          : null,
+      setItem: () => undefined,
+    };
+    const { container: panel } = await mountPanel({ storage: store });
+
+    await act(async () => {
+      panel.querySelector<HTMLButtonElement>('button[title*="scopes in a window"]')?.click();
+    });
+    const floating = document.body.querySelector<HTMLElement>('.scope-window');
+    expect(floating).not.toBeNull();
+    const left = Number.parseFloat(floating!.style.left);
+    const top = Number.parseFloat(floating!.style.top);
+    const width = Number.parseFloat(floating!.style.width);
+    const height = Number.parseFloat(floating!.style.height);
+    expect(left + width).toBeLessThanOrEqual(480);
+    expect(top + height).toBeLessThanOrEqual(360);
+  });
+
+  it('pulls the window back inside when the viewport shrinks', async () => {
+    const { container: panel } = await mountPanel();
+    await act(async () => {
+      panel.querySelector<HTMLButtonElement>('button[title*="scopes in a window"]')?.click();
+    });
+    expect(document.body.querySelector('.scope-window')).not.toBeNull();
+
+    resizeViewport(520, 400);
+    await act(async () => {
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    const floating = document.body.querySelector<HTMLElement>('.scope-window');
+    const left = Number.parseFloat(floating!.style.left);
+    const top = Number.parseFloat(floating!.style.top);
+    const width = Number.parseFloat(floating!.style.width);
+    const height = Number.parseFloat(floating!.style.height);
+    expect(left + width).toBeLessThanOrEqual(520);
+    expect(top + height).toBeLessThanOrEqual(400);
+    expect(width).toBeGreaterThanOrEqual(300);
   });
 
   it('offers an Undo toast when the grade is reset', async () => {
