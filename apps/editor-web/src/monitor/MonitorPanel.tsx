@@ -73,7 +73,7 @@ import {
 import { MonitorSelectionOverlay } from './MonitorSelectionOverlay.js';
 import { MonitorTransformBox } from './MonitorTransformBox.js';
 import { boxContainsPoint } from './monitor-hit-test.js';
-import { buildMonitorOverlays } from './monitor-overlay-model.js';
+import { buildMonitorGroupOverlay, buildMonitorOverlays } from './monitor-overlay-model.js';
 import type { MonitorTransformHost, TransformPatches } from './monitor-transform-drag.js';
 import {
   monitorTransformPreview,
@@ -314,6 +314,9 @@ function MonitorPanelContent({
       agentPreviewOnScreen,
     });
   };
+  // The playhead a release writes its keyframes at (T-M05b).
+  const playheadRef = useRef(state.playheadUs);
+  playheadRef.current = state.playheadUs;
   const livePatches = useMonitorTransformPreview();
   // A colour gesture in progress draws with its live grade (never written yet).
   const liveGrade = useColorGradePreview();
@@ -324,9 +327,10 @@ function MonitorPanelContent({
       commit: (label: string, patches: TransformPatches) => {
         try {
           // One undo step for the whole gesture, as the aspect-ratio change does.
+          // A value whose stopwatch is on gets a keyframe at the playhead (T-M05b).
           session.dispatchCompound(label, {
             document: {
-              ...withTransformPatches(session.visualProject, patches),
+              ...withTransformPatches(session.visualProject, patches, playheadRef.current),
               updatedAt: new Date().toISOString(),
             },
           });
@@ -472,7 +476,7 @@ function MonitorPanelContent({
     const cameraId = composition.activeCameraId;
     // A Monitor drag in progress draws with its live values (never written yet).
     const patches = monitorTransformPreview.get();
-    const drawnProject = withTransformPatches(previewVisualProject, patches);
+    const drawnProject = withTransformPatches(previewVisualProject, patches, state.playheadUs);
     // A colour gesture in progress draws with its live grade (never written yet).
     const gradedProject = withColorGradePreview(previewVisualProject, liveGrade);
     const gradedClip =
@@ -841,6 +845,10 @@ function MonitorPanelContent({
     () => buildMonitorOverlays(transformTargets, monitorView.view.zoom),
     [monitorView.view.zoom, transformTargets],
   );
+  const transformGroup = useMemo(
+    () => buildMonitorGroupOverlay(transformTargets, monitorView.view.zoom),
+    [monitorView.view.zoom, transformTargets],
+  );
   const frameRect = monitorFrameRect(monitorView.view, frameSize);
 
   const toggleFullscreen = () => {
@@ -1003,6 +1011,7 @@ function MonitorPanelContent({
         />
         <MonitorTransformBox
           overlays={transformOverlays}
+          group={transformGroup}
           view={monitorView.view}
           viewportSize={monitorView.viewportSize}
           interactive={monitorView.tool === 'select' && !spaceHeld}

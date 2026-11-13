@@ -206,7 +206,7 @@ describe('transform targets', () => {
     expect(TRANSFORM_BLOCK_MESSAGES['agent-preview']).toMatch(/agent preview/);
   });
 
-  it('a value from an expression or animated by keyframes greys the gestures that write it', () => {
+  it('a value from an expression greys the gestures that write it; a keyframed one does not (T-M05b)', () => {
     const expression = targets(['clip-shape'], {
       project: project({ objects: { shape: { expressions: { x: 'time * 10' } } } }),
     })[0]!;
@@ -222,7 +222,8 @@ describe('transform targets', () => {
         },
       }),
     })[0]!;
-    expect(animated.blocked).toEqual({ rotate: 'animated' });
+    // T-M05b: a keyframed value is edited on the Monitor and keyed on release.
+    expect(animated.blocked).toEqual({});
   });
 
   it("a parented object carries its parent's world values; a parent with no size blocks moving", () => {
@@ -429,5 +430,110 @@ describe('live values', () => {
       scaleY: 2,
       rotationDeg: 30,
     });
+  });
+});
+
+describe('T-M05b: keyframed values and the anchor point on the targets', () => {
+  const curve = (value: number) => ({
+    keyframes: [
+      { timeUs: 0, value, interpolation: 'linear' as const },
+      { timeUs: 1_000_000, value: value + 100, interpolation: 'linear' as const },
+    ],
+  });
+
+  it('a keyframed value is read from its curve at the playhead, not from the static value', () => {
+    const [shape] = targets(['clip-shape'], {
+      project: project({
+        objects: {
+          shape: {
+            animations: { x: curve(140), rotationDeg: curve(5) },
+          } as Partial<VisualObjectV1>,
+        },
+      }),
+    });
+    expect(shape!.local).toEqual({ x: 140, y: 200, scaleX: 1, scaleY: 1, rotationDeg: 5 });
+    expect(shape!.blocked).toEqual({});
+  });
+
+  it('carries the saved anchor (the centre when there is none)', () => {
+    expect(targets(['clip-shape'])[0]!.anchor).toEqual({ x: 0.5, y: 0.5 });
+    const [anchored] = targets(['clip-shape'], {
+      project: project({
+        objects: { shape: { transform: t(100, 200, { anchorX: 0, anchorY: 1 }) } },
+      }),
+    });
+    expect(anchored!.anchor).toEqual({ x: 0, y: 1 });
+    expect(anchored!.anchorBlocked).toBeUndefined();
+  });
+
+  it('the anchor of an element that is not turned can move even with position keyframes', () => {
+    const [shape] = targets(['clip-shape'], {
+      project: project({
+        objects: { shape: { animations: { x: curve(100) } } as Partial<VisualObjectV1> },
+      }),
+    });
+    expect(shape!.anchorBlocked).toBeUndefined();
+  });
+
+  it('an animated rotation, or a turned element with an animated position, blocks the anchor', () => {
+    const rotating = targets(['clip-shape'], {
+      project: project({
+        objects: { shape: { animations: { rotationDeg: curve(0) } } as Partial<VisualObjectV1> },
+      }),
+    })[0]!;
+    expect(rotating.anchorBlocked).toBe('animated');
+    const scripted = targets(['clip-shape'], {
+      project: project({ objects: { shape: { expressions: { rotationDeg: 'time' } } } }),
+    })[0]!;
+    expect(scripted.anchorBlocked).toBe('expression');
+    // The child is drawn turned a quarter (by its parent): its position must hold still too.
+    const child = targets(['clip-child'], {
+      project: project({
+        objects: { child: { animations: { y: curve(0) } } as Partial<VisualObjectV1> },
+      }),
+    })[0]!;
+    expect(child.anchorBlocked).toBe('animated');
+    expect(TRANSFORM_BLOCK_MESSAGES.animated).toMatch(/anchor point/);
+  });
+
+  it('what greys everything greys the anchor too', () => {
+    expect(targets(['clip-shape'], { locked: ['clip-shape'] })[0]!.anchorBlocked).toBe('locked');
+    expect(targets(['clip-shape'], { project: project({ camera: true }) })[0]!.anchorBlocked).toBe(
+      'camera',
+    );
+    expect(targets(['clip-shape'], { agentPreviewOnScreen: true })[0]!.anchorBlocked).toBe(
+      'agent-preview',
+    );
+    expect(targets(['clip-captions'])[0]!.anchorBlocked).toBe('no-object');
+    const flat = targets(['clip-child'], {
+      project: project({ objects: { holder: { transform: t(0, 0, { scaleX: 0 }) } } }),
+    })[0]!;
+    expect(flat.anchorBlocked).toBe('parent-zero-scale');
+  });
+
+  it('the release writes a key on the keyframed channel and a static value on the others', () => {
+    const visual = project({
+      objects: { shape: { animations: { x: curve(100) } } as Partial<VisualObjectV1> },
+    });
+    const list = targets(['clip-shape'], { project: visual });
+    const patches = gesturePatches(
+      list,
+      { kind: 'move' },
+      { x: 0, y: 0 },
+      { x: 15, y: 5 },
+      {
+        shift: false,
+        alt: false,
+      },
+    )!;
+    const written = withTransformPatches(visual, patches, 0).visualObjects.shape!;
+    expect(written.animations!.x!.keyframes[0]).toEqual({
+      timeUs: 0,
+      value: 115,
+      interpolation: 'linear',
+    });
+    expect(written.animations!.x!.keyframes).toHaveLength(2);
+    expect(written.transform.x).toBe(100);
+    expect(written.transform.y).toBe(205);
   });
 });
