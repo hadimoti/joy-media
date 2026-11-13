@@ -46,6 +46,55 @@ function adapter(): CreativeSkillRunAdapter {
 }
 
 describe('creative skill runner', () => {
+  it('keeps the failure code an adapter step threw, and never its text', async () => {
+    const failing = Object.assign(
+      new Error('JOY_CREATIVE_SKILL_HOST_NO_PREPARED_CHANGE:secret-path'),
+      {
+        code: 'NO_PREPARED_CHANGE',
+      },
+    );
+    const worker: CreativeSkillRunAdapter = {
+      ...adapter(),
+      propose: vi.fn(async (): Promise<CreativeSkillStepResult> => {
+        throw failing;
+      }),
+    };
+    const runner = createCreativeSkillRunner({
+      runtime,
+      adapter: worker,
+      isAuthorityCurrent: () => true,
+    });
+    const result = await runner.run({
+      skillId: 'build-rough-cut',
+      scope: { projectId: 'project-1', runId: 'run-1', epoch: 1, revision: 'revision-1' },
+    });
+
+    expect(result.kind).toBe('blocked');
+    expect(result).toMatchObject({ reason: 'adapter-failed', failureCode: 'NO_PREPARED_CHANGE' });
+    expect(JSON.stringify(result)).not.toContain('secret-path');
+  });
+
+  it('drops a failure code that is not one the table knows', async () => {
+    const worker: CreativeSkillRunAdapter = {
+      ...adapter(),
+      observe: vi.fn(async (): Promise<CreativeSkillStepResult> => {
+        throw Object.assign(new Error('boom'), { code: 'NOT_A_KNOWN_CODE' });
+      }),
+    };
+    const runner = createCreativeSkillRunner({
+      runtime,
+      adapter: worker,
+      isAuthorityCurrent: () => true,
+    });
+    const result = await runner.run({
+      skillId: 'build-rough-cut',
+      scope: { projectId: 'project-1', runId: 'run-1', epoch: 1, revision: 'revision-1' },
+    });
+
+    expect(result).toMatchObject({ kind: 'blocked', reason: 'adapter-failed' });
+    expect(result).not.toHaveProperty('failureCode');
+  });
+
   it('runs only the bounded declared checkpoints and stops before any apply authority', async () => {
     const events: string[] = [];
     const worker = adapter();

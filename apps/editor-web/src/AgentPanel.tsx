@@ -119,6 +119,26 @@ import {
   type JoyAgentRunState,
 } from './joy-agent/run-events.js';
 import {
+  codesFromDiagnostics,
+  joyCodeCodeOfThrown,
+  joyCodeKeyForBlockReason,
+  joyCodeKeyForExecutionErrors,
+  joyCodeKeyForLookBlockReason,
+  joyCodeKeyForRecipeStop,
+  joyCodeKeyForRunError,
+  joyCodeKeyForThrown,
+  joyCodeMessageByKey,
+  reportJoyCodeFailure,
+  type JoyCodeMessageKey,
+} from './joy-code-messages.js';
+import { JoyCodeFailureCard } from './joy-code-failure-card.js';
+import {
+  createJoyCodeRetryTargets,
+  joyCodeMessageWithoutRetry,
+  runJoyCodeRetry,
+  type JoyCodeRetryRequest,
+} from './joy-code-retry.js';
+import {
   EMPTY_AGENT_PRESENCE,
   type AgentPresenceState,
   type AgentPresenceStore,
@@ -337,6 +357,8 @@ interface LastRun {
   readonly executionResult: ExecutionResult;
   readonly reverted: boolean;
   readonly savedWorkflowId?: string;
+  /** The table entry for a failed run. The card shows its sentence, never the engine's errors. */
+  readonly failureKey?: JoyCodeMessageKey | undefined;
 }
 
 export interface JoyAgentAttachedAsset {
@@ -651,6 +673,8 @@ export function AgentPanel({
   const latestSessionRef = useRef(session);
   latestSessionRef.current = session;
   const activeModelRunIdRef = useRef<string | undefined>(undefined);
+  /** The request each failure card's "Try again" re-runs, saved when the failure happens. */
+  const [retryTargets] = useState(createJoyCodeRetryTargets);
   const activeComposerHostLeaseRef = useRef<JoyAgentComposerHostLease | undefined>(undefined);
   const sessionScopeRef = useRef({
     projectId: project.id,
@@ -1667,6 +1691,54 @@ export function AgentPanel({
     );
   }
 
+  /**
+   * One failure is one calm card (joy-code-failure-card.tsx) built from its
+   * table entry. The code is logged here, and only the code: never the text.
+   * `retry` is the exact request that failed; a failure with none gets no
+   * retry button.
+   */
+  function appendFailure(
+    threadId: string,
+    key: JoyCodeMessageKey,
+    code: unknown = key,
+    retry?: JoyCodeRetryRequest,
+  ): void {
+    reportJoyCodeFailure(code);
+    const now = new Date().toISOString();
+    const id = makeJoyCodeId('message');
+    if (retry !== undefined) retryTargets.save(id, retry);
+    setConversation((current) =>
+      addJoyCodeConversationMessage(current, {
+        id,
+        role: 'assistant',
+        body: joyCodeMessageByKey(key).sentence,
+        createdAt: now,
+        failureKey: key,
+      }),
+    );
+  }
+
+  /** The props of a failure card: its retry re-runs the request saved for this message. */
+  function failureCardProps(messageId: string, failureKey: string) {
+    const retry = retryTargets.get(messageId);
+    const entry = joyCodeMessageByKey(failureKey);
+    return retry === undefined
+      ? { message: joyCodeMessageWithoutRetry(entry), onRetry: undefined }
+      : { message: entry, onRetry: () => runFailureRetry(retry) };
+  }
+
+  /** "Try again": re-run the saved request of one failure, with this render's state. */
+  function runFailureRetry(request: JoyCodeRetryRequest): void {
+    runJoyCodeRetry(request, {
+      prompt: (prompt) => submitPrompt(prompt),
+      recipe: (skillId) => void runRecipe(skillId),
+      agentLook: (prompt) => void runAgentLook(prompt),
+      look: (look) => void runLook(look),
+      bake: (bake) => void bakeLookFromCompositionAudio(bake),
+      plan: (intent, threadId) => plan(intent, threadId),
+    });
+  }
+
   const handOffCreativeBrief = useCallback(
     (brief: CreativeBriefV1): void => {
       const threadId = conversation.id;
@@ -1731,12 +1803,17 @@ export function AgentPanel({
     const baseRevision = session.projectRevisionId;
     const baseProject = project;
     const built = buildIntent(intent);
+    // The retry re-plans this same intent on the thread it came from.
+    const failedPlan: JoyCodeRetryRequest = { kind: 'plan', intent, threadId };
     if (!built.ok) {
-      appendMessage(threadId, 'assistant', built.reason);
+      // The builder's reason text never reaches the chat: only its table entry does.
+      const key = joyCodeKeyForBlockReason(built.reason);
+      appendFailure(threadId, key, key, failedPlan);
       return;
     }
     const agentPlan = createPlan(built.goal, [...built.steps]);
     const dryRun = dryRunPlan(agentPlan, registry, buildEditorContext(baseProject));
+    if (dryRun.errors.length > 0) reportJoyCodeFailure('JOY_AGENT_INVALID_PROPOSAL');
     const decisions = approvalEngine.evaluatePlan(
       agentPlan,
       agentContext,
@@ -1747,7 +1824,7 @@ export function AgentPanel({
       decisions.find((decision) => decision.decision === 'requires-manual') ??
       decisions[0];
     if (approval === undefined) {
-      appendMessage(threadId, 'assistant', 'No approval decision was created for this plan.');
+      appendFailure(threadId, 'unexpected-failure', 'PLAN_NO_APPROVAL', failedPlan);
       return;
     }
     auditRef.current.record({
@@ -1763,13 +1840,23 @@ export function AgentPanel({
       userId: 'local-owner',
       metadata: { summary: dryRun.aggregateDiff.summary, decision: approval.decision },
     });
-    appendMessage(
-      threadId,
-      'assistant',
-      approval.decision === 'blocked'
-        ? `The plan is ready, but execution policy blocked it: ${approval.reason}`
-        : `The “${intent.label}” plan is ready. Preview: ${dryRun.aggregateDiff.summary}. Review the proposed change below.`,
-    );
+    if (approval.decision === 'blocked') {
+      // The policy reason is engine text, so the chat says only that it was blocked.
+      reportJoyCodeFailure('PLAN_POLICY_BLOCKED');
+      appendMessage(
+        threadId,
+        'assistant',
+        'The plan is ready, but execution policy blocked it. Review the plan below.',
+      );
+    } else {
+      appendMessage(
+        threadId,
+        'assistant',
+        `The “${intent.label}” plan is ready. Preview: ${dryRun.aggregateDiff.summary}. Review the proposed change below.`,
+      );
+    }
+    // The engine's reason is free text: the card shows only its table entry, and the console gets a plain code.
+    if (approval.decision !== 'auto-approved') reportJoyCodeFailure(approval.reason);
     setPending({
       runId,
       threadId,
@@ -1849,6 +1936,7 @@ export function AgentPanel({
       return;
     }
     if (intent === undefined && joyAgentEngineClient !== undefined) {
+      const failedPrompt: JoyCodeRetryRequest = { kind: 'prompt', prompt: body };
       const connectionStatus = joyAgentEngineClient.getStatus();
       if (connectionStatus === undefined) {
         // No model is connected. The calm card above the composer already says
@@ -2317,13 +2405,15 @@ export function AgentPanel({
               );
             }
             if (event.phase === 'failed') {
-              const failureMessage = event.message?.trim() || 'JOY could not complete this run.';
-              const failureWithNoEditNotice = /\bno edits?\s+(?:were\s+)?applied\b/i.test(
-                failureMessage,
-              )
-                ? failureMessage
-                : failureMessage.replace(/[.!?\s]+$/, '') + '. No edits were applied.';
-              appendMessage(threadId, 'assistant', failureWithNoEditNotice);
+              // The run error code picks the entry; an unknown or missing code gets the generic one.
+              // The engine's own text is never shown: it can carry paths or provider payloads.
+              const failureCode = runErrorCodeForAgentError(event.errorCode);
+              appendFailure(
+                threadId,
+                joyCodeKeyForRunError(failureCode),
+                failureCode ?? event.errorCode,
+                failedPrompt,
+              );
             }
             if (event.phase === 'cancelled')
               appendMessage(threadId, 'assistant', 'JOY run cancelled. No edits were applied.');
@@ -2362,10 +2452,11 @@ export function AgentPanel({
               { panelId: 'agent', sectionId: 'composer' },
             ],
           });
-          appendMessage(
+          appendFailure(
             threadId,
-            'assistant',
-            noEditsAppliedFailureMessage(error, 'JOY run failed safely.'),
+            joyCodeKeyForThrown(error),
+            joyCodeCodeOfThrown(error),
+            failedPrompt,
           );
           setAgentPhase('failed');
         } finally {
@@ -2382,11 +2473,7 @@ export function AgentPanel({
       return;
     }
     if (intent === undefined) {
-      appendMessage(
-        threadId,
-        'assistant',
-        'Connect a model in Agent Settings to run natural-language JOY edits. No unfenced fallback recipe route is available.',
-      );
+      appendFailure(threadId, 'no-model');
       return;
     }
     if (!legacyRecipeExecutionEnabled()) {
@@ -2394,11 +2481,7 @@ export function AgentPanel({
       // timeline-only idempotency route. It remains deliberately unavailable
       // until it is migrated to the same prepared-change + receipt authority
       // as the production Worker path above.
-      appendMessage(
-        threadId,
-        'assistant',
-        'This local recipe is temporarily unavailable while JOY finishes its durable approval and receipt boundary. Connect a model to use the guarded JOY edit path.',
-      );
+      appendFailure(threadId, 'recipe-temporarily-unavailable');
       return;
     }
     setThinkingThreadId(threadId);
@@ -2437,6 +2520,7 @@ export function AgentPanel({
       return;
     const entry = creativeSkills.find((candidate) => candidate.skill.id === skillId);
     if (entry === undefined || !entry.available) return;
+    const failedRecipe: JoyCodeRetryRequest = { kind: 'recipe', skillId };
     // Recipe progress, observation consent, and approval controls are rendered
     // in the Edit stream. Move there before starting so a recipe can never wait
     // for input behind the Recipes catalog.
@@ -2476,24 +2560,18 @@ export function AgentPanel({
       });
       if (recipeRunScopeRef.current?.runId !== scope.runId) return;
       if (result.kind === 'unavailable') {
-        appendMessage(
-          threadId,
-          'assistant',
-          `“${result.skill.title}” is unavailable: missing ${[
-            ...result.missingCapabilities,
-            ...result.missingOperations,
-          ].join(', ')}.`,
-        );
+        appendFailure(threadId, 'recipe-unavailable');
         cancelRunLifecycle(scope.runId, 'Recipe unavailable.');
         setAgentPhase('cancelled');
         if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
         return;
       }
       if (result.kind === 'blocked') {
-        appendMessage(
+        appendFailure(
           threadId,
-          'assistant',
-          `“${result.skill.title}” was blocked (${result.reason}). No edit was applied.`,
+          joyCodeKeyForRecipeStop(result.reason, result.failureCode),
+          result.failureCode ?? result.reason,
+          failedRecipe,
         );
         cancelRunLifecycle(scope.runId, 'Recipe blocked.');
         setAgentPhase('failed');
@@ -2510,11 +2588,7 @@ export function AgentPanel({
       if (result.kind === 'ready-for-approval') {
         const prepared = staged === undefined ? undefined : preparedChanges.getView(staged);
         if (prepared === undefined) {
-          appendMessage(
-            threadId,
-            'assistant',
-            'The recipe prepared a change but its preview authority was lost. Try again.',
-          );
+          appendFailure(threadId, 'stale-authority', 'stale-authority', failedRecipe);
           cancelRunLifecycle(scope.runId, 'Recipe preview authority lost.');
           setAgentPhase('failed');
           if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
@@ -2544,11 +2618,7 @@ export function AgentPanel({
       if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
     } catch (error) {
       if (recipeRunScopeRef.current?.runId !== scope.runId) return;
-      appendMessage(
-        threadId,
-        'assistant',
-        noEditsAppliedFailureMessage(error, 'The recipe run failed safely.'),
-      );
+      appendFailure(threadId, joyCodeKeyForThrown(error), joyCodeCodeOfThrown(error), failedRecipe);
       cancelRunLifecycle(scope.runId, 'Recipe run failed.');
       setAgentPhase('failed');
       if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
@@ -2611,6 +2681,7 @@ export function AgentPanel({
     });
     if (resolution.kind !== 'run') return;
     const { definition, compileInput: lookCompileInput, verb } = resolution;
+    const failedLook: JoyCodeRetryRequest = { kind: 'look', request };
 
     const threadId = activeThread.id;
     const scope: CreativeSkillRunScope = {
@@ -2665,12 +2736,13 @@ export function AgentPanel({
       if (recipeRunScopeRef.current?.runId !== scope.runId) return;
 
       if (result.kind === 'blocked') {
-        appendMessage(
+        // The diagnostic lines stay out of the chat; their codes go to the log.
+        for (const code of codesFromDiagnostics(result.diagnostics)) reportJoyCodeFailure(code);
+        appendFailure(
           threadId,
-          'assistant',
-          `“${definition.title}” could not be prepared (${result.reason}). No edit was applied.${
-            result.diagnostics.length > 0 ? `\n${result.diagnostics.join('\n')}` : ''
-          }`,
+          joyCodeKeyForLookBlockReason(result.reason),
+          result.reason,
+          failedLook,
         );
         cancelRecipeInvocation(scope.runId, 'Look blocked.');
         setAgentPhase('failed');
@@ -2680,11 +2752,7 @@ export function AgentPanel({
 
       const prepared = preparedChanges.getView(result.changeSetId);
       if (prepared === undefined) {
-        appendMessage(
-          threadId,
-          'assistant',
-          'The Look prepared a change but its preview authority was lost. Try again.',
-        );
+        appendFailure(threadId, 'stale-authority', 'stale-authority', failedLook);
         cancelRecipeInvocation(scope.runId, 'Look preview authority lost.');
         setAgentPhase('failed');
         if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
@@ -2707,11 +2775,7 @@ export function AgentPanel({
       );
     } catch (error) {
       if (recipeRunScopeRef.current?.runId !== scope.runId) return;
-      appendMessage(
-        threadId,
-        'assistant',
-        noEditsAppliedFailureMessage(error, 'The Look run failed safely.'),
-      );
+      appendFailure(threadId, joyCodeKeyForThrown(error), joyCodeCodeOfThrown(error), failedLook);
       cancelRecipeInvocation(scope.runId, 'Look run failed.');
       setAgentPhase('failed');
       if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
@@ -2754,6 +2818,7 @@ export function AgentPanel({
       controlValues = { ...stored.controlValues, ...(request.nextControlValues ?? {}) };
     }
     if (definition === undefined) return;
+    const failedBake: JoyCodeRetryRequest = { kind: 'bake', request };
 
     appendMessage(activeThread.id, 'assistant', 'Decoding the composition audio…');
     const loaded = await loadCompositionAudioForLook({
@@ -2766,11 +2831,10 @@ export function AgentPanel({
       return;
     }
     if (loaded.kind === 'error') {
-      appendMessage(
-        activeThread.id,
-        'assistant',
-        `The composition audio could not be prepared (${loaded.message}). No bake was applied.`,
-      );
+      // The loader's text can name a path or a provider detail, so the card
+      // carries only the table entry and the log only the fixed code. Try again
+      // re-runs this bake request.
+      appendFailure(activeThread.id, 'audio-not-prepared', 'AUDIO_PREPARE_FAILED', failedBake);
       return;
     }
 
@@ -2781,11 +2845,9 @@ export function AgentPanel({
       clip: loaded.clip,
     });
     if (baked.audioBakes.length === 0) {
-      appendMessage(
-        activeThread.id,
-        'assistant',
-        `Nothing to bake: ${baked.diagnostics[0] ?? 'this Look has no audio-driveable keyframe binding.'}`,
-      );
+      // The bake's diagnostic text stays out of the chat; its codes go to the log.
+      for (const code of codesFromDiagnostics(baked.diagnostics)) reportJoyCodeFailure(code);
+      appendFailure(activeThread.id, 'look-no-operations', 'NO_AUDIO_BINDING', failedBake);
       return;
     }
     appendMessage(
@@ -2818,6 +2880,7 @@ export function AgentPanel({
       return;
     const trimmed = prompt.trim().slice(0, 2_000);
     if (trimmed.length === 0) return;
+    const failedAgentLook: JoyCodeRetryRequest = { kind: 'agent-look', prompt: trimmed };
 
     const threadId = activeThread.id;
     const resolvedFonts = Object.fromEntries(
@@ -2886,11 +2949,7 @@ export function AgentPanel({
       if (recipeRunScopeRef.current?.runId !== scope.runId) return;
 
       if (result.kind === 'failed') {
-        appendMessage(
-          threadId,
-          'assistant',
-          `The Look request could not be prepared (${result.message}). No edit was applied.`,
-        );
+        appendFailure(threadId, joyCodeKeyForRunError(result.code), result.code, failedAgentLook);
         cancelRecipeInvocation(scope.runId, 'Look request failed.');
         setAgentPhase('failed');
         if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
@@ -2906,11 +2965,7 @@ export function AgentPanel({
 
       const prepared = preparedChanges.getView(result.changeSetId);
       if (prepared === undefined) {
-        appendMessage(
-          threadId,
-          'assistant',
-          'The Look prepared a change but its preview authority was lost. Try again.',
-        );
+        appendFailure(threadId, 'stale-authority', 'stale-authority', failedAgentLook);
         cancelRecipeInvocation(scope.runId, 'Look preview authority lost.');
         setAgentPhase('failed');
         if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
@@ -2940,10 +2995,11 @@ export function AgentPanel({
       );
     } catch (error) {
       if (recipeRunScopeRef.current?.runId !== scope.runId) return;
-      appendMessage(
+      appendFailure(
         threadId,
-        'assistant',
-        noEditsAppliedFailureMessage(error, 'The Look run failed safely.'),
+        joyCodeKeyForThrown(error),
+        joyCodeCodeOfThrown(error),
+        failedAgentLook,
       );
       cancelRecipeInvocation(scope.runId, 'Look run failed.');
       setAgentPhase('failed');
@@ -3012,11 +3068,7 @@ export function AgentPanel({
       if (lifecycleRun !== undefined)
         acceptRunLifecycle(lifecycleRun, 'failed', { display: 'JOY apply failed safely.' });
       setAgentPhase('failed');
-      appendMessage(
-        activeThread.id,
-        'assistant',
-        error instanceof Error ? `JOY apply failed: ${error.message}` : 'JOY apply failed safely.',
-      );
+      appendFailure(activeThread.id, joyCodeKeyForThrown(error), joyCodeCodeOfThrown(error));
       return;
     }
     const applied = outcome.result;
@@ -3147,6 +3199,9 @@ export function AgentPanel({
         userId: 'local-owner',
         error: error.message,
       });
+      // The thrown text is never shown: its run code (or the generic entry) picks the card.
+      // A failed execution is not retried: the plan already ran, so Dismiss only.
+      const failureKey = joyCodeKeyForThrown(error);
       const failedResult: ExecutionResult = {
         planId: agentPlan.planId,
         success: false,
@@ -3164,11 +3219,11 @@ export function AgentPanel({
           summary: 'not applied',
         },
         durationMs: 0,
-        errors: [error.message],
+        errors: [failureKey],
         warnings: [],
         rollbackAvailable: false,
       };
-      appendMessage(threadId, 'assistant', `The edit was not applied: ${error.message}`);
+      appendFailure(threadId, failureKey, joyCodeCodeOfThrown(error));
       updateThreadStatus(threadId, 'failed');
       setPending(undefined);
       setLastRun({
@@ -3177,6 +3232,7 @@ export function AgentPanel({
         plan: agentPlan,
         executionResult: failedResult,
         reverted: false,
+        failureKey,
       });
       return;
     }
@@ -3188,16 +3244,29 @@ export function AgentPanel({
       ...(executionResult.errors[0] !== undefined && { error: executionResult.errors[0] }),
       metadata: { transactionLabel: executionResult.transactionLabel },
     });
-    appendMessage(
-      threadId,
-      'assistant',
-      executionResult.success
-        ? `“${intent.label}” was applied to the timeline as one atomic transaction.`
-        : `The edit failed: ${executionResult.errors.join(', ')}`,
-    );
+    // Each engine error maps to a table key; the chat and the last-run card show that entry only.
+    const failureKey = executionResult.success
+      ? undefined
+      : joyCodeKeyForExecutionErrors(executionResult.errors);
+    if (failureKey === undefined) {
+      appendMessage(
+        threadId,
+        'assistant',
+        `“${intent.label}” was applied to the timeline as one atomic transaction.`,
+      );
+    } else {
+      appendFailure(threadId, failureKey);
+    }
     updateThreadStatus(threadId, executionResult.success ? 'completed' : 'failed');
     setPending(undefined);
-    setLastRun({ threadId, intent, plan: agentPlan, executionResult, reverted: false });
+    setLastRun({
+      threadId,
+      intent,
+      plan: agentPlan,
+      executionResult,
+      reverted: false,
+      ...(failureKey === undefined ? {} : { failureKey }),
+    });
     clearAgentPreviewForSourceRun(pending.runId);
     agentPresenceStore?.dispatch({
       protocolVersion: 1,
@@ -3278,7 +3347,9 @@ export function AgentPanel({
         });
       }
     } catch (error) {
-      setAttachError(error instanceof Error ? error.message : String(error));
+      // The thrown text is never shown: the console gets a plain code, the chat the table sentence.
+      reportJoyCodeFailure(joyCodeCodeOfThrown(error));
+      setAttachError(joyCodeMessageByKey(joyCodeKeyForThrown(error)).sentence);
     } finally {
       setAttaching(false);
       if (attachInputRef.current !== null) attachInputRef.current.value = '';
@@ -3316,7 +3387,8 @@ export function AgentPanel({
           }
         }}
       >
-        {liveAgentPhase !== undefined && (
+        {/* A failed run is shown by its failure card in the chat, not by this strip. */}
+        {liveAgentPhase !== undefined && liveAgentPhase !== 'failed' && (
           <div
             className={`joy-agent-live-status is-${liveAgentPhase}`}
             role="status"
@@ -3584,31 +3656,39 @@ export function AgentPanel({
               </div>
             )}
 
-            {activeThread?.messages.map((message) => (
-              <article
-                key={message.id}
-                className={`joy-code-message is-${message.role}`}
-                aria-label={message.role === 'user' ? 'You' : 'Joy Code'}
-              >
-                {message.role === 'assistant' && (
-                  <span className="joy-code-avatar" aria-hidden="true">
-                    <JoyCodeLogo variant="mark" />
-                  </span>
-                )}
-                <div>
-                  <strong>{message.role === 'user' ? 'You' : 'Joy Code'}</strong>
-                  <p
-                    lang={
-                      message.role === 'assistant' && /[\u0600-\u06ff]/u.test(message.body)
-                        ? 'fa'
-                        : undefined
-                    }
-                  >
-                    {message.body}
-                  </p>
-                </div>
-              </article>
-            ))}
+            {activeThread?.messages.map((message) =>
+              message.failureKey !== undefined ? (
+                <JoyCodeFailureCard
+                  key={message.id}
+                  {...failureCardProps(message.id, message.failureKey)}
+                  {...(onOpenSettings === undefined ? {} : { onOpenSettings })}
+                />
+              ) : (
+                <article
+                  key={message.id}
+                  className={`joy-code-message is-${message.role}`}
+                  aria-label={message.role === 'user' ? 'You' : 'Joy Code'}
+                >
+                  {message.role === 'assistant' && (
+                    <span className="joy-code-avatar" aria-hidden="true">
+                      <JoyCodeLogo variant="mark" />
+                    </span>
+                  )}
+                  <div>
+                    <strong>{message.role === 'user' ? 'You' : 'Joy Code'}</strong>
+                    <p
+                      lang={
+                        message.role === 'assistant' && /[\u0600-\u06ff]/u.test(message.body)
+                          ? 'fa'
+                          : undefined
+                      }
+                    >
+                      {message.body}
+                    </p>
+                  </div>
+                </article>
+              ),
+            )}
 
             {isThinking && (
               <article
@@ -3647,9 +3727,15 @@ export function AgentPanel({
                   height={120}
                 />
                 {pending.dryRun.errors.length > 0 && (
-                  <p className="agent-error">Dry-run errors: {pending.dryRun.errors.join(', ')}</p>
+                  <p className="agent-error">
+                    {joyCodeMessageByKey('JOY_AGENT_INVALID_PROPOSAL').sentence}
+                  </p>
                 )}
-                <span className="joy-code-plan-reason">{pending.approval.reason}</span>
+                {pending.approval.decision === 'blocked' && (
+                  <span className="joy-code-plan-reason">
+                    {joyCodeMessageByKey(joyCodeKeyForRunError(pending.approval.reason)).sentence}
+                  </span>
+                )}
                 <div className="joy-code-plan-actions">
                   {pending.approval.decision === 'blocked' && (
                     <button type="button" onClick={reject}>
@@ -3765,7 +3851,7 @@ export function AgentPanel({
                   )}
                 </div>
                 {!lastRun.executionResult.success && (
-                  <p className="agent-error">{lastRun.executionResult.errors.join(', ')}</p>
+                  <p className="agent-error">{joyCodeMessageByKey(lastRun.failureKey).sentence}</p>
                 )}
                 {lastRun.reverted && <p>Reverted.</p>}
                 {lastRun.savedWorkflowId !== undefined && (

@@ -3,11 +3,13 @@ import type { JoyAgentHostToolName } from './host-tool-contract.js';
 import type { CreativeSkillRunScope } from './skill-runner.js';
 import type { CreativeSkillHostPrimitives } from './creative-skill-host-adapter.js';
 import type { DirectorVerificationReport } from './director-verifier.js';
+import type { JoyAgentRunErrorCode } from './run-events.js';
 
 /**
  * The terminal state of one scoped recipe tool-loop. `prepared` carries the
  * opaque proposal identity; `answer` is the advisory/no-edit outcome; `failed`
- * is a redacted host/provider failure.
+ * is a redacted host/provider failure. `code` is the run error code, when the
+ * engine sent one; the message is for the log only and never shown in the chat.
  */
 export type CreativeSkillScopedToolLoopResult =
   | {
@@ -18,7 +20,11 @@ export type CreativeSkillScopedToolLoopResult =
       readonly repairAttempts: number;
     }
   | { readonly kind: 'answer'; readonly text: string }
-  | { readonly kind: 'failed'; readonly message: string };
+  | {
+      readonly kind: 'failed';
+      readonly message: string;
+      readonly code?: JoyAgentRunErrorCode;
+    };
 
 export interface CreativeSkillScopedToolLoopInput {
   readonly skillId: CreativeSkillManifest['id'];
@@ -133,9 +139,13 @@ function buildCreativeSkillPrompt(
 }
 
 class CreativeSkillToolLoopFailure extends Error {
-  constructor(message: string) {
+  /** The run error code the runner keeps for the message table. */
+  readonly code: JoyAgentRunErrorCode | undefined;
+
+  constructor(message: string, code?: JoyAgentRunErrorCode) {
     super(`JOY_CREATIVE_SKILL_TOOL_LOOP:${message}`);
     this.name = 'CreativeSkillToolLoopFailure';
+    this.code = code;
   }
 }
 
@@ -180,7 +190,8 @@ export function createCreativeSkillEditorPrimitives(
     async observeSources(input) {
       const skill = manifestFor(input.skillId);
       const result = await ensureToolLoop(skill, input.signal);
-      if (result.kind === 'failed') throw new CreativeSkillToolLoopFailure(result.message);
+      if (result.kind === 'failed')
+        throw new CreativeSkillToolLoopFailure(result.message, result.code);
       const coverage = await deps.readObservationCoverage({
         scope: input.scope,
         signal: input.signal,
@@ -198,7 +209,8 @@ export function createCreativeSkillEditorPrimitives(
     async prepareChange(input) {
       const skill = manifestFor(input.skillId);
       const result = await ensureToolLoop(skill, input.signal);
-      if (result.kind === 'failed') throw new CreativeSkillToolLoopFailure(result.message);
+      if (result.kind === 'failed')
+        throw new CreativeSkillToolLoopFailure(result.message, result.code);
       if (result.kind === 'answer') return { kind: 'unavailable', reason: 'no-actionable-edit' };
       return {
         kind: 'prepared',
