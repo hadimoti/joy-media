@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { installDesktopBridge } from './support/desktop-bridge.js';
 import { openFirstProject, openJoyCodeSettings } from './support/editor.js';
 
-// The v1.1.0 desktop build is local-only (PLAN-v4 §4a, §11 P1): the agent settings offer OpenRouter
+// The v1.1.1 desktop build is local-only (PLAN-v4 §4a, §11 P1): the agent settings offer OpenRouter
 // and custom endpoints, and have no sign-in, plan, update, Kilo, joy-hosted or Dual-Brain controls.
 const REMOVED_LABELS = [
   'Kilo',

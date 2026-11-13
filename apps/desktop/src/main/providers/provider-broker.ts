@@ -434,7 +434,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     if (deps.store.isDisabledLegacy(profileId)) {
       throw new BrokerError(
         'PROFILE_DISABLED',
-        'This profile is a v1.0.x provider that v1.1.0 no longer offers',
+        'This profile is a v1.0.x provider that v1.1.1 no longer offers',
       );
     }
     const verdict = evaluateEndpoint(profile.provider, profile.baseUrl, {
