@@ -123,7 +123,9 @@ async function createPackagedVideoProject(
   const assetCard = page.locator('.asset-card', { hasText: mediaName }).first();
   await expect(assetCard).toBeVisible();
   await assetCard.getByRole('button', { name: `Add ${mediaName} to timeline` }).click();
-  await expect(page.locator(`.timeline-clip[aria-label^="${mediaName.replace(/\.mp4$/, '')},"]`).first()).toBeVisible();
+  await expect(
+    page.locator(`.timeline-clip[aria-label^="${mediaName.replace(/\.mp4$/, '')},"]`).first(),
+  ).toBeVisible();
 }
 
 async function exportEditableProject(
@@ -265,7 +267,9 @@ test.describe('desktop.missing-media relink', () => {
       const restarted = await reopenAfterRestart(app, opened.projectTitle);
       await openAssets(restarted);
       await expect(restarted.getByRole('region', { name: 'Missing media' })).toHaveCount(0);
-      await expect(restarted.locator(`.timeline-clip[aria-label^="${mediaName.replace(/\.mp4$/, '')},"]`)).toHaveCount(1);
+      await expect(
+        restarted.locator(`.timeline-clip[aria-label^="${mediaName.replace(/\.mp4$/, '')},"]`),
+      ).toHaveCount(1);
     } finally {
       await app?.close().catch(() => undefined);
       for (const dir of Object.values(profiles)) rmSync(dir, { recursive: true, force: true });
