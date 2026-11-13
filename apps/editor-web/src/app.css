@@ -2596,7 +2596,7 @@ label {
   border: 1px solid color-mix(in srgb, var(--joy-accent) 35%, transparent);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--joy-bg-control) 70%, transparent);
-  color: var(--joy-text-primary);
+  color: var(--joy-text);
   font-size: 0.75rem;
 }
 .dropped-import-progress-name {
