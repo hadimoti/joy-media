@@ -52,6 +52,7 @@ export function JobsPanel({
   const [status, setStatus] = useState<string>();
   const [tab, setTab] = useState('workers');
   const refreshSeqRef = useRef(0);
+  const lastLoggedWorkerErrorRef = useRef<string | undefined>(undefined);
   const pollingRef = useRef<BoundedPollingLoop | undefined>(undefined);
   const projectInitialized = initializedProjectId === projectId;
 
@@ -64,6 +65,14 @@ export function JobsPanel({
       const nextJobs = await client.jobs(projectId);
       const nextWorkerProcess = await readWorkerProcess();
       if (requestId !== refreshSeqRef.current) return;
+      if (nextWorkerProcess?.lastError !== undefined) {
+        if (lastLoggedWorkerErrorRef.current !== nextWorkerProcess.lastError) {
+          console.warn('Desktop local service reported an error:', nextWorkerProcess.lastError);
+          lastLoggedWorkerErrorRef.current = nextWorkerProcess.lastError;
+        }
+      } else {
+        lastLoggedWorkerErrorRef.current = undefined;
+      }
       setWorkers(nextWorkers);
       setJobs(nextJobs);
       setWorkerProcess(nextWorkerProcess);
@@ -275,7 +284,9 @@ function WorkerProcessRow({
         <strong>Local service</strong>
         <span className={`jobs-pill jobs-pill--${view.tone}`}>{view.label}</span>
       </div>
-      {status.lastError !== undefined && <p className="jobs-error">{status.lastError}</p>}
+      {status.lastError !== undefined && (
+        <p className="jobs-error">The background helper stopped. Try again.</p>
+      )}
       {view.canRetry && (
         <button
           type="button"

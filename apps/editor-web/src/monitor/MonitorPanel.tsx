@@ -24,6 +24,7 @@ import {
 } from '../ui-preferences.js';
 import {
   chooseAutoPreviewQuality,
+  INITIAL_AUTO_PREVIEW_QUALITY_STATE,
   previewQualityResolution,
   resolvePreviewQuality,
   type FixedPreviewQuality,
@@ -249,6 +250,7 @@ function MonitorPanelContent({
     initialPreviewPreference.current.quality,
   );
   const [autoPreviewQuality, setAutoPreviewQuality] = useState<FixedPreviewQuality>('full');
+  const autoPreviewQualityStateRef = useRef(INITIAL_AUTO_PREVIEW_QUALITY_STATE);
   const activePreviewQuality = resolvePreviewQuality(
     previewQuality,
     autoPreviewQuality,
@@ -267,6 +269,9 @@ function MonitorPanelContent({
   }, [state.playing]);
   const composition = previewVisualProject.compositions[previewVisualProject.rootCompositionId];
   const previewFrameRate = composition?.frameRate ?? { num: 30, den: 1 };
+  useEffect(() => {
+    autoPreviewQualityStateRef.current = INITIAL_AUTO_PREVIEW_QUALITY_STATE;
+  }, [previewQuality, previewFrameRate.num, previewFrameRate.den, state.playing]);
   const width = composition?.width ?? 1080;
   const height = composition?.height ?? 1920;
   const frameSize = useMemo(() => ({ width, height }), [width, height]);
@@ -574,13 +579,20 @@ function MonitorPanelContent({
       performanceTrackerRef.current = sample.tracker;
       if (sample.stats !== undefined) setPerformanceStats(sample.stats);
       if (previewQuality === 'auto') {
-        const nextQuality = chooseAutoPreviewQuality(
+        const decision = chooseAutoPreviewQuality(
           activePreviewQualityRef.current,
           renderedAtMs - renderStartedAtMs,
           previewFrameRate,
+          autoPreviewQualityStateRef.current,
         );
-        if (nextQuality !== activePreviewQualityRef.current) setAutoPreviewQuality(nextQuality);
+        autoPreviewQualityStateRef.current = decision.state;
+        if (decision.quality !== activePreviewQualityRef.current)
+          setAutoPreviewQuality(decision.quality);
+      } else {
+        autoPreviewQualityStateRef.current = INITIAL_AUTO_PREVIEW_QUALITY_STATE;
       }
+    } else {
+      autoPreviewQualityStateRef.current = INITIAL_AUTO_PREVIEW_QUALITY_STATE;
     }
     refreshSelectionOutlineRef.current();
     // A staged document becomes review-ready only after the real program

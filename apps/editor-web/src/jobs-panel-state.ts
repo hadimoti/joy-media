@@ -40,10 +40,10 @@ export function projectJobStatus(
   if (projectMissing)
     return connected
       ? 'Ready to initialize · Local service connected'
-      : 'Ready to initialize · No worker connected';
+      : 'Ready to initialize · No local service connected';
   return connected
     ? `Initialized · Local service connected${gpu ? ' · GPU ready' : ''}`
-    : 'Initialized · No worker connected';
+    : 'Initialized · No local service connected';
 }
 
 export interface WorkerProcessView {

@@ -127,7 +127,9 @@ describe('Format popover opened from the monitor read-out', () => {
 
   it('shows the FPS and dropped-frame readout when enabled in View', () => {
     const host = mount(true);
-    expect(host.querySelector('.monitor-performance-readout')?.textContent).toBe('24 FPS · 2 dropped');
+    expect(host.querySelector('.monitor-performance-readout')?.textContent).toBe(
+      '24 FPS · 2 dropped',
+    );
   });
 
   it('moves focus into the popover, onto its first control, when it opens', () => {

@@ -4868,9 +4868,7 @@ function EditorWorkspace({
           )
             break;
           if (Date.now() >= workerExportDeadline)
-            throw new Error(
-              'Export verification timed out. Check the connection and retry.',
-            );
+            throw new Error('Export verification timed out. Check the connection and retry.');
           setExportProgress(0.98);
           await new Promise<void>((resolve, reject) => {
             let settled = false;

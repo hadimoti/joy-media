@@ -76,8 +76,7 @@ export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiP
       if (isEditorUiPreferencesV2(parsed)) {
         const savedQuality = parsed.monitorPreview?.quality;
         const monitorPreview = {
-          quality:
-            savedQuality === undefined || savedQuality === 'quarter' ? 'auto' : savedQuality,
+          quality: savedQuality === undefined || savedQuality === 'quarter' ? 'auto' : savedQuality,
         };
         return {
           ...parsed,

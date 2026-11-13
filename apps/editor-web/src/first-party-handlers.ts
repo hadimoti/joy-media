@@ -332,7 +332,8 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           deferred: true,
           mode: args.mode,
           profile: args.profile ?? 'social-h264-aac',
-          reason: 'Use the editor Export with an output preset; background encoding is not available yet.',
+          reason:
+            'Use the editor Export with an output preset; background encoding is not available yet.',
         }),
       },
       output: {

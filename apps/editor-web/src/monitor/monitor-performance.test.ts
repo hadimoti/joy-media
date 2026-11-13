@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createMonitorPerformanceTracker,
-  recordMonitorFrame,
-} from './monitor-performance.js';
+import { createMonitorPerformanceTracker, recordMonitorFrame } from './monitor-performance.js';
 
 describe('monitor performance sampling', () => {
   it('reports rendered frames per second and accumulated dropped frames', () => {
