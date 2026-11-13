@@ -161,8 +161,9 @@ test('cannot certify a final MP4 after its encoded media payload is zeroed', asy
       maxArtifactBytes: 2_000_000,
       maxPresentationPts: 2_000,
       maxDecodedFrames: 64,
-      maxFramePixels: 1_000_000,
-      maxDecodedPixelBytes: 4_000_000,
+      // The sample intro is 1080x1920 (T-R01): one RGBA frame is 8,294,400 bytes.
+      maxFramePixels: 2_073_600,
+      maxDecodedPixelBytes: 8_294_400,
       maxAudioSampleValues: 200_000,
     };
     const clean = await decoder.decode({
