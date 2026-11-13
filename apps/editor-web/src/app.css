@@ -63,6 +63,7 @@ textarea:focus:not(:focus-visible) {
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
+  --space-6: 32px;
   --control-sm: 28px;
   --control-md: 32px;
   --control-lg: 38px;
@@ -76,6 +77,10 @@ textarea:focus:not(:focus-visible) {
   --joy-type-xs: 0.75rem;
   --joy-type-sm: 0.8125rem;
   --joy-type-md: 0.875rem;
+  /* T-D16 type steps: 11 = 2xs, 12 = xs, 13 = sm, 14 = md, and the three below. */
+  --joy-type-lg: 0.9375rem;
+  --joy-type-xl: 1.125rem;
+  --joy-type-2xl: 1.5rem;
 
   /* Self-hosted OFL faces: Latin UI plus Persian/Arabic coverage. */
   --joy-font-ui:
@@ -84,6 +89,13 @@ textarea:focus:not(:focus-visible) {
     'Vazirmatn Variable', 'Noto Sans Arabic', 'Noto Naskh Arabic', 'Inter Variable', system-ui,
     sans-serif;
   --joy-font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* Motion (T-D16): hover 120 ms, menus 160 ms, dialogs 200 ms, one easing.
+     The playhead and anything being dragged never animate. */
+  --joy-ease: cubic-bezier(0.2, 0, 0, 1);
+  --joy-motion-hover: 120ms;
+  --joy-motion-menu: 160ms;
+  --joy-motion-dialog: 200ms;
 
   color: var(--joy-text);
   background: var(--joy-bg-app);
@@ -487,8 +499,8 @@ main {
   color: var(--joy-text-secondary);
   cursor: pointer;
   transition:
-    background-color 0.12s,
-    color 0.12s;
+    background-color var(--joy-motion-hover),
+    color var(--joy-motion-hover);
 }
 .window-control-btn:hover {
   background: rgba(255, 255, 255, 0.08);
@@ -702,7 +714,7 @@ main {
   place-items: center;
   color: var(--joy-text-secondary);
   line-height: 1;
-  transition: transform 0.14s ease;
+  transition: transform var(--joy-motion-hover) var(--joy-ease);
 }
 .workspace-switcher-trigger[aria-expanded='true'] .workspace-switcher-chevron,
 .header-format-btn[aria-expanded='true'] .header-disclosure-chevron {
@@ -1439,8 +1451,8 @@ a.icon-button {
   box-shadow: none;
   cursor: pointer;
   transition:
-    color 0.12s ease,
-    background 0.12s ease;
+    color var(--joy-motion-hover) var(--joy-ease),
+    background var(--joy-motion-hover) var(--joy-ease);
 }
 .icon-button-labeled {
   width: auto;
@@ -3740,8 +3752,8 @@ label {
   transform-origin: right center;
   pointer-events: none;
   transition:
-    opacity 0.12s ease,
-    transform 0.12s ease;
+    opacity var(--joy-motion-hover) var(--joy-ease),
+    transform var(--joy-motion-hover) var(--joy-ease);
 }
 .timeline-track-header:hover .timeline-track-controls,
 .timeline-track-header:focus-within .timeline-track-controls,
@@ -5267,8 +5279,8 @@ label {
   font-weight: 600;
   cursor: pointer;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--joy-motion-hover),
+    color var(--joy-motion-hover);
 }
 .motion-create-btn:hover {
   background: var(--joy-accent);
@@ -5300,8 +5312,8 @@ label {
   font-size: var(--joy-type-xs);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color var(--joy-motion-hover),
+    background var(--joy-motion-hover);
 }
 
 .motion-filter-chip.active,
@@ -5377,7 +5389,7 @@ label {
   border-radius: var(--radius-sm);
   background: var(--joy-bg-elevated);
   overflow: hidden;
-  transition: border-color 0.15s;
+  transition: border-color var(--joy-motion-hover);
 }
 
 .motion-card:hover {
@@ -5945,8 +5957,8 @@ label {
   cursor: pointer;
   flex-shrink: 0;
   transition:
-    color 0.12s,
-    background 0.12s;
+    color var(--joy-motion-hover),
+    background var(--joy-motion-hover);
 }
 .ms-topbar-btn:hover {
   color: var(--joy-text);
@@ -7154,7 +7166,7 @@ label {
   box-sizing: border-box;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--joy-motion-hover) var(--joy-ease);
 }
 .asset-grid--medium .asset-card-actions {
   height: 5rem;
@@ -9274,7 +9286,7 @@ label {
   background: rgba(247, 245, 134, 0.1);
   color: #f7f586;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--joy-motion-hover) var(--joy-ease);
   display: flex;
   align-items: center;
   gap: 0.3rem;
@@ -11096,7 +11108,7 @@ label {
   border-radius: var(--radius-sm);
   background: transparent;
   cursor: pointer;
-  transition: border-color 0.12s ease;
+  transition: border-color var(--joy-motion-hover) var(--joy-ease);
   min-width: 0;
 }
 .transition-card-thumb {
@@ -11146,7 +11158,7 @@ label {
   min-height: 1.1rem !important;
   color: var(--joy-text-faint);
   opacity: 0;
-  transition: opacity 0.12s;
+  transition: opacity var(--joy-motion-hover);
 }
 .transition-card:hover .card-fav-btn,
 .effect-card:hover .card-fav-btn {
@@ -11474,7 +11486,7 @@ label {
   font-size: var(--joy-type-xs);
   cursor: grab;
   user-select: none;
-  transition: border-color 0.12s;
+  transition: border-color var(--joy-motion-hover);
   overflow: hidden;
 }
 .effect-card.is-unavailable {
@@ -11768,8 +11780,8 @@ label {
   text-align: start;
   cursor: pointer;
   transition:
-    border-color 120ms ease,
-    background 120ms ease;
+    border-color var(--joy-motion-hover) var(--joy-ease),
+    background var(--joy-motion-hover) var(--joy-ease);
 }
 .filter-library-card:hover:not(:disabled),
 .filter-library-card:focus-visible {
@@ -12223,9 +12235,9 @@ label {
   background: #191b1e;
   cursor: pointer;
   transition:
-    border-color 120ms,
-    transform 120ms,
-    background 120ms;
+    border-color var(--joy-motion-hover),
+    transform var(--joy-motion-hover),
+    background var(--joy-motion-hover);
 }
 .es-stack-card:hover {
   border-color: rgb(255 255 255 / 16%);
@@ -12982,7 +12994,7 @@ label {
   border-radius: 50%;
   background: #72797d;
   content: '';
-  transition: transform 120ms;
+  transition: transform var(--joy-motion-hover);
 }
 .es-toggle.is-on {
   color: var(--es-accent);
@@ -14855,9 +14867,9 @@ label {
   cursor: pointer;
   white-space: nowrap;
   transition:
-    border-color 0.15s,
-    color 0.15s,
-    background 0.15s;
+    border-color var(--joy-motion-hover),
+    color var(--joy-motion-hover),
+    background var(--joy-motion-hover);
 }
 .transition-category-chip:hover,
 .transition-category-chip:focus-visible {
@@ -15214,7 +15226,7 @@ label {
   justify-content: center;
   color: var(--color-text-muted);
   opacity: 0.55;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--joy-motion-hover) var(--joy-ease);
 }
 
 .timeline-virtual-lane:hover .timeline-virtual-lane-header {
@@ -16881,9 +16893,9 @@ label {
   font-size: var(--joy-type-xs);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    color 0.15s,
-    background 0.15s;
+    border-color var(--joy-motion-hover),
+    color var(--joy-motion-hover),
+    background var(--joy-motion-hover);
   white-space: nowrap;
 }
 
@@ -16920,8 +16932,8 @@ label {
   background: var(--joy-bg-elevated);
   overflow: hidden;
   transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
+    border-color var(--joy-motion-hover),
+    box-shadow var(--joy-motion-hover);
   position: relative;
   cursor: default;
   min-width: 0;
@@ -16997,7 +17009,7 @@ label {
   min-height: 1.7rem;
   padding: 0;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--joy-motion-hover);
   background: var(--joy-accent);
   color: var(--joy-bg-panel);
   border: none;
@@ -17145,8 +17157,8 @@ label {
   background: var(--joy-bg-deep);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color var(--joy-motion-hover),
+    background var(--joy-motion-hover);
 }
 
 .psd-import-drop:hover,
@@ -17219,7 +17231,7 @@ label {
   border-radius: var(--radius-xs);
   cursor: pointer;
   font-size: var(--joy-type-xs);
-  transition: background 0.1s;
+  transition: background var(--joy-motion-hover);
 }
 
 .psd-layer-row:hover {
@@ -17253,7 +17265,7 @@ label {
   font-size: var(--joy-type-xs);
   font-weight: 600;
   cursor: pointer;
-  transition: filter 0.15s;
+  transition: filter var(--joy-motion-hover);
 }
 
 .psd-import-apply-btn:hover:not(:disabled) {
@@ -19006,4 +19018,32 @@ label {
 .dv-tab:hover .panel-tab-close,
 .dv-tab:focus-within .panel-tab-close {
   opacity: 1;
+}
+
+/* Motion rules (T-D16). The playhead and anything being dragged never animate, and
+   reduced motion turns every animation and transition off. */
+.timeline-playhead,
+.timeline-playhead *,
+.timeline-playhead-slider,
+.is-dragging,
+[data-dragging='true'] {
+  transition: none !important;
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+/* Numbers that change while you watch line up in columns (T-D16). */
+.inspector-prop input[type='number'],
+.inspector-prop output,
+.inspector-speed-value,
+.timeline-timecode,
+.monitor-meta {
+  font-variant-numeric: tabular-nums;
 }

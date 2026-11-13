@@ -38,6 +38,9 @@ const TYPE_TOKENS: Readonly<Record<string, number>> = {
   '--joy-type-xs': 12,
   '--joy-type-sm': 13,
   '--joy-type-md': 14,
+  '--joy-type-lg': 15,
+  '--joy-type-xl': 18,
+  '--joy-type-2xl': 24,
 };
 
 /** The size of a font-size value in pixels, or null when it is not a plain size. */
