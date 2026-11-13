@@ -36,32 +36,32 @@ export async function verifyWorkerAudioDerivative(input: {
   readonly now?: string;
 }): Promise<VerifiedWorkerAudioResult> {
   const { derivative, blob } = input;
-  if (derivative.kind !== 'audio') throw new Error('Worker result is not an audio derivative');
+  if (derivative.kind !== 'audio') throw new Error('Processing result is not an audio derivative');
   if (derivative.assetId !== input.sourceAssetId)
-    throw new Error('Worker audio result does not belong to the selected source asset');
+    throw new Error('Processed audio does not belong to the selected source asset');
   if (blob.size !== derivative.bytes)
-    throw new Error('Worker audio result byte length does not match its receipt');
+    throw new Error('Processed audio byte length does not match its receipt');
   const expectedMime = derivative.descriptor.mimeType.toLowerCase();
   if (!expectedMime.startsWith('audio/'))
-    throw new Error('Worker audio result receipt does not declare an audio MIME type');
+    throw new Error('Processed audio receipt does not declare an audio MIME type');
   if (blob.type !== '' && blob.type.toLowerCase() !== expectedMime)
-    throw new Error('Worker audio result MIME does not match its receipt');
+    throw new Error('Processed audio MIME does not match its receipt');
   if (!/^[a-f0-9]{64}$/i.test(input.sourceAssetSha256))
-    throw new Error('Worker audio result source SHA-256 is unavailable');
+    throw new Error('Source audio SHA-256 is unavailable');
   const digest = hex(
     new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())),
   );
   if (digest !== derivative.sha256.toLowerCase())
-    throw new Error('Worker audio result SHA-256 does not match its receipt');
+    throw new Error('Processed audio SHA-256 does not match its receipt');
   let decoded: DecodedWorkerAudio;
   try {
     decoded = await (input.decodeAudio ?? decodeWorkerAudioBlob)(blob);
   } catch (error) {
     const detail = error instanceof Error ? `: ${error.message}` : '';
-    throw new Error(`Worker audio result is not decodable${detail}`);
+    throw new Error(`Processed audio is not decodable${detail}`);
   }
   if (!Number.isSafeInteger(decoded.durationUs) || decoded.durationUs <= 0)
-    throw new Error('Worker audio result decoded with an invalid duration');
+    throw new Error('Processed audio decoded with an invalid duration');
   const generatedAssetId = `processed-${input.jobId}`;
   const createdAt = input.now ?? new Date().toISOString();
   return {
@@ -103,7 +103,7 @@ export async function verifyWorkerAudioDerivative(input: {
 export async function decodeWorkerAudioBlob(blob: Blob): Promise<DecodedWorkerAudio> {
   const AudioContextConstructor = globalThis.AudioContext;
   if (AudioContextConstructor === undefined)
-    throw new Error('Worker audio result cannot be decoded in this browser');
+    throw new Error('Audio processing is not supported in this browser');
 
   const context = new AudioContextConstructor();
   try {
@@ -114,7 +114,7 @@ export async function decodeWorkerAudioBlob(blob: Blob): Promise<DecodedWorkerAu
     return { durationUs };
   } catch (error) {
     const detail = error instanceof Error ? `: ${error.message}` : '';
-    throw new Error(`Worker audio result is not decodable${detail}`);
+    throw new Error(`Processed audio is not decodable${detail}`);
   } finally {
     await context.close().catch(() => undefined);
   }
