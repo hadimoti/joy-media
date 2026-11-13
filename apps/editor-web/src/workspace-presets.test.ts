@@ -255,6 +255,72 @@ describe('first-run layout', () => {
 });
 
 describe('workspace preset layout persistence', () => {
+  it('loads a pre-panel-menu saved-layout fixture unchanged and restores the saved group state', () => {
+    const key = workspacePresetLayoutKey('vertical', 'edit');
+    const preMenuFixture = JSON.stringify(verticalDockLayout());
+    const storage = memoryStorage({ [key]: preMenuFixture });
+
+    const loadedBeforeMenu = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(loadedBeforeMenu.restored).toBe(true);
+    expect(storage.getItem(key)).toBe(preMenuFixture);
+
+    const movedGroupLayout = {
+      ...(loadedBeforeMenu.layout as Record<string, unknown>),
+      activeGroup: 'context',
+    };
+    persistWorkspacePresetLayout(storage, 'edit', 'vertical', movedGroupLayout);
+
+    const afterRestart = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(afterRestart.restored).toBe(true);
+    expect(afterRestart.layout).toMatchObject({
+      activeGroup: 'context',
+      joyLayoutVersion: 2,
+    });
+    expect(leafIds(afterRestart.layout)).toEqual(leafIds(loadedBeforeMenu.layout));
+  });
+
+  it('keeps a deliberately closed panel absent when its saved layout is restored', async () => {
+    const layout = structuredClone(verticalDockLayout()) as {
+      panels: Record<string, unknown>;
+      grid: { root: Record<string, unknown> };
+    };
+    delete layout.panels.jobs;
+    const removeClosedPanel = (node: unknown): void => {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        node.forEach(removeClosedPanel);
+        return;
+      }
+      const record = node as Record<string, unknown>;
+      if (record.data !== null && typeof record.data === 'object') {
+        const data = record.data as Record<string, unknown>;
+        const views = data.views;
+        if (Array.isArray(views)) {
+          const remainingViews = views.filter((id) => id !== 'jobs');
+          data.views = remainingViews;
+          if (data.activeView === 'jobs') data.activeView = remainingViews[0];
+        }
+      }
+      Object.values(record).forEach(removeClosedPanel);
+    };
+    removeClosedPanel(layout.grid.root);
+
+    const storage = memoryStorage();
+    const key = persistWorkspacePresetLayout(storage, 'edit', 'vertical', layout);
+    const afterRestart = planWorkspaceLayout(storage, 'edit', 'vertical');
+    const appSource = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
+
+    expect(afterRestart.restored).toBe(true);
+    expect(key).toBe(workspacePresetLayoutKey('vertical', 'edit'));
+    expect(leafViews(afterRestart.layout, 'context')).not.toContain('jobs');
+    expect(
+      Object.keys((afterRestart.layout as { panels: Record<string, unknown> }).panels),
+    ).not.toContain('jobs');
+    expect(appSource).toMatch(/if\s*\(!restoredSavedLayout\)\s*ensureDockPanels\(api\)/);
+  });
+
   it('keeps each preset and view mode in its own storage slot', () => {
     const storage = memoryStorage();
     const editVertical = '{"layoutMarker":"saved edit vertical"}';
@@ -369,5 +435,18 @@ describe('workspace preset layout persistence', () => {
     expect(appSource.slice(layoutListenerStart, layoutListenerEnd)).toMatch(
       /persistWorkspacePresetLayout\(\s*storage,\s*workspacePresetRef\.current,\s*viewModeRef\.current,\s*event\.api\.toJSON\(\),?\s*\)/,
     );
+  });
+
+  it('resets only the active mode and preset from a panel header menu', async () => {
+    const appSource = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
+    const start = appSource.indexOf('const resetDockLayout = useCallback');
+    const end = appSource.indexOf('const switchEditorView = useCallback', start);
+    const block = appSource.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(block).toContain('storage.removeItem(workspacePresetLayoutKey(mode, preset))');
+    expect(block).toContain('applyDockLayout(api, mode, preset)');
+    expect(block).not.toContain('resetWorkspaceTarget()');
   });
 });

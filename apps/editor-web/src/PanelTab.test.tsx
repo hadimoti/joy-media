@@ -76,8 +76,8 @@ describe('the name on a dock tab (T-D09 review)', () => {
     (globalThis as { ResizeObserver?: unknown }).ResizeObserver = StubResizeObserver;
   });
 
-  afterEach(() => {
-    root?.unmount();
+  afterEach(async () => {
+    if (root !== undefined) await act(async () => root?.unmount());
     container?.remove();
     strip?.remove();
     root = undefined;
@@ -86,13 +86,20 @@ describe('the name on a dock tab (T-D09 review)', () => {
     delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
   });
 
-  /** Render one tab inside a tab strip of the given width. */
-  async function renderTab(stripWidthPx: number): Promise<HTMLDivElement> {
+  /** Render one tab in a header whose tab-list width may differ from its actions. */
+  async function renderTab(
+    stripWidthPx: number,
+    tabListWidthPx = stripWidthPx,
+  ): Promise<HTMLDivElement> {
     strip = document.createElement('div');
     strip.className = 'dv-tabs-and-actions-container';
     Object.defineProperty(strip, 'clientWidth', { value: stripWidthPx, configurable: true });
+    const tabList = document.createElement('div');
+    tabList.className = 'dv-tabs-container';
+    Object.defineProperty(tabList, 'clientWidth', { value: tabListWidthPx, configurable: true });
     container = document.createElement('div');
-    strip.append(container);
+    tabList.append(container);
+    strip.append(tabList);
     document.body.append(strip);
 
     root = createRoot(container);
@@ -128,6 +135,16 @@ describe('the name on a dock tab (T-D09 review)', () => {
     expect(tab?.getAttribute('title')).toBe('Create');
     expect(tab?.getAttribute('aria-label')).toBe('Create');
     expect(host.querySelector('.panel-tab-label')?.textContent).toBe('Create');
+  });
+
+  it('does not force every tab label on when header actions leave less room for the tab list', async () => {
+    const host = await renderTab(LABELLED_TAB_STRIP_WIDTH + 80, LABELLED_TAB_STRIP_WIDTH - 1);
+    const tab = tabOf(host);
+
+    expect(tab?.hasAttribute('data-labelled'), 'the available tab list is still narrow').toBe(
+      false,
+    );
+    expect(StubResizeObserver.watched, 'the tab watches the actual tab list').toBe(1);
   });
 
   it('knows where the strip stops having room', () => {

@@ -13,6 +13,7 @@ import {
 import { DockviewReact } from 'dockview';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
 import { PanelTab } from './PanelTab.js';
+import { PanelHeaderActions } from './PanelHeaderMenu.js';
 import {
   EditorPanelContext,
   type AnimationGraphFocusRequest,
@@ -3616,12 +3617,14 @@ function EditorWorkspace({
       // A saved layout always wins; the first-run layout (Joy Code collapsed)
       // applies only when nothing is saved for this workspace yet.
       const plan = planWorkspaceLayout(storage, preset, mode);
+      let restoredSavedLayout = plan.restored;
       try {
         api.fromJSON(plan.layout as never, { reuseExistingPanels: false });
       } catch (error) {
         if (plan.restored) {
           // A saved layout the editor cannot read: drop it and use the default.
           storage.removeItem(plan.key);
+          restoredSavedLayout = false;
           try {
             api.fromJSON(firstRunWorkspaceLayout(preset, mode) as never, {
               reuseExistingPanels: false,
@@ -3633,7 +3636,9 @@ function EditorWorkspace({
           console.warn('default dock layout rejected, falling back to a stack', error);
         }
       }
-      ensureDockPanels(api);
+      // A missing panel in a saved layout can be an intentional Close panel
+      // action. Repair the first-run seed, but keep saved closures durable.
+      if (!restoredSavedLayout) ensureDockPanels(api);
       api.getPanel('monitor')?.api.setActive();
       persistWorkspacePresetLayout(storage, preset, mode, api.toJSON());
     },
@@ -3689,6 +3694,15 @@ function EditorWorkspace({
     viewModeRef.current = target.mode;
     const api = dockviewApiRef.current;
     if (api !== null) applyDockLayout(api, target.mode, target.preset);
+  }, [applyDockLayout, storage]);
+
+  const resetDockLayout = useCallback(() => {
+    const api = dockviewApiRef.current;
+    if (api === null) return;
+    const mode = viewModeRef.current;
+    const preset = workspacePresetRef.current;
+    storage.removeItem(workspacePresetLayoutKey(mode, preset));
+    applyDockLayout(api, mode, preset);
   }, [applyDockLayout, storage]);
 
   const switchEditorView = useCallback(() => {
@@ -7565,6 +7579,7 @@ function EditorWorkspace({
                 })),
               selectClips,
               clearSelection: () => setState((current) => ({ ...current, selectedIds: [] })),
+              resetDockLayout,
               dispatchTimeline,
               dispatchTimelineAndProjectAudio,
               updateVisualProperty,
@@ -7634,6 +7649,7 @@ function EditorWorkspace({
               className="workspace"
               components={dockviewComponents}
               defaultTabComponent={PanelTab}
+              rightHeaderActionsComponent={PanelHeaderActions}
               onReady={onReady}
             />
           </EditorPanelContext.Provider>

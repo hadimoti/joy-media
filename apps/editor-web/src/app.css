@@ -3005,6 +3005,19 @@ label {
   display: none;
   flex: none;
 }
+#root .workspace .panel-header-action-overflow-menu {
+  display: inline-flex;
+  align-items: center;
+}
+#root .workspace .panel-header-action-overflow-menu .action-overflow-trigger {
+  width: 2rem;
+  min-width: 2rem;
+  height: 2.25rem;
+  padding: 0;
+}
+#root .workspace .panel-header-action-overflow-menu .action-overflow-trigger-label {
+  display: none;
+}
 .action-overflow-trigger {
   font-size: 1.2rem;
   line-height: 1;

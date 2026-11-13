@@ -99,6 +99,8 @@ export interface EditorPanelContextValue {
   readonly toggleSelection: (id: string) => void;
   readonly selectClips: (clipIds: readonly string[]) => void;
   readonly clearSelection: () => void;
+  /** Resets the current Dockview mode/preset without discarding other workspace preferences. */
+  readonly resetDockLayout: () => void;
   readonly dispatchTimeline: (transaction: CommandTransaction) => void;
   readonly dispatchTimelineAndProjectAudio: (
     label: string,

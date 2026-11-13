@@ -5,9 +5,8 @@ import { useAgentPanelPresence } from './agent-presence.js';
 import type { PanelId } from './workspace.js';
 
 /**
- * How wide a tab strip has to be before every tab carries its name. Below
- * this the tabs stay icon-only — with their tooltip and their accessible
- * name — and only the active tab names itself.
+ * How wide Dockview's actual tab list has to be before every tab carries its
+ * name. Header action slots are outside that list and must not count as room.
  */
 export const LABELLED_TAB_STRIP_WIDTH = 480;
 
@@ -44,13 +43,13 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
   const [namesItsTab, setNamesItsTab] = useState(false);
 
   useEffect(() => {
-    const strip = tabRef.current?.closest('.dv-tabs-and-actions-container');
-    if (strip === undefined || strip === null) return;
-    const measure = (): void => setNamesItsTab(stripHasRoomForLabels(strip.clientWidth));
+    const tabList = tabRef.current?.closest('.dv-tabs-container');
+    if (tabList === undefined || tabList === null) return;
+    const measure = (): void => setNamesItsTab(stripHasRoomForLabels(tabList.clientWidth));
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
-    observer.observe(strip);
+    observer.observe(tabList);
     return () => observer.disconnect();
   }, []);
 

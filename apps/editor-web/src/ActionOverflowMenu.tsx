@@ -14,9 +14,11 @@ export interface ActionOverflowMenuItem {
 export function ActionOverflowMenu({
   label = 'More timeline actions',
   items,
+  className,
 }: {
   readonly label?: string;
   readonly items: readonly ActionOverflowMenuItem[];
+  readonly className?: string;
 }) {
   // A panel-header menu is one popup among the app's popups (OB-18): opening
   // another popup closes it, and outside click or Escape closes it.
@@ -54,7 +56,10 @@ export function ActionOverflowMenu({
   }, [open]);
 
   return (
-    <div className="action-overflow-menu" ref={popup.rootRef}>
+    <div
+      className={`action-overflow-menu${className === undefined ? '' : ` ${className}`}`}
+      ref={popup.rootRef}
+    >
       <button
         type="button"
         className="icon-button icon-button-labeled action-overflow-trigger"
