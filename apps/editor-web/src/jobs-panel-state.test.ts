@@ -9,11 +9,13 @@ import {
 const NOW = 1_000_000;
 
 describe('project Jobs panel state', () => {
-  it('labels a missing control-plane record as ready to initialize, never offline', () => {
+  it('uses local-service wording when there is no connected service', () => {
     const status = projectJobStatus(true, [], NOW);
 
-    expect(status).toContain('Ready to initialize');
+    expect(status).toBe('Ready to initialize · No local service connected');
     expect(status).not.toContain('Not connected');
+    expect(projectJobStatus(false, [], NOW)).toBe('Initialized · No local service connected');
+    expect(status).not.toContain('worker');
   });
 
   it('distinguishes connected and disconnected Workers', () => {
@@ -30,13 +32,14 @@ describe('project Jobs panel state', () => {
     expect(jobStateLabel({ state: 'failed', cancelRequested: false })).toBe('Failed');
     expect(jobStateLabel({ state: 'completed', cancelRequested: false })).toBe('Completed');
   });
-  it('mentions GPU ready only when Comfy/ML capabilities are present', () => {
+  it('uses service wording and mentions GPU ready only when Comfy/ML capabilities are present', () => {
     const noGpu = projectJobStatus(
       false,
       [worker({ lastSeenAt: NOW - 1, capabilities: ['asset.thumbnail'] })],
       NOW,
     );
-    expect(noGpu).toBe('Initialized · Worker connected');
+    expect(noGpu).toBe('Initialized · Local service connected');
+    expect(noGpu).not.toContain('Worker');
     expect(noGpu).not.toContain('GPU ready');
     const withGpu = projectJobStatus(
       false,

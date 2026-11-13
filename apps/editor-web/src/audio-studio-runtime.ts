@@ -407,7 +407,7 @@ export function audioExecutionTargetLabel(target: AudioExecutionTarget): string 
     case 'browser-dsp':
       return 'Browser DSP';
     case 'local-worker':
-      return 'Local Worker';
+      return 'Local device';
     case 'vps-orchestrated':
       return 'Remote Provider';
   }

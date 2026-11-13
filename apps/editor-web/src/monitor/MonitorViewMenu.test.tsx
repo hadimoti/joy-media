@@ -62,7 +62,7 @@ describe('Monitor View menu', () => {
     expect(container?.querySelector('[role="dialog"]')).toBeNull();
     const dialog = openMenu();
     expect(dialog).not.toBeNull();
-    expect(dialog?.querySelectorAll('[role="switch"]')).toHaveLength(7);
+    expect(dialog?.querySelectorAll('[role="switch"]')).toHaveLength(8);
     expect(dialog?.querySelector('[role="radiogroup"][aria-label="Background"]')).not.toBeNull();
     expect(
       dialog?.querySelector(
@@ -95,6 +95,17 @@ describe('Monitor View menu', () => {
     openMenu();
     expect(button('Centre marks').getAttribute('aria-checked')).toBe('true');
     expect(button('Grid').getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('offers the frame-rate and dropped-frames readout as a View switch', () => {
+    const onChange = vi.fn<(next: MonitorViewOptions) => void>();
+    mount(<MonitorViewMenu options={DEFAULT_MONITOR_VIEW_OPTIONS} onChange={onChange} />);
+    openMenu();
+    act(() => button('Frame rate and dropped frames').click());
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...DEFAULT_MONITOR_VIEW_OPTIONS,
+      showPerformanceStats: true,
+    });
   });
 
   it('chooses the background and the preview overlay as one-of-several', () => {
