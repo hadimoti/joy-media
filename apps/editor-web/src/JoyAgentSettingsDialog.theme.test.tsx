@@ -17,6 +17,13 @@ const sourceOf = (name: string): string =>
 /** The two stylesheets that style the app's dialogs. */
 const DIALOG_STYLESHEETS = ['./JoyAgentSettingsDialog.css', './AppDialogs.css'] as const;
 
+/**
+ * The shared dialog look also lives in app.css: the frame every app dialog
+ * sits in, and the standard buttons. Those rules are part of this dialog's
+ * own look, so they are checked here too.
+ */
+const APP_STYLESHEET = './app.css';
+
 /** The dialog's own source, and the two panels it renders inside it. */
 const DIALOG_SOURCES = [
   './JoyAgentSettingsDialog.tsx',
@@ -46,20 +53,245 @@ const ALLOWED_TYPOGRAPHY = new Set(['·', '…', '•', '§', '—', '–', '✕
 /** The stylesheet without its comments: a comment names no colour. */
 const withoutComments = (source: string): string => source.replace(/\/\*[\s\S]*?\*\//g, '');
 
-describe('the Joy Code Settings dialog stylesheet (T-P06)', () => {
-  it('holds no hex colour and no rgba() outside a token definition', () => {
-    for (const stylesheet of DIALOG_STYLESHEETS) {
-      const lines = withoutComments(sourceOf(stylesheet)).split('\n');
-      const offenders: string[] = [];
-      lines.forEach((line, index) => {
-        // A token definition may name the colour it stands for.
-        if (/^\s*--[\w-]+\s*:/.test(line)) return;
-        if (/#[0-9a-fA-F]{3,8}\b/.test(line) || /rgba?\s*\(/.test(line)) {
-          offenders.push(`${stylesheet}:${index + 1}: ${line.trim()}`);
-        }
-      });
-      expect(offenders, `${stylesheet} must be built on the --joy-* tokens`).toEqual([]);
+/* ────────────────────────────────────────────────────────────────────────────
+   A small CSS reader.
+
+   A stylesheet is not a list of lines: a value may run over several of them,
+   and a rule may sit inside a media query. So the reader below splits a
+   stylesheet into rules and reads each declaration's value on its own, which
+   is what a colour check needs to see.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+interface CssDeclaration {
+  readonly property: string;
+  readonly value: string;
+}
+
+interface CssRule {
+  readonly selector: string;
+  readonly declarations: readonly CssDeclaration[];
+}
+
+/** The text between an opening brace and the brace that closes it. */
+function readBlock(text: string, open: number): { inner: string; end: number } {
+  let depth = 0;
+  for (let index = open; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return { inner: text.slice(open + 1, index), end: index + 1 };
     }
+  }
+  return { inner: text.slice(open + 1), end: text.length };
+}
+
+/** The declarations of a rule body, split on the semicolons that end them. */
+function declarationsOf(body: string): CssDeclaration[] {
+  const declarations: CssDeclaration[] = [];
+  let depth = 0;
+  let current = '';
+  const flush = () => {
+    const colon = current.indexOf(':');
+    if (colon !== -1) {
+      const property = current.slice(0, colon).trim();
+      const value = current.slice(colon + 1).trim();
+      if (property !== '' && value !== '') declarations.push({ property, value });
+    }
+    current = '';
+  };
+  for (const char of body) {
+    if (char === '(') depth += 1;
+    else if (char === ')') depth = Math.max(0, depth - 1);
+    if (char === ';' && depth === 0) {
+      flush();
+      continue;
+    }
+    current += char;
+  }
+  flush();
+  return declarations;
+}
+
+/** The rules of a stylesheet, including the ones inside a media query. */
+function cssRules(source: string): CssRule[] {
+  const text = withoutComments(source);
+  const found: CssRule[] = [];
+  let prelude = '';
+  let index = 0;
+  while (index < text.length) {
+    const char = text[index];
+    if (char !== '{') {
+      prelude += char;
+      index += 1;
+      continue;
+    }
+    const block = readBlock(text, index);
+    const head = prelude.trim();
+    prelude = '';
+    index = block.end;
+    if (head.startsWith('@')) {
+      // An at-rule may hold rules of its own, a media query for instance.
+      found.push(...cssRules(block.inner));
+      continue;
+    }
+    if (head !== '') found.push({ selector: head, declarations: declarationsOf(block.inner) });
+  }
+  return found;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   The colour reader.
+
+   A stylesheet that spells a colour out is painting a colour the app has no
+   token for, so every way of spelling one out is an offender: a hex, a
+   colour function, a colour by name, or a literal inside a color-mix(). The
+   app's own tokens — var(--joy-*) — and the keywords that mean "no colour"
+   are the only colours allowed.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/** The colours CSS knows by name. */
+const NAMED_COLOURS = new Set(
+  `aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown
+   burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan
+   darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid
+   darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet
+   deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro
+   ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki
+   lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow
+   lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray
+   lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine
+   mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise
+   mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab
+   orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru
+   pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen
+   seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle
+   tomato turquoise violet wheat white whitesmoke yellow yellowgreen`
+    .split(/\s+/)
+    .filter((name) => name !== ''),
+);
+
+/** The keywords that stand for the absence of a colour, not for one. */
+const COLOUR_KEYWORDS = new Set([
+  'transparent',
+  'currentcolor',
+  'inherit',
+  'initial',
+  'unset',
+  'revert',
+  'none',
+]);
+
+/** A colour written as a hex: #fff, #ffff, #f4b72f or #f4b72fff. */
+const HEX_COLOUR = /(^|[^\w#-])#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![0-9a-fA-F])/g;
+
+/** A colour written as a function: rgb(), hsl(), oklch() and the like. */
+const COLOUR_FUNCTION = /\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\s*\(/g;
+
+/** A colour mixed from other colours: color-mix(in srgb, … , …). */
+const COLOUR_MIX = /color-mix\s*\(([^()]*)\)/g;
+
+/** The app's own token reference. */
+const JOY_TOKEN = /^var\(\s*--joy-[\w-]+\s*\)$/;
+
+/** Every colour a value spells out, in words a reviewer can read. */
+function colourOffenders(value: string): string[] {
+  const found: string[] = [];
+  for (const match of value.matchAll(HEX_COLOUR)) {
+    found.push(`hex colour "${match[0].trim()}"`);
+  }
+  for (const match of value.matchAll(COLOUR_FUNCTION)) {
+    found.push(`colour function "${match[1] ?? ''}()"`);
+  }
+  for (const word of value.toLowerCase().match(/[a-z]+/g) ?? []) {
+    if (NAMED_COLOURS.has(word) && !COLOUR_KEYWORDS.has(word)) {
+      found.push(`named colour "${word}"`);
+    }
+  }
+  for (const match of value.matchAll(COLOUR_MIX)) {
+    // The first part is the colour space; the rest are the colours mixed.
+    for (const part of (match[1] ?? '').split(',').slice(1)) {
+      const colour = part.trim().split(/\s+/)[0] ?? '';
+      if (colour === '') continue;
+      if (JOY_TOKEN.test(colour)) continue;
+      if (COLOUR_KEYWORDS.has(colour.toLowerCase())) continue;
+      found.push(`color-mix literal "${colour}"`);
+    }
+  }
+  return found;
+}
+
+/**
+ * The classes that make a rule part of the shared dialog frame, of the Joy
+ * Code Settings dialog, of the Asset Library dialog that shares the frame,
+ * or of the standard buttons. A rule that mentions none of them belongs to
+ * some other part of the app and is none of this check's business, so the
+ * check stays off unrelated rules.
+ */
+const DIALOG_CLASSES = [
+  'agent-settings',
+  'joy-agent-settings-dialog',
+  'joy-settings-',
+  'joy-accordion-',
+  'joy-btn-',
+  'asset-library-storage',
+  'button-primary',
+  'button-secondary',
+  'button-danger',
+  'button-link',
+  'button-sm',
+] as const;
+
+/** Is this rule one of the dialog's own rules? */
+function isDialogRule(rule: CssRule): boolean {
+  const classes = [...rule.selector.matchAll(/\.(-?[_A-Za-z][\w-]*)/g)].map(
+    (match) => match[1] ?? '',
+  );
+  return classes.some((className) =>
+    DIALOG_CLASSES.some((prefix) => className === prefix || className.startsWith(prefix)),
+  );
+}
+
+/** Every colour the given rules spell out, in words a reviewer can read. */
+function colourOffendersIn(rules: readonly CssRule[]): string[] {
+  const found: string[] = [];
+  for (const rule of rules) {
+    for (const declaration of rule.declarations) {
+      // A token definition may name the colour it stands for.
+      if (declaration.property.startsWith('--')) continue;
+      for (const offender of colourOffenders(declaration.value)) {
+        found.push(
+          `${rule.selector} { ${declaration.property}: ${declaration.value} } -> ${offender}`,
+        );
+      }
+    }
+  }
+  return found;
+}
+
+describe('the Joy Code Settings dialog stylesheet (T-P06)', () => {
+  it('holds no colour of its own in the two dialog stylesheets', () => {
+    for (const stylesheet of DIALOG_STYLESHEETS) {
+      const rules = cssRules(sourceOf(stylesheet));
+      expect(rules.length, `${stylesheet} must hold rules to check`).toBeGreaterThan(5);
+      expect(colourOffendersIn(rules), `${stylesheet} must be built on the --joy-* tokens`).toEqual(
+        [],
+      );
+    }
+  });
+
+  it('holds no colour of its own in the shared dialog rules of app.css', () => {
+    // The frame the dialog sits in and the standard buttons live in app.css,
+    // so the same rule applies to them: a colour of their own is an offender.
+    const rules = cssRules(sourceOf(APP_STYLESHEET)).filter(isDialogRule);
+    expect(
+      rules.length,
+      'the scope must find the dialog rules it is meant to check',
+    ).toBeGreaterThan(30);
+    expect(
+      colourOffendersIn(rules),
+      'the shared dialog rules of app.css must be built on the --joy-* tokens',
+    ).toEqual([]);
   });
 
   it('names no navy and no blue', () => {
@@ -75,6 +307,47 @@ describe('the Joy Code Settings dialog stylesheet (T-P06)', () => {
     const source = sourceOf('./JoyAgentSettingsDialog.css');
     expect(source).toContain('var(--joy-');
     expect(source).toContain('var(--joy-accent)');
+  });
+});
+
+describe('the colour reader (T-P06 review)', () => {
+  it('catches every way a stylesheet can spell a colour out', () => {
+    expect(colourOffenders('#fff')).toEqual(['hex colour "#fff"']);
+    expect(colourOffenders('#f4b72f')).toHaveLength(1);
+    expect(colourOffenders('rgb(0 0 0 / 50%)')).toHaveLength(1);
+    expect(colourOffenders('rgba(0, 0, 0, 0.5)')).toHaveLength(1);
+    expect(colourOffenders('hsl(210 90% 60%)')).toHaveLength(1);
+    expect(colourOffenders('navy')).toEqual(['named colour "navy"']);
+    expect(colourOffenders('white')).toEqual(['named colour "white"']);
+    expect(colourOffenders('color-mix(in srgb, #fff 50%, #000)').length).toBeGreaterThan(0);
+  });
+
+  it('lets the app tokens and the absence of a colour through', () => {
+    expect(colourOffenders('var(--joy-accent)')).toEqual([]);
+    expect(colourOffenders('transparent')).toEqual([]);
+    expect(colourOffenders('currentColor')).toEqual([]);
+    expect(colourOffenders('color-mix(in srgb, var(--joy-ok) 48%, var(--joy-border))')).toEqual([]);
+    expect(colourOffenders('color-mix(in srgb, var(--joy-bg-deep) 68%, transparent)')).toEqual([]);
+    expect(
+      colourOffenders('linear-gradient(145deg, var(--joy-accent), var(--joy-accent-hover))'),
+    ).toEqual([]);
+  });
+
+  it('reads a rule that runs over several lines', () => {
+    const rules = cssRules(`
+      .thing {
+        background:
+          linear-gradient(
+            145deg,
+            var(--joy-accent),
+            var(--joy-accent-hover)
+          );
+      }
+    `);
+
+    expect(rules).toHaveLength(1);
+    expect(rules[0]?.declarations).toHaveLength(1);
+    expect(colourOffendersIn(rules)).toEqual([]);
   });
 });
 
