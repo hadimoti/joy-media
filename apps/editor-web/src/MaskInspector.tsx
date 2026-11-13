@@ -94,14 +94,14 @@ export function maskRuntimeStatus(
   );
 
   if (readyWorker !== undefined) {
-    const label = target.kind === 'image' ? 'Photo Worker ready' : 'Video Worker ready';
-    return { state: 'ready', label, title: `${label} · selected source is local` };
+    const label = target.kind === 'image' ? 'Photo ready' : 'Video ready';
+    return { state: 'ready', label, title: 'The selected source is ready on this device.' };
   }
   if (capableWorkers.length > 0) {
     return {
       state: 'source-missing',
-      label: 'Worker ready · source missing',
-      title: 'The selected source is not available on a capable Local Worker',
+      label: 'Source missing',
+      title: 'The selected source is not available on this device.',
     };
   }
   if (onlineWorkers.some((worker) => worker.capabilities.includes(alternateCapability))) {
@@ -117,11 +117,11 @@ export function maskRuntimeStatus(
   }
   return {
     state: 'offline',
-    label: 'Local Worker offline',
+    label: 'Local device offline',
     title:
       pairedWorkers.length > 0
-        ? 'A paired Local Worker has not checked in recently'
-        : 'Pair a Local Worker to enable masking',
+        ? 'The paired device is not online.'
+        : 'Connect a local device to enable masking.',
   };
 }
 
@@ -159,7 +159,7 @@ export function MaskInspector({
       setWorkers(await client.workers());
       setRuntimeError(undefined);
     } catch (error) {
-      setRuntimeError(error instanceof Error ? error.message : 'Worker status unavailable');
+      setRuntimeError(error instanceof Error ? error.message : 'Local service status unavailable');
       throw error;
     }
   }, [client]);
@@ -257,7 +257,7 @@ export function MaskInspector({
   const queue = async (output: 'matte' | 'cutout') => {
     if (runtimeState !== 'ready') return;
     if (!providerReady) {
-      setRuntimeError(`${settings.provider} is not installed on the current Local Worker.`);
+      setRuntimeError(`${settings.provider} is not installed on this device.`);
       return;
     }
     if (autoNeedsSam && !autoSamReady) {

@@ -36,7 +36,6 @@ export interface EditorUiPreferencesV2 {
   readonly disclosures: Readonly<Record<string, boolean>>;
   readonly monitorPreview?: {
     readonly quality: PreviewQuality;
-    readonly renderer: 'auto' | 'gpu-worker' | 'local';
   };
   /** The Monitor's View menu (overlays, guides, background); per user, never project data. */
   readonly monitorView?: MonitorViewOptions;
@@ -65,7 +64,7 @@ export const DEFAULT_EDITOR_UI_PREFERENCES: EditorUiPreferencesV2 = {
   jobsFilter: 'all',
   panelTabs: {},
   disclosures: {},
-  monitorPreview: { quality: 'quarter', renderer: 'auto' },
+  monitorPreview: { quality: 'auto' },
   monitorView: DEFAULT_MONITOR_VIEW_OPTIONS,
 };
 
@@ -75,9 +74,10 @@ export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiP
     try {
       const parsed: unknown = JSON.parse(raw);
       if (isEditorUiPreferencesV2(parsed)) {
-        const monitorPreview = parsed.monitorPreview ?? {
-          quality: 'quarter' as const,
-          renderer: 'auto' as const,
+        const savedQuality = parsed.monitorPreview?.quality;
+        const monitorPreview = {
+          quality:
+            savedQuality === undefined || savedQuality === 'quarter' ? 'auto' : savedQuality,
         };
         return {
           ...parsed,
@@ -168,8 +168,10 @@ function isEditorUiPreferencesV2(value: unknown): value is EditorUiPreferencesV2
       (isRecord(value.monitorPreview) &&
         (value.monitorPreview.quality === 'quarter' ||
           value.monitorPreview.quality === 'half' ||
-          value.monitorPreview.quality === 'full') &&
-        (value.monitorPreview.renderer === 'auto' ||
+          value.monitorPreview.quality === 'full' ||
+          value.monitorPreview.quality === 'auto') &&
+        (value.monitorPreview.renderer === undefined ||
+          value.monitorPreview.renderer === 'auto' ||
           value.monitorPreview.renderer === 'gpu-worker' ||
           value.monitorPreview.renderer === 'local')))
   );

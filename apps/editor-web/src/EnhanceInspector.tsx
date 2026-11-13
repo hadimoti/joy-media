@@ -42,29 +42,29 @@ function runtimeStatus(
   if (capable.some((worker) => (worker.localAssetIds ?? []).includes(target.assetId))) {
     return {
       state: 'ready',
-      label: target.kind === 'image' ? 'Photo Worker ready' : 'Video Worker ready',
-      title: 'A capable Local Worker has the selected source.',
+      label: target.kind === 'image' ? 'Photo ready' : 'Video ready',
+      title: 'The selected source is ready on this device.',
     };
   }
   if (capable.length > 0)
     return {
       state: 'source-missing',
-      label: 'Worker ready · source missing',
-      title: 'The selected source is not available on a capable Local Worker.',
+      label: 'Source missing',
+      title: 'The selected source is not available on this device.',
     };
   if (online.length > 0)
     return {
       state: 'model-missing',
       label: target.kind === 'image' ? 'Add an image upscaler' : 'Add a video upscaler',
-      title: `No online Worker advertises ${capability}.`,
+      title: `No online device advertises ${capability}.`,
     };
   return {
     state: 'offline',
-    label: 'Local Worker offline',
+    label: 'Local device offline',
     title:
       paired.length > 0
-        ? 'A paired Worker has not checked in recently.'
-        : 'Pair a Local Worker to upscale locally.',
+        ? 'The paired device is not online.'
+        : 'Connect a local device to upscale locally.',
   };
 }
 
@@ -102,7 +102,7 @@ export function EnhanceInspector({
       setWorkers(await client.workers());
       setRuntimeError(undefined);
     } catch (error) {
-      setRuntimeError(error instanceof Error ? error.message : 'Worker status unavailable');
+      setRuntimeError(error instanceof Error ? error.message : 'Local service status unavailable');
       throw error;
     }
   }, [client]);

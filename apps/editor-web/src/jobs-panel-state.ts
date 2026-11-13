@@ -39,10 +39,10 @@ export function projectJobStatus(
   const gpu = hasLocalGpuWorker(workers, now);
   if (projectMissing)
     return connected
-      ? 'Ready to initialize · Worker connected'
+      ? 'Ready to initialize · Local service connected'
       : 'Ready to initialize · No worker connected';
   return connected
-    ? `Initialized · Worker connected${gpu ? ' · GPU ready' : ''}`
+    ? `Initialized · Local service connected${gpu ? ' · GPU ready' : ''}`
     : 'Initialized · No worker connected';
 }
 

@@ -71,7 +71,7 @@ const CAPABILITY_FILTERS: readonly {
   readonly label: string;
 }[] = [
   { id: 'all', label: 'All' },
-  { id: 'local-worker', label: 'Local Worker' },
+  { id: 'local-worker', label: 'Local device' },
   { id: 'browser-dsp', label: 'Browser DSP' },
   { id: 'vps-orchestrated', label: 'Remote Provider' },
 ];
@@ -541,7 +541,7 @@ export function AudioPanel({
             </span>
             <span data-state={localWorkerReady ? 'ready' : 'blocked'}>
               <AudioWorkerIcon />
-              <span>Local Worker {localWorkerReady ? 'connected' : 'disconnected'}</span>
+              <span>Local device {localWorkerReady ? 'connected' : 'disconnected'}</span>
             </span>
             <div
               className="timeline-audio-dsp-pills"
@@ -737,7 +737,7 @@ export function AudioPanel({
           <section className="audio-runtime-summary" aria-label="Runtime summary">
             <strong>Runtime readiness</strong>
             <span>Browser DSP: {clipIds.length > 0 ? 'Ready' : 'Needs clips'}</span>
-            <span>Local Worker: {localWorkerLabel}</span>
+            <span>Local device: {localWorkerLabel}</span>
             <span>Remote Provider: {remoteProviderLabel}</span>
           </section>
           <section className="audio-runtime-section" aria-label="Audio runtime controls">
@@ -749,7 +749,7 @@ export function AudioPanel({
                 <span className="icon-tool" aria-hidden="true">
                   <AudioWorkerIcon />
                 </span>
-                <strong>Local Worker</strong>
+                <strong>Local device</strong>
                 <span>{localWorkerLabel}</span>
               </div>
               <div
@@ -769,7 +769,7 @@ export function AudioPanel({
                 <strong>Device</strong>
                 <select
                   value={device}
-                  aria-label="Audio worker device"
+                  aria-label="Audio processing device"
                   onChange={(event) =>
                     setDevice(event.currentTarget.value === 'cpu' ? 'cpu' : 'gpu')
                   }
@@ -813,14 +813,14 @@ export function AudioPanel({
                   type="button"
                   className="audio-run-button"
                   data-audio-route="local-worker"
-                  aria-label={`Run ${selectedWorkflow.label} on Local Worker`}
+                  aria-label={`Run ${selectedWorkflow.label} on this device`}
                   aria-describedby={runReadinessId}
                   title={
                     localRunReady
-                      ? `Run on ${connectedWorker?.id ?? 'Local Worker'}`
+                      ? 'Run on this device'
                       : !localWorkerReady
-                        ? 'Pair a Local Worker to run'
-                        : 'Local Worker execution is not connected'
+                        ? 'Connect a local device to run'
+                        : 'Local device execution is not connected'
                   }
                   disabled={!localRunReady || runningTarget !== null}
                   onClick={() => {

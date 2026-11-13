@@ -25,7 +25,7 @@ import { panelTabIconUrl } from './panel-tab-icons.js';
 const PRESENCE_ORDER = { connected: 0, disconnected: 1 } as const;
 
 const TABS: readonly PanelTabSpec[] = [
-  { id: 'workers', label: 'Workers' },
+  { id: 'workers', label: 'Local services' },
   { id: 'queue', label: 'Queue' },
 ];
 
@@ -48,7 +48,7 @@ export function JobsPanel({
   // Track the initialized *project ID*, rather than a boolean. A panel can stay mounted while the
   // editor switches projects, and the next project must register its own binding first.
   const [initializedProjectId, setInitializedProjectId] = useState<string>();
-  const [connectionStatus, setConnectionStatus] = useState('Checking the local Worker…');
+  const [connectionStatus, setConnectionStatus] = useState('Checking local services…');
   const [status, setStatus] = useState<string>();
   const [tab, setTab] = useState('workers');
   const refreshSeqRef = useRef(0);
@@ -71,7 +71,7 @@ export function JobsPanel({
       setConnectionStatus(projectJobStatus(false, nextWorkers));
     } catch (error) {
       if (requestId !== refreshSeqRef.current) return;
-      setConnectionStatus(`Local Worker status is unavailable: ${message(error)}`);
+      setConnectionStatus(`Local service status is unavailable: ${message(error)}`);
       throw error;
     }
   }, [client, projectId, projectInitialized, projectTitle]);
@@ -108,7 +108,7 @@ export function JobsPanel({
       setWorkerProcess(await retryDesktopWorker());
       setStatus(undefined);
     } catch (error) {
-      setStatus(`Worker retry failed: ${message(error)}`);
+      setStatus(`Local service retry failed: ${message(error)}`);
     }
   }, []);
 
@@ -146,9 +146,9 @@ export function JobsPanel({
       }
     >
       {tab === 'workers' && (
-        <section className="jobs-section" aria-label="Workers">
+        <section className="jobs-section" aria-label="Local services">
           <div className="jobs-section-head">
-            <h3>Workers</h3>
+            <h3>Local services</h3>
             <span className="jobs-section-meta">
               {connectedCount} connected · {workers.length} total
             </span>
@@ -157,7 +157,7 @@ export function JobsPanel({
             <WorkerProcessRow status={workerProcess} onRetry={() => void retryWorkerProcess()} />
           )}
           {sortedWorkers.length === 0 ? (
-            <p className="jobs-empty">No local Worker found.</p>
+            <p className="jobs-empty">No local services found.</p>
           ) : (
             <ul className="jobs-workers">
               {sortedWorkers.map((worker) => {
@@ -272,7 +272,7 @@ function WorkerProcessRow({
   return (
     <div className="jobs-worker-process" data-worker-connection={status.connection}>
       <div className="jobs-row-main">
-        <strong>Local Worker</strong>
+        <strong>Local service</strong>
         <span className={`jobs-pill jobs-pill--${view.tone}`}>{view.label}</span>
       </div>
       {status.lastError !== undefined && <p className="jobs-error">{status.lastError}</p>}
@@ -280,7 +280,7 @@ function WorkerProcessRow({
         <button
           type="button"
           className="jobs-retry-button"
-          aria-label="Retry local Worker"
+          aria-label="Retry local service"
           onClick={onRetry}
         >
           Retry

@@ -24,7 +24,7 @@ const idlePopup: PopupControl = {
  * Mirrors App.tsx: the Format popover is mounted in the header (under the header menu's root),
  * while the monitor read-out in the monitor transport is the trigger that opens it.
  */
-function FormatHarness() {
+function FormatHarness({ showStats = false }: { readonly showStats?: boolean }) {
   const formatMenu = usePopup(POPUP_IDS.canvasFormat);
   const props: MonitorTransportProps = {
     zoomDrawer: idlePopup,
@@ -41,17 +41,15 @@ function FormatHarness() {
     hasTimelineContent: false,
     seek: () => undefined,
     togglePlayback: () => undefined,
-    previewQuality: 'half',
+    previewQuality: 'auto',
+    activePreviewQuality: 'full',
     setPreviewQuality: () => undefined,
-    previewRenderer: 'local',
-    setPreviewRenderer: () => undefined,
-    gpuPreviewStatus: 'local',
-    gpuSession: undefined,
+    performanceStats: { fps: 24, droppedFrames: 2 },
     formatMenu,
     width: 1920,
     height: 1080,
     canvasPresetId: 'youtube-1080',
-    viewOptions: DEFAULT_MONITOR_VIEW_OPTIONS,
+    viewOptions: { ...DEFAULT_MONITOR_VIEW_OPTIONS, showPerformanceStats: showStats },
     onViewOptionsChange: () => undefined,
   };
   return (
@@ -76,14 +74,14 @@ function FormatHarness() {
 let root: Root | undefined;
 let host: HTMLDivElement | undefined;
 
-function mount() {
+function mount(showStats = false) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   act(() => {
     root?.render(
       <PopupProvider>
-        <FormatHarness />
+        <FormatHarness showStats={showStats} />
       </PopupProvider>,
     );
   });
@@ -108,6 +106,30 @@ afterEach(() => {
 });
 
 describe('Format popover opened from the monitor read-out', () => {
+  it('shows pixel sizes for Preview quality and removes renderer and GPU status controls', () => {
+    const host = mount();
+    const quality = host.querySelector<HTMLSelectElement>('select[aria-label="Preview quality"]');
+    expect(quality).not.toBeNull();
+    expect(Array.from(quality?.options ?? []).map((option) => option.textContent)).toEqual([
+      'Auto (1920 × 1080)',
+      'Full (1920 × 1080)',
+      'Half (960 × 540)',
+      'Quarter (480 × 270)',
+    ]);
+    expect(quality?.querySelector('option[value="quarter"]')?.getAttribute('title')).toContain(
+      'looks softer',
+    );
+    expect(host.querySelector('select[aria-label="Monitor preview renderer"]')).toBeNull();
+    expect(host.textContent).not.toContain('Renderer');
+    expect(host.querySelector('.monitor-preview-status')).toBeNull();
+    expect(host.querySelector('.monitor-performance-readout')).toBeNull();
+  });
+
+  it('shows the FPS and dropped-frame readout when enabled in View', () => {
+    const host = mount(true);
+    expect(host.querySelector('.monitor-performance-readout')?.textContent).toBe('24 FPS · 2 dropped');
+  });
+
   it('moves focus into the popover, onto its first control, when it opens', () => {
     const container = mount();
     const trigger = monitorReadout(container);

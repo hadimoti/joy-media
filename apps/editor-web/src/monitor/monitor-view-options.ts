@@ -30,6 +30,7 @@ export const MONITOR_VIEW_SWITCHES = [
   'rulers',
   'canvasBorder',
   'pixelGrid',
+  'showPerformanceStats',
 ] as const;
 export type MonitorViewSwitch = (typeof MONITOR_VIEW_SWITCHES)[number];
 
@@ -50,6 +51,8 @@ export interface MonitorViewOptions {
   readonly canvasBorder: boolean;
   /** Shows only from `PIXEL_GRID_MIN_ZOOM` (800 per cent) on. */
   readonly pixelGrid: boolean;
+  /** Shows rendered frame rate and dropped frames in the Monitor bar. */
+  readonly showPerformanceStats: boolean;
   readonly background: MonitorBackground;
   readonly previewAspect: MonitorPreviewAspect;
   readonly guides: readonly MonitorUserGuide[];
@@ -63,6 +66,7 @@ export const DEFAULT_MONITOR_VIEW_OPTIONS: MonitorViewOptions = {
   rulers: false,
   canvasBorder: false,
   pixelGrid: true,
+  showPerformanceStats: false,
   background: 'checkerboard',
   previewAspect: 'none',
   guides: [],
@@ -268,6 +272,7 @@ export function sanitizeMonitorViewOptions(value: unknown): MonitorViewOptions {
     rulers: flag('rulers'),
     canvasBorder: flag('canvasBorder'),
     pixelGrid: flag('pixelGrid'),
+    showPerformanceStats: flag('showPerformanceStats'),
     background: background ?? defaults.background,
     previewAspect: previewAspect ?? defaults.previewAspect,
     guides: guides.map((guide) => ({ axis: guide.axis, position: guide.position })),

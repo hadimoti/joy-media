@@ -1800,13 +1800,6 @@ h2 {
 .monitor-canvas canvas {
   display: block;
 }
-/* Where the authored frame sits under the view: its shadow and the GPU picture. */
-.monitor-frame {
-  position: absolute;
-  z-index: 1;
-  box-shadow: 0 0.5rem 2rem #000a;
-  pointer-events: none;
-}
 /* View menu (T-M08): the popover over the Monitor bar, saved per user. */
 .monitor-view-root {
   position: relative;
@@ -2114,16 +2107,6 @@ h2 {
   opacity: 0.6;
   cursor: not-allowed;
 }
-.monitor-gpu-frame {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  pointer-events: none;
-  filter: drop-shadow(0 0.5rem 1rem #000a);
-}
 .monitor-transport {
   position: relative;
   display: grid;
@@ -2163,7 +2146,7 @@ h2 {
   font-size: var(--joy-type-xs);
 }
 .monitor-preview-control select {
-  max-width: 6.5rem;
+  max-width: 12rem;
   border: 0;
   background: transparent;
   color: var(--joy-text);
@@ -2174,7 +2157,7 @@ h2 {
   background: var(--joy-bg-panel);
   color: var(--joy-text);
 }
-.monitor-preview-status {
+.monitor-performance-readout {
   display: inline-flex;
   align-items: center;
   padding: 0 0.4rem;
@@ -2182,12 +2165,6 @@ h2 {
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   white-space: nowrap;
-}
-.monitor-preview-status.is-hardware-gpu {
-  color: #65d58a;
-}
-.monitor-preview-status.is-fallback {
-  color: #ffbe55;
 }
 .monitor-transport-btn {
   display: inline-flex;
@@ -2428,15 +2405,7 @@ h2 {
   }
 
   .monitor-preview-control:first-child select {
-    width: 4.5rem;
-  }
-
-  .monitor-preview-control:nth-child(2) select {
-    width: 5.6rem;
-  }
-
-  .monitor-preview-status {
-    padding-inline: 0.25rem;
+    width: 10rem;
   }
 
   .monitor-format-readout-shape {

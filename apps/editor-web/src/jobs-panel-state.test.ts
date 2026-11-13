@@ -30,13 +30,14 @@ describe('project Jobs panel state', () => {
     expect(jobStateLabel({ state: 'failed', cancelRequested: false })).toBe('Failed');
     expect(jobStateLabel({ state: 'completed', cancelRequested: false })).toBe('Completed');
   });
-  it('mentions GPU ready only when Comfy/ML capabilities are present', () => {
+  it('uses service wording and mentions GPU ready only when Comfy/ML capabilities are present', () => {
     const noGpu = projectJobStatus(
       false,
       [worker({ lastSeenAt: NOW - 1, capabilities: ['asset.thumbnail'] })],
       NOW,
     );
-    expect(noGpu).toBe('Initialized · Worker connected');
+    expect(noGpu).toBe('Initialized · Local service connected');
+    expect(noGpu).not.toContain('Worker');
     expect(noGpu).not.toContain('GPU ready');
     const withGpu = projectJobStatus(
       false,

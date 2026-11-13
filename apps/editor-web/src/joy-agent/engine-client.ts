@@ -764,7 +764,7 @@ export function createSingleWorkerEngineClient(
       }
     };
     worker.onerror = () => {
-      const error = new Error('JOY Agent Worker failed');
+      const error = new Error('JOY Agent service failed');
       closeObservationPort(error);
       for (const item of pending.values()) {
         clearTimeout(item.timer);

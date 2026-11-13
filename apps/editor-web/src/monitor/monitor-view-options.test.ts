@@ -47,6 +47,7 @@ describe('Monitor View options: defaults and saved values', () => {
       rulers: false,
       canvasBorder: false,
       pixelGrid: true,
+      showPerformanceStats: false,
       background: 'checkerboard',
       previewAspect: 'none',
       guides: [],

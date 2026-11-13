@@ -30,6 +30,7 @@ const SWITCH_LABELS: Readonly<Record<MonitorViewSwitch, string>> = {
   rulers: 'Rulers and guides',
   canvasBorder: 'Canvas border',
   pixelGrid: 'Pixel grid (from 800 %)',
+  showPerformanceStats: 'Frame rate and dropped frames',
 };
 
 const SAFE_SWITCHES: readonly MonitorViewSwitch[] = ['titleSafe', 'actionSafe'];
@@ -155,6 +156,10 @@ export function MonitorViewMenu({
             >
               Clear guides
             </button>
+          </div>
+          <div className="monitor-view-group" role="group" aria-label="Performance">
+            <span className="monitor-view-group-label">Performance</span>
+            {(['showPerformanceStats'] as const).map(renderSwitch)}
           </div>
           <div className="monitor-view-group" role="radiogroup" aria-label="Background">
             <span className="monitor-view-group-label">Background</span>
