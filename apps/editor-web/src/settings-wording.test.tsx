@@ -163,6 +163,52 @@ describe('the Joy Code Settings wording (T-P07)', () => {
   });
 });
 
+describe('the coverage of the wording table (T-P07)', () => {
+  it('lists every string of the wording file in the table', () => {
+    const missing: string[] = [];
+    for (const value of wordingStrings()) {
+      // A string with a placeholder is listed as its parts, because the table
+      // shows the filled example.
+      const parts = value.split(/\{[a-zA-Z]+\}/).filter((part) => part.trim().length > 0);
+      for (const part of parts) {
+        if (!table.includes(part)) missing.push(`${value} -> ${part}`);
+      }
+    }
+    expect(missing, 'every word of the dialog belongs in the table').toEqual([]);
+  });
+
+  it('gives the permissions a place of their own', () => {
+    for (const name of Object.values(SETTINGS_TOOLS.names)) {
+      expect(table, `${name} must be in the table`).toContain(name);
+    }
+    // The permissions table says where each name is shown.
+    expect(table).toContain('Tools and permissions page, the first switch');
+    expect(table).toContain('Tools and permissions page, the twelfth switch');
+  });
+
+  it('holds no copy of its own in the dialog', () => {
+    // Every visible word of the dialog comes from the wording file, so the
+    // dialog holds only class names, roles and the values of the code.
+    const source = dialogSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const lines = source.split('\n');
+    const copy: string[] = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? '';
+      if (/^\s*(import|from)\b/.test(line)) continue;
+      // A console message is for the developer, not for the screen.
+      if (/console\.(warn|error|log|info)/.test(line)) continue;
+      for (const match of line.matchAll(/'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)"/g)) {
+        const value = match[1] ?? match[2] ?? '';
+        if (!value.includes(' ') || !/[A-Za-z]/.test(value)) continue;
+        // A class name, a role or a code value has no spaces of its own.
+        if (/^[a-z0-9-]+(\s+[a-z0-9-]+)*$/.test(value)) continue;
+        copy.push(`${index + 1}: ${value}`);
+      }
+    }
+    expect(copy, 'the dialog must read its words from the wording file').toEqual([]);
+  });
+});
+
 describe('the words on the five pages (T-P07)', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
