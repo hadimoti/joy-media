@@ -558,7 +558,9 @@ console.log(
 
 // 5d. build-installer.ps1 also lists the setup exe in the release manifest, with its digest. The block runs on a
 // temp folder with a stand-in manifest; a rebuilt setup replaces its entry instead of adding a second one.
-console.log('5d. Testing that build-installer.ps1 lists joy-media-setup.exe in the release manifest...');
+console.log(
+  '5d. Testing that build-installer.ps1 lists joy-media-setup.exe in the release manifest...',
+);
 {
   const script = readFileSync(resolve('apps/desktop/installer/build-installer.ps1'), 'utf8');
   const begin = script.indexOf('(MANIFEST-BLOCK-BEGIN)');
@@ -698,7 +700,11 @@ console.log('✔ build-installer.ps1 syntax parse check passed.');
 // its work when imported, so the check reads its source.)
 console.log('8. Verifying the release plan status in package-release.mjs...');
 const releaseScript = readFileSync(resolve('apps/desktop/scripts/package-release.mjs'), 'utf8');
-assert.match(releaseScript, /status: 'unsigned-release'/, 'The release plan must say unsigned-release');
+assert.match(
+  releaseScript,
+  /status: 'unsigned-release'/,
+  'The release plan must say unsigned-release',
+);
 assert.doesNotMatch(releaseScript, /status: 'blocked'/, 'The release plan must not say blocked');
 console.log('✔ Release plan status is unsigned-release.');
 
