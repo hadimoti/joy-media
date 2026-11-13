@@ -14160,6 +14160,75 @@ label {
   gap: var(--space-2);
 }
 
+/* Inspector Visual rows (T-D08): X and Y share one row, Scale has a link toggle,
+   opacity is one percentage with a slider, and Reset appears on hover or focus. */
+.inspector-transform-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+}
+.inspector-transform-pair-linked {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+.inspector-transform-pair .property-control-input {
+  width: 100%;
+}
+.inspector-transform-pair .inspector-prop-row {
+  flex-wrap: wrap;
+}
+.inspector-transform-pair .property-control-slider {
+  flex: 1 1 6rem;
+  width: auto;
+}
+.inspector-unit {
+  color: var(--joy-text-faint);
+  font-size: var(--joy-type-xs);
+}
+.inspector-link-toggle {
+  display: grid;
+  align-self: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--joy-text-faint);
+  cursor: pointer;
+}
+.inspector-link-toggle svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+.inspector-link-toggle:hover:not(:disabled),
+.inspector-link-toggle:focus-visible {
+  border-color: var(--joy-border-strong);
+  color: var(--joy-text);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 60%, transparent);
+}
+.inspector-link-toggle[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--joy-accent) 60%, transparent);
+  color: var(--joy-accent);
+}
+.inspector-link-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* Reset stays in the tab order but is visible only on hover or while the row has focus. */
+.inspector-transform-property .property-row-reset {
+  opacity: 0;
+  pointer-events: none;
+}
+.inspector-transform-property:hover .property-row-reset,
+.inspector-transform-property:focus-within .property-row-reset,
+.inspector-transform-property .property-row-reset:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* Inspector / Mask — compact local-first segmentation controls. */
 .mask-inspector {
   display: grid;
