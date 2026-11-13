@@ -265,6 +265,7 @@ import type { DroppedImportProgressState } from './DroppedImportProgress.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
+import { clipNameWithoutExtension } from './media-label.js';
 import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
 import { DualLensPanel } from './DualLensPanel.js';
@@ -6012,7 +6013,7 @@ function EditorWorkspace({
             return [
               {
                 clipId: clip.id,
-                label: asset?.displayName ?? clip.id,
+                label: clipNameWithoutExtension(asset?.displayName ?? '') || 'Clip',
                 kind:
                   kind === 'overlay' || asset?.kind === 'image' || targetObject?.kind === 'image'
                     ? ('picture' as const)

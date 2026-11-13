@@ -86,7 +86,7 @@ import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
 import type { DataLane } from './data-lanes.js';
 import { countLaneItems } from './data-lanes.js';
 import { DataLaneDrawer } from './DataLaneDrawer.js';
-import { polishMediaLabel } from './media-label.js';
+import { clipNameWithoutExtension } from './media-label.js';
 import {
   buildTimelineMediaImportTransaction,
   type TimelineMediaAsset,
@@ -146,10 +146,6 @@ function snapSplitUs(
   if (maxUs < minUs) return undefined;
   if (snapped < minUs || snapped > maxUs) return undefined;
   return snapped;
-}
-
-function clipDisplayName(id: string): string {
-  return polishMediaLabel(id);
 }
 
 function TimelineTrackKindIcon({ kind }: { readonly kind: TimelineTrackKind }) {
@@ -295,8 +291,8 @@ function TimelineClip({
   /** Half-gap between adjacent clips; start edge stays flush with timeToPixel. */
   const gapPx = 1;
   const layoutWidthPx = Math.max(6, widthPx - gapPx);
-  const label =
-    displayName?.trim() || clipDisplayName(clip.id.replace(/^voice-/, '').replace(/^clip-/, ''));
+  // The clip's name is its file name without the extension; ids are never shown.
+  const label = clipNameWithoutExtension(displayName ?? '') || 'Clip';
   const durationLabel = `${(displayDurationUs / 1_000_000).toFixed(1)}s`;
   const startLabel = `${(clip.startUs / 1_000_000).toFixed(1)}s`;
   const endLabel = `${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`;
@@ -312,7 +308,7 @@ function TimelineClip({
       tabIndex={0}
       className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}${isDragOver ? ' is-drag-over' : ''}`}
       aria-pressed={selected}
-      aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}, clip ${clip.id}`}
+      aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}`}
       aria-roledescription="timeline clip"
       data-clip-id={clip.id}
       data-element-kind={elementKind}
@@ -461,7 +457,7 @@ function TimelineClip({
             type="button"
             className="timeline-clip-trim timeline-clip-trim-start"
             data-trim-edge="start"
-            aria-label={`Trim start of ${clip.id}`}
+            aria-label={`Trim start of ${label}`}
             aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"
             title="Trim start · Arrow keys nudge 0.1s; Shift nudges 1s"
             onPointerDown={(event) => {
@@ -489,7 +485,7 @@ function TimelineClip({
             type="button"
             className="timeline-clip-trim timeline-clip-trim-end"
             data-trim-edge="end"
-            aria-label={`Trim end of ${clip.id}`}
+            aria-label={`Trim end of ${label}`}
             aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"
             title="Trim end · Arrow keys nudge 0.1s; Shift nudges 1s"
             onPointerDown={(event) => {
@@ -1022,11 +1018,19 @@ export function TimelinePanel({
     if (Math.abs(next - root.scrollLeft) >= 1) root.scrollLeft = next;
   }, [autoFit, playing, playheadUs, timelineDurationUs, viewport.pixelsPerSecond]);
 
+  // Undo labels and menus name a track by its code (V1, A1), never by its id.
+  const trackCodeFor = (id: string): string => {
+    const shown = tracks.find((track) => track.id === id);
+    return shown === undefined ? 'track' : professionalTrackCode(shown.family, shown.familyIndex);
+  };
+
   const toggle = (id: string, flag: 'locked' | 'muted' | 'solo') => {
+    const toggledTrack = composition.tracks.find((track) => track.id === id);
+    const shownTrack = trackCodeFor(id);
     if (flag === 'locked') {
-      const current = composition.tracks.find((track) => track.id === id)?.locked === true;
+      const current = toggledTrack?.locked === true;
       onDispatch({
-        label: current ? `Unlock ${id}` : `Lock ${id}`,
+        label: current ? `Unlock ${shownTrack}` : `Lock ${shownTrack}`,
         commands: [
           {
             type: 'timeline.setTrackLocked',
@@ -1037,9 +1041,9 @@ export function TimelinePanel({
       return;
     }
     if (flag === 'muted') {
-      const current = composition.tracks.find((track) => track.id === id)?.muted === true;
+      const current = toggledTrack?.muted === true;
       onDispatch({
-        label: current ? `Unmute ${id}` : `Mute ${id}`,
+        label: current ? `Unmute ${shownTrack}` : `Mute ${shownTrack}`,
         commands: [
           {
             type: 'timeline.setTrackMuted',
@@ -1063,8 +1067,9 @@ export function TimelinePanel({
 
   const setVisibility = (id: string, visible: boolean) => {
     if (composition.tracks.find((track) => track.id === id) === undefined) return;
+    const shownCode = trackCodeFor(id);
     onDispatch({
-      label: visible ? `Show ${id}` : `Hide ${id}`,
+      label: visible ? `Show ${shownCode}` : `Hide ${shownCode}`,
       commands: [
         {
           type: 'property.setTrackEnabled',
@@ -2587,7 +2592,7 @@ export function TimelinePanel({
                     <span className="track-code" dir="ltr">
                       {professionalTrackCode(track.family, track.familyIndex)}
                     </span>
-                    <span className="track-name" dir="ltr" title={track.id}>
+                    <span className="track-name" dir="ltr" title={trackCode}>
                       {trackName}
                     </span>
                     {track.family === 'audio' && (
@@ -2597,22 +2602,22 @@ export function TimelinePanel({
                       >
                         <span
                           className={`audio-dsp-pill dsp-dfn ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
-                          title="DeepFilterNet (DFN) Active"
+                          title="Noise reduction (DeepFilterNet) active"
                         >
-                          DFN
+                          Noise reduction
                         </span>
                         <span
                           className={`audio-dsp-pill dsp-norm ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
-                          title="Volume Normalization (NORM) Active"
+                          title="Loudness normalization (EBU R128) active"
                         >
-                          NORM
+                          Loudness
                         </span>
                       </div>
                     )}
                   </div>
                   <div
                     className="timeline-track-controls"
-                    aria-label={`${track.id} track controls`}
+                    aria-label={`${trackCode} track controls`}
                   >
                     <button
                       type="button"
@@ -2634,7 +2639,7 @@ export function TimelinePanel({
                       type="button"
                       className="icon-button"
                       aria-pressed={track.locked}
-                      aria-label={`Lock ${track.id}`}
+                      aria-label={`Lock ${trackCode}`}
                       title={track.locked ? 'Unlock track' : 'Lock track'}
                       onClick={() => toggle(track.id, 'locked')}
                     >
@@ -2649,7 +2654,7 @@ export function TimelinePanel({
                       type="button"
                       className="icon-button"
                       aria-pressed={track.muted === true}
-                      aria-label={`${track.muted ? 'Unmute' : 'Mute'} ${track.id}`}
+                      aria-label={`${track.muted ? 'Unmute' : 'Mute'} ${trackCode}`}
                       title={track.muted ? 'Unmute track' : 'Mute track'}
                       onClick={() => toggle(track.id, 'muted')}
                     >
@@ -2659,7 +2664,7 @@ export function TimelinePanel({
                       type="button"
                       className="icon-button"
                       aria-pressed={track.solo}
-                      aria-label={`Solo ${track.id}`}
+                      aria-label={`Solo ${trackCode}`}
                       title={track.solo ? 'Unsolo track' : 'Solo track'}
                       onClick={() => toggle(track.id, 'solo')}
                     >
@@ -2697,9 +2702,9 @@ export function TimelinePanel({
                   data-track-id={track.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={`Insert media on ${track.id} track`}
+                  aria-label={`Insert media on ${trackCode} track`}
                   aria-keyshortcuts="Enter Space"
-                  title={`Insert media on ${track.id} track (Enter or Space)`}
+                  title={`Insert media on ${trackCode} track (Enter or Space)`}
                   style={{ minWidth: `${laneWidthPx}px` }}
                   onKeyDown={(event) => {
                     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -2938,7 +2943,8 @@ export function TimelinePanel({
                       key={clip.id}
                       clip={clip}
                       elementKind={timelineElementKindForClip(clip, elementKinds)}
-                      {...(clip.kind === 'video' && assetDisplayNames?.[clip.assetId] !== undefined
+                      {...(clip.kind !== 'composition' &&
+                      assetDisplayNames?.[clip.assetId] !== undefined
                         ? { displayName: assetDisplayNames[clip.assetId] }
                         : {})}
                       selected={selectedIds.includes(clip.id)}

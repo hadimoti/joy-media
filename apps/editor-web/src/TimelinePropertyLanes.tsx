@@ -68,6 +68,19 @@ function snapToFrame(timeUs: number, frameUs: number): number {
   return Math.max(0, Math.round(timeUs / frameUs) * frameUs);
 }
 
+const OBJECT_KIND_LABELS: Readonly<Record<string, string>> = {
+  image: 'Picture',
+  video: 'Video',
+  text: 'Text',
+};
+
+/** The name shown for a selected object: its text, or its kind. Ids are never shown. */
+function objectDisplayLabel(object: VisualObjectV1): string {
+  const text = object.kind === 'text' ? object.text?.trim() : undefined;
+  if (text !== undefined && text.length > 0) return text;
+  return OBJECT_KIND_LABELS[object.kind] ?? 'Object';
+}
+
 export function TimelinePropertyLanes({
   object,
   playheadUs,
@@ -94,6 +107,7 @@ export function TimelinePropertyLanes({
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
 }) {
   const lanes = useMemo(() => buildLegacyTransformPropertyLanes(object), [object]);
+  const objectLabel = objectDisplayLabel(object);
   const visibleLanes = showAnimatedOnly ? lanes.filter((lane) => lane.keys.length > 0) : lanes;
   const viewportStartUs = Math.max(0, (scrollLeft / pixelsPerSecond) * 1_000_000);
   const viewportEndUs = ((scrollLeft + viewportWidthPx) / pixelsPerSecond) * 1_000_000;
@@ -142,11 +156,11 @@ export function TimelinePropertyLanes({
   };
 
   return (
-    <section className="timeline-property-lanes" aria-label={`${object.id} animated properties`}>
+    <section className="timeline-property-lanes" aria-label={`${objectLabel} animated properties`}>
       <header className="timeline-property-lanes-header">
         <div className="timeline-property-lanes-title">
           <strong>Properties</strong>
-          <span title={object.id}>{object.id}</span>
+          <span title={objectLabel}>{objectLabel}</span>
         </div>
         <label className="timeline-property-lanes-filter">
           <input

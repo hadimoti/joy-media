@@ -9,6 +9,21 @@
  * - `JOY` → `JOY`
  */
 
+const MEDIA_FILE_EXTENSION =
+  /\.(mp4|m4v|mov|mkv|webm|avi|mxf|png|jpe?g|webp|gif|tiff?|heic|svg|wav|mp3|m4a|aac|flac|ogg|opus)$/i;
+
+/**
+ * Clip name for editor chrome: a media file name with its extension removed
+ * (`product-shot.mp4` → `product-shot`). Anything without a known media
+ * extension is returned trimmed and unchanged, so `Mr.Bean` and `v1.2 intro`
+ * survive.
+ */
+export function clipNameWithoutExtension(raw: string): string {
+  const trimmed = raw.trim();
+  const stripped = trimmed.replace(MEDIA_FILE_EXTENSION, '').trim();
+  return stripped.length > 0 ? stripped : trimmed;
+}
+
 export function polishMediaLabel(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return trimmed;

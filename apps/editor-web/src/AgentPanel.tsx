@@ -604,7 +604,7 @@ export function AgentPanel({
   let readinessText = '';
   if (capability === undefined) {
     readinessText =
-      'Connect a model with JOY edit tools in Agent Settings to run natural-language JOY edits. No fallback provider was selected.';
+      'Connect a model with JOY edit tools in Agent Settings to run natural-language JOY edits.';
   } else if (capability === 'untested') {
     readinessText = 'The model capability is untested. Test a model in Agent Settings.';
   } else if (capability === 'incompatible') {
@@ -1548,8 +1548,7 @@ export function AgentPanel({
     recipeReadinessText =
       'The JOY recipe runner is unavailable in this editor session. Open JOY Agent Settings to check the connection.';
   } else if (capability === undefined) {
-    recipeReadinessText =
-      'Connect a model with JOY edit tools in Agent Settings to run recipes. No fallback provider was selected.';
+    recipeReadinessText = 'Connect a model with JOY edit tools in Agent Settings to run recipes.';
   } else if (capability === 'untested') {
     recipeReadinessText =
       'The model capability is untested. Test a model in Agent Settings before running recipes.';
@@ -1574,7 +1573,7 @@ export function AgentPanel({
       'The JOY Looks runner is unavailable in this editor session. Open JOY Agent Settings to check the connection.';
   } else if (capability === undefined) {
     lookReadinessText =
-      'Ask JOY for Looks needs a model with JOY edit tools. Connect one in Agent Settings. No fallback provider was selected.';
+      'Ask JOY for Looks needs a model with JOY edit tools. Connect one in Agent Settings.';
   } else if (capability === 'untested') {
     lookReadinessText =
       'The model capability is untested. Test a model in Agent Settings before asking JOY to work with Looks.';

@@ -549,15 +549,15 @@ export function AudioPanel({
             >
               <span
                 className={`audio-dsp-pill dsp-dfn ${!noClips ? 'is-active' : 'is-ready'}`}
-                title="DeepFilterNet (DFN) Real-Time Noise Reduction"
+                title="Noise reduction (DeepFilterNet), real time"
               >
-                DFN
+                Noise reduction
               </span>
               <span
                 className={`audio-dsp-pill dsp-norm ${!noClips ? 'is-active' : 'is-ready'}`}
-                title="Volume Normalization (NORM) EBU R128"
+                title="Loudness normalization (EBU R128)"
               >
-                NORM
+                Loudness
               </span>
             </div>
             <button
@@ -971,15 +971,15 @@ export function AudioPanel({
             >
               <span
                 className={`audio-dsp-pill dsp-dfn ${!noClips ? 'is-active' : 'is-ready'}`}
-                title="DeepFilterNet (DFN) Real-Time Noise Reduction"
+                title="Noise reduction (DeepFilterNet), real time"
               >
-                DFN
+                Noise reduction
               </span>
               <span
                 className={`audio-dsp-pill dsp-norm ${!noClips ? 'is-active' : 'is-ready'}`}
-                title="Volume Normalization (NORM) EBU R128"
+                title="Loudness normalization (EBU R128)"
               >
-                NORM
+                Loudness
               </span>
             </div>
           </div>

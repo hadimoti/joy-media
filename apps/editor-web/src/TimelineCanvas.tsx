@@ -187,7 +187,8 @@ function TrackHeaderChrome({
     return <div className="timeline-track-label">{label}</div>;
   }
 
-  const trackId = controls?.trackId ?? header?.name ?? fallbackLabel;
+  // Accessible names use the track code (V1, A1), never the raw track id.
+  const trackId = header?.code ?? fallbackLabel;
 
   return (
     <>
@@ -208,7 +209,7 @@ function TrackHeaderChrome({
               type="button"
               className="icon-button"
               aria-pressed={controls.locked}
-              aria-label={`Lock ${controls.trackId}`}
+              aria-label={`Lock ${trackId}`}
               title={controls.locked ? 'Unlock track' : 'Lock track'}
               onClick={() => controls.onToggle('locked')}
             >
@@ -223,7 +224,7 @@ function TrackHeaderChrome({
               type="button"
               className="icon-button"
               aria-pressed={controls.solo}
-              aria-label={`Solo ${controls.trackId}`}
+              aria-label={`Solo ${trackId}`}
               title={controls.solo ? 'Unsolo track' : 'Solo track'}
               onClick={() => controls.onToggle('solo')}
             >
