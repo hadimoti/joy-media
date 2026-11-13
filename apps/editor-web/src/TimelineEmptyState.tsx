@@ -2,6 +2,11 @@ import { useCallback, useRef, useState } from 'react';
 import { UploadIcon } from './icons.js';
 import type { SpikeProject } from '@joy-media/project-schema';
 
+export interface TimelineEmptyStateFileDropPosition {
+  readonly clientX: number;
+  readonly rect: DOMRect;
+}
+
 export interface TimelineEmptyStateProps {
   readonly project: SpikeProject;
   readonly _playheadUs: number;
@@ -10,7 +15,10 @@ export interface TimelineEmptyStateProps {
   readonly onSeek: (timeUs: number) => void;
   readonly onImportClick: () => void;
   readonly onAddFromLibrary: () => void;
-  readonly onFilesDrop?: (files: readonly File[]) => void;
+  readonly onFilesDrop?: (
+    files: readonly File[],
+    position: TimelineEmptyStateFileDropPosition,
+  ) => void;
   readonly onAssetDrop?: (asset: {
     readonly assetId: string;
     readonly kind: string;
@@ -70,7 +78,10 @@ export function TimelineEmptyState({
         return;
       }
       if (event.dataTransfer.files.length > 0) {
-        onFilesDrop?.(Array.from(event.dataTransfer.files));
+        onFilesDrop?.(Array.from(event.dataTransfer.files), {
+          clientX: event.clientX,
+          rect: event.currentTarget.getBoundingClientRect(),
+        });
         return;
       }
       const raw = event.dataTransfer.getData('application/x-joy-media-asset');
