@@ -5314,7 +5314,10 @@ function EditorWorkspace({
       );
       controller.abort();
     };
-    const handleImportDroppedFiles = (files: readonly File[]) => {
+    const handleImportDroppedFiles = (
+      files: readonly File[],
+      dropMode: 'media' | 'timeline',
+    ): Promise<void> => {
       const controller = new AbortController();
       droppedImportControllerRef.current = controller;
       setDroppedImportProgress({
@@ -5326,23 +5329,27 @@ function EditorWorkspace({
       });
       const addImportedAsset = (asset: Awaited<ReturnType<typeof importMediaFile>>) => {
         rememberImportedAsset(asset);
-        const composition = activeTimelineView.composition;
-        if (composition !== undefined) {
-          const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${Date.now()}`;
-          bindMediaClip(asset, clipId);
-          context.dispatchTimeline(
-            buildTimelineMediaImportTransaction(
-              composition,
-              [asset],
-              activeTimelinePlayheadUs,
-              new Set(),
-              () => clipId,
-            ),
-          );
+        if (dropMode === 'timeline') {
+          const composition = activeTimelineView.composition;
+          if (composition !== undefined) {
+            const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${Date.now()}`;
+            bindMediaClip(asset, clipId);
+            context.dispatchTimeline(
+              buildTimelineMediaImportTransaction(
+                composition,
+                [asset],
+                activeTimelinePlayheadUs,
+                new Set(),
+                () => clipId,
+              ),
+            );
+          }
+          context.showToast(`${asset.displayName} added to the timeline.`, 'success');
+          return;
         }
-        context.showToast(`${asset.displayName} added to the timeline.`, 'success');
+        context.showToast(`${asset.displayName} imported to Media.`, 'success');
       };
-      void (async () => {
+      return (async () => {
         try {
           const imported = await importDroppedMediaFiles({
             projectId: controlPlaneProject.controlPlaneProjectId,
@@ -5385,22 +5392,25 @@ function EditorWorkspace({
             return;
           }
           setDroppedImportProgress(undefined);
-          for (const file of files) {
-            void importMediaFile({
-              projectId: controlPlaneProject.controlPlaneProjectId,
-              projectTitle: controlPlaneProject.title,
-              file,
-              client: mediaControlPlaneClient,
-              originalAssetCache: originalAssetCachePromise,
-            })
-              .then(addImportedAsset)
-              .catch((error) => {
+          await Promise.all(
+            files.map(async (file) => {
+              try {
+                const asset = await importMediaFile({
+                  projectId: controlPlaneProject.controlPlaneProjectId,
+                  projectTitle: controlPlaneProject.title,
+                  file,
+                  client: mediaControlPlaneClient,
+                  originalAssetCache: originalAssetCachePromise,
+                });
+                addImportedAsset(asset);
+              } catch (error) {
                 context.showToast(
                   `Failed to import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
                   'error',
                 );
-              });
-          }
+              }
+            }),
+          );
         } catch (error) {
           context.showToast(
             controller.signal.aborted
@@ -6432,7 +6442,7 @@ function EditorWorkspace({
           assetDisplayNames={Object.fromEntries(
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
           )}
-          onImportFiles={handleImportDroppedFiles}
+          onImportFiles={(files) => handleImportDroppedFiles(files, 'timeline')}
           onMediaPlaced={(asset, clipId) => bindMediaClip(asset, clipId)}
           onTogglePlayback={context.togglePlayback}
           onSeek={(timeUs) => context.seek(timelineViewRootTime(activeTimelineView, timeUs))}
@@ -6598,7 +6608,7 @@ function EditorWorkspace({
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
           storage={context.storage}
-          onImportFiles={handleImportDroppedFiles}
+          onImportFiles={(files) => handleImportDroppedFiles(files, 'media')}
           {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
           onCancelDroppedImport={handleCancelDroppedImport}
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}

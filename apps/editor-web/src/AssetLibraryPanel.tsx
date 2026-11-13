@@ -169,7 +169,7 @@ export function AssetLibraryPanel({
   }) => void;
   readonly onOpenAssetSettings?: () => void;
   /** Import OS-dropped files through the shared desktop bridge flow. */
-  readonly onImportFiles?: (files: readonly File[]) => void;
+  readonly onImportFiles?: (files: readonly File[]) => void | Promise<void>;
   readonly droppedImportProgress?: DroppedImportProgressState;
   readonly onCancelDroppedImport?: () => void;
   /** Missing project media, relinked from the panel's Missing media section. */
@@ -431,12 +431,16 @@ export function AssetLibraryPanel({
       const files = Array.from(event.dataTransfer.files ?? []);
       if (files.length === 0) return;
       if (onImportFiles !== undefined) {
-        onImportFiles(files);
+        void Promise.resolve(onImportFiles(files))
+          .then(refresh)
+          .catch((error: unknown) => {
+            setStatus(`Media import failed: ${message(error)}`);
+          });
         return;
       }
       for (const file of files) void importFile(file);
     },
-    [importFile, onImportFiles],
+    [importFile, onImportFiles, refresh],
   );
   const addAssetToTimeline = useCallback(
     async (asset: {

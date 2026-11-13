@@ -44,12 +44,15 @@ function ticket(file: File, sourceIndex: number): DesktopDroppedFileTicket {
   };
 }
 
-function installDroppedFileBridge(batch: DesktopDroppedFileBatch) {
+function installDroppedFileBridge(
+  batch: DesktopDroppedFileBatch,
+  catalogAssets: () => readonly BrowserAsset[] = () => [],
+) {
   const priorBridge = Object.getOwnPropertyDescriptor(window, 'joyDesktop');
   const bridge: DesktopJoyBridge = {
     channels: [],
     invoke: vi.fn(async (channel: string) =>
-      channel === 'desktop.asset-library.get-catalog' ? { assets: [] } : undefined,
+      channel === 'desktop.asset-library.get-catalog' ? { assets: catalogAssets() } : undefined,
     ),
     importDroppedFiles: vi.fn(async () => batch),
     onDroppedImportProgress: vi.fn(() => () => undefined),
@@ -194,6 +197,46 @@ describe('the Media panel empty state (T-D05)', () => {
     expect(client.importDroppedAsset).toHaveBeenCalledTimes(1);
     expect(importedAssets.map((asset) => asset.displayName)).toEqual(['one.png']);
     expect(result?.assets).toHaveLength(1);
+  });
+
+  it('refreshes the Media list after a drop so the empty state disappears', async () => {
+    const file = new File(['one'], 'one.png', { type: 'image/png' });
+    const batch = { tickets: [ticket(file, 0)], folderDepth: 1 as const, folderCount: 0 };
+    let catalog: readonly BrowserAsset[] = [];
+    let catalogReads = 0;
+    installDroppedFileBridge(batch, () => {
+      catalogReads += 1;
+      return catalog;
+    });
+    const client = importClient([file], async (source, item) => importedAsset(source, item));
+    let importFinished: Promise<void> | undefined;
+    const rendered = await renderPanel({
+      onImportFiles: (files) => {
+        importFinished = (async () => {
+          const result = await importDroppedMediaFiles({
+            projectId: 'project-1',
+            projectTitle: 'Project',
+            files,
+            client,
+            originalAssetCache: { putFromVerifiedDesktopImport: vi.fn(async () => undefined) },
+          });
+          catalog = result?.assets ?? [];
+        })();
+        return importFinished;
+      },
+    });
+    const initialCatalogReads = catalogReads;
+
+    expect(rendered.querySelector('.asset-library-empty')).not.toBeNull();
+    await act(async () => {
+      dispatchDrop(rendered, [file]);
+      await importFinished;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(catalogReads).toBeGreaterThan(initialCatalogReads);
+    expect(rendered.textContent).toContain('one.png');
+    expect(rendered.querySelector('.asset-library-empty')).toBeNull();
   });
 
   it('routes every dropped file through the desktop import bridge', async () => {
