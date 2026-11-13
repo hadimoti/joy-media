@@ -28,6 +28,10 @@ export function shouldAskCanvasReframe(
  * Fit/Fill scale the old composition uniformly around its centre; Keep leaves
  * the clip transforms untouched. The renderer and both export paths consume
  * this same project document.
+ *
+ * A composition with an active camera is left alone entirely: the camera's
+ * perspective projection already depends on the composition height and frames
+ * every visual layer, so remapping the clips and the camera would scale twice.
  */
 export function reframeProjectClips(
   project: JoyProjectV1,
@@ -35,6 +39,7 @@ export function reframeProjectClips(
   mode: CanvasReframeMode,
 ): JoyProjectV1 {
   if (mode === 'keep') return project;
+  if (canvasReframeIsCameraFramed(project)) return project;
   const composition = project.compositions[project.rootCompositionId];
   if (composition === undefined) return project;
   const reframe = canvasReframeTransform(
@@ -73,9 +78,19 @@ export function reframeProjectClips(
     : project;
 }
 
-/** Number of parentless clip/camera roots skipped because their transforms are not safely remappable. */
+/** True when the root composition has an active camera, which frames every clip and blocks Fit/Fill. */
+export function canvasReframeIsCameraFramed(project: JoyProjectV1): boolean {
+  const composition = project.compositions[project.rootCompositionId];
+  return composition !== undefined && composition.activeCameraId !== undefined;
+}
+
+/**
+ * Number of clip roots left alone: every clip root when a camera frames the
+ * project, otherwise the roots whose transforms are not safely remappable.
+ */
 export function canvasReframeSkippedObjectCount(project: JoyProjectV1): number {
   const objectIds = collectCanvasReframeObjectIds(project);
+  if (canvasReframeIsCameraFramed(project)) return objectIds.size;
   return collectCanvasReframeSkippedObjectIds(project, objectIds).size;
 }
 
@@ -155,10 +170,6 @@ function collectCanvasReframeObjectIds(project: JoyProjectV1): Set<string> {
   for (const objectId of boundObjectIds) {
     const rootId = findParentlessRoot(objectId, project.visualObjects);
     if (rootId !== undefined) roots.add(rootId);
-  }
-  if (composition.activeCameraId !== undefined) {
-    const cameraRoot = findParentlessRoot(composition.activeCameraId, project.visualObjects);
-    if (cameraRoot !== undefined) roots.add(cameraRoot);
   }
   return roots;
 }

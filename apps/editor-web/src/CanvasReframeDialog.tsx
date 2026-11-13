@@ -7,6 +7,7 @@ export interface CanvasReframeDialogProps {
   readonly source: CanvasSize;
   readonly target: CanvasSize;
   readonly skippedObjectCount: number;
+  readonly cameraFramed: boolean;
   readonly onApply: (mode: CanvasReframeMode) => void;
   readonly onCancel: () => void;
 }
@@ -26,6 +27,7 @@ export function CanvasReframeDialog({
   source,
   target,
   skippedObjectCount,
+  cameraFramed,
   onApply,
   onCancel,
 }: CanvasReframeDialogProps) {
@@ -83,7 +85,14 @@ export function CanvasReframeDialog({
         <p className="app-dialog-message">
           Hand-set transforms scale by the same rule around the canvas centre.
         </p>
-        {skippedObjectCount > 0 && (
+        {skippedObjectCount > 0 && cameraFramed && (
+          <p className="app-dialog-message">
+            Fit and Fill will leave {skippedObjectCount} clip object
+            {skippedObjectCount === 1 ? '' : 's'} alone: clips framed by a camera are left as they
+            are, because the camera frames them.
+          </p>
+        )}
+        {skippedObjectCount > 0 && !cameraFramed && (
           <p className="app-dialog-message">
             Fit and Fill will leave {skippedObjectCount} object
             {skippedObjectCount === 1 ? '' : 's'} alone because expressions or unsupported animation

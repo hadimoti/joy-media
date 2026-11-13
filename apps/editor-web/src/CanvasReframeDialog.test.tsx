@@ -16,7 +16,11 @@ afterEach(async () => {
   container = undefined;
 });
 
-async function renderDialog(defaultMode: 'fit' | 'fill' | 'keep' = 'fit', skippedObjectCount = 0) {
+async function renderDialog(
+  defaultMode: 'fit' | 'fill' | 'keep' = 'fit',
+  skippedObjectCount = 0,
+  cameraFramed = false,
+) {
   const onApply = vi.fn();
   const onCancel = vi.fn();
   container = document.createElement('div');
@@ -27,6 +31,7 @@ async function renderDialog(defaultMode: 'fit' | 'fill' | 'keep' = 'fit', skippe
       <CanvasReframeDialog
         defaultMode={defaultMode}
         skippedObjectCount={skippedObjectCount}
+        cameraFramed={cameraFramed}
         onApply={onApply}
         onCancel={onCancel}
         source={{ width: 1920, height: 1080 }}
@@ -55,6 +60,17 @@ describe('CanvasReframeDialog', () => {
     );
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
       'Fit and Fill will leave 2 objects alone because expressions or unsupported animation prevent safe remapping.',
+    );
+  });
+
+  it('says plainly that camera-framed clips are left as they are', async () => {
+    await renderDialog('fit', 2, true);
+
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Fit and Fill will leave 2 clip objects alone: clips framed by a camera are left as they are, because the camera frames them.',
+    );
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(
+      'expressions or unsupported animation',
     );
   });
 

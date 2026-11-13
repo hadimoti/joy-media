@@ -6,6 +6,7 @@ import type {
 import { canonicalBindingKey } from '@joy-media/project-schema';
 import { describe, expect, it } from 'vitest';
 import {
+  canvasReframeIsCameraFramed,
   canvasReframeSkippedObjectCount,
   reframeProjectClips,
   shouldAskCanvasReframe,
@@ -92,7 +93,7 @@ describe('reframeProjectClips', () => {
     expect(result.visualObjects.child?.transform).toEqual(project.visualObjects.child?.transform);
   });
 
-  it('remaps the active camera along with the clip objects', () => {
+  it('leaves a camera-framed project alone and counts it', () => {
     const project = projectWithClips(
       { 'clip-1': 'picture' },
       {
@@ -104,8 +105,31 @@ describe('reframeProjectClips', () => {
 
     const result = reframeProjectClips(project, target, 'fit');
 
-    expect(result.visualObjects.picture?.transform).toMatchObject({ x: 65, y: 60 });
-    expect(result.visualObjects.camera?.transform).toMatchObject({ x: 55, y: 40 });
+    expect(canvasReframeIsCameraFramed(project)).toBe(true);
+    expect(result).toBe(project);
+    expect(result.visualObjects.picture?.transform).toEqual(
+      project.visualObjects.picture?.transform,
+    );
+    expect(result.visualObjects.camera?.transform).toEqual(project.visualObjects.camera?.transform);
+    // Only the clip object is counted; the camera itself is never a clip.
+    expect(canvasReframeSkippedObjectCount(project)).toBe(1);
+  });
+
+  it('leaves a clip the camera does not parent alone too, because the camera frames every layer', () => {
+    const project = projectWithClips(
+      { 'clip-1': 'picture', 'clip-2': 'title' },
+      {
+        picture: visualObject('picture', { x: 80, y: 120 }),
+        title: visualObject('title', { x: 30, y: 40 }),
+        camera: visualObject('camera', { x: 60, y: 80 }, { kind: 'camera' }),
+      },
+      'camera',
+    );
+
+    const result = reframeProjectClips(project, target, 'fill');
+
+    expect(result).toBe(project);
+    expect(canvasReframeSkippedObjectCount(project)).toBe(2);
   });
 
   it('scales keyframed transform values while preserving curve timing and easing', () => {

@@ -99,6 +99,7 @@ import { applyCanvasDimensions, applyExportPresetSelection } from './export-form
 import { CANVAS_FORMAT_POPOVER_ID, CanvasFormatPopover } from './CanvasFormatMenu.js';
 import { CanvasReframeDialog } from './CanvasReframeDialog.js';
 import {
+  canvasReframeIsCameraFramed,
   canvasReframeSkippedObjectCount,
   shouldAskCanvasReframe,
   type CanvasReframeMode,
@@ -7391,6 +7392,7 @@ function EditorWorkspace({
                   source={pendingCanvasReframe.source}
                   target={pendingCanvasReframe.target}
                   skippedObjectCount={canvasReframeSkippedObjectCount(session.visualProject)}
+                  cameraFramed={canvasReframeIsCameraFramed(session.visualProject)}
                   onApply={confirmCanvasReframe}
                   onCancel={() => setPendingCanvasReframe(undefined)}
                 />
