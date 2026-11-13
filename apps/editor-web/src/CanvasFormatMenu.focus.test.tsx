@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { CANVAS_FORMAT_POPOVER_ID, CanvasFormatPopover } from './CanvasFormatMenu.js';
 import { MonitorTransport, type MonitorTransportProps } from './monitor/MonitorTransport.js';
 import { PopupProvider, usePopup, type PopupControl } from './popup-manager.js';
+import { DEFAULT_MONITOR_VIEW_OPTIONS } from './monitor/monitor-view-options.js';
 import { POPUP_IDS } from './popup-ids.js';
 
 (
@@ -50,6 +51,8 @@ function FormatHarness() {
     width: 1920,
     height: 1080,
     canvasPresetId: 'youtube-1080',
+    viewOptions: DEFAULT_MONITOR_VIEW_OPTIONS,
+    onViewOptionsChange: () => undefined,
   };
   return (
     <>

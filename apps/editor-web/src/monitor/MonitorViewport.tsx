@@ -22,6 +22,7 @@ import {
   type MonitorTool,
 } from './monitor-tools.js';
 import { panByDrag } from './monitor-hand.js';
+import type { MonitorBackground } from './monitor-view-options.js';
 import { MonitorNavigation, type MonitorThumbnailReader } from './MonitorNavigator.js';
 import {
   clampPan,
@@ -269,6 +270,8 @@ export interface MonitorViewportProps {
   readonly readThumbnail?: MonitorThumbnailReader | undefined;
   /** Click and marquee selection with the Select tool (T-M04). */
   readonly selection?: MonitorViewportSelection | undefined;
+  /** The Monitor background (View menu): checkerboard by default. */
+  readonly background?: MonitorBackground | undefined;
   readonly children: ReactNode;
 }
 
@@ -366,6 +369,7 @@ export function MonitorViewport({
   onDrop,
   readThumbnail,
   selection,
+  background,
   children,
 }: MonitorViewportProps) {
   const spaceHeld = useSpaceHold();
@@ -527,6 +531,7 @@ export function MonitorViewport({
       data-monitor-pan-x={Math.round(controller.view.panX)}
       data-monitor-pan-y={Math.round(controller.view.panY)}
       data-monitor-tool={tool}
+      data-monitor-background={background ?? 'checkerboard'}
       data-monitor-cursor={cursor}
       style={cursor === 'default' ? undefined : { cursor }}
       onDragOver={onDragOver}

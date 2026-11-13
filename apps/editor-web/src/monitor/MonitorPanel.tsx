@@ -65,6 +65,8 @@ import {
 import { usePopup, type PopupControl } from '../popup-manager.js';
 import { POPUP_IDS } from '../popup-ids.js';
 import { MonitorTransport } from './MonitorTransport.js';
+import { MonitorOverlays } from './MonitorOverlays.js';
+import { useMonitorViewOptions } from './MonitorViewMenu.js';
 import { monitorZoomLabel } from './monitor-view.js';
 import {
   MonitorViewport,
@@ -101,6 +103,10 @@ import {
 } from './monitor-selection.js';
 import { monitorPixelScale } from './monitor-pixel-scale.js';
 import { createProjectColorLutResolver } from '../project-color-luts.js';
+import {
+  DroppedImportProgress,
+  type DroppedImportProgressState,
+} from '../DroppedImportProgress.js';
 
 /**
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
@@ -109,9 +115,15 @@ import { createProjectColorLutResolver } from '../project-color-luts.js';
 
 export function MonitorPanel({
   agentPreviewSurfaceVisible = true,
+  onFilesDrop,
+  droppedImportProgress,
+  onCancelDroppedImport,
   formatMenu,
 }: {
   readonly agentPreviewSurfaceVisible?: boolean;
+  readonly onFilesDrop?: (files: readonly File[]) => void;
+  readonly droppedImportProgress?: DroppedImportProgressState;
+  readonly onCancelDroppedImport?: () => void;
   /** The App-owned Format popup; the monitor bar's read-out opens the same popover. */
   readonly formatMenu: PopupControl;
 }) {
@@ -126,6 +138,9 @@ export function MonitorPanel({
     <MonitorPanelContent
       context={context}
       agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
+      onFilesDrop={onFilesDrop}
+      droppedImportProgress={droppedImportProgress}
+      onCancelDroppedImport={onCancelDroppedImport}
       formatMenu={formatMenu}
     />
   );
@@ -134,10 +149,16 @@ export function MonitorPanel({
 function MonitorPanelContent({
   context,
   agentPreviewSurfaceVisible,
+  onFilesDrop,
+  droppedImportProgress,
+  onCancelDroppedImport,
   formatMenu,
 }: {
   readonly context: EditorPanelContextValue;
   readonly agentPreviewSurfaceVisible: boolean;
+  readonly onFilesDrop?: ((files: readonly File[]) => void) | undefined;
+  readonly droppedImportProgress?: DroppedImportProgressState | undefined;
+  readonly onCancelDroppedImport?: (() => void) | undefined;
   readonly formatMenu: PopupControl;
 }) {
   const {
@@ -224,6 +245,8 @@ function MonitorPanelContent({
       : undefined;
   // The zoom drawer is one popup (OB-18): outside click, Escape and a second popup close it.
   const zoomDrawer = usePopup(POPUP_IDS.monitorZoom);
+  // The View menu (T-M08) options are saved per user.
+  const [viewOptions, setViewOptions] = useMonitorViewOptions(storage);
   const panelRef = useRef<HTMLElement | null>(null);
   const initialPreviewPreference = useRef(
     loadEditorUiPreferences(storage).monitorPreview ??
@@ -875,7 +898,11 @@ function MonitorPanelContent({
   };
 
   const handleMonitorEffectDragOver = useCallback((event: React.DragEvent) => {
-    if (!event.dataTransfer.types.includes('application/x-joy-effect')) return;
+    if (
+      !event.dataTransfer.types.includes('application/x-joy-effect') &&
+      !event.dataTransfer.types.includes('Files')
+    )
+      return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
     setMonitorDragOver(true);
@@ -889,6 +916,11 @@ function MonitorPanelContent({
     (event: React.DragEvent) => {
       event.preventDefault();
       setMonitorDragOver(false);
+      if (event.dataTransfer.types.includes('Files') || event.dataTransfer.files.length > 0) {
+        event.stopPropagation();
+        onFilesDrop?.(Array.from(event.dataTransfer.files));
+        return;
+      }
       const raw = event.dataTransfer.getData('application/x-joy-effect');
       if (!raw) return;
       try {
@@ -917,12 +949,15 @@ function MonitorPanelContent({
         /* ignore malformed */
       }
     },
-    [dispatchProject, timelineProject, visualProject, state.selectedIds, showToast],
+    [dispatchProject, onFilesDrop, timelineProject, visualProject, state.selectedIds, showToast],
   );
 
   return (
     <article className="monitor-panel" ref={panelRef}>
       {error !== undefined && <p className="monitor-error">{error}</p>}
+      {droppedImportProgress !== undefined && onCancelDroppedImport !== undefined && (
+        <DroppedImportProgress progress={droppedImportProgress} onCancel={onCancelDroppedImport} />
+      )}
       <MonitorViewport
         controller={monitorView}
         dragOver={monitorDragOver}
@@ -931,6 +966,7 @@ function MonitorPanelContent({
         onDrop={handleMonitorEffectDrop}
         readThumbnail={readNavigatorThumbnail}
         selection={monitorSelection}
+        background={viewOptions.background}
       >
         <div ref={containerRef} className="monitor-canvas" />
         <div className="monitor-frame" style={frameRect}>
@@ -944,6 +980,13 @@ function MonitorPanelContent({
             />
           )}
         </div>
+        <MonitorOverlays
+          view={monitorView.view}
+          frame={frameSize}
+          viewportSize={monitorView.viewportSize}
+          options={viewOptions}
+          onGuidesChange={(guides) => setViewOptions((current) => ({ ...current, guides }))}
+        />
         <MonitorSelectionOverlay
           overlay={selectionOutline.overlay}
           frame={frameSize}
@@ -995,6 +1038,8 @@ function MonitorPanelContent({
         width={width}
         height={height}
         canvasPresetId={canvasPresetId}
+        viewOptions={viewOptions}
+        onViewOptionsChange={setViewOptions}
       />
     </article>
   );

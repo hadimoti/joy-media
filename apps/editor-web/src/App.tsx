@@ -59,6 +59,7 @@ import type {
   AnimationDescriptorV1,
   AssetRecordV1,
   AnimatablePropertyV1,
+  Clip,
   ExportPresetId,
   JoyProjectV1,
   SpikeProject,
@@ -262,9 +263,16 @@ import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js'
 import { prepareTimelinePresentation } from './timeline-presentation.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import type { DroppedImportProgressState } from './DroppedImportProgress.js';
-import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
+import {
+  buildTimelineMediaImportTransaction,
+  sortDroppedMediaFiles,
+  type DroppedFilesTarget,
+  type TimelineMediaAsset,
+} from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
+import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
+import { findFirstPartyScene } from '@joy-media/html-scene-runtime/first-party';
 import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
 import { DualLensPanel } from './DualLensPanel.js';
@@ -932,6 +940,12 @@ const CONTROL_PLANE_PROJECT_ENSURE_RETRY_INITIAL_MS = 2_000;
 const CONTROL_PLANE_PROJECT_ENSURE_RETRY_MAX_MS = 60_000;
 /** Bounded, ephemeral derived bytes for one active local observation run. */
 const JOY_AGENT_OBSERVATION_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+
+/** History entries name a clip by its media name, never by its id. */
+function historyClipName(project: JoyProjectV1, clip: Clip): string {
+  const mediaName = 'assetId' in clip ? project.assets[clip.assetId]?.displayName : undefined;
+  return clipNameFromMedia(mediaName, 'clip');
+}
 
 function EditorWorkspace({
   projectId,
@@ -2950,7 +2964,7 @@ function EditorWorkspace({
       const stickerCount = Object.values(session.visualProject.visualObjects).filter(
         (item) => item.kind === 'image',
       ).length;
-      const label = `Add sticker ${asset.displayName ?? asset.assetId}`;
+      const label = asset.displayName ? `Add sticker ${asset.displayName}` : 'Add sticker';
       const clip: VideoClip = {
         id: clipId,
         kind: 'video',
@@ -3239,7 +3253,7 @@ function EditorWorkspace({
         source: { kind: 'object', id: objectId },
         visualObject: object,
       });
-      const label = `Place HTML scene ${scenePackageId}`;
+      const label = `Place ${findFirstPartyScene(scenePackageId)?.name ?? 'HTML scene'}`;
       session.dispatchCompound(label, {
         document,
         timeline: { label, commands: timelineCommands },
@@ -3738,7 +3752,7 @@ function EditorWorkspace({
           const endUs = selection.clip.startUs + selection.clip.durationUs;
           if (current.playheadUs <= selection.clip.startUs || current.playheadUs >= endUs) return;
           dispatchTimeline({
-            label: `Split ${selection.clip.id}`,
+            label: `Split ${historyClipName(session.visualProject, selection.clip)}`,
             commands: [
               {
                 type: 'timeline.splitClip',
@@ -3779,7 +3793,7 @@ function EditorWorkspace({
             return;
           }
           dispatchTimeline({
-            label: `Duplicate ${selection.clip.id}`,
+            label: `Duplicate ${historyClipName(session.visualProject, selection.clip)}`,
             commands: [
               duplicateClipCommand(
                 composition.id,
@@ -3846,7 +3860,7 @@ function EditorWorkspace({
         const endUs = selection.clip.startUs + selection.clip.durationUs;
         if (current.playheadUs <= selection.clip.startUs || current.playheadUs >= endUs) return;
         dispatchTimeline({
-          label: `Split ${selection.clip.id}`,
+          label: `Split ${historyClipName(session.visualProject, selection.clip)}`,
           commands: [
             {
               type: 'timeline.splitClip',
@@ -3864,7 +3878,7 @@ function EditorWorkspace({
       }
       if (kind === 'duplicate') {
         dispatchTimeline({
-          label: `Duplicate ${selection.clip.id}`,
+          label: `Duplicate ${historyClipName(session.visualProject, selection.clip)}`,
           commands: [
             duplicateClipCommand(
               composition.id,
@@ -5336,126 +5350,6 @@ function EditorWorkspace({
     if (activeTimelineView === undefined)
       throw new Error('timeline root composition is unavailable');
     const activeTimelinePlayheadUs = timelineViewLocalTime(activeTimelineView, state.playheadUs);
-    const handleCancelDroppedImport = () => {
-      const controller = droppedImportControllerRef.current;
-      if (controller === null || controller.signal.aborted) return;
-      setDroppedImportProgress((current) =>
-        current === undefined ? current : { ...current, cancelling: true },
-      );
-      controller.abort();
-    };
-    const handleImportDroppedFiles = (
-      files: readonly File[],
-      dropMode: 'media' | 'timeline',
-    ): Promise<void> => {
-      const controller = new AbortController();
-      droppedImportControllerRef.current = controller;
-      setDroppedImportProgress({
-        fileName: files[0]?.name ?? 'Dropped media',
-        current: 0,
-        total: files.length,
-        percentage: 0,
-        cancelling: false,
-      });
-      const addImportedAsset = (asset: Awaited<ReturnType<typeof importMediaFile>>) => {
-        rememberImportedAsset(asset);
-        if (dropMode === 'timeline') {
-          const composition = activeTimelineView.composition;
-          if (composition !== undefined) {
-            const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${Date.now()}`;
-            bindMediaClip(asset, clipId);
-            context.dispatchTimeline(
-              buildTimelineMediaImportTransaction(
-                composition,
-                [asset],
-                activeTimelinePlayheadUs,
-                new Set(),
-                () => clipId,
-              ),
-            );
-          }
-          context.showToast(`${asset.displayName} added to the timeline.`, 'success');
-          return;
-        }
-        context.showToast(`${asset.displayName} imported to Media.`, 'success');
-      };
-      return (async () => {
-        try {
-          const imported = await importDroppedMediaFiles({
-            projectId: controlPlaneProject.controlPlaneProjectId,
-            projectTitle: controlPlaneProject.title,
-            files,
-            client: mediaControlPlaneClient,
-            originalAssetCache: originalAssetCachePromise,
-            signal: controller.signal,
-            onProgress: (progress) => {
-              setDroppedImportProgress((current) => ({
-                fileName: progress.fileName ?? current?.fileName ?? 'Dropped media',
-                current: progress.current ?? current?.current ?? 1,
-                total: progress.total ?? current?.total ?? files.length,
-                percentage: Math.round(progress.ratio * 100),
-                cancelling: current?.cancelling ?? false,
-              }));
-            },
-            onImported: (asset) => addImportedAsset(asset),
-          });
-          if (imported !== undefined) {
-            if (imported.cancelled) {
-              context.showToast(
-                'Import cancelled. Completed files are kept; the current file was not added.',
-                'info',
-              );
-              return;
-            }
-            if (imported.folderCount > 0) {
-              context.showToast('Folders are read one level deep.', 'info');
-            }
-            if (imported.skippedMessage !== undefined) {
-              context.showToast(imported.skippedMessage, 'info');
-            }
-            for (const failure of imported.failures) {
-              context.showToast(
-                `Failed to import ${failure.displayName}: ${failure.message}`,
-                'error',
-              );
-            }
-            return;
-          }
-          setDroppedImportProgress(undefined);
-          await Promise.all(
-            files.map(async (file) => {
-              try {
-                const asset = await importMediaFile({
-                  projectId: controlPlaneProject.controlPlaneProjectId,
-                  projectTitle: controlPlaneProject.title,
-                  file,
-                  client: mediaControlPlaneClient,
-                  originalAssetCache: originalAssetCachePromise,
-                });
-                addImportedAsset(asset);
-              } catch (error) {
-                context.showToast(
-                  `Failed to import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
-                  'error',
-                );
-              }
-            }),
-          );
-        } catch (error) {
-          context.showToast(
-            controller.signal.aborted
-              ? 'Import cancelled. No partial file was added.'
-              : `Dropped media could not be imported: ${error instanceof Error ? error.message : String(error)}`,
-            controller.signal.aborted ? 'info' : 'error',
-          );
-        } finally {
-          if (droppedImportControllerRef.current === controller) {
-            droppedImportControllerRef.current = null;
-            setDroppedImportProgress(undefined);
-          }
-        }
-      })();
-    };
     const activeTimelineDurationUs = timelineEffectiveDurationUs(activeTimelineView.composition);
     const activeTimelineMarkers = visualProject.markers
       .filter(
@@ -6012,7 +5906,7 @@ function EditorWorkspace({
             return [
               {
                 clipId: clip.id,
-                label: asset?.displayName ?? clip.id,
+                label: clipNameWithoutExtension(asset?.displayName ?? '') || 'Clip',
                 kind:
                   kind === 'overlay' || asset?.kind === 'image' || targetObject?.kind === 'image'
                     ? ('picture' as const)
@@ -6184,6 +6078,14 @@ function EditorWorkspace({
       const audioTracks = audioComposition?.tracks ?? [];
       const audioClips = audioTracks.flatMap((track) => track.clips);
       const clipIds = audioClips.map((clip) => clip.id);
+      // Clip names for the mixer rows: the media name, or "Audio N" in AudioPanel.
+      const audioClipLabels: Record<string, string> = {};
+      for (const clip of audioClips) {
+        const mediaName =
+          'assetId' in clip ? visualProject.assets[clip.assetId]?.displayName : undefined;
+        const name = clipNameFromMedia(mediaName, '');
+        if (name.length > 0) audioClipLabels[clip.id] = name;
+      }
       const selectedClipIds = audioClips
         .filter((clip) => state.selectedIds.includes(clip.id))
         .map((clip) => clip.id);
@@ -6219,6 +6121,7 @@ function EditorWorkspace({
       return withFeatureHub(
         <AudioPanel
           clipIds={clipIds}
+          clipLabels={audioClipLabels}
           enhanceScopes={enhanceScopes}
           audioState={context.audioState}
           onAudioChange={(next, label) => context.setAudioState(next, label)}
@@ -6414,6 +6317,239 @@ function EditorWorkspace({
           onProjectRevision={context.bumpProjectRevision}
         />,
       );
+    const cancelDroppedImport = () => {
+      const controller = droppedImportControllerRef.current;
+      if (controller === null || controller.signal.aborted) return;
+      setDroppedImportProgress((current) =>
+        current === undefined ? current : { ...current, cancelling: true },
+      );
+      controller.abort();
+    };
+    const handleDroppedFiles = async (files: readonly File[], target: DroppedFilesTarget) => {
+      const orderedFiles = sortDroppedMediaFiles(files);
+      if (orderedFiles.length === 0) return;
+      const controller = new AbortController();
+      droppedImportControllerRef.current = controller;
+      setDroppedImportProgress({
+        fileName: orderedFiles[0]?.name ?? 'Dropped media',
+        current: 0,
+        total: orderedFiles.length,
+        percentage: 0,
+        cancelling: false,
+      });
+      const importedAssets: Awaited<ReturnType<typeof importMediaFile>>[] = [];
+      const failures: { displayName: string; message: string }[] = [];
+      let cancelled = false;
+      try {
+        const imported = await importDroppedMediaFiles({
+          projectId: controlPlaneProject.controlPlaneProjectId,
+          projectTitle: controlPlaneProject.title,
+          files: orderedFiles,
+          client: mediaControlPlaneClient,
+          originalAssetCache: originalAssetCachePromise,
+          signal: controller.signal,
+          onProgress: (progress) => {
+            setDroppedImportProgress((current) => ({
+              fileName: progress.fileName ?? current?.fileName ?? 'Dropped media',
+              current: progress.current ?? current?.current ?? 1,
+              total: progress.total ?? current?.total ?? orderedFiles.length,
+              percentage: Math.round(progress.ratio * 100),
+              cancelling: current?.cancelling ?? false,
+            }));
+          },
+        });
+        if (imported !== undefined) {
+          importedAssets.push(...imported.assets);
+          failures.push(...imported.failures);
+          cancelled = imported.cancelled;
+          if (imported.folderCount > 0) {
+            context.showToast('Folders are read one level deep.', 'info');
+          }
+          if (imported.skippedMessage !== undefined) {
+            context.showToast(imported.skippedMessage, 'info');
+          }
+        } else if (!isDesktopHost()) {
+          // Renderer File imports are a browser-only fallback.
+          for (const [index, file] of orderedFiles.entries()) {
+            if (controller.signal.aborted) {
+              cancelled = true;
+              break;
+            }
+            setDroppedImportProgress((current) => ({
+              fileName: file.name,
+              current: index + 1,
+              total: orderedFiles.length,
+              percentage: Math.round((index / orderedFiles.length) * 100),
+              cancelling: current?.cancelling ?? false,
+            }));
+            try {
+              const asset = await importMediaFile({
+                projectId: controlPlaneProject.controlPlaneProjectId,
+                projectTitle: controlPlaneProject.title,
+                file,
+                client: mediaControlPlaneClient,
+                originalAssetCache: originalAssetCachePromise,
+                onProgress: (progress) => {
+                  setDroppedImportProgress((current) => ({
+                    fileName: progress.fileName ?? file.name,
+                    current: progress.current ?? index + 1,
+                    total: progress.total ?? orderedFiles.length,
+                    percentage: Math.round(progress.ratio * 100),
+                    cancelling: current?.cancelling ?? false,
+                  }));
+                },
+              });
+              importedAssets.push(asset);
+            } catch (error) {
+              failures.push({
+                displayName: file.name,
+                message: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        } else {
+          for (const file of orderedFiles) {
+            failures.push({
+              displayName: file.name,
+              message: 'Desktop dropped-file import is unavailable.',
+            });
+          }
+        }
+
+        if (importedAssets.length > 0) {
+          let nextVisualProject = context.visualProject;
+          const timelineAssets: TimelineMediaAsset[] = [];
+          const clipIds: string[] = [];
+          const composition = activeTimelineView.composition;
+          const shouldPlace = target.surface !== 'media' && composition !== undefined;
+          const batchToken = Date.now();
+          for (const [index, asset] of importedAssets.entries()) {
+            nextVisualProject = projectWithImportedAsset(nextVisualProject, asset);
+            if (!shouldPlace) continue;
+            const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${batchToken}-${index}`;
+            const controllerId = `media-controller-${clipId}`;
+            let scale = 1;
+            if (
+              target.surface === 'monitor' &&
+              asset.kind !== 'audio' &&
+              asset.descriptor.width !== undefined &&
+              asset.descriptor.height !== undefined &&
+              asset.descriptor.width > 0 &&
+              asset.descriptor.height > 0
+            ) {
+              scale = Math.min(
+                composition.width / asset.descriptor.width,
+                composition.height / asset.descriptor.height,
+              );
+            }
+            nextVisualProject = bindClipToObject(
+              {
+                ...nextVisualProject,
+                visualObjects: {
+                  ...nextVisualProject.visualObjects,
+                  [controllerId]: {
+                    id: controllerId,
+                    kind: 'null',
+                    assetId: asset.id,
+                    transform: {
+                      x: 0,
+                      y: 0,
+                      scaleX: scale,
+                      scaleY: scale,
+                      rotationDeg: 0,
+                      opacity: 1,
+                      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+                    },
+                  },
+                },
+              },
+              clipId,
+              controllerId,
+            );
+            timelineAssets.push({
+              id: asset.id,
+              kind: asset.kind,
+              displayName: asset.displayName,
+              descriptor: {
+                ...(asset.descriptor.mimeType === undefined
+                  ? {}
+                  : { mimeType: asset.descriptor.mimeType }),
+                ...(asset.descriptor.durationUs === undefined
+                  ? {}
+                  : { durationUs: asset.descriptor.durationUs }),
+                ...(asset.descriptor.width === undefined ? {} : { width: asset.descriptor.width }),
+                ...(asset.descriptor.height === undefined
+                  ? {}
+                  : { height: asset.descriptor.height }),
+              },
+            });
+            clipIds.push(clipId);
+          }
+          context.replaceVisualProject(nextVisualProject);
+          if (shouldPlace && composition !== undefined) {
+            const lockedTrackIds = new Set(
+              composition.tracks
+                .filter(
+                  (track) =>
+                    track.locked === true ||
+                    context.timelineTrackFlags.find((flag) => flag.id === track.id)?.locked ===
+                      true,
+                )
+                .map((track) => track.id),
+            );
+            const startUs = target.timeUs;
+            const placement =
+              target.surface === 'timeline'
+                ? {
+                    mode: target.newTrack ? ('new-track' as const) : ('timeline-track' as const),
+                    startUs,
+                    ...(target.trackId === undefined ? {} : { targetTrackId: target.trackId }),
+                  }
+                : { mode: 'first-free' as const, startUs };
+            context.dispatchTimeline(
+              buildTimelineMediaImportTransaction(
+                composition,
+                timelineAssets,
+                startUs,
+                lockedTrackIds,
+                (_asset, index) => clipIds[index]!,
+                placement,
+              ),
+            );
+          }
+          context.showToast(
+            target.surface === 'media'
+              ? `${importedAssets.length} file${importedAssets.length === 1 ? '' : 's'} added to the media library.`
+              : `${importedAssets.length} file${importedAssets.length === 1 ? '' : 's'} added to the timeline.`,
+            'success',
+          );
+        }
+        for (const failure of failures) {
+          context.showToast(`Failed to import ${failure.displayName}: ${failure.message}`, 'error');
+        }
+        if (cancelled || controller.signal.aborted) {
+          context.showToast(
+            importedAssets.length > 0
+              ? 'Import cancelled. Completed files were kept; the current file was not added.'
+              : 'Import cancelled. No files were added.',
+            'info',
+          );
+        }
+      } catch (error) {
+        context.showToast(
+          controller.signal.aborted
+            ? 'Import cancelled. Completed files could not be confirmed.'
+            : `Dropped media could not be imported: ${error instanceof Error ? error.message : String(error)}`,
+          controller.signal.aborted ? 'info' : 'error',
+        );
+      } finally {
+        if (droppedImportControllerRef.current === controller) {
+          droppedImportControllerRef.current = null;
+          setDroppedImportProgress(undefined);
+        }
+      }
+    };
+
     if (api.id === 'timeline') {
       const selectedObjectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const selectedObject =
@@ -6468,11 +6604,11 @@ function EditorWorkspace({
             return asset;
           }}
           {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
-          onCancelDroppedImport={handleCancelDroppedImport}
+          onCancelDroppedImport={cancelDroppedImport}
           assetDisplayNames={Object.fromEntries(
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
           )}
-          onImportFiles={(files) => handleImportDroppedFiles(files, 'timeline')}
+          onImportFiles={handleDroppedFiles}
           onMediaPlaced={(asset, clipId) => bindMediaClip(asset, clipId)}
           onTogglePlayback={context.togglePlayback}
           onSeek={(timeUs) => context.seek(timelineViewRootTime(activeTimelineView, timeUs))}
@@ -6638,11 +6774,11 @@ function EditorWorkspace({
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
           storage={context.storage}
-          onImportFiles={(files) => handleImportDroppedFiles(files, 'media')}
-          {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
-          onCancelDroppedImport={handleCancelDroppedImport}
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onAddToTimeline={addAssetToTimeline}
+          onImportFiles={(files) => handleDroppedFiles(files, { surface: 'media' })}
+          {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
+          onCancelDroppedImport={cancelDroppedImport}
           onEditWithAi={(asset) => {
             context.attachJoyAgentAsset(asset);
             context.activatePanel('agent');
@@ -6724,6 +6860,11 @@ function EditorWorkspace({
       return (
         <MonitorPanel
           agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
+          onFilesDrop={(files) =>
+            handleDroppedFiles(files, { surface: 'monitor', timeUs: activeTimelinePlayheadUs })
+          }
+          {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
+          onCancelDroppedImport={cancelDroppedImport}
           formatMenu={formatMenu}
         />
       );

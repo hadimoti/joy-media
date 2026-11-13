@@ -9,6 +9,7 @@ import { APP_MENU_GROUPS } from './app-menu.js';
 export const POPUP_IDS = {
   commandPalette: 'command-palette',
   monitorZoom: 'monitor-zoom',
+  monitorView: 'monitor-view',
   projectMenu: 'project-menu',
   exportPreset: 'export-preset',
   recentProcesses: 'recent-processes',

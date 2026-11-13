@@ -26,9 +26,15 @@ import {
 
 export const EXPECTED_JOY_HASH = 'AF05BE55222C86FECE27E738B7E8A931CB4261C9797261C67DDE3C71A4E5CAC0';
 export const LOCK_PATH = 'C:\\jgp\\LOCK-app-run.txt';
+export const OS_FILE_DROP_SELECTORS = Object.freeze({
+  timeline: '.timeline-lane, .timeline-empty-state, .timeline-file-new-track-drop',
+  monitor: '.monitor-canvas-wrap',
+  media: '.asset-library-main',
+});
 const APP_NAME = 'joy-media.exe';
 const CDP_HOST = '127.0.0.1';
 const OWNER_HOME = 'C:\\Users\\HadiMoti';
+const DROP_FIXTURE_ROOT = 'C:\\jgp\\v111\\dnd';
 
 function fail(message) {
   const error = new Error(message);
@@ -149,6 +155,49 @@ export function verifyAfterRun(before, after) {
   }
   if (after.runningProcesses !== 0) {
     throw fail('a JOY Media or Electron process remains after the run');
+  }
+}
+
+/** Dispatch a Chromium trusted drag event using real files from the isolated fixture folder. */
+export async function dispatchOSFileDrop(
+  page,
+  surface,
+  filePaths,
+  { allowedRoot = DROP_FIXTURE_ROOT, selector, position } = {},
+) {
+  const targetSelector = selector ?? OS_FILE_DROP_SELECTORS[surface];
+  if (targetSelector === undefined) throw fail(`unknown OS file-drop surface: ${surface}`);
+  if (!Array.isArray(filePaths) || filePaths.length === 0) {
+    throw fail('at least one real OS file is required for a file-drop run');
+  }
+  const allowedRootPath = resolve(allowedRoot);
+  const files = filePaths.map((filePath) => {
+    if (typeof filePath !== 'string' || !isAbsolute(filePath)) {
+      throw fail('drop fixture paths must be absolute');
+    }
+    const absolute = resolve(filePath);
+    if (!isInside(absolute, allowedRootPath) || linkOnPath(absolute)) {
+      throw fail('drop fixture must be a regular path inside the isolated fixture folder');
+    }
+    if (!existsSync(absolute) || !statSync(absolute).isFile()) {
+      throw fail('drop fixture path must name an existing file');
+    }
+    return absolute;
+  });
+
+  const target = page.locator(targetSelector).first();
+  const box = await target.boundingBox();
+  if (box === null) throw fail(`OS file-drop target is not visible: ${targetSelector}`);
+  const x = box.x + Math.max(1, Math.min(box.width - 1, position?.x ?? box.width / 2));
+  const y = box.y + Math.max(1, Math.min(box.height - 1, position?.y ?? box.height / 2));
+  const session = await page.context().newCDPSession(page);
+  const data = { items: [], files, dragOperationsMask: 1 };
+  try {
+    for (const type of ['dragEnter', 'dragOver', 'drop']) {
+      await session.send('Input.dispatchDragEvent', { type, x, y, data });
+    }
+  } finally {
+    await session.detach();
   }
 }
 
@@ -303,6 +352,10 @@ export function createLiveDriver(config, options = {}) {
     },
     async title() {
       return page.title();
+    },
+    async dropFiles(surface, filePaths, dropOptions = {}) {
+      if (page === undefined) throw fail('launch the unpacked app before dispatching a file drop');
+      return dispatchOSFileDrop(page, surface, filePaths, dropOptions);
     },
   };
 }

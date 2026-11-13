@@ -36,6 +36,14 @@ describe('Joy Code not-connected card wiring', () => {
     expect(chat).not.toContain('to run natural-language JOY edits.');
   });
 
+  it('states an incompatible model in plain words, with no fallback sentence', () => {
+    // Four incompatible-model messages (chat, Recipes, Looks, send guard) share this copy.
+    expect(panelSource).not.toContain('no fallback provider was selected');
+    expect(panelSource).toContain(
+      'The configured model is incompatible. Test another model in Agent Settings.',
+    );
+  });
+
   it('hides the Recipes Run buttons until a model is connected', () => {
     expect(panelSource).toContain('{isRecipeRunnerReady && (');
     expect(panelSource).not.toContain('!isRecipeRunnerReady ||');

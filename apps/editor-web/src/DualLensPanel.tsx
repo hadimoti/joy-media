@@ -361,8 +361,10 @@ function TimeProjection({
         visible: enabledSeed,
       };
       if (flag === 'visible') {
+        // History names the track by its lane label (V1 Main Video), never by its id.
+        const trackLabel = lanes.find((lane) => lane.sourceTrackId === trackId)?.label ?? 'track';
         onDispatch({
-          label: current.visible ? `Hide ${trackId}` : `Show ${trackId}`,
+          label: current.visible ? `Hide ${trackLabel}` : `Show ${trackLabel}`,
           commands: [
             {
               type: 'property.setTrackEnabled',

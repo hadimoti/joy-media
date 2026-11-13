@@ -60,11 +60,14 @@ describe('CaptionsPanel empty state', () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Caption text seg-1"');
+    // Cues are named by order (1, 2, …); the segment id never reaches the DOM.
+    expect(markup).toContain('aria-label="Caption text 1"');
+    expect(markup).not.toContain('seg-1');
     expect(markup).toContain('value="Edited caption"');
     expect(markup).toContain('title="Source: Welcome to JOY"');
-    expect(markup).toContain('aria-label="Revert caption seg-1 to source text"');
-    expect(markup).toContain('aria-label="Delete caption seg-1"');
+    expect(markup).toContain('aria-label="Revert caption 1 to source text"');
+    expect(markup).toContain('aria-label="Delete caption 1"');
+    expect(markup).toContain('Caption track 1');
   });
 
   it('exposes transcription failures beside the actions that are affected', () => {

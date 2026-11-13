@@ -55,7 +55,10 @@ import {
 } from './commands/timeline-commands.js';
 import { TimelineContextMenu } from './TimelineContextMenu.js';
 import { ActionOverflowMenu, type ActionOverflowMenuItem } from './ActionOverflowMenu.js';
-import { TimelineEmptyState } from './TimelineEmptyState.js';
+import {
+  TimelineEmptyState,
+  type TimelineEmptyStateFileDropPosition,
+} from './TimelineEmptyState.js';
 import { DroppedImportProgress, type DroppedImportProgressState } from './DroppedImportProgress.js';
 import { TimelineTrackVisibilityButton } from './TimelineTrackVisibilityButton.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
@@ -86,9 +89,11 @@ import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
 import type { DataLane } from './data-lanes.js';
 import { countLaneItems } from './data-lanes.js';
 import { DataLaneDrawer } from './DataLaneDrawer.js';
-import { polishMediaLabel } from './media-label.js';
+import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
 import {
   buildTimelineMediaImportTransaction,
+  snapTimelineDropTimeUs,
+  type DroppedFilesTarget,
   type TimelineMediaAsset,
 } from './timeline-media-import.js';
 import {
@@ -124,6 +129,18 @@ import { diffAgentTimeline, type AgentPreviewTimeline } from './agent-timeline-p
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
 
+/** History entries name a clip by its media name, never by its id. */
+function clipHistoryName(
+  tracks: readonly { readonly clips: readonly Clip[] }[],
+  clipId: string,
+  assetDisplayNames: Readonly<Record<string, string>> | undefined,
+): string {
+  const clip = tracks.flatMap((track) => track.clips).find((item) => item.id === clipId);
+  const mediaName =
+    clip !== undefined && 'assetId' in clip ? assetDisplayNames?.[clip.assetId] : undefined;
+  return clipNameFromMedia(mediaName, 'clip');
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -146,10 +163,6 @@ function snapSplitUs(
   if (maxUs < minUs) return undefined;
   if (snapped < minUs || snapped > maxUs) return undefined;
   return snapped;
-}
-
-function clipDisplayName(id: string): string {
-  return polishMediaLabel(id);
 }
 
 function TimelineTrackKindIcon({ kind }: { readonly kind: TimelineTrackKind }) {
@@ -295,8 +308,8 @@ function TimelineClip({
   /** Half-gap between adjacent clips; start edge stays flush with timeToPixel. */
   const gapPx = 1;
   const layoutWidthPx = Math.max(6, widthPx - gapPx);
-  const label =
-    displayName?.trim() || clipDisplayName(clip.id.replace(/^voice-/, '').replace(/^clip-/, ''));
+  // The clip's name is its file name without the extension; ids are never shown.
+  const label = clipNameWithoutExtension(displayName ?? '') || 'Clip';
   const durationLabel = `${(displayDurationUs / 1_000_000).toFixed(1)}s`;
   const startLabel = `${(clip.startUs / 1_000_000).toFixed(1)}s`;
   const endLabel = `${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`;
@@ -312,7 +325,7 @@ function TimelineClip({
       tabIndex={0}
       className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}${isDragOver ? ' is-drag-over' : ''}`}
       aria-pressed={selected}
-      aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}, clip ${clip.id}`}
+      aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}`}
       aria-roledescription="timeline clip"
       data-clip-id={clip.id}
       data-element-kind={elementKind}
@@ -461,7 +474,7 @@ function TimelineClip({
             type="button"
             className="timeline-clip-trim timeline-clip-trim-start"
             data-trim-edge="start"
-            aria-label={`Trim start of ${clip.id}`}
+            aria-label={`Trim start of ${label}`}
             aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"
             title="Trim start · Arrow keys nudge 0.1s; Shift nudges 1s"
             onPointerDown={(event) => {
@@ -489,7 +502,7 @@ function TimelineClip({
             type="button"
             className="timeline-clip-trim timeline-clip-trim-end"
             data-trim-edge="end"
-            aria-label={`Trim end of ${clip.id}`}
+            aria-label={`Trim end of ${label}`}
             aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"
             title="Trim end · Arrow keys nudge 0.1s; Shift nudges 1s"
             onPointerDown={(event) => {
@@ -546,6 +559,7 @@ function TimelineRunway({
   family,
   laneWidthPx,
   onDrop,
+  onFilesDrop,
   onActivate,
 }: {
   readonly family: 'visual' | 'audio';
@@ -560,6 +574,7 @@ function TimelineRunway({
     clientX: number,
     rect: DOMRect,
   ) => void;
+  readonly onFilesDrop: (files: readonly File[], clientX: number, rect: DOMRect) => void;
   readonly onActivate: () => void;
 }) {
   return (
@@ -577,11 +592,28 @@ function TimelineRunway({
         onActivate();
       }}
       onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('Files')) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = 'copy';
+          return;
+        }
         if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = 'copy';
       }}
       onDrop={(event) => {
+        if (event.dataTransfer.types.includes('Files') || event.dataTransfer.files.length > 0) {
+          event.preventDefault();
+          event.stopPropagation();
+          const canvas = event.currentTarget.querySelector('.timeline-runway-canvas');
+          onFilesDrop(
+            Array.from(event.dataTransfer.files),
+            event.clientX,
+            canvas?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect(),
+          );
+          return;
+        }
         const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
         if (!raw) return;
         event.preventDefault();
@@ -612,6 +644,12 @@ function TimelineRunway({
       </span>
     </div>
   );
+}
+
+interface TimelineFileDropIndicator {
+  readonly timeUs: number;
+  readonly trackId?: string;
+  readonly newTrack: boolean;
 }
 
 function safeAssetDuration(asset: {
@@ -720,7 +758,7 @@ export function TimelinePanel({
   readonly onDispatchArtifacts?: (transaction: ArtifactTransaction) => void;
   readonly onOpenAssetLibrary?: () => void;
   readonly onImportMedia?: (file: File) => Promise<TimelineMediaAsset>;
-  readonly onImportFiles?: (files: readonly File[]) => void;
+  readonly onImportFiles?: (files: readonly File[], target: DroppedFilesTarget) => void;
   readonly droppedImportProgress?: DroppedImportProgressState;
   readonly onCancelDroppedImport?: () => void;
   readonly onMediaPlaced?: (asset: TimelineMediaAsset, clipId: string) => void;
@@ -771,6 +809,9 @@ export function TimelinePanel({
   const [showAnimatedProperties, setShowAnimatedProperties] = useState(true);
   /** Clip being dragged over by an effect or transition — shows amber highlight. */
   const [dragEffectOverClipId, setDragEffectOverClipId] = useState<string | null>(null);
+  const [fileDropIndicator, setFileDropIndicator] = useState<TimelineFileDropIndicator | undefined>(
+    undefined,
+  );
   // Dockview can remount a clip after its first selection click. Keep the
   // double-click window at the panel level so a composition still opens when
   // the browser reports two independent detail=1 events.
@@ -1022,11 +1063,19 @@ export function TimelinePanel({
     if (Math.abs(next - root.scrollLeft) >= 1) root.scrollLeft = next;
   }, [autoFit, playing, playheadUs, timelineDurationUs, viewport.pixelsPerSecond]);
 
+  // Undo labels and menus name a track by its code (V1, A1), never by its id.
+  const trackCodeFor = (id: string): string => {
+    const shown = tracks.find((track) => track.id === id);
+    return shown === undefined ? 'track' : professionalTrackCode(shown.family, shown.familyIndex);
+  };
+
   const toggle = (id: string, flag: 'locked' | 'muted' | 'solo') => {
+    const toggledTrack = composition.tracks.find((track) => track.id === id);
+    const shownTrack = trackCodeFor(id);
     if (flag === 'locked') {
-      const current = composition.tracks.find((track) => track.id === id)?.locked === true;
+      const current = toggledTrack?.locked === true;
       onDispatch({
-        label: current ? `Unlock ${id}` : `Lock ${id}`,
+        label: current ? `Unlock ${shownTrack}` : `Lock ${shownTrack}`,
         commands: [
           {
             type: 'timeline.setTrackLocked',
@@ -1037,9 +1086,9 @@ export function TimelinePanel({
       return;
     }
     if (flag === 'muted') {
-      const current = composition.tracks.find((track) => track.id === id)?.muted === true;
+      const current = toggledTrack?.muted === true;
       onDispatch({
-        label: current ? `Unmute ${id}` : `Mute ${id}`,
+        label: current ? `Unmute ${shownTrack}` : `Mute ${shownTrack}`,
         commands: [
           {
             type: 'timeline.setTrackMuted',
@@ -1063,8 +1112,9 @@ export function TimelinePanel({
 
   const setVisibility = (id: string, visible: boolean) => {
     if (composition.tracks.find((track) => track.id === id) === undefined) return;
+    const shownCode = trackCodeFor(id);
     onDispatch({
-      label: visible ? `Show ${id}` : `Hide ${id}`,
+      label: visible ? `Show ${shownCode}` : `Hide ${shownCode}`,
       commands: [
         {
           type: 'property.setTrackEnabled',
@@ -1228,12 +1278,37 @@ export function TimelinePanel({
   const canDelete = selected !== undefined && !selectedLocked;
 
   const frameUs = useMemo(() => frameDurationUs(composition.frameRate), [composition.frameRate]);
+  const timelineDropAnchorsUs = useMemo(
+    () => [
+      playheadUs,
+      ...markers.map((marker) => marker.timeUs),
+      ...composition.tracks.flatMap((track) =>
+        track.clips.flatMap((clip) => [clip.startUs, clip.startUs + clip.durationUs]),
+      ),
+    ],
+    [composition.tracks, markers, playheadUs],
+  );
+  const timelineDropTimeAt = useCallback(
+    (clientX: number, rect: DOMRect) => {
+      const pixelsPerSecond = Math.max(1, viewport.pixelsPerSecond);
+      return snapTimelineDropTimeUs({
+        rawTimeUs: pixelToTime(clientX - rect.left, {
+          originUs: 0,
+          pixelsPerSecond,
+        }),
+        anchorsUs: timelineDropAnchorsUs,
+        frameUs,
+        toleranceUs: (8 * 1_000_000) / pixelsPerSecond,
+      });
+    },
+    [frameUs, timelineDropAnchorsUs, viewport.pixelsPerSecond],
+  );
 
   const dispatchSplitAt = useCallback(
     (trackId: string, clipId: string, atUs: number) => {
       if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
       onDispatch({
-        label: `Split ${clipId}`,
+        label: `Split ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
         commands: [
           {
             type: 'timeline.splitClip',
@@ -1248,7 +1323,7 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks, onDispatch],
+    [assetDisplayNames, composition.id, composition.tracks, onDispatch],
   );
 
   const moveClip =
@@ -1350,7 +1425,7 @@ export function TimelinePanel({
       try {
         if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return false;
         onDispatch({
-          label: `Trim ${edge} ${clipId}`,
+          label: `Trim ${edge} ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
           commands: [trimCommand(composition.id, trackId, clipId, edge, timeUs)],
         });
         return true;
@@ -1401,7 +1476,7 @@ export function TimelinePanel({
         clipId,
       );
       onDispatch({
-        label: `Insert ${asset.displayName ?? asset.assetId}`,
+        label: `Insert ${asset.displayName ?? 'media'}`,
         commands: [
           {
             type: 'timeline.insertClip',
@@ -1455,7 +1530,7 @@ export function TimelinePanel({
         clipId,
       );
       onDispatch({
-        label: `Add ${asset.displayName ?? asset.assetId}`,
+        label: `Add ${asset.displayName ?? 'media'}`,
         commands: [
           {
             type: 'timeline.addTrack',
@@ -1529,8 +1604,11 @@ export function TimelinePanel({
   const dispatchDuplicate = (trackId: string, clip: Clip) => {
     const source = composition.tracks.find((t) => t.id === trackId);
     if (source === undefined || source.locked === true) return;
+    // The history entry names the clip by its media name, never by its id.
+    const mediaName = 'assetId' in clip ? assetDisplayNames?.[clip.assetId] : undefined;
+    const clipName = clipNameWithoutExtension(mediaName ?? '') || 'clip';
     onDispatch({
-      label: `Duplicate ${clip.id}`,
+      label: `Duplicate ${clipName}`,
       commands: [
         duplicateClipCommand(
           composition.id,
@@ -1720,7 +1798,7 @@ export function TimelinePanel({
       return;
     }
     onDispatch({
-      label: `Freeze ${clipId}`,
+      label: `Freeze ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
       commands: [
         freezeFrameCommand(
           composition.id,
@@ -1737,7 +1815,7 @@ export function TimelinePanel({
   const dispatchReverse = (trackId: string, clipId: string) => {
     if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
     onDispatch({
-      label: `Reverse ${clipId}`,
+      label: `Reverse ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
       commands: [toggleClipReverseCommand(composition.id, trackId, clipId)],
     });
     showToast?.(
@@ -1784,7 +1862,7 @@ export function TimelinePanel({
     const clip = track?.clips.find((c) => c.id === clipId);
     const fromFreeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
     onDispatch({
-      label: `Speed ${clipId} → ${playbackRate}×`,
+      label: `Speed ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)} → ${playbackRate}×`,
       commands: [
         {
           type: 'timeline.setClipRate',
@@ -2049,15 +2127,111 @@ export function TimelinePanel({
   }, [onDispatch, onImportMedia, onMediaPlaced, onOpenAssetLibrary, playheadUs, showToast]);
 
   const handleFilesDrop = useCallback(
-    (files: readonly File[]) => {
+    (files: readonly File[], position: TimelineEmptyStateFileDropPosition) => {
       if (files.length === 0) return;
       if (onImportFiles !== undefined) {
-        onImportFiles(files);
+        onImportFiles(files, {
+          surface: 'timeline',
+          timeUs: timelineDropTimeAt(position.clientX, position.rect),
+          newTrack: true,
+        });
+        return;
+      }
+      showToast?.('File import is unavailable in this workspace.', 'error');
+    },
+    [onImportFiles, showToast, timelineDropTimeAt],
+  );
+
+  const handleRunwayFilesDrop = useCallback(
+    (files: readonly File[], clientX: number, rect: DOMRect) => {
+      if (files.length === 0) return;
+      if (onImportFiles !== undefined) {
+        onImportFiles(files, {
+          surface: 'timeline',
+          timeUs: timelineDropTimeAt(clientX, rect),
+          newTrack: true,
+        });
+        return;
+      }
+      showToast?.('File import is unavailable in this workspace.', 'error');
+    },
+    [onImportFiles, showToast, timelineDropTimeAt],
+  );
+
+  const deliverFilesDrop = useCallback(
+    (files: readonly File[], target: DroppedFilesTarget) => {
+      if (files.length === 0) return;
+      if (onImportFiles !== undefined) {
+        onImportFiles(files, target);
         return;
       }
       showToast?.('File import is unavailable in this workspace.', 'error');
     },
     [onImportFiles, showToast],
+  );
+
+  const handleBlankTimelineFilesDragOver = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (!event.dataTransfer.types.includes('Files')) return;
+      const target = event.target as HTMLElement;
+      if (
+        target.closest(
+          '.timeline-lane, .timeline-runway, .timeline-empty-state, .timeline-file-new-track-drop',
+        ) !== null
+      )
+        return;
+      const trackRows = Array.from(
+        event.currentTarget.querySelectorAll<HTMLElement>('.timeline-track'),
+      );
+      const lastTrackBottom = Math.max(
+        0,
+        ...trackRows.map((row) => row.getBoundingClientRect().bottom),
+      );
+      if (trackRows.length > 0 && event.clientY < lastTrackBottom) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+      const axis = event.currentTarget.querySelector('.timeline-tracks-grid');
+      const rect = axis?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+      setFileDropIndicator({
+        timeUs: timelineDropTimeAt(event.clientX, rect),
+        newTrack: true,
+      });
+    },
+    [timelineDropTimeAt],
+  );
+
+  const handleBlankTimelineFilesDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (!event.dataTransfer.types.includes('Files') && event.dataTransfer.files.length === 0)
+        return;
+      const target = event.target as HTMLElement;
+      if (
+        target.closest(
+          '.timeline-lane, .timeline-runway, .timeline-empty-state, .timeline-file-new-track-drop',
+        ) !== null
+      )
+        return;
+      const trackRows = Array.from(
+        event.currentTarget.querySelectorAll<HTMLElement>('.timeline-track'),
+      );
+      const lastTrackBottom = Math.max(
+        0,
+        ...trackRows.map((row) => row.getBoundingClientRect().bottom),
+      );
+      if (trackRows.length > 0 && event.clientY < lastTrackBottom) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const axis = event.currentTarget.querySelector('.timeline-tracks-grid');
+      const rect = axis?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+      const timeUs = timelineDropTimeAt(event.clientX, rect);
+      setFileDropIndicator(undefined);
+      deliverFilesDrop(Array.from(event.dataTransfer.files), {
+        surface: 'timeline',
+        timeUs,
+        newTrack: true,
+      });
+    },
+    [deliverFilesDrop, timelineDropTimeAt],
   );
 
   const handleAssetDrop = useCallback(
@@ -2386,6 +2560,13 @@ export function TimelinePanel({
       <div
         className="timeline-tracks"
         ref={scrollRef}
+        onDragOver={handleBlankTimelineFilesDragOver}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+            setFileDropIndicator(undefined);
+          }
+        }}
+        onDrop={handleBlankTimelineFilesDrop}
         onScroll={(event) => setTracksScrollLeft(event.currentTarget.scrollLeft)}
         onWheel={(event) => {
           if (!(event.ctrlKey || event.metaKey)) return;
@@ -2472,6 +2653,7 @@ export function TimelinePanel({
               family="visual"
               laneWidthPx={laneWidthPx}
               onDrop={handleRunwayDrop}
+              onFilesDrop={handleRunwayFilesDrop}
               onActivate={handleAddFromLibrary}
             />
           )}
@@ -2481,12 +2663,9 @@ export function TimelinePanel({
             const trackLabelColor =
               localTrackLabelColors[track.id] ?? trackLabelColors?.[track.id] ?? source.labelColor;
             const kind: TimelineTrackKind = track.family === 'audio' ? 'audio' : 'video';
-            const trackName = professionalTrackName(
-              track.family,
-              track.familyIndex,
-              source.name ?? source.id,
-            );
             const trackCode = professionalTrackCode(track.family, track.familyIndex);
+            // An unnamed track shows its track code (V1, A1), never its id.
+            const trackName = source.name?.trim() ? source.name.trim() : trackCode;
             const startsAudioStack =
               track.family === 'audio' && (index === 0 || visible[index - 1]?.family !== 'audio');
             return (
@@ -2558,7 +2737,7 @@ export function TimelinePanel({
                       () => {},
                       () =>
                         onDispatch({
-                          label: `Remove ${source.name ?? source.id}`,
+                          label: `Remove ${trackName}`,
                           commands: [
                             {
                               type: 'timeline.removeTrack',
@@ -2587,7 +2766,7 @@ export function TimelinePanel({
                     <span className="track-code" dir="ltr">
                       {professionalTrackCode(track.family, track.familyIndex)}
                     </span>
-                    <span className="track-name" dir="ltr" title={track.id}>
+                    <span className="track-name" dir="ltr" title={trackCode}>
                       {trackName}
                     </span>
                     {track.family === 'audio' && (
@@ -2597,28 +2776,30 @@ export function TimelinePanel({
                       >
                         <span
                           className={`audio-dsp-pill dsp-dfn ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
-                          title="DeepFilterNet (DFN) Active"
+                          title="Noise reduction (DeepFilterNet) active"
+                          aria-label="Noise reduction (DeepFilterNet) active"
                         >
-                          DFN
+                          Noise reduction
                         </span>
                         <span
                           className={`audio-dsp-pill dsp-norm ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
-                          title="Volume Normalization (NORM) Active"
+                          title="Loudness normalization (EBU R128) active"
+                          aria-label="Loudness normalization (EBU R128) active"
                         >
-                          NORM
+                          Loudness
                         </span>
                       </div>
                     )}
                   </div>
                   <div
                     className="timeline-track-controls"
-                    aria-label={`${track.id} track controls`}
+                    aria-label={`${trackCode} track controls`}
                   >
                     <button
                       type="button"
                       className="timeline-track-kind-icon timeline-track-kind-button"
                       title="Change track color"
-                      aria-label={`Change label color for ${source.name ?? source.id}`}
+                      aria-label={`Change label color for ${trackName}`}
                       aria-haspopup="menu"
                       aria-expanded={colorMenuTrackId === track.id}
                       onClick={(event) => {
@@ -2634,14 +2815,14 @@ export function TimelinePanel({
                       type="button"
                       className="icon-button"
                       aria-pressed={track.locked}
-                      aria-label={`Lock ${track.id}`}
+                      aria-label={`Lock ${trackCode}`}
                       title={track.locked ? 'Unlock track' : 'Lock track'}
                       onClick={() => toggle(track.id, 'locked')}
                     >
                       <LockIcon />
                     </button>
                     <TimelineTrackVisibilityButton
-                      trackId={track.id}
+                      trackLabel={trackCode}
                       visible={track.visible}
                       onToggle={(visible) => setVisibility(track.id, visible)}
                     />
@@ -2649,7 +2830,7 @@ export function TimelinePanel({
                       type="button"
                       className="icon-button"
                       aria-pressed={track.muted === true}
-                      aria-label={`${track.muted ? 'Unmute' : 'Mute'} ${track.id}`}
+                      aria-label={`${track.muted ? 'Unmute' : 'Mute'} ${trackCode}`}
                       title={track.muted ? 'Unmute track' : 'Mute track'}
                       onClick={() => toggle(track.id, 'muted')}
                     >
@@ -2659,7 +2840,7 @@ export function TimelinePanel({
                       type="button"
                       className="icon-button"
                       aria-pressed={track.solo}
-                      aria-label={`Solo ${track.id}`}
+                      aria-label={`Solo ${trackCode}`}
                       title={track.solo ? 'Unsolo track' : 'Solo track'}
                       onClick={() => toggle(track.id, 'solo')}
                     >
@@ -2674,7 +2855,7 @@ export function TimelinePanel({
                             [track.id]: labelColor,
                           }));
                           onDispatch({
-                            label: `Color ${source.name ?? source.id}`,
+                            label: `Color ${trackName}`,
                             commands: [
                               {
                                 type: 'timeline.setTrackLabelColor',
@@ -2697,9 +2878,9 @@ export function TimelinePanel({
                   data-track-id={track.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={`Insert media on ${track.id} track`}
+                  aria-label={`Insert media on ${trackCode} track`}
                   aria-keyshortcuts="Enter Space"
-                  title={`Insert media on ${track.id} track (Enter or Space)`}
+                  title={`Insert media on ${trackCode} track (Enter or Space)`}
                   style={{ minWidth: `${laneWidthPx}px` }}
                   onKeyDown={(event) => {
                     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -2754,6 +2935,18 @@ export function TimelinePanel({
                   onPointerUp={(event) => endMarquee(event)}
                   onPointerCancel={(event) => endMarquee(event, true)}
                   onDragOver={(event) => {
+                    if (event.dataTransfer.types.includes('Files')) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      event.dataTransfer.dropEffect = track.locked ? 'none' : 'copy';
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      setFileDropIndicator({
+                        trackId: track.id,
+                        timeUs: timelineDropTimeAt(event.clientX, rect),
+                        newTrack: false,
+                      });
+                      return;
+                    }
                     if (
                       !event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND) &&
                       !event.dataTransfer.types.includes('application/x-joy-effect') &&
@@ -2773,10 +2966,38 @@ export function TimelinePanel({
                     );
                     setDragEffectOverClipId(hitClip?.id ?? null);
                   }}
-                  onDragLeave={() => {
+                  onDragLeave={(event) => {
                     setDragEffectOverClipId(null);
+                    if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+                      setFileDropIndicator((current) =>
+                        current?.trackId === track.id ? undefined : current,
+                      );
+                    }
                   }}
                   onDrop={(event) => {
+                    if (
+                      event.dataTransfer.types.includes('Files') ||
+                      event.dataTransfer.files.length > 0
+                    ) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setFileDropIndicator(undefined);
+                      if (track.locked) {
+                        showToast?.(
+                          'This track is locked. Unlock it before dropping files.',
+                          'info',
+                        );
+                        return;
+                      }
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      deliverFilesDrop(Array.from(event.dataTransfer.files), {
+                        surface: 'timeline',
+                        timeUs: timelineDropTimeAt(event.clientX, rect),
+                        trackId: track.id,
+                        newTrack: false,
+                      });
+                      return;
+                    }
                     event.preventDefault();
                     if (track.locked) return;
                     setDragEffectOverClipId(null);
@@ -2888,6 +3109,15 @@ export function TimelinePanel({
                       viewport={{ ...viewport, originUs: 0 }}
                     />
                   ))}
+                  {fileDropIndicator?.trackId === track.id && (
+                    <span
+                      className="timeline-file-drop-indicator"
+                      style={{
+                        left: `${timeToPixel(fileDropIndicator.timeUs, { ...viewport, originUs: 0 })}px`,
+                      }}
+                      aria-hidden="true"
+                    />
+                  )}
                   {index === 0 &&
                     markers.map((marker) => {
                       const selected = selectedMarkerId === marker.id;
@@ -2938,7 +3168,8 @@ export function TimelinePanel({
                       key={clip.id}
                       clip={clip}
                       elementKind={timelineElementKindForClip(clip, elementKinds)}
-                      {...(clip.kind === 'video' && assetDisplayNames?.[clip.assetId] !== undefined
+                      {...(clip.kind !== 'composition' &&
+                      assetDisplayNames?.[clip.assetId] !== undefined
                         ? { displayName: assetDisplayNames[clip.assetId] }
                         : {})}
                       selected={selectedIds.includes(clip.id)}
@@ -2998,8 +3229,60 @@ export function TimelinePanel({
               family="audio"
               laneWidthPx={laneWidthPx}
               onDrop={handleRunwayDrop}
+              onFilesDrop={handleRunwayFilesDrop}
               onActivate={handleAddFromLibrary}
             />
+          )}
+
+          {fileDropIndicator?.newTrack && (
+            <div
+              className="timeline-file-new-track-drop"
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes('Files')) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = 'copy';
+                const axis = event.currentTarget
+                  .closest('.timeline-tracks-inner')
+                  ?.querySelector('.timeline-tracks-grid');
+                const rect =
+                  axis?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+                setFileDropIndicator({
+                  timeUs: timelineDropTimeAt(event.clientX, rect),
+                  newTrack: true,
+                });
+              }}
+              onDrop={(event) => {
+                if (
+                  !event.dataTransfer.types.includes('Files') &&
+                  event.dataTransfer.files.length === 0
+                )
+                  return;
+                event.preventDefault();
+                event.stopPropagation();
+                const axis = event.currentTarget
+                  .closest('.timeline-tracks-inner')
+                  ?.querySelector('.timeline-tracks-grid');
+                const rect =
+                  axis?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+                const timeUs = timelineDropTimeAt(event.clientX, rect);
+                setFileDropIndicator(undefined);
+                deliverFilesDrop(Array.from(event.dataTransfer.files), {
+                  surface: 'timeline',
+                  timeUs,
+                  newTrack: true,
+                });
+              }}
+            >
+              Drop files to create a new track
+              <span
+                className="timeline-file-drop-indicator"
+                style={{
+                  left: `${timeToPixel(fileDropIndicator.timeUs, { ...viewport, originUs: 0 })}px`,
+                }}
+                aria-hidden="true"
+              />
+            </div>
           )}
 
           {selectedObject !== undefined && onPropertyDispatch !== undefined && (
