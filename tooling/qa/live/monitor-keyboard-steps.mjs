@@ -83,7 +83,17 @@ export async function keyboardOnly(page, { clipId }) {
   );
   if (stillOnStage) throw new Error('Esc did not leave the Monitor picture');
 
-  return `Tab reached the picture after ${presses} presses; arrow, Shift, Alt scale, ] rotate and Esc all worked without the mouse`;
+  // Shift+Tab at the first element lets focus leave the picture (it does not trap focus).
+  await focusStage(page);
+  await page.keyboard.press('Shift+Tab');
+  const leftByShiftTab = !(await page.evaluate(
+    (selector) => document.activeElement?.matches(selector) === true,
+    STAGE,
+  ));
+  if (!leftByShiftTab)
+    throw new Error('Shift+Tab at the first element trapped focus in the picture');
+
+  return `Tab reached the picture after ${presses} presses; arrow, Shift, Alt scale, ] rotate, Esc and Shift+Tab at the ends all worked without the mouse`;
 }
 
 export const MONITOR_KEYBOARD_CASES = {
