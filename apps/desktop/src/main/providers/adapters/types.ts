@@ -5,7 +5,7 @@ export const JOY_TITLE_HEADER = 'x-title';
 export const JOY_TITLE = 'JOY Media';
 
 export interface PreparedCall {
-  readonly method: 'GET' | 'POST';
+  readonly method: 'GET' | 'POST' | 'DELETE';
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: string | undefined;
