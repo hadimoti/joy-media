@@ -47,7 +47,18 @@ import {
   setJoyCodeConversationStatus,
   type JoyCodeConversation,
 } from './joy-code-conversation.js';
-import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
+import {
+  CheckIcon,
+  CloseIcon,
+  ColorAdjustIcon,
+  EnhanceIcon,
+  GearIcon,
+  ListIcon,
+  PlayIcon,
+  PlusIcon,
+  SaveIcon,
+  UndoIcon,
+} from './icons.js';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
@@ -3379,7 +3390,7 @@ export function AgentPanel({
               onClick={() => setComposerCapability('creative-brief')}
             >
               <span className="joy-code-capability-spark" aria-hidden="true">
-                ✦
+                <EnhanceIcon />
               </span>
               Creative Brief
               {creativeBriefContext !== undefined && (
@@ -3393,7 +3404,7 @@ export function AgentPanel({
               onClick={() => setComposerCapability('recipes')}
             >
               <span className="joy-code-capability-spark" aria-hidden="true">
-                ☰
+                <ListIcon />
               </span>
               Recipes
             </button>
@@ -3404,7 +3415,7 @@ export function AgentPanel({
               onClick={() => setComposerCapability('looks')}
             >
               <span className="joy-code-capability-spark" aria-hidden="true">
-                ◑
+                <ColorAdjustIcon />
               </span>
               Looks
             </button>
@@ -3417,7 +3428,7 @@ export function AgentPanel({
                 title="Joy Code Settings"
                 onClick={onOpenSettings}
               >
-                ⚙️
+                <GearIcon />
               </button>
             )}
           </div>
@@ -3425,7 +3436,10 @@ export function AgentPanel({
             <section className="joy-code-brief-artifact" aria-label="Attached Creative Brief">
               <div className="joy-code-brief-artifact-copy">
                 <span className="joy-code-brief-artifact-kicker">
-                  <span aria-hidden="true">✦</span> Creative Brief attached
+                  <span aria-hidden="true">
+                    <EnhanceIcon />
+                  </span>{' '}
+                  Creative Brief attached
                 </span>
                 <strong>{creativeBriefContext.request}</strong>
                 <span>

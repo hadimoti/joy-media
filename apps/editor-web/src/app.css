@@ -6327,22 +6327,20 @@ label {
   border-radius: 50%;
 }
 
-.ms-image-icon {
-  display: block;
-  width: 12px;
-  height: 12px;
-  background: currentColor;
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpath d='M21 15l-5-5L5 21'/%3E%3C/svg%3E");
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpath d='M21 15l-5-5L5 21'/%3E%3C/svg%3E");
-}
-
+/* The context menu glyphs come from the shared outline set (T-D09). */
+.ms-image-icon,
 .ms-video-icon {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 12px;
   height: 12px;
-  background: currentColor;
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpolygon points='23 7 16 12 23 17 23 7'/%3E%3Crect x='1' y='5' width='15' height='14' rx='2'/%3E%3C/svg%3E");
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpolygon points='23 7 16 12 23 17 23 7'/%3E%3Crect x='1' y='5' width='15' height='14' rx='2'/%3E%3C/svg%3E");
+  color: inherit;
+}
+.ms-image-icon svg,
+.ms-video-icon svg {
+  width: 12px;
+  height: 12px;
 }
 
 /* Inspector */
@@ -7118,13 +7116,24 @@ label {
   pointer-events: none;
 }
 .asset-card-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 1.35rem;
   line-height: 1;
   opacity: 0.55;
   user-select: none;
 }
+.asset-card-placeholder svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
 .asset-card-media--video .asset-card-placeholder {
   font-size: 1.1rem;
+}
+.asset-card-media--video .asset-card-placeholder svg {
+  width: 1.1rem;
+  height: 1.1rem;
 }
 .asset-grid--large .asset-card-media {
   height: 7.5rem;
@@ -8776,9 +8785,15 @@ label {
   outline-offset: 2px;
 }
 .joy-code-capability-spark {
+  display: inline-flex;
+  align-items: center;
   color: var(--joy-gold, #f5b82e);
   font-size: 0.88rem;
   line-height: 1;
+}
+.joy-code-capability-spark svg {
+  width: 0.9rem;
+  height: 0.9rem;
 }
 .joy-code-capability-dot {
   width: 0.35rem;
@@ -11415,6 +11430,10 @@ label {
 }
 .effect-card-cost[data-cost='high'] {
   font-size: var(--joy-type-xs);
+}
+.effect-card-cost svg {
+  width: 0.85rem;
+  height: 0.85rem;
 }
 .effect-card-cost[data-cost='medium'] {
   font-size: var(--joy-type-xs);
@@ -18617,6 +18636,10 @@ label {
   color: var(--joy-bg-elevated);
   font-size: var(--joy-type-xs);
   font-weight: 800;
+}
+.agent-settings-notice-icon svg {
+  width: 0.7rem;
+  height: 0.7rem;
 }
 .agent-settings-notice.is-success {
   border-color: color-mix(in srgb, var(--joy-ok) 48%, var(--joy-border));

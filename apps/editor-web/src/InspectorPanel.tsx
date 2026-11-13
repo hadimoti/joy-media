@@ -30,6 +30,8 @@ import {
 } from '@joy-media/motion-core';
 import type { KeyframeInterpolationV1 } from '@joy-media/project-schema';
 import {
+  ChevronDownIcon,
+  ChevronUpIcon,
   InterpBezierIcon,
   InterpEasedIcon,
   InterpHoldIcon,
@@ -1122,7 +1124,7 @@ export function EffectsSection({
                         );
                       }}
                     >
-                      ↑
+                      <ChevronUpIcon />
                     </button>
                     <button
                       type="button"
@@ -1136,7 +1138,7 @@ export function EffectsSection({
                         );
                       }}
                     >
-                      ↓
+                      <ChevronDownIcon />
                     </button>
                     <button
                       type="button"

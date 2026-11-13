@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CloseIcon, RefreshIcon } from './icons.js';
+import { CheckIcon, CloseIcon, InfoIcon, RefreshIcon, WarningIcon } from './icons.js';
 import {
   isDesktopHost,
   getDesktopAssetLibrarySettings,
@@ -265,7 +265,13 @@ export function AssetLibrarySettingsDialog({
                   aria-live="polite"
                 >
                   <span className="agent-settings-notice-icon" aria-hidden="true">
-                    {notice.kind === 'success' ? '✓' : notice.kind === 'error' ? '!' : 'i'}
+                    {notice.kind === 'success' ? (
+                      <CheckIcon />
+                    ) : notice.kind === 'error' ? (
+                      <WarningIcon />
+                    ) : (
+                      <InfoIcon />
+                    )}
                   </span>
                   <span>{notice.message}</span>
                 </div>

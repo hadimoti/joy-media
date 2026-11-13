@@ -18,7 +18,7 @@ import {
 } from '@joy-media/visual-effects';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
-import { LayersIcon, PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
+import { BoltIcon, LayersIcon, PlusIcon, StarFilledIcon, StarIcon, WarningIcon } from './icons.js';
 import { effectCategoryIconUrl } from './effect-category-icons.js';
 import { EditorPanelContext } from './editor-panel-context.js';
 import { EffectPreviewMedia } from './EffectPreviewMedia.js';
@@ -454,7 +454,7 @@ function EffectCard({
         <div className="effect-card-icon">
           {descriptor.cost !== 'low' && (
             <span className="effect-card-cost" data-cost={descriptor.cost}>
-              {descriptor.cost === 'high' ? '⚠' : '⚡'}
+              {descriptor.cost === 'high' ? <WarningIcon /> : <BoltIcon />}
             </span>
           )}
           <span className="effect-card-label">{descriptor.label}</span>

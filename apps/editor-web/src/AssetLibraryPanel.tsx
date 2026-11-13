@@ -36,7 +36,10 @@ import {
   useReleasableObjectUrl,
 } from './media-object-url.js';
 import {
+  AudioIcon,
   CloseIcon,
+  ImageIcon,
+  PlayIcon,
   PlusIcon,
   RefreshIcon,
   AiEffectIcon,
@@ -1451,7 +1454,13 @@ function AssetCardMedia({
         <img src={url} alt="" loading="lazy" decoding="async" />
       ) : (
         <span className="asset-card-placeholder" aria-hidden>
-          {asset.kind === 'video' ? '▶' : asset.kind === 'audio' ? '♪' : '▣'}
+          {asset.kind === 'video' ? (
+            <PlayIcon />
+          ) : asset.kind === 'audio' ? (
+            <AudioIcon />
+          ) : (
+            <ImageIcon />
+          )}
         </span>
       )}
     </button>
