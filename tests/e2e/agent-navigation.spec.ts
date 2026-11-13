@@ -11,6 +11,20 @@ test.describe('JOY Agent navigation', () => {
     await assertBrowserAudit(page, testInfo);
   });
 
+  test('keeps Joy Code out of the dock on the very first run', async ({ page }) => {
+    await authenticate(page);
+    await openReferenceWorkspace(page);
+
+    // Joy Code is optional: the first run does not reserve a column for it.
+    await expect(page.locator('.panel-tab[aria-label="Joy Code"]')).toHaveCount(0);
+
+    // It opens on demand and gets a column of its own.
+    await page.getByRole('button', { name: 'View', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Joy Code', exact: true }).click();
+    const tab = page.locator('.panel-tab[aria-label="Joy Code"]').first();
+    await expect(tab).toBeVisible();
+  });
+
   test('removes the redundant capability heading', async ({ page }) => {
     await authenticate(page);
     await openReferenceWorkspace(page);
@@ -68,17 +82,21 @@ test.describe('JOY Agent navigation', () => {
 
     const readiness = page.getByRole('status', { name: 'Edit readiness' });
     await expect(readiness).toBeVisible();
-    await expect(readiness).toContainText('Connect a model with JOY edit tools');
+    await expect(readiness).toContainText(
+      'Joy Code is optional. Connect your own AI model to edit by describing what you want.',
+    );
+    // One calm card: the engineer wording is gone.
+    await expect(readiness).not.toContainText('Connect a model with JOY edit tools');
     const dimensions = await readiness.evaluate((element) => ({
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
     }));
     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
-    await readiness.getByRole('button', { name: 'Open JOY Agent Settings' }).click();
+    await readiness.getByRole('button', { name: 'Connect a model' }).click();
     await expect(page.getByRole('dialog', { name: 'Joy Code Settings' })).toBeVisible();
   });
 
-  test('keeps the Edit prerequisite visible in a disconnected conversation', async ({ page }) => {
+  test('keeps one message when a disconnected conversation asks for an edit', async ({ page }) => {
     await authenticate(page);
     await openReferenceWorkspace(page);
     await openPanel(page, 'Joy Code');
@@ -87,13 +105,12 @@ test.describe('JOY Agent navigation', () => {
     await composer.fill('Make this edit more cinematic');
     await composer.press('Enter');
 
-    await expect(page.locator('.joy-code-message.is-assistant').last()).toContainText(
-      'Connect a model with JOY edit tools',
-    );
+    // The card is the one message: the chat does not repeat it.
+    await expect(page.locator('.joy-code-message.is-assistant')).toHaveCount(0);
     await expect(page.getByRole('status', { name: 'Edit readiness' })).toBeVisible();
   });
 
-  test('explains the Recipes model prerequisite and blocks runs while disconnected', async ({
+  test('explains the Recipes model prerequisite and hides runs while disconnected', async ({
     page,
   }) => {
     await authenticate(page);
@@ -105,14 +122,13 @@ test.describe('JOY Agent navigation', () => {
 
     const readiness = page.getByRole('status', { name: 'Recipes readiness' });
     await expect(readiness).toBeVisible();
-    await expect(readiness).toContainText('Connect a model with JOY edit tools');
-    await expect(readiness.getByRole('button', { name: 'Open JOY Agent Settings' })).toBeVisible();
+    await expect(readiness).toContainText('Joy Code is optional.');
+    await expect(readiness.getByRole('button', { name: 'Connect a model' })).toBeVisible();
 
-    const runButtons = page.getByRole('button', { name: /^Run / });
-    expect(await runButtons.count()).toBeGreaterThan(0);
-    for (const runButton of await runButtons.all()) await expect(runButton).toBeDisabled();
+    // Recipe runs stay hidden until a model is connected.
+    await expect(page.getByRole('button', { name: /^Run / })).toHaveCount(0);
 
-    await readiness.getByRole('button', { name: 'Open JOY Agent Settings' }).click();
+    await readiness.getByRole('button', { name: 'Connect a model' }).click();
     await expect(page.getByRole('dialog', { name: 'Joy Code Settings' })).toBeVisible();
   });
 
@@ -126,16 +142,17 @@ test.describe('JOY Agent navigation', () => {
 
     const readiness = page.getByRole('status', { name: 'Looks readiness' });
     await expect(readiness).toBeVisible();
-    await expect(readiness).toContainText('Ask JOY for Looks needs a model with JOY edit tools');
-    await expect(readiness.getByRole('button', { name: 'Open JOY Agent Settings' })).toBeVisible();
+    await expect(readiness).toContainText('Joy Code is optional.');
+    await expect(readiness.getByRole('button', { name: 'Connect a model' })).toBeVisible();
 
     const looks = page.getByRole('region', { name: 'Living Looks' });
     await expect(looks).toBeVisible();
     await expect(looks.getByRole('tab', { name: 'Browse', exact: true })).toBeVisible();
     await expect(looks.getByRole('tab', { name: 'Configure', exact: true })).toBeVisible();
+    // Ask JOY needs a model; a manual Look does not.
     await expect(looks.getByRole('button', { name: 'Ask JOY', exact: true })).toHaveCount(0);
 
-    await readiness.getByRole('button', { name: 'Open JOY Agent Settings' }).click();
+    await readiness.getByRole('button', { name: 'Connect a model' }).click();
     await expect(page.getByRole('dialog', { name: 'Joy Code Settings' })).toBeVisible();
   });
 

@@ -1,5 +1,51 @@
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { workspacePresetLayout } from './workspace-presets.js';
+import { dockLayoutKey, verticalDockLayout } from './dock-layout.js';
+import {
+  firstRunWorkspaceLayout,
+  planWorkspaceLayout,
+  persistWorkspacePresetLayout,
+  workspacePresetLayoutKey,
+  workspacePresetLayout,
+} from './workspace-presets.js';
+import { PANEL_IDS } from './workspace.js';
+
+function leafIds(layout: unknown): string[] {
+  const ids: string[] = [];
+  const visit = (value: unknown): void => {
+    if (value === null || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    if (record.type === 'leaf' && record.data && typeof record.data === 'object') {
+      const data = record.data as Record<string, unknown>;
+      if (typeof data.id === 'string') ids.push(data.id);
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(layout);
+  return ids;
+}
+
+function memoryStorage(initial: Record<string, string> = {}) {
+  const map = new Map(Object.entries(initial));
+  return {
+    getItem(key: string) {
+      return map.has(key) ? map.get(key)! : null;
+    },
+    setItem(key: string, value: string) {
+      map.set(key, value);
+    },
+    removeItem(key: string) {
+      map.delete(key);
+    },
+    entries() {
+      return [...map.entries()];
+    },
+  };
+}
 
 function leafViews(layout: unknown, id: string): string[] {
   const views: string[] = [];
@@ -45,5 +91,179 @@ describe('workspace presets', () => {
     const layout = workspacePresetLayout(preset, 'vertical');
     expect(leafViews(layout, 'context')).toContain(requestedView);
     expect((layout as { grid: { root: unknown } }).grid.root).toBeDefined();
+  });
+});
+
+describe('first-run layout', () => {
+  it('leaves Joy Code out of the dock on the very first run', () => {
+    const cases = [
+      ['vertical', 'monitor-col'],
+      ['widescreen', 'monitor-row'],
+    ] as const;
+    for (const [mode, monitorGroup] of cases) {
+      const layout = firstRunWorkspaceLayout('edit', mode);
+
+      expect(leafIds(layout)).not.toContain('agent-col');
+      // Every panel stays registered, so "Open Joy Code" can still bring it back.
+      expect(Object.keys((layout as { panels: Record<string, unknown> }).panels).sort()).toEqual(
+        [...PANEL_IDS].sort(),
+      );
+      expect(leafIds(layout)).toContain(monitorGroup);
+    }
+  });
+
+  it('keeps Joy Code in the Automate workspace, which is about Joy Code', () => {
+    expect(leafIds(firstRunWorkspaceLayout('automate', 'vertical'))).toContain('agent-col');
+  });
+
+  it('lets a saved layout win over the first-run collapse', () => {
+    const saved = JSON.stringify(verticalDockLayout());
+    const storage = memoryStorage({ [dockLayoutKey('vertical')]: saved });
+
+    const plan = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(plan.restored).toBe(true);
+    expect(plan.key).toBe(dockLayoutKey('vertical'));
+    expect(leafIds(plan.layout)).toContain('agent-col');
+    // The saved layout fixture is untouched.
+    expect(storage.getItem(dockLayoutKey('vertical'))).toBe(saved);
+  });
+
+  it('uses the collapsed first-run layout when nothing is saved', () => {
+    const storage = memoryStorage();
+
+    const plan = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(plan.restored).toBe(false);
+    expect(plan.key).toBe(dockLayoutKey('vertical'));
+    expect(leafIds(plan.layout)).not.toContain('agent-col');
+  });
+
+  it('drops a saved layout it cannot read and falls back to the first run', () => {
+    const storage = memoryStorage({ [dockLayoutKey('vertical')]: '{not json' });
+
+    const plan = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(plan.restored).toBe(false);
+    expect(storage.getItem(dockLayoutKey('vertical'))).toBeNull();
+    expect(leafIds(plan.layout)).not.toContain('agent-col');
+  });
+});
+
+describe('workspace preset layout persistence', () => {
+  it('keeps each preset and view mode in its own storage slot', () => {
+    const storage = memoryStorage();
+    const editVertical = '{"layoutMarker":"saved edit vertical"}';
+    const automateVertical = '{"layoutMarker":"saved automate vertical"}';
+    const automateWidescreen = '{"layoutMarker":"saved automate widescreen"}';
+
+    storage.setItem(workspacePresetLayoutKey('vertical', 'edit'), editVertical);
+    storage.setItem(workspacePresetLayoutKey('vertical', 'automate'), automateVertical);
+    storage.setItem(workspacePresetLayoutKey('widescreen', 'automate'), automateWidescreen);
+
+    expect(workspacePresetLayoutKey('vertical', 'edit')).toBe('joy-media.dockview.vertical.v12');
+    expect(storage.getItem('joy-media.dockview.vertical.v12')).toBe(editVertical);
+    expect(storage.getItem('joy-media.workspace.automate.vertical.v2')).toBe(automateVertical);
+    expect(storage.getItem('joy-media.workspace.automate.widescreen.v2')).toBe(automateWidescreen);
+    expect(
+      (planWorkspaceLayout(storage, 'edit', 'vertical').layout as { layoutMarker: string })
+        .layoutMarker,
+    ).toBe('saved edit vertical');
+    expect(
+      (planWorkspaceLayout(storage, 'automate', 'vertical').layout as { layoutMarker: string })
+        .layoutMarker,
+    ).toBe('saved automate vertical');
+    expect(
+      (planWorkspaceLayout(storage, 'automate', 'widescreen').layout as { layoutMarker: string })
+        .layoutMarker,
+    ).toBe('saved automate widescreen');
+  });
+
+  it('keeps the collapsed first-run Edit layout after visiting Automate', () => {
+    const storage = memoryStorage();
+    const firstEdit = planWorkspaceLayout(storage, 'edit', 'vertical');
+    expect(firstEdit.key).toBe(workspacePresetLayoutKey('vertical', 'edit'));
+    storage.setItem(firstEdit.key, JSON.stringify(firstEdit.layout));
+
+    const automate = planWorkspaceLayout(storage, 'automate', 'vertical');
+    storage.setItem(
+      workspacePresetLayoutKey('vertical', 'automate'),
+      JSON.stringify(automate.layout),
+    );
+
+    const editAfterAutomate = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(editAfterAutomate.restored).toBe(true);
+    expect(leafIds(editAfterAutomate.layout)).not.toContain('agent-col');
+  });
+
+  it('never changes a saved Edit layout while Automate is active', () => {
+    const storage = memoryStorage();
+    const savedEdit = JSON.stringify(verticalDockLayout());
+    const editKey = workspacePresetLayoutKey('vertical', 'edit');
+    storage.setItem(editKey, savedEdit);
+
+    storage.setItem(
+      workspacePresetLayoutKey('vertical', 'automate'),
+      JSON.stringify(workspacePresetLayout('automate', 'vertical')),
+    );
+
+    expect(storage.getItem(editKey)).toBe(savedEdit);
+    const edit = planWorkspaceLayout(storage, 'edit', 'vertical');
+    expect(edit.key).toBe(editKey);
+    expect(edit.restored).toBe(true);
+    expect(leafIds(edit.layout)).toContain('agent-col');
+  });
+
+  it('keeps the saved Edit layout byte-for-byte intact while Automate persists its layout', () => {
+    const storage = memoryStorage();
+    const editKey = workspacePresetLayoutKey('vertical', 'edit');
+    const automateKey = workspacePresetLayoutKey('vertical', 'automate');
+    const savedEdit = JSON.stringify(firstRunWorkspaceLayout('edit', 'vertical'));
+    storage.setItem(editKey, savedEdit);
+
+    const changedAutomateLayout = {
+      ...(workspacePresetLayout('automate', 'vertical') as Record<string, unknown>),
+      layoutMarker: 'automate layout changed',
+    };
+    persistWorkspacePresetLayout(storage, 'automate', 'vertical', changedAutomateLayout);
+
+    expect(storage.getItem(editKey)).toBe(savedEdit);
+    expect(
+      storage
+        .entries()
+        .map(([key]) => key)
+        .sort(),
+    ).toEqual([editKey, automateKey].sort());
+    expect(JSON.parse(storage.getItem(automateKey) ?? 'null').layoutMarker).toBe(
+      'automate layout changed',
+    );
+
+    const editAfterAutomate = planWorkspaceLayout(storage, 'edit', 'vertical');
+    expect(editAfterAutomate.restored).toBe(true);
+    expect(leafIds(editAfterAutomate.layout)).not.toContain('agent-col');
+    expect(storage.getItem(editKey)).toBe(savedEdit);
+  });
+
+  it('routes App layout-change and view-mode saves through preset-aware persistence', async () => {
+    const appSource = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
+    const switchStart = appSource.indexOf('const switchEditorView = useCallback');
+    const switchEnd = appSource.indexOf('const recordExportEntry = useCallback', switchStart);
+    const layoutListenerStart = appSource.indexOf('const persistDockLayout = () =>');
+    const layoutListenerEnd = appSource.indexOf(
+      'event.api.onDidLayoutChange(persistDockLayout)',
+      layoutListenerStart,
+    );
+
+    expect(switchStart).toBeGreaterThanOrEqual(0);
+    expect(switchEnd).toBeGreaterThan(switchStart);
+    expect(layoutListenerStart).toBeGreaterThanOrEqual(0);
+    expect(layoutListenerEnd).toBeGreaterThan(layoutListenerStart);
+    expect(appSource.slice(switchStart, switchEnd)).toMatch(
+      /persistWorkspacePresetLayout\(\s*storage,\s*workspacePresetRef\.current,\s*current,\s*api\.toJSON\(\),?\s*\)/,
+    );
+    expect(appSource.slice(layoutListenerStart, layoutListenerEnd)).toMatch(
+      /persistWorkspacePresetLayout\(\s*storage,\s*workspacePresetRef\.current,\s*viewModeRef\.current,\s*event\.api\.toJSON\(\),?\s*\)/,
+    );
   });
 });
