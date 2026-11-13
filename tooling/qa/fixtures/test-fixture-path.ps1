@@ -31,9 +31,12 @@ function Assert-Accepted {
 }
 
 # Refused: a folder that belongs to the owner, a path that escapes with .., a sibling with the same prefix.
-Assert-Refused 'C:\Users\HadiMoti\Documents' 'owner documents'
-Assert-Refused 'C:\Users\HadiMoti\joy-media-assets' 'owner library'
-Assert-Refused 'C:\jgp\v111\fixtures\..\..\Users\HadiMoti\Documents' 'dot-dot escape from the fixture folder'
+# The owner's folders come from the profile at run time, never as literal paths in the repository.
+Assert-Refused (Join-Path $env:USERPROFILE 'Documents') 'owner documents'
+Assert-Refused (Join-Path $env:USERPROFILE 'joy-media-assets') 'owner library'
+# Three .. from C:\jgp\v111\fixtures reach C:\, then the profile's own path.
+$profilePath = Split-Path -Path $env:USERPROFILE -NoQualifier
+Assert-Refused ('C:\jgp\v111\fixtures\..\..\..' + $profilePath + '\Documents') 'dot-dot escape from the fixture folder'
 Assert-Refused 'C:\jgp\v111\fixtures\..\..\..\Windows' 'dot-dot escape to the system folder'
 Assert-Refused 'C:\jgp\v111\fixtures-evil' 'sibling with the same prefix'
 Assert-Refused 'C:\jgp\v111\fixtures-evil\x' 'child of a sibling with the same prefix'
