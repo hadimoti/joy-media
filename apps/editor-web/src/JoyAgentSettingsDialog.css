@@ -1,95 +1,72 @@
-/* Joy Code Settings Dialog - Professional Two-Pane Accordion Workspace */
+/* Joy Code Settings (T-P06).
+ *
+ * The dialog sits on the app's shared dialog frame — the same `agent-settings-*`
+ * classes the Asset Library Storage dialog uses — so it reads as part of the
+ * editor instead of a private navy screen. Every colour here comes from a
+ * `--joy-*` token in app.css: no hex, no rgba(), no navy and no blue.
+ */
 
-.joy-agent-settings-dialog-v2 {
-  display: flex;
-  flex-direction: column;
-  width: min(1040px, calc(100vw - 40px));
-  height: min(720px, calc(100vh - 40px));
-  max-height: 760px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  background: #121316;
-  box-shadow:
-    0 24px 80px rgba(0, 0, 0, 0.75),
-    0 0 0 1px rgba(255, 176, 32, 0.12);
-  color: #e6e6e6;
-  font-family: inherit;
+/* ─── The frame ─────────────────────────────────────────────────────────── */
+
+/* The dialog box, the header and the footer come from `.agent-settings-dialog`
+   in app.css. This widens the frame for the two-pane layout. The class is
+   doubled up so the dialog's own width wins whatever order the two
+   stylesheets land in. */
+.agent-settings-dialog.joy-agent-settings-dialog {
+  width: min(1040px, calc(100vw - 48px));
+  height: min(720px, calc(100vh - 48px));
+  max-height: min(760px, calc(100vh - 48px));
 }
 
-/* Header */
+/* Header: title, one-line description, close. */
 .joy-agent-settings-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  background: #17181e;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 16px;
 }
 
 .joy-agent-settings-header-title {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
-.joy-settings-logo-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: rgba(255, 176, 32, 0.15);
-  border: 1px solid rgba(255, 176, 32, 0.3);
-  color: #ffb020;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-}
-
-.joy-agent-settings-header-title h2 {
-  margin: 0;
-  font-size: 14px;
+.joy-agent-settings-dialog .joy-agent-settings-header-title h2 {
+  color: var(--joy-text);
+  font-size: 1.05rem;
   font-weight: 600;
-  color: #fff;
-  letter-spacing: 0.02em;
   line-height: 1.2;
 }
 
-.joy-settings-header-sub {
-  font-size: 11px;
-  color: #888;
-  display: block;
+.joy-settings-logo-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 38%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-accent) 14%, transparent);
+  color: var(--joy-accent);
 }
 
-.joy-agent-settings-header-title .joy-settings-badge {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(255, 176, 32, 0.15);
-  color: #ffb020;
-  border: 1px solid rgba(255, 176, 32, 0.25);
+.joy-settings-header-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  line-height: 1.4;
 }
 
 .joy-agent-settings-close-btn {
-  background: transparent;
-  border: none;
-  color: #888;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
+  color: var(--joy-text-muted);
 }
 
 .joy-agent-settings-close-btn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--joy-text);
+  background: var(--joy-bg-hover);
 }
 
-/* Body: Two-Pane Split */
+/* Body: the left list and the page beside it. */
 .joy-agent-settings-body {
   display: flex;
   flex: 1;
@@ -97,94 +74,104 @@
   overflow: hidden;
 }
 
-/* Left Sidebar (Vertical Navigation) */
+/* ─── The left list ─────────────────────────────────────────────────────── */
+
 .joy-agent-settings-sidebar {
-  width: 230px;
-  flex-shrink: 0;
-  background: #15161b;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
+  flex: none;
   flex-direction: column;
-  padding: 16px 12px 12px;
   gap: 8px;
+  width: 230px;
+  padding: 16px 12px 12px;
+  border-right: 1px solid var(--joy-border);
+  background: var(--joy-bg-panel);
 }
 
 .joy-settings-sidebar-section-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #6c7280;
   padding-left: 8px;
-  margin-bottom: 2px;
+  color: var(--joy-text-faint);
+  font-size: var(--joy-type-2xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .joy-settings-sidebar-list {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 3px;
-  flex: 1;
 }
 
-.joy-settings-nav-item {
+/* A row in the left list. It carries the standard button class and looks like
+   a list row, not like a boxed button. */
+.joy-agent-settings-dialog .joy-settings-nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   padding: 9px 12px;
-  border: none;
+  border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: #9da3af;
-  border-radius: 7px;
-  cursor: pointer;
-  text-align: left;
-  font-size: 12.5px;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-md);
   font-weight: 500;
-  transition: all 0.15s ease;
-  position: relative;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
-.joy-settings-nav-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #f3f4f6;
+.joy-agent-settings-dialog .joy-settings-nav-item:hover {
+  background: var(--joy-bg-hover);
+  color: var(--joy-text);
 }
 
-.joy-settings-nav-item.is-active {
-  background: rgba(255, 176, 32, 0.12);
-  color: #ffb020;
+.joy-agent-settings-dialog .joy-settings-nav-item.is-active {
+  background: color-mix(in srgb, var(--joy-accent) 12%, transparent);
+  color: var(--joy-accent);
   font-weight: 600;
 }
 
-.joy-settings-nav-item.is-active::before {
+/* The gold selection ring: a gold bar on the left of the chosen row. */
+.joy-agent-settings-dialog .joy-settings-nav-item.is-active::before {
   content: '';
   position: absolute;
   left: 0;
   top: 6px;
   bottom: 6px;
   width: 3px;
-  background: #ffb020;
   border-radius: 0 3px 3px 0;
+  background: var(--joy-accent);
 }
 
 .joy-settings-nav-icon {
-  font-size: 14px;
-  line-height: 1;
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   width: 18px;
+  height: 18px;
+  color: currentColor;
+}
+
+.joy-settings-nav-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .joy-settings-nav-label {
-  white-space: nowrap;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .joy-settings-sidebar-footer {
   margin-top: auto;
   padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--joy-border-subtle);
 }
 
 .joy-settings-sidebar-status {
@@ -192,54 +179,55 @@
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
 }
 
 .joy-settings-sidebar-status-dot {
+  flex-shrink: 0;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #555;
-  flex-shrink: 0;
+  background: var(--joy-text-faint);
 }
 
 .joy-settings-sidebar-status-dot.is-connected {
-  background: #10b981;
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.7);
+  background: var(--joy-ok);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--joy-ok) 70%, transparent);
 }
 
 .joy-settings-sidebar-status-text {
-  min-width: 0;
   flex: 1;
+  min-width: 0;
 }
 
 .joy-settings-sidebar-status-label {
-  font-size: 11px;
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
   font-weight: 600;
-  color: #eee;
   line-height: 1.2;
 }
 
 .joy-settings-sidebar-status-sub {
-  font-size: 10px;
-  color: #888;
-  white-space: nowrap;
   overflow: hidden;
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-2xs);
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-/* Right Main Panel */
+/* ─── The page ──────────────────────────────────────────────────────────── */
+
 .joy-agent-settings-main {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 20px 24px;
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 16px;
-  background: #121316;
+  min-width: 0;
+  padding: 20px 24px;
+  overflow-y: auto;
+  background: var(--joy-bg-elevated);
 }
 
 .joy-settings-section-header {
@@ -247,39 +235,63 @@
 }
 
 .joy-settings-section-kicker {
-  font-size: 10px;
+  display: block;
+  margin-bottom: 3px;
+  color: var(--joy-accent);
+  font-size: var(--joy-type-2xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #ffb020;
-  display: block;
-  margin-bottom: 3px;
 }
 
 .joy-settings-section-title {
   margin: 0;
-  font-size: 17px;
+  color: var(--joy-text);
+  font-size: 1.05rem;
   font-weight: 600;
-  color: #fff;
 }
 
 .joy-settings-section-desc {
   margin: 3px 0 0;
-  font-size: 12px;
-  color: #8e95a5;
-  line-height: 1.4;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-md);
+  line-height: 1.45;
 }
 
-/* Active Status Banner */
+/* Every card in the dialog is the frame's card, so the pages read as one set
+   of sections rather than as a private screen. The accordion items are the
+   sections of a page, and they take the same card. */
+.joy-agent-settings-dialog .agent-settings-section,
+.joy-agent-settings-dialog .joy-accordion-item {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  padding: 13px;
+  overflow: hidden;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-panel);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+/* ─── The active connection banner ──────────────────────────────────────── */
+
 .joy-settings-active-banner {
-  background: linear-gradient(135deg, rgba(255, 176, 32, 0.08) 0%, rgba(20, 21, 26, 0.95) 100%);
-  border: 1px solid rgba(255, 176, 32, 0.25);
-  border-radius: 9px;
-  padding: 12px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 25%, transparent);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--joy-accent) 8%, transparent),
+    color-mix(in srgb, var(--joy-bg-panel) 95%, transparent)
+  );
 }
 
 .joy-settings-active-info {
@@ -290,32 +302,30 @@
 }
 
 .joy-settings-active-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
   width: 32px;
   height: 32px;
-  border-radius: 7px;
-  background: rgba(255, 176, 32, 0.15);
-  color: #ffb020;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  font-weight: 700;
-  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-accent) 15%, transparent);
+  color: var(--joy-accent);
 }
 
 .joy-settings-active-details strong {
   display: block;
-  font-size: 13px;
-  color: #fff;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
   font-weight: 600;
 }
 
 .joy-settings-active-details span {
-  font-size: 11.5px;
-  color: #999;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
 }
 
-/* Vault Profiles Bar */
+/* ─── Saved profiles ────────────────────────────────────────────────────── */
+
 .joy-settings-vault-profiles {
   display: flex;
   flex-direction: column;
@@ -323,11 +333,11 @@
 }
 
 .joy-settings-vault-profiles-header {
-  font-size: 11px;
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
   font-weight: 600;
-  color: #888;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .joy-settings-vault-profiles-grid {
@@ -337,89 +347,115 @@
 }
 
 .joy-settings-provider-card {
-  background: #17181f;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
-  padding: 9px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-height: 58px;
+  padding: 9px 12px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-raised);
   transition: border-color 0.15s ease;
 }
 
 .joy-settings-provider-card:hover {
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: var(--joy-border-hover);
 }
 
 .joy-settings-provider-card.is-active {
-  border-color: rgba(255, 176, 32, 0.45);
-  background: rgba(255, 176, 32, 0.05);
+  border-color: color-mix(in srgb, var(--joy-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--joy-accent) 5%, var(--joy-bg-raised));
+}
+
+.joy-settings-provider-card.is-disabled-legacy {
+  opacity: 0.72;
+}
+
+.joy-settings-provider-meta {
+  min-width: 0;
 }
 
 .joy-settings-provider-meta strong {
   display: block;
-  font-size: 12px;
-  color: #fff;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
 }
 
 .joy-settings-provider-meta span {
-  font-size: 11px;
-  color: #777;
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
 }
 
-/* Accordion Component (Structure from FAQ Theme) */
+.joy-settings-legacy-status {
+  display: block;
+  margin-top: 2px;
+  color: var(--joy-warning);
+  font-size: var(--joy-type-2xs);
+}
+
+/* ─── Accordions ────────────────────────────────────────────────────────── */
+
 .joy-accordion {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.joy-accordion-item {
-  background: #17181f;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 9px;
-  overflow: hidden;
-  transition: all 0.2s ease;
-}
-
 .joy-accordion-item.is-open {
-  border-color: rgba(255, 176, 32, 0.3);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
-  background: #181920;
+  border-color: color-mix(in srgb, var(--joy-accent) 30%, transparent);
+  background: var(--joy-bg-raised);
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--joy-bg-deep) 35%, transparent);
 }
 
-.joy-accordion-trigger {
-  width: 100%;
+/* The disclosure row. It carries the standard button class and looks like a
+   quiet row until it is opened. */
+.joy-agent-settings-dialog .joy-accordion-trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
   padding: 12px 16px;
+  border: 0;
   background: transparent;
-  border: none;
-  color: #e5e7eb;
-  cursor: pointer;
-  text-align: left;
+  color: var(--joy-text);
   font-family: inherit;
+  font-size: var(--joy-type-md);
+  text-align: left;
+  cursor: pointer;
   transition: background 0.15s ease;
 }
 
-.joy-accordion-trigger:hover {
-  background: rgba(255, 255, 255, 0.03);
+.joy-agent-settings-dialog .joy-accordion-trigger:hover {
+  background: var(--joy-bg-hover);
 }
 
 .joy-accordion-trigger-title {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 13px;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
   font-weight: 600;
-  color: #f3f4f6;
 }
 
 .joy-accordion-icon {
-  font-size: 15px;
-  line-height: 1;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--joy-text-muted);
+}
+
+.joy-accordion-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.joy-accordion-item.is-open .joy-accordion-icon {
+  color: var(--joy-accent);
 }
 
 .joy-accordion-trigger-meta {
@@ -429,40 +465,48 @@
 }
 
 .joy-accordion-tag {
-  font-size: 11px;
-  font-weight: 500;
   padding: 2px 7px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #9da3af;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
+  font-weight: 500;
 }
 
 .joy-accordion-tag.is-success {
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
-  border-color: rgba(16, 185, 129, 0.25);
+  border-color: color-mix(in srgb, var(--joy-ok) 25%, transparent);
+  background: color-mix(in srgb, var(--joy-ok) 12%, transparent);
+  color: var(--joy-ok);
 }
 
 .joy-accordion-chevron {
-  font-size: 12px;
-  color: #777;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--joy-text-faint);
   transition: transform 0.2s ease;
 }
 
+.joy-accordion-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
 .joy-accordion-item.is-open .joy-accordion-chevron {
+  color: var(--joy-accent);
   transform: rotate(180deg);
-  color: #ffb020;
 }
 
 .joy-accordion-content {
-  padding: 0 16px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  padding-top: 14px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--joy-border-subtle);
 }
+
+/* ─── Provider routes ───────────────────────────────────────────────────── */
 
 .joy-provider-route {
   display: flex;
@@ -477,43 +521,41 @@
 }
 
 .joy-provider-route + .joy-provider-route {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding-top: 12px;
+  border-top: 1px solid var(--joy-border-subtle);
 }
 
 .joy-provider-route-title {
   margin: 0;
-  color: #e5e7eb;
-  font-size: 12px;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
   font-weight: 600;
 }
 
 .joy-provider-risk-notice {
   margin: 0;
-  color: #c7c9d0;
-  font-size: 11.5px;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
   line-height: 1.5;
 }
 
-/* Provider sign-in stack: centered, on the editor's gray tokens (DESIGN.md §1, §3a). Scoped so the
-   other dialog accordions keep their own styling. Amber is not used at rest (DESIGN.md §1a). */
+/* The provider sign-in stack: centered, on the editor's gray tokens. */
 .joy-provider-route-accordions {
   width: 100%;
   max-width: 640px;
   margin: 0 auto;
-  gap: 8px;
 }
 
 .joy-provider-route-accordions .joy-accordion-item {
-  background: var(--joy-bg-raised);
   border: 1px solid var(--joy-border);
   border-radius: var(--joy-radius-inner);
+  background: var(--joy-bg-raised);
   box-shadow: none;
 }
 
 .joy-provider-route-accordions .joy-accordion-item.is-open {
-  background: var(--joy-bg-raised);
   border-color: var(--joy-border-hover);
+  background: var(--joy-bg-raised);
   box-shadow: none;
 }
 
@@ -529,12 +571,11 @@
 
 .joy-provider-route-accordions .joy-accordion-trigger-title {
   color: var(--joy-text);
-  font-size: var(--joy-type-md);
 }
 
 .joy-provider-route-accordions .joy-accordion-tag {
-  background: var(--joy-bg-control);
   border-color: var(--joy-border-strong);
+  background: var(--joy-bg-control);
   color: var(--joy-text-muted);
 }
 
@@ -545,16 +586,16 @@
 
 .joy-provider-route-accordions .joy-accordion-content {
   align-items: center;
-  text-align: center;
-  background: var(--joy-bg-panel);
   border-top: 1px solid var(--joy-border-subtle);
+  background: var(--joy-bg-panel);
+  text-align: center;
 }
 
 .joy-provider-route-accordions .joy-provider-route,
 .joy-provider-route-accordions .joy-provider-route-title {
   align-items: center;
-  text-align: center;
   color: var(--joy-text);
+  text-align: center;
 }
 
 .joy-provider-route-accordions .joy-provider-route + .joy-provider-route {
@@ -568,14 +609,8 @@
   text-align: center;
 }
 
-.joy-provider-route-accordions .joy-settings-form-grid input,
-.joy-provider-route-accordions .joy-settings-form-grid select {
-  background: var(--joy-bg-input);
-  border-color: var(--joy-border-strong);
-  color: var(--joy-text);
-}
+/* ─── Forms ─────────────────────────────────────────────────────────────── */
 
-/* Forms in Accordions */
 .joy-settings-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -590,21 +625,21 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  font-size: 11.5px;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
   font-weight: 500;
-  color: #bbb;
 }
 
 .joy-settings-field input,
 .joy-settings-field select {
-  width: 100%;
-  background: #111216;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  padding: 7px 11px;
-  color: #fff;
-  font-size: 12.5px;
   box-sizing: border-box;
+  width: 100%;
+  padding: 7px 11px;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
   outline: none;
   transition:
     border-color 0.15s ease,
@@ -613,41 +648,53 @@
 
 .joy-settings-field input:focus,
 .joy-settings-field select:focus {
-  border-color: #ffb020;
-  box-shadow: 0 0 0 2px rgba(255, 176, 32, 0.2);
+  border-color: var(--joy-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 22%, transparent);
+}
+
+/* The app's own radio and checkbox: a gold tick on a dark control. */
+.joy-agent-settings-dialog input[type='radio'],
+.joy-agent-settings-dialog input[type='checkbox'] {
+  accent-color: var(--joy-accent);
+  cursor: pointer;
 }
 
 .joy-settings-input-with-action {
   display: flex;
-  gap: 8px;
   align-items: center;
+  gap: 8px;
 }
 
 .joy-settings-input-with-action input {
   flex: 1;
 }
 
-.joy-settings-text-btn {
-  background: transparent;
-  border: none;
-  color: #ffb020;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
+/* A quiet text action, e.g. the model drawer toggle. */
+.joy-agent-settings-dialog .joy-settings-text-btn {
   padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--joy-accent);
+  font-size: var(--joy-type-xs);
+  font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 3px;
+  cursor: pointer;
 }
 
-.joy-settings-text-btn:hover {
-  color: #ffbe3d;
+.joy-agent-settings-dialog .joy-settings-text-btn:hover {
+  color: var(--joy-accent-hover);
+}
+
+.joy-settings-text-btn svg {
+  vertical-align: -2px;
 }
 
 .joy-settings-pro-card {
-  background: rgba(255, 176, 32, 0.06);
-  border: 1px solid rgba(255, 176, 32, 0.2);
-  border-radius: 6px;
   padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 20%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-accent) 6%, transparent);
 }
 
 .joy-settings-actions-bar {
@@ -657,48 +704,53 @@
   margin-top: 4px;
 }
 
+/* ─── Notices ───────────────────────────────────────────────────────────── */
+
 .joy-settings-notice {
-  font-size: 12px;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--joy-type-md);
 }
 
 .joy-settings-notice.is-error {
-  background: rgba(239, 68, 68, 0.12);
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.25);
+  border: 1px solid color-mix(in srgb, var(--joy-danger) 25%, transparent);
+  background: color-mix(in srgb, var(--joy-danger) 12%, transparent);
+  color: var(--joy-danger);
 }
 
 .joy-settings-notice.is-success {
-  background: rgba(16, 185, 129, 0.12);
-  color: #6ee7b7;
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  border: 1px solid color-mix(in srgb, var(--joy-ok) 25%, transparent);
+  background: color-mix(in srgb, var(--joy-ok) 12%, transparent);
+  color: var(--joy-ok);
 }
 
 .joy-settings-notice.is-info {
-  background: rgba(59, 130, 246, 0.12);
-  color: #93c5fd;
-  border: 1px solid rgba(59, 130, 246, 0.25);
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--joy-accent) 10%, transparent);
+  color: var(--joy-accent);
 }
 
 .joy-settings-inline-notice {
-  font-size: 11.5px;
-}
-.joy-settings-inline-notice.is-error {
-  color: #f87171;
-}
-.joy-settings-inline-notice.is-success {
-  color: #10b981;
+  font-size: var(--joy-type-xs);
 }
 
-/* Model Drawer Accordion Style */
+.joy-settings-inline-notice.is-error {
+  color: var(--joy-danger);
+}
+
+.joy-settings-inline-notice.is-success {
+  color: var(--joy-ok);
+}
+
+/* ─── The model drawer ──────────────────────────────────────────────────── */
+
 .joy-model-drawer-item {
-  border-color: rgba(255, 176, 32, 0.2);
+  border-color: color-mix(in srgb, var(--joy-accent) 20%, transparent);
 }
 
 .joy-model-drawer-content {
-  background: #14151a;
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--joy-bg-inset);
 }
 
 .joy-model-drawer-header {
@@ -710,23 +762,24 @@
 
 .joy-model-drawer-hint {
   margin: 0;
-  font-size: 11.5px;
-  color: #9da3af;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
 }
 
 .joy-model-drawer-search input {
   width: 100%;
-  background: #101115;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
   padding: 6px 10px;
-  color: #fff;
-  font-size: 12px;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-size: var(--joy-type-sm);
   outline: none;
 }
 
 .joy-model-drawer-search input:focus {
-  border-color: #ffb020;
+  border-color: var(--joy-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 22%, transparent);
 }
 
 .joy-model-drawer-tags {
@@ -735,27 +788,37 @@
   gap: 6px;
 }
 
-.joy-model-tag {
+/* A filter chip. It carries the standard button class and looks like a chip. */
+.joy-agent-settings-dialog .joy-model-tag {
   padding: 3px 8px;
-  font-size: 11px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #aaa;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.joy-model-tag:hover {
-  background: rgba(255, 176, 32, 0.15);
-  color: #ffb020;
+.joy-agent-settings-dialog .joy-model-tag:hover {
+  border-color: color-mix(in srgb, var(--joy-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--joy-accent) 15%, transparent);
+  color: var(--joy-accent);
 }
 
-.joy-model-tag.is-active {
-  background: #ffb020;
-  color: #111;
+.joy-agent-settings-dialog .joy-model-tag.is-active {
+  border-color: var(--joy-accent);
+  background: var(--joy-accent);
+  color: var(--joy-on-accent);
   font-weight: 600;
-  border-color: #ffb020;
+}
+
+.joy-model-drawer-empty {
+  width: 100%;
+  padding: 12px;
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
+  text-align: center;
 }
 
 .joy-settings-model-chips {
@@ -763,51 +826,45 @@
   flex-wrap: wrap;
   gap: 6px;
   max-height: 150px;
-  overflow-y: auto;
   padding: 8px;
-  background: #101115;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
+  overflow-y: auto;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
 }
 
-.joy-settings-model-chip {
+/* A chosen model. It carries the standard button class and looks like a chip. */
+.joy-agent-settings-dialog .joy-settings-model-chip {
   padding: 4px 9px;
-  font-size: 11px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #ccc;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-xs);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.joy-settings-model-chip:hover {
-  background: rgba(255, 176, 32, 0.15);
-  border-color: rgba(255, 176, 32, 0.35);
-  color: #fff;
+.joy-agent-settings-dialog .joy-settings-model-chip:hover {
+  border-color: color-mix(in srgb, var(--joy-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--joy-accent) 15%, transparent);
+  color: var(--joy-text);
 }
 
-.joy-settings-model-chip.is-selected {
-  background: #ffb020;
-  border-color: #ffb020;
-  color: #111;
+.joy-agent-settings-dialog .joy-settings-model-chip.is-selected {
+  border-color: var(--joy-accent);
+  background: var(--joy-accent);
+  color: var(--joy-on-accent);
   font-weight: 600;
 }
 
-.joy-model-drawer-empty {
-  font-size: 11.5px;
-  color: #777;
-  padding: 12px;
-  text-align: center;
-  width: 100%;
-}
+/* ─── The media support check ───────────────────────────────────────────── */
 
-/* Modality Probe Result */
 .joy-settings-media-result {
-  background: #121317;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 6px;
   padding: 10px 12px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
 }
 
 .joy-settings-probe-grid {
@@ -818,103 +875,37 @@
   padding: 0;
 }
 
+.agent-media-capability-list {
+  margin: 0;
+}
+
 .joy-settings-probe-grid dt {
-  font-size: 11px;
-  color: #888;
   margin-bottom: 2px;
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
 }
 
 .joy-settings-probe-grid dd {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 4px;
   display: inline-block;
+  margin: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  font-size: var(--joy-type-xs);
+  font-weight: 600;
 }
 
 .joy-settings-probe-grid dd.is-supported {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
+  background: color-mix(in srgb, var(--joy-ok) 15%, transparent);
+  color: var(--joy-ok);
 }
 
 .joy-settings-probe-grid dd.is-unavailable {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  background: color-mix(in srgb, var(--joy-danger) 15%, transparent);
+  color: var(--joy-danger);
 }
 
-/* Buttons */
-.joy-btn-primary {
-  background: #ffb020;
-  color: #111;
-  border: none;
-  font-weight: 600;
-  font-size: 12px;
-  padding: 7px 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  transition: background 0.15s ease;
-}
+/* ─── Execution mode ────────────────────────────────────────────────────── */
 
-.joy-btn-primary:hover:not(:disabled) {
-  background: #ffbe3d;
-}
-
-.joy-btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.joy-btn-secondary {
-  background: rgba(255, 255, 255, 0.07);
-  color: #e0e0e0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  font-size: 12px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  transition: all 0.15s ease;
-}
-
-.joy-btn-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.joy-btn-secondary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.joy-btn-sm {
-  font-size: 11px;
-  padding: 4px 8px;
-}
-
-.joy-btn-danger {
-  background: rgba(239, 68, 68, 0.1);
-  color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.joy-btn-danger:hover {
-  background: rgba(239, 68, 68, 0.2);
-  color: #fca5a5;
-}
-
-/* Execution Modes */
 .joy-settings-mode-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -922,43 +913,46 @@
 }
 
 .joy-settings-mode-card {
-  background: #14151b;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
-  padding: 10px 12px;
-  cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+  cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .joy-settings-mode-card:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-  background: #181920;
+  border-color: var(--joy-border-hover);
+  background: var(--joy-bg-raised);
 }
 
 .joy-settings-mode-card.is-selected {
-  border-color: #ffb020;
-  background: rgba(255, 176, 32, 0.06);
+  border-color: var(--joy-accent);
+  background: color-mix(in srgb, var(--joy-accent) 6%, var(--joy-bg-inset));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 22%, transparent);
 }
 
 .joy-settings-mode-card-title {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #fff;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
+  font-weight: 600;
 }
 
 .joy-settings-mode-card-desc {
-  font-size: 11px;
-  color: #888;
-  line-height: 1.35;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  line-height: 1.4;
 }
 
-/* Capabilities Grid */
+/* ─── Capabilities ──────────────────────────────────────────────────────── */
+
 .joy-settings-capabilities-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -966,71 +960,79 @@
 }
 
 .joy-settings-cap-item {
-  background: #14151b;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 6px;
-  padding: 8px 10px;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  color: #ddd;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-md);
   cursor: pointer;
 }
 
-.joy-settings-cap-item input {
-  accent-color: #ffb020;
-  cursor: pointer;
-}
+/* ─── Diagnostics ───────────────────────────────────────────────────────── */
 
-/* Diagnostics Rows */
 .joy-settings-diagnostic-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 38px;
   padding: 8px 10px;
-  background: #14151b;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
-  font-size: 12px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+  font-size: var(--joy-type-md);
 }
 
 .joy-settings-diagnostic-status {
-  font-size: 11px;
-  font-weight: 600;
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
+  font-size: var(--joy-type-xs);
+  font-weight: 600;
 }
 
 .joy-settings-diagnostic-status.is-supported {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
+  background: color-mix(in srgb, var(--joy-ok) 15%, transparent);
+  color: var(--joy-ok);
 }
 
 .joy-settings-diagnostic-status.is-unavailable {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  background: color-mix(in srgb, var(--joy-danger) 15%, transparent);
+  color: var(--joy-danger);
 }
 
-/* Footer */
+/* ─── Footer ────────────────────────────────────────────────────────────── */
+
 .joy-agent-settings-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 20px;
-  background: #17181e;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 11px;
-  color: #888;
+  gap: 16px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--joy-border);
+  border-bottom: 0;
+  background: var(--joy-bg-chrome);
+  color: var(--joy-text-faint);
+  font-size: var(--joy-type-xs);
 }
 
 .joy-agent-settings-footer-vault {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+  min-width: 0;
 }
 
-/* Studio Presets Bar */
+.joy-agent-settings-footer-vault svg {
+  flex: none;
+  color: var(--joy-text-muted);
+}
+
+/* ─── The studio preset bar ─────────────────────────────────────────────── */
+
 .joy-studio-preset-bar {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1038,102 +1040,305 @@
   margin-bottom: 16px;
 }
 
-.joy-preset-tab {
+/* A preset. It carries the standard button class and looks like a card. */
+.joy-agent-settings-dialog .joy-preset-tab {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  min-height: 84px;
   padding: 12px 14px;
-  background: #17181e;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  cursor: pointer;
-  text-align: left;
-  transition: all 0.2s ease;
-  position: relative;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-panel);
   color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.joy-preset-tab:hover {
-  background: #1e2028;
-  border-color: rgba(255, 255, 255, 0.16);
+.joy-agent-settings-dialog .joy-preset-tab:hover {
+  border-color: var(--joy-border-hover);
+  background: var(--joy-bg-raised);
 }
 
-.joy-preset-tab.is-active {
-  background: #1d1e26;
-  border-color: #f7f586;
-  box-shadow: 0 0 16px rgba(247, 245, 134, 0.12);
+.joy-agent-settings-dialog .joy-preset-tab.is-active {
+  border-color: color-mix(in srgb, var(--joy-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--joy-accent) 6%, var(--joy-bg-panel));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 22%, transparent);
 }
 
-.joy-preset-tab .joy-preset-icon {
-  font-size: 18px;
+.joy-preset-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 6px;
+  color: var(--joy-accent);
+}
+
+.joy-preset-icon svg {
+  width: 18px;
+  height: 18px;
 }
 
 .joy-preset-tab .joy-preset-text strong {
   display: block;
-  font-size: 13px;
-  color: #fff;
   margin-bottom: 2px;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
 }
 
 .joy-preset-tab .joy-preset-text span {
-  font-size: 11px;
-  color: #8f95a3;
-  line-height: 1.35;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  line-height: 1.4;
 }
 
 .joy-preset-tag {
   position: absolute;
   top: 8px;
   right: 8px;
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(247, 245, 134, 0.16);
-  color: #f7f586;
-  border: 1px solid rgba(247, 245, 134, 0.3);
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 30%, transparent);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--joy-accent) 16%, transparent);
+  color: var(--joy-accent);
+  font-size: var(--joy-type-2xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-/* Dual Brain Chips */
+/* ─── The two brains ────────────────────────────────────────────────────── */
+
 .joy-settings-dual-brain-banner {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--joy-border-subtle);
 }
 
 .joy-dual-brain-chip {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  background: rgba(255, 255, 255, 0.03);
+  min-height: 32px;
   padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+  font-size: var(--joy-type-md);
 }
 
 .joy-chip-label {
+  color: var(--joy-text-secondary);
   font-weight: 600;
-  color: #a0aec0;
 }
 
 .joy-chip-val {
-  font-family: monospace;
-  color: #f7f586;
+  color: var(--joy-accent);
+  font-family: var(--joy-font-mono);
 }
 
 .joy-chip-badge {
   margin-left: auto;
-  font-size: 10px;
-  font-weight: 600;
   padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--joy-ok) 15%, transparent);
+  color: var(--joy-ok);
+  font-size: var(--joy-type-2xs);
+  font-weight: 600;
+}
+
+/* ─── The Workhorse and Creative Brain cards ────────────────────────────── */
+/* These live in AgentSlotsSection, which had no stylesheet at all. */
+
+.agent-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-slots-error {
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--joy-danger) 25%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-danger) 12%, transparent);
+  color: var(--joy-danger);
+  font-size: var(--joy-type-xs);
+}
+
+.agent-slots-note,
+.agent-slot-note {
+  margin: 0;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  line-height: 1.45;
+}
+
+.agent-slot-account,
+.agent-slot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-panel);
+}
+
+.agent-slot-account h4 {
+  margin: 0;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
+  font-weight: 600;
+}
+
+.agent-slot-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  font-weight: 500;
+}
+
+.agent-slot-field input,
+.agent-slot-field select,
+.agent-slot-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 11px;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-family: inherit;
+  font-size: var(--joy-type-md);
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.agent-slot-field textarea {
+  resize: vertical;
+}
+
+.agent-slot-field input:focus,
+.agent-slot-field select:focus,
+.agent-slot-field textarea:focus {
+  border-color: var(--joy-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 22%, transparent);
+}
+
+.agent-slot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-slot-settings {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 9px;
+}
+
+.agent-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+}
+
+/* ─── Rows and hints ────────────────────────────────────────────────────── */
+/* The dialog's small layout and text roles. They live here so the dialog
+   source carries no hard-coded colours of its own. */
+
+.joy-settings-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.joy-settings-actions-row-tight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.joy-settings-actions-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.joy-settings-actions-column-wide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.joy-settings-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.joy-settings-provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.joy-settings-block-gap {
+  margin-bottom: 10px;
+}
+
+.joy-settings-hint-muted {
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  line-height: 1.45;
+}
+
+.joy-settings-hint-strong {
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+  font-weight: 600;
+}
+
+.joy-settings-hint-success {
+  margin-top: 2px;
+  color: var(--joy-ok);
+  font-size: var(--joy-type-xs);
+}
+
+.joy-settings-hint-accent {
+  color: var(--joy-accent);
+  font-weight: 600;
+}
+
+.joy-settings-hint-block {
+  margin: 0 0 12px;
+}
+
+.joy-settings-hint-muted svg,
+.joy-settings-hint-block svg {
+  vertical-align: -2px;
+  margin-right: 3px;
+}
+
+/* The small remove button on a saved profile. It keeps the "✕" label the
+   behaviour tests look for, and takes the app's icon-button shape. */
+.joy-settings-remove-btn {
+  width: 1.4rem;
+  height: 1.4rem;
+  min-width: 1.4rem;
+  min-height: 1.4rem;
+  font-size: var(--joy-type-sm);
+  line-height: 1;
 }

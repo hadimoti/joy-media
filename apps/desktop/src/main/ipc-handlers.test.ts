@@ -1,6 +1,4 @@
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
 import { createFileRegistry } from './file-registry.js';
@@ -774,88 +772,70 @@ describe('IPC dispatch', () => {
   });
 
   it('reselects a prior library for an unconfigured install without moving or deleting files', async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'joy-media-library-upgrade-'));
-    try {
-      const previousLibrary = path.join(tempRoot, 'previous-library');
-      const nextDefault = path.join(tempRoot, 'new-default');
-      const audioPath = path.join(previousLibrary, 'audio', 'ambience.wav');
-      const imagePath = path.join(previousLibrary, 'images', 'cover.png');
-      fs.mkdirSync(path.dirname(audioPath), { recursive: true });
-      fs.mkdirSync(path.dirname(imagePath), { recursive: true });
-      fs.writeFileSync(audioPath, 'fixture audio bytes');
-      fs.writeFileSync(imagePath, 'fixture image bytes');
-      const catalog = {
-        version: 1,
-        counts: { total: 2, audio: 1, image: 1 },
-        assets: [
-          { id: 'fixture-audio', kind: 'audio', path: 'audio/ambience.wav' },
-          { id: 'fixture-image', kind: 'image', path: 'images/cover.png' },
-        ],
-      };
-      fs.writeFileSync(path.join(previousLibrary, 'catalog.json'), JSON.stringify(catalog));
+    const previousLibrary = 'C:\\test-assets\\previous-library';
+    const nextDefault = 'C:\\test-assets\\new-default';
+    const catalogPath = `${previousLibrary}\\catalog.json`;
+    const catalog = {
+      version: 1,
+      counts: { total: 2, audio: 1, image: 1 },
+      assets: [
+        { id: 'fixture-audio', kind: 'audio', path: 'audio/ambience.wav' },
+        { id: 'fixture-image', kind: 'image', path: 'images/cover.png' },
+      ],
+    };
+    vi.spyOn(fs, 'existsSync').mockImplementation(
+      (candidate) => String(candidate) === previousLibrary || String(candidate) === catalogPath,
+    );
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify(catalog) as never);
+    const mutations = [
+      vi.spyOn(fs, 'mkdirSync').mockImplementation(() => undefined),
+      vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined),
+      vi.spyOn(fs, 'renameSync').mockImplementation(() => undefined),
+      vi.spyOn(fs, 'unlinkSync').mockImplementation(() => undefined),
+      vi.spyOn(fs, 'rmSync').mockImplementation(() => undefined),
+    ];
 
-      const d = deps();
-      d.localDatabase.getDefaultAssetLibraryDirectory = () => nextDefault;
-      const showOpenDirectoryDialog = vi.fn(async () => ({
-        canceled: false,
-        path: previousLibrary,
-      }));
-      const handlers = createIpcHandlers({ ...d, showOpenDirectoryDialog });
-      const snapshot = (root: string) => {
-        const entries: [string, string][] = [];
-        const visit = (directory: string) => {
-          for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-            const absolutePath = path.join(directory, entry.name);
-            if (entry.isDirectory()) visit(absolutePath);
-            else
-              entries.push([
-                path.relative(root, absolutePath),
-                fs.readFileSync(absolutePath, 'base64'),
-              ]);
-          }
-        };
-        visit(root);
-        return entries.sort(([left], [right]) => left.localeCompare(right));
-      };
-      const filesBeforeReselect = snapshot(previousLibrary);
+    const d = deps();
+    d.localDatabase.getDefaultAssetLibraryDirectory = () => nextDefault;
+    const showOpenDirectoryDialog = vi.fn(async () => ({
+      canceled: false,
+      path: previousLibrary,
+    }));
+    const handlers = createIpcHandlers({ ...d, showOpenDirectoryDialog });
 
-      const initial = await dispatchIpcRequest(handlers, {
-        origin: 'joy-media-app://renderer',
-        channel: 'desktop.asset-library.get-settings',
-      });
-      expect(initial.ok).toBe(true);
-      expect(initial.data).toMatchObject({
-        directory: nextDefault,
-        isDefault: true,
-        hasCatalog: false,
-        counts: { total: 0, audio: 0, image: 0 },
-      });
-      expect(d.localDatabase.getSetting('asset_library_directory')).toBeUndefined();
+    const initial = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.asset-library.get-settings',
+    });
+    expect(initial.ok).toBe(true);
+    expect(initial.data).toMatchObject({
+      directory: nextDefault,
+      isDefault: true,
+      hasCatalog: false,
+      counts: { total: 0, audio: 0, image: 0 },
+    });
+    expect(d.localDatabase.getSetting('asset_library_directory')).toBeUndefined();
 
-      const selected = await dispatchIpcRequest(handlers, {
-        origin: 'joy-media-app://renderer',
-        channel: 'desktop.asset-library.select-directory',
-      });
-      expect(selected.ok).toBe(true);
-      expect(selected.data).toMatchObject({
-        directory: previousLibrary,
-        isDefault: false,
-        hasCatalog: true,
-        counts: { total: 2, audio: 1, image: 1 },
-      });
-      expect(d.localDatabase.getSetting('asset_library_directory')).toBe(previousLibrary);
-      expect(showOpenDirectoryDialog).toHaveBeenCalledTimes(1);
+    const selected = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.asset-library.select-directory',
+    });
+    expect(selected.ok).toBe(true);
+    expect(selected.data).toMatchObject({
+      directory: previousLibrary,
+      isDefault: false,
+      hasCatalog: true,
+      counts: { total: 2, audio: 1, image: 1 },
+    });
+    expect(d.localDatabase.getSetting('asset_library_directory')).toBe(previousLibrary);
+    expect(showOpenDirectoryDialog).toHaveBeenCalledTimes(1);
 
-      const catalogResult = await dispatchIpcRequest(handlers, {
-        origin: 'joy-media-app://renderer',
-        channel: 'desktop.asset-library.get-catalog',
-      });
-      expect(catalogResult).toEqual({ ok: true, data: catalog });
-      expect(snapshot(previousLibrary)).toEqual(filesBeforeReselect);
-      expect(fs.existsSync(nextDefault)).toBe(false);
-    } finally {
-      fs.rmSync(tempRoot, { recursive: true, force: true });
-    }
+    const catalogResult = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.asset-library.get-catalog',
+    });
+    expect(catalogResult).toEqual({ ok: true, data: catalog });
+    expect(mutations.every((mutation) => mutation.mock.calls.length === 0)).toBe(true);
   });
 
   it('asset-library.reset-directory clears the override and returns the default settings', async () => {
@@ -872,6 +852,74 @@ describe('IPC dispatch', () => {
     const info = resetRes.data as { directory: string; isDefault: boolean };
     expect(info.directory).toBe(d.localDatabase.getDefaultAssetLibraryDirectory());
     expect(info.isDefault).toBe(true);
+  });
+
+  it('asset-library.open-directory opens the configured folder, and no other', async () => {
+    const library = 'C:\\test-assets\\library';
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    vi.spyOn(fs, 'statSync').mockReturnValue({ isDirectory: () => true } as fs.Stats);
+    const openDirectory = vi.fn(async () => '');
+    const d = deps();
+    d.localDatabase.setAssetLibraryDirectory(library);
+    const handlers = createIpcHandlers({ ...d, openDirectory });
+
+    const res = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.asset-library.open-directory',
+      // The renderer never names a path; this one is ignored on purpose.
+      payload: { directory: '/somewhere/else' },
+    });
+
+    expect(res.ok).toBe(true);
+    expect(openDirectory).toHaveBeenCalledTimes(1);
+    expect(openDirectory).toHaveBeenCalledWith(library);
+  });
+
+  it('asset-library.open-directory refuses a configured file path with a clear error', async () => {
+    const file = 'C:\\test-assets\\library.json';
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    vi.spyOn(fs, 'statSync').mockReturnValue({ isDirectory: () => false } as fs.Stats);
+    const openDirectory = vi.fn(async () => '');
+    const d = deps();
+    d.localDatabase.setAssetLibraryDirectory(file);
+    const handlers = createIpcHandlers({ ...d, openDirectory });
+
+    const res = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.asset-library.open-directory',
+    });
+
+    expect(res).toEqual({
+      ok: false,
+      error: 'The configured asset library path is not a directory',
+    });
+    expect(openDirectory).not.toHaveBeenCalled();
+  });
+
+  it('asset-library.get-settings reports the kind of drive the library sits on', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers({ ...d, classifyDrive: () => 'removable' });
+
+    const res = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.asset-library.get-settings',
+    });
+
+    expect(res.ok).toBe(true);
+    expect((res.data as { driveType: string }).driveType).toBe('removable');
+  });
+
+  it('asset-library.get-settings says "unknown" when the drive cannot be told, so nobody is warned', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+
+    const res = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.asset-library.get-settings',
+    });
+
+    expect(res.ok).toBe(true);
+    expect((res.data as { driveType: string }).driveType).toBe('unknown');
   });
 });
 
