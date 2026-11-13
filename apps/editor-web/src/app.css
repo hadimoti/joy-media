@@ -2039,6 +2039,11 @@ h2 {
   overflow: hidden;
   pointer-events: none;
 }
+/* T-M12: with keyboard focus on the Monitor picture, the selected element's box shows the focus ring. */
+.joy-panel-root:has(.monitor-canvas-wrap:focus-visible) .monitor-transform-lines {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 2px;
+}
 .monitor-transform-lines {
   position: absolute;
   inset: 0;
