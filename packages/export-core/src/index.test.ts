@@ -7,6 +7,7 @@ import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
 import {
   ffmpegArgs,
   freezeManifest,
+  dimensionsForPreset,
   remuxBrowserMp4,
   renderFixture,
   renderRgbaFrames,
@@ -27,6 +28,16 @@ describe('deterministic export contract', () => {
     expect(freezeManifest(manifest)).toEqual(manifest);
     expect(ffmpegArgs(manifest, 'out.mp4')).toContain('libx264');
   });
+
+  it.each(['reels-1080', 'shorts-1080', 'youtube-1080', 'high-bitrate'] as const)(
+    'keeps canvas dimensions for the %s export preset',
+    (preset) => {
+      expect(dimensionsForPreset(preset, { width: 1234, height: 987 })).toEqual({
+        width: 1234,
+        height: 987,
+      });
+    },
+  );
   it('produces a verified H.264/AAC fixture through ffmpeg', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-export-'));
     const output = join(directory, 'fixture.mp4');

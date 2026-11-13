@@ -23,6 +23,13 @@ export interface BrowserExportManifest {
   readonly height: number;
   readonly frameRate: number;
   readonly durationUs: number;
+  readonly videoBitrate?: number;
+  readonly audio?: {
+    readonly codec: 'aac';
+    readonly sampleRate: number;
+    readonly channels: number;
+    readonly bitrate: number;
+  };
 }
 
 export interface BrowserExportResult {
@@ -221,8 +228,8 @@ export async function downloadBrowserMp4(
     const chunks: BlobPart[] = [];
     recorder = new MediaRecorder(stream, {
       mimeType: selectedMimeType,
-      videoBitsPerSecond: Math.max(2_000_000, width * height * frameRate),
-      audioBitsPerSecond: 128_000,
+      videoBitsPerSecond: manifest.videoBitrate ?? Math.max(2_000_000, width * height * frameRate),
+      audioBitsPerSecond: manifest.audio?.bitrate ?? 128_000,
     });
     const recorderMimeType = recorder.mimeType || selectedMimeType;
     if (!recorderMimeType.toLowerCase().startsWith('video/mp4')) {

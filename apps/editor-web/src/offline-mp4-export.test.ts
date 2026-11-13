@@ -821,6 +821,43 @@ describe('detectOfflineMp4Capability', () => {
     expect(audioQueries[0]).toMatchObject({ codec: 'mp4a.40.2', sampleRate: 44100 });
   });
 
+  it('probes the preset video and audio bitrate and channel settings', async () => {
+    const videoQueries: VideoEncoderConfig[] = [];
+    const audioQueries: AudioEncoderConfig[] = [];
+    const capability = await detectOfflineMp4Capability(
+      {
+        ...input,
+        needsAudio: true,
+        bitrate: 8_000_000,
+        audioSampleRate: 44_100,
+        audioChannels: 1,
+        audioBitrate: 96_000,
+      },
+      {
+        videoEncoder: {
+          isConfigSupported: async (config) => {
+            videoQueries.push(config);
+            return { supported: true };
+          },
+        },
+        audioEncoder: {
+          isConfigSupported: async (config) => {
+            audioQueries.push(config);
+            return { supported: true };
+          },
+        },
+      },
+    );
+
+    expect(capability.ok).toBe(true);
+    expect(videoQueries[0]).toMatchObject({ bitrate: 8_000_000 });
+    expect(audioQueries[0]).toMatchObject({
+      sampleRate: 44_100,
+      numberOfChannels: 1,
+      bitrate: 96_000,
+    });
+  });
+
   it('reports a missing WebCodecs encoder instead of throwing', async () => {
     const capability = await detectOfflineMp4Capability(input);
     expect(capability.ok).toBe(false);

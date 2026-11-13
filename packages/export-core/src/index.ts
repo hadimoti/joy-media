@@ -3,7 +3,16 @@ import { existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 export type ExportPresetId =
-  'social-h264-aac' | 'reels-1080' | 'shorts-1080' | 'youtube-1080' | 'high-bitrate';
+  | 'social-h264-aac'
+  | 'reels-1080'
+  | 'shorts-1080'
+  | 'youtube-1080'
+  | 'high-bitrate'
+  | 'tiktok-1080'
+  | 'instagram-feed-4x5'
+  | 'square-1080'
+  | 'landscape-4k'
+  | 'custom';
 
 export interface RenderManifest {
   readonly projectId: string;
@@ -13,23 +22,20 @@ export interface RenderManifest {
   readonly frameRate: number;
   readonly durationUs: number;
   readonly preset: ExportPresetId;
+  readonly videoBitrate?: number;
+  readonly audio?: {
+    readonly codec: 'aac';
+    readonly sampleRate: number;
+    readonly channels: number;
+    readonly bitrate: number;
+  };
 }
 
 export function dimensionsForPreset(
-  preset: ExportPresetId,
+  _preset: ExportPresetId,
   fallback: { readonly width: number; readonly height: number },
 ): { readonly width: number; readonly height: number } {
-  switch (preset) {
-    case 'reels-1080':
-    case 'shorts-1080':
-      return { width: 1080, height: 1920 };
-    case 'youtube-1080':
-      return { width: 1920, height: 1080 };
-    case 'high-bitrate':
-      return { width: Math.max(fallback.width, 1920), height: Math.max(fallback.height, 1080) };
-    default:
-      return fallback;
-  }
+  return fallback;
 }
 export function freezeManifest(manifest: RenderManifest): RenderManifest {
   if (

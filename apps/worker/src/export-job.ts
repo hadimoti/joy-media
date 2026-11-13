@@ -78,7 +78,12 @@ export function exportJobPayload(value: unknown): ExportJobPayload {
     manifestRecord.preset !== 'reels-1080' &&
     manifestRecord.preset !== 'shorts-1080' &&
     manifestRecord.preset !== 'youtube-1080' &&
-    manifestRecord.preset !== 'high-bitrate'
+    manifestRecord.preset !== 'high-bitrate' &&
+    manifestRecord.preset !== 'tiktok-1080' &&
+    manifestRecord.preset !== 'instagram-feed-4x5' &&
+    manifestRecord.preset !== 'square-1080' &&
+    manifestRecord.preset !== 'landscape-4k' &&
+    manifestRecord.preset !== 'custom'
   )
     throw new Error('render.export payload preset is invalid');
   let frozenManifest: RenderManifest;

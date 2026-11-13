@@ -68,6 +68,8 @@ export interface OfflineMp4CapabilityInput {
   readonly needsAudio: boolean;
   /** The sample rate of the mixed audio the AAC encoder will receive; 48 kHz when omitted. */
   readonly audioSampleRate?: number;
+  readonly audioChannels?: number;
+  readonly audioBitrate?: number;
 }
 
 /** The WebCodecs pieces the capability probe talks to. */
@@ -202,6 +204,8 @@ export async function detectOfflineMp4Capability(
       const audioFailure = await checkAudioSupport(
         input.needsAudio,
         input.audioSampleRate ?? AUDIO_SAMPLE_RATE,
+        input.audioChannels ?? AUDIO_CHANNEL_COUNT,
+        input.audioBitrate ?? AUDIO_BITRATE,
         deps,
       );
       if (audioFailure !== undefined) return { ok: false, reason: audioFailure };
@@ -221,6 +225,8 @@ export async function detectOfflineMp4Capability(
 async function checkAudioSupport(
   needsAudio: boolean,
   sampleRate: number,
+  channels: number,
+  bitrate: number,
   deps: OfflineMp4CapabilityDeps,
 ): Promise<string | undefined> {
   if (!needsAudio) return undefined;
@@ -232,8 +238,8 @@ async function checkAudioSupport(
     audioEncoder.isConfigSupported({
       codec: AUDIO_CODEC,
       sampleRate,
-      numberOfChannels: AUDIO_CHANNEL_COUNT,
-      bitrate: AUDIO_BITRATE,
+      numberOfChannels: channels,
+      bitrate,
     }),
   );
   if (outcome.kind === 'timeout')
