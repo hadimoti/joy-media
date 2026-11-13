@@ -640,6 +640,9 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (!fs.existsSync(dir)) {
         return { ok: false, error: 'The asset library folder does not exist on this system' };
       }
+      if (!fs.statSync(dir).isDirectory()) {
+        return { ok: false, error: 'The configured asset library path is not a directory' };
+      }
       const problem = await deps.openDirectory(dir);
       if (typeof problem === 'string' && problem.length > 0) {
         return { ok: false, error: problem };

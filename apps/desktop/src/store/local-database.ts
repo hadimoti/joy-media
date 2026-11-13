@@ -8,7 +8,6 @@ import { ensureProjectDocumentSchema, SqliteProjectDocumentStore } from './proje
 import { PROFILE_BINDING_TABLE_SQL, secretVersionDigest } from './profile-binding.js';
 import {
   countLibraryAssets,
-  countsFromStoredCounts,
   EMPTY_ASSET_LIBRARY_COUNTS,
   type AssetLibraryCounts,
 } from './asset-library-counts.js';
@@ -476,12 +475,10 @@ export class LocalDatabase {
       try {
         const raw = fs.readFileSync(catalogPath, 'utf8');
         const parsed = JSON.parse(raw);
-        // The asset list is the catalogue itself, so the kinds are read from it.
-        // A stored count is only used when there is no list to count.
+        // The asset list is the catalogue itself; a missing list is empty rather
+        // than an invitation to trust a second, potentially stale source.
         if (Array.isArray(parsed.assets)) {
           counts = countLibraryAssets(parsed.assets);
-        } else if (parsed.counts) {
-          counts = countsFromStoredCounts(parsed.counts);
         }
       } catch {
         // ignore read error

@@ -20,16 +20,20 @@ const DRIVE_TYPES: Readonly<Record<number, AssetLibraryDriveType>> = {
 };
 
 const cached = new Map<string, AssetLibraryDriveType>();
+const DRIVE_ROOT_PATTERN = /^[A-Za-z]:\\?$/;
 
-/** "E:\\" is the drive "E:" as Windows names it. */
-function deviceIdOf(root: string): string {
-  return root.replace(/[\\/]+$/, '');
+interface DriveTypeProbeRuntime {
+  readonly platform?: NodeJS.Platform;
+  readonly execFile?: typeof execFile;
 }
 
-function queryWindowsDriveType(deviceId: string): Promise<AssetLibraryDriveType> {
+function queryWindowsDriveType(
+  deviceId: string,
+  runExecFile: typeof execFile,
+): Promise<AssetLibraryDriveType> {
   const command = `(Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='${deviceId}'").DriveType`;
   return new Promise((resolve) => {
-    execFile(
+    runExecFile(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command', command],
       { timeout: 5000, windowsHide: true },
@@ -47,17 +51,24 @@ function queryWindowsDriveType(deviceId: string): Promise<AssetLibraryDriveType>
 
 /** The kind of drive this root is. Cached per drive, so opening the settings
  * again is free. */
-export async function driveTypeOfRoot(root: string): Promise<AssetLibraryDriveType> {
-  const known = cached.get(root);
+export async function driveTypeOfRoot(
+  root: string,
+  runtime: DriveTypeProbeRuntime = {},
+): Promise<AssetLibraryDriveType> {
+  if (typeof root !== 'string' || !DRIVE_ROOT_PATTERN.test(root)) return 'unknown';
+
+  // Only the single validated drive literal below reaches the PowerShell filter.
+  const deviceId = root.slice(0, 2).toUpperCase();
+  const known = cached.get(deviceId);
   if (known !== undefined) return known;
   let type: AssetLibraryDriveType;
-  if (process.platform !== 'win32') {
+  if ((runtime.platform ?? process.platform) !== 'win32') {
     // No removable drives and no network shares to tell apart from here.
-    type = 'fixed';
+    type = 'unknown';
   } else {
-    type = await queryWindowsDriveType(deviceIdOf(root));
+    type = await queryWindowsDriveType(deviceId, runtime.execFile ?? execFile);
   }
-  cached.set(root, type);
+  cached.set(deviceId, type);
   return type;
 }
 
