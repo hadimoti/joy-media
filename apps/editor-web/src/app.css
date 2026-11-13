@@ -14649,6 +14649,28 @@ label {
   padding: var(--space-5) var(--space-3);
 }
 
+/* The empty library is one drop zone and one gold button (T-D05). */
+.asset-library-drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-4);
+  border: 1px dashed var(--joy-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-inset);
+  text-align: center;
+}
+.asset-library-drop-zone.is-drag-active {
+  border-color: var(--joy-accent);
+  background: color-mix(in srgb, var(--joy-accent) 10%, var(--joy-bg-inset));
+}
+.asset-library-drop-hint {
+  margin: 0;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-md);
+  line-height: 1.45;
+}
 
 /* Keep the asset-library content box available for narrow-panel queries. */
 .asset-library-content {
