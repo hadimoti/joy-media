@@ -3,15 +3,22 @@
 # Builds the fixtures with ffmpeg only (the test sources are ffmpeg's own
 # generators, so nothing is copied from the owner's folders), probes each
 # output with ffprobe, and writes manifest.json next to them with size,
-# duration, streams and SHA-256. Only this script and the manifest are
-# committed. The media itself stays outside the repository.
+# duration, streams, SHA-256 and a `reproducible` flag. Only this script, the
+# path guard, its test and the manifest are committed. The media stays outside
+# the repository.
 #
 # Usage:
 #   pwsh tooling/qa/fixtures/make-fixtures.ps1 -OutDir C:\jgp\v111\fixtures
-#   pwsh tooling/qa/fixtures/make-fixtures.ps1 -OutDir C:\jgp\v111\fixtures -CheckAgainst <older manifest.json>
+#   pwsh tooling/qa/fixtures/make-fixtures.ps1 -OutDir C:\jgp\v111\fixtures -CheckAgainst <earlier manifest.json>
 #
-# -CheckAgainst fails if any lossless item has a different SHA-256 from that
-# manifest. Lossy items are not compared: their hashes depend on the encoder.
+# -CheckAgainst compares every item with the earlier manifest. It fails if a
+# lossless item changed, and it sets `reproducible` for each item: true only when
+# the SHA-256 is identical across the two runs. Lossy items are compared too but
+# are not required to match.
+#
+# -OutDir is checked before anything is created or written (fixture-path.ps1):
+# only C:\jgp\v111\fixtures, a folder inside it, or a joy-fixtures-* folder under
+# the temp directory is used. The guard is tested by test-fixture-path.ps1.
 
 param(
   [string]$OutDir = 'C:\jgp\v111\fixtures',
@@ -20,6 +27,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+. (Join-Path $PSScriptRoot 'fixture-path.ps1')
+
+# The output folder is checked before anything is created or written.
+$OutDir = Resolve-FixtureOutDir -Path $OutDir
 
 function Invoke-Ffmpeg {
   param([string[]]$Arguments)
@@ -92,6 +104,12 @@ $specs = @(
      args = @('-f','lavfi','-i',"${tone}:duration=3",'-ac','2','-c:a','aac','-b:a','128k') }
 )
 
+# The earlier manifest for the double-run check, read before anything is written.
+$older = $null
+if ($CheckAgainst -ne '') {
+  $older = Get-Content -LiteralPath $CheckAgainst -Raw | ConvertFrom-Json
+}
+
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $ffmpegVersion = (& ffmpeg -version | Select-Object -First 1)
 
@@ -101,6 +119,13 @@ $items = foreach ($spec in $specs) {
   $probe = Get-Probe -Path $path
   $file = Get-Item -LiteralPath $path
   $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+  # Reproducible only when the earlier manifest has this item with the same hash.
+  $earlierHash = $null
+  if ($null -ne $older) {
+    $earlier = $older.items | Where-Object { $_.file -eq $spec.name } | Select-Object -First 1
+    if ($null -ne $earlier) { $earlierHash = $earlier.sha256 }
+  }
+  $reproducible = ($null -ne $earlierHash) -and ($earlierHash -eq $hash)
   $streams = foreach ($s in $probe.streams) {
     [ordered]@{
       type = Get-Field $s 'codec_type'
@@ -120,6 +145,7 @@ $items = foreach ($spec in $specs) {
     file = $spec.name
     kind = $spec.kind
     lossless = $spec.lossless
+    reproducible = $reproducible
     bytes = $file.Length
     sha256 = $hash
     formatName = Get-Field $probe.format 'format_name'
@@ -128,26 +154,33 @@ $items = foreach ($spec in $specs) {
   }
 }
 
+# Acceptance checks: every item probed, and the lossless items unchanged against the earlier run.
+$missing = $items | Where-Object { $_.streams.Count -eq 0 }
+if ($missing) { throw "no streams in: $($missing.file -join ', ')" }
+
+if ($null -ne $older) {
+  $mismatch = @()
+  foreach ($item in $items | Where-Object { $_.lossless }) {
+    if (-not $item.reproducible) { $mismatch += $item.file }
+  }
+  if ($mismatch.Count -gt 0) { throw "lossless hash changed: $($mismatch -join ', ')" }
+  Write-Output 'lossless hashes match the earlier manifest'
+}
+
+$header = @(
+  "reproducible: true only when this item's SHA-256 was identical across two runs of make-fixtures.ps1.",
+  'The run that wrote this manifest was compared with the earlier manifest given by -CheckAgainst.',
+  'It is false when the hash changed, and for every item when no earlier manifest was given.',
+  'lossless: the format keeps every sample or pixel exactly. It does not by itself mean reproducible;',
+  'a lossy item can still be reproducible when the encoder gives the same bytes.'
+)
 $manifest = [ordered]@{
   task = 'T-A04'
+  header = $header
   generator = $ffmpegVersion
+  comparedAgainst = $(if ($null -ne $older) { $CheckAgainst } else { $null })
   items = @($items)
 }
 $manifestPath = Join-Path $OutDir 'manifest.json'
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 Write-Output "wrote $($items.Count) items and $manifestPath"
-
-# Acceptance checks: every item probed, and the video rows match their spec.
-$missing = $items | Where-Object { $_.streams.Count -eq 0 }
-if ($missing) { throw "no streams in: $($missing.file -join ', ')" }
-
-if ($CheckAgainst -ne '') {
-  $older = Get-Content -LiteralPath $CheckAgainst -Raw | ConvertFrom-Json
-  $mismatch = @()
-  foreach ($item in $items | Where-Object { $_.lossless }) {
-    $before = $older.items | Where-Object { $_.file -eq $item.file }
-    if ($null -eq $before -or $before.sha256 -ne $item.sha256) { $mismatch += $item.file }
-  }
-  if ($mismatch.Count -gt 0) { throw "lossless hash changed: $($mismatch -join ', ')" }
-  Write-Output 'lossless hashes match the earlier manifest'
-}
