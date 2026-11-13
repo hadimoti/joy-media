@@ -873,6 +873,57 @@ describe('IPC dispatch', () => {
     expect(info.directory).toBe(d.localDatabase.getDefaultAssetLibraryDirectory());
     expect(info.isDefault).toBe(true);
   });
+
+  it('asset-library.open-directory opens the configured folder, and no other', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'joy-media-open-folder-'));
+    try {
+      const library = path.join(tempRoot, 'library');
+      fs.mkdirSync(library, { recursive: true });
+      const openDirectory = vi.fn(async () => '');
+      const d = deps();
+      d.localDatabase.setAssetLibraryDirectory(library);
+      const handlers = createIpcHandlers({ ...d, openDirectory });
+
+      const res = await dispatchIpcRequest(handlers, {
+        origin: 'joy-media-app://renderer',
+        channel: 'desktop.asset-library.open-directory',
+        // The renderer never names a path; this one is ignored on purpose.
+        payload: { directory: '/somewhere/else' },
+      });
+
+      expect(res.ok).toBe(true);
+      expect(openDirectory).toHaveBeenCalledTimes(1);
+      expect(openDirectory).toHaveBeenCalledWith(library);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('asset-library.get-settings reports the kind of drive the library sits on', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers({ ...d, classifyDrive: () => 'removable' });
+
+    const res = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.asset-library.get-settings',
+    });
+
+    expect(res.ok).toBe(true);
+    expect((res.data as { driveType: string }).driveType).toBe('removable');
+  });
+
+  it('asset-library.get-settings says "unknown" when the drive cannot be told, so nobody is warned', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+
+    const res = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.asset-library.get-settings',
+    });
+
+    expect(res.ok).toBe(true);
+    expect((res.data as { driveType: string }).driveType).toBe('unknown');
+  });
 });
 
 describe('legacy provider profiles (v1.1.0)', () => {

@@ -8,11 +8,14 @@ import type { WorkerStatus } from '../worker-status.js';
 import type { FileRegistry } from './file-registry.js';
 import type { WorkerSupervisor } from './worker-supervisor.js';
 import type {
+  AssetLibrarySettings,
   JobRecord,
   LocalDatabase,
   MediaKind,
   ProviderProfile,
 } from '../store/local-database.js';
+import type { AssetLibraryDriveType } from '../store/asset-library-drive.js';
+import { EMPTY_ASSET_LIBRARY_COUNTS } from '../store/asset-library-counts.js';
 import { LEGACY_PROVIDER_IDS } from '../store/migrations.js';
 import {
   clearAgentSlotsForProfile,
@@ -69,6 +72,14 @@ export interface IpcHandlerDeps {
   >;
   readonly showOpenDialog: ShowOpenDialog;
   readonly showOpenDirectoryDialog?: ShowOpenDialog;
+  /** Opens a folder in the OS file browser. Absent means the action is unavailable.
+   * Resolves with the reason it failed, or with nothing when the folder opened. */
+  readonly openDirectory?: (directory: string) => Promise<string | void>;
+  /** Works out what kind of drive a folder sits on (fixed, removable, network).
+   * Absent means "unknown", and the owner is not warned about a drive we know nothing about. */
+  readonly classifyDrive?: (
+    directory: string,
+  ) => Promise<AssetLibraryDriveType> | AssetLibraryDriveType;
   readonly localDatabase: LocalDatabase;
   readonly probeMedia: ProbeMedia;
   readonly secretStore: SecretStore;
@@ -101,6 +112,23 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
   const now = deps.now ?? (() => new Date().toISOString());
   const newId = deps.newId ?? (() => crypto.randomUUID());
   const agentRequests = deps.agentRequests ?? new AgentRequestRegistry();
+
+  /** The kind of drive a folder is on, asked for gently: a failure means "unknown",
+   * never a broken settings dialog. */
+  const driveTypeOf = async (directory: string): Promise<AssetLibraryDriveType> => {
+    if (deps.classifyDrive === undefined) return 'unknown';
+    try {
+      return (await deps.classifyDrive(directory)) ?? 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  };
+
+  /** The library's settings plus the kind of drive it sits on. */
+  const librarySettings = async (): Promise<AssetLibrarySettings> => {
+    const info = deps.localDatabase.getAssetLibraryInfo();
+    return { ...info, driveType: await driveTypeOf(info.directory) };
+  };
 
   const handlers: Record<IpcChannel, IpcHandler> = {
     ...mediaChannelTable(deps.mediaChannel),
@@ -574,8 +602,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       return { ok: true, data: Boolean(isMax) };
     },
     'desktop.asset-library.get-settings': async () => {
-      const info = deps.localDatabase.getAssetLibraryInfo();
-      return { ok: true, data: info };
+      return { ok: true, data: await librarySettings() };
     },
     'desktop.asset-library.set-directory': async (payload) => {
       if (typeof payload !== 'object' || payload === null) {
@@ -586,8 +613,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         return { ok: false, error: 'Directory path must be a non-empty string' };
       }
       deps.localDatabase.setAssetLibraryDirectory(dir.trim());
-      const info = deps.localDatabase.getAssetLibraryInfo();
-      return { ok: true, data: info };
+      return { ok: true, data: await librarySettings() };
     },
     'desktop.asset-library.select-directory': async () => {
       if (!deps.showOpenDirectoryDialog) {
@@ -598,13 +624,27 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         return { ok: true, data: null };
       }
       deps.localDatabase.setAssetLibraryDirectory(result.path);
-      const info = deps.localDatabase.getAssetLibraryInfo();
-      return { ok: true, data: info };
+      return { ok: true, data: await librarySettings() };
     },
     'desktop.asset-library.reset-directory': async () => {
       deps.localDatabase.resetAssetLibraryDirectory();
-      const info = deps.localDatabase.getAssetLibraryInfo();
-      return { ok: true, data: info };
+      return { ok: true, data: await librarySettings() };
+    },
+    'desktop.asset-library.open-directory': async () => {
+      // The renderer never names a path here: only the folder the library is
+      // already configured to use may ever be opened.
+      if (!deps.openDirectory) {
+        return { ok: false, error: 'Opening the folder is unavailable in this environment' };
+      }
+      const dir = deps.localDatabase.getAssetLibraryDirectory();
+      if (!fs.existsSync(dir)) {
+        return { ok: false, error: 'The asset library folder does not exist on this system' };
+      }
+      const problem = await deps.openDirectory(dir);
+      if (typeof problem === 'string' && problem.length > 0) {
+        return { ok: false, error: problem };
+      }
+      return { ok: true, data: { directory: dir } };
     },
     'desktop.asset-library.get-catalog': async () => {
       const dir = deps.localDatabase.getAssetLibraryDirectory();
@@ -612,7 +652,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (!fs.existsSync(catalogPath)) {
         return {
           ok: true,
-          data: { version: 1, counts: { total: 0, audio: 0, image: 0 }, assets: [] },
+          data: { version: 1, counts: EMPTY_ASSET_LIBRARY_COUNTS, assets: [] },
         };
       }
       try {

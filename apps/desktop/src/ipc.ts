@@ -30,6 +30,7 @@ export const IPC_CHANNELS = [
   'desktop.asset-library.get-catalog',
   'desktop.asset-library.reset-directory',
   'desktop.asset-library.remove-entry',
+  'desktop.asset-library.open-directory',
   'desktop.media.asset.register',
   'desktop.media.asset.upload-original',
   'desktop.media.asset.upload-original-chunk',
