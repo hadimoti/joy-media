@@ -14,6 +14,7 @@ import {
   type DesktopProviderProfile,
 } from './desktop-client.js';
 import { providerLabel } from './provider-labels.js';
+import { ChevronDownIcon } from './icons.js';
 
 /** Owner wording for the xAI sign-in route, reworded 2026-11-01 to say the route may be disabled and the API key is better. */
 const OAUTH_RISK_NOTICE =
@@ -166,7 +167,7 @@ function ProviderRouteAccordion({
     <div className={'joy-accordion-item' + (open ? ' is-open' : '')}>
       <button
         type="button"
-        className="joy-accordion-trigger"
+        className="button-secondary joy-accordion-trigger"
         aria-label={'Toggle ' + label + ' connection routes'}
         aria-expanded={open}
         aria-controls={'joy-provider-routes-' + provider.id}
@@ -177,7 +178,9 @@ function ProviderRouteAccordion({
           <span className="joy-accordion-tag">
             {regions.length > 0 ? 'Sign-in + API key' : 'Sign-in only'}
           </span>
-          <span className="joy-accordion-chevron">▾</span>
+          <span className="joy-accordion-chevron">
+            <ChevronDownIcon />
+          </span>
         </span>
       </button>
 
@@ -187,7 +190,7 @@ function ProviderRouteAccordion({
             <h4 className="joy-provider-route-title">Sign-in route (Primary)</h4>
             <button
               type="button"
-              className="joy-btn-primary"
+              className="button-primary"
               disabled={signInDisabled || saving}
               onClick={onSignIn}
             >
@@ -289,7 +292,7 @@ function ProviderRouteAccordion({
                 <div className="joy-settings-field-full">
                   <button
                     type="button"
-                    className="joy-btn-primary joy-btn-sm"
+                    className="button-primary button-sm"
                     disabled={saving}
                     onClick={() => void saveApiKey()}
                   >

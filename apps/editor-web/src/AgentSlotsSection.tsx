@@ -122,13 +122,19 @@ export function AgentSlotsSection({
         </p>
         <div className="agent-slot-actions">
           {chatGpt === undefined ? (
-            <button type="button" disabled={accountBusy} onClick={() => void signInChatGpt()}>
+            <button
+              type="button"
+              className="button-primary"
+              disabled={accountBusy}
+              onClick={() => void signInChatGpt()}
+            >
               Connect ChatGPT
             </button>
           ) : (
             <>
               <button
                 type="button"
+                className="button-secondary"
                 disabled={accountBusy}
                 onClick={() => void signInChatGpt(chatGpt.id)}
               >
@@ -136,6 +142,7 @@ export function AgentSlotsSection({
               </button>
               <button
                 type="button"
+                className="button-secondary"
                 disabled={accountBusy}
                 onClick={() => void logOutChatGpt(chatGpt)}
               >
@@ -327,12 +334,17 @@ function AgentSlotCard({
       </label>
       <div className="agent-slot-actions">
         {offered.length > 0 && (
-          <button type="button" onClick={() => setTypingModel((current) => !current)}>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => setTypingModel((current) => !current)}
+          >
             {typingModel ? 'Choose from the list' : 'Type a model ID'}
           </button>
         )}
         <button
           type="button"
+          className="button-secondary"
           disabled={busy || listingBusy || profileId === ''}
           onClick={() => void refreshModels()}
         >
@@ -377,10 +389,20 @@ function AgentSlotCard({
         </label>
       </div>
       <div className="agent-slot-actions">
-        <button type="button" disabled={busy} onClick={() => void save()}>
+        <button
+          type="button"
+          className="button-primary"
+          disabled={busy}
+          onClick={() => void save()}
+        >
           Save {label}
         </button>
-        <button type="button" disabled={busy || !slot.ready} onClick={() => void use()}>
+        <button
+          type="button"
+          className="button-primary"
+          disabled={busy || !slot.ready}
+          onClick={() => void use()}
+        >
           Use for agent
         </button>
       </div>
