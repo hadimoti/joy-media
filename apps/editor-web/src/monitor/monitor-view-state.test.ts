@@ -118,6 +118,10 @@ describe('wheel zoom factor', () => {
 });
 
 describe('fit', () => {
+  it('pins the padding Fit keeps around the frame at 16 px', () => {
+    expect(MONITOR_FIT_PADDING_PX).toBe(16);
+  });
+
   it('fits a portrait frame in a landscape viewport and centres it', () => {
     const zoom = fitZoom(viewport, portrait);
     // Fit leaves 16 px on each side of the viewport (T-D12).
