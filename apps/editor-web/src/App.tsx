@@ -270,6 +270,7 @@ import {
   type TimelineMediaAsset,
 } from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
+import { calculateMediaFitTransform } from './media-fit-transform.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
 import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
 import { findFirstPartyScene } from '@joy-media/html-scene-runtime/first-party';
@@ -5686,6 +5687,18 @@ function EditorWorkspace({
       }
       const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
       const controllerId = `media-controller-${clipId}`;
+      const fitted =
+        asset.kind === 'audio' ||
+        asset.descriptor.width === undefined ||
+        asset.descriptor.height === undefined
+          ? undefined
+          : calculateMediaFitTransform({
+              sourceWidth: asset.descriptor.width,
+              sourceHeight: asset.descriptor.height,
+              frameWidth: composition.width,
+              frameHeight: composition.height,
+              mode: 'fit',
+            });
       context.replaceVisualProject(
         writeClipMediaKind(
           bindClipToObject(
@@ -5705,10 +5718,10 @@ function EditorWorkspace({
                   kind: 'null',
                   assetId: asset.assetId,
                   transform: {
-                    x: 0,
-                    y: 0,
-                    scaleX: 1,
-                    scaleY: 1,
+                    x: fitted?.x ?? 0,
+                    y: fitted?.y ?? 0,
+                    scaleX: fitted?.scaleX ?? 1,
+                    scaleY: fitted?.scaleY ?? 1,
                     rotationDeg: 0,
                     opacity: 1,
                     crop: { left: 0, top: 0, right: 0, bottom: 0 },
@@ -5752,6 +5765,22 @@ function EditorWorkspace({
     ) => {
       const controllerId = `media-controller-${clipId}`;
       if (context.visualProject.visualObjects[controllerId] !== undefined) return;
+      const composition =
+        context.timelineProject.compositions[context.activeTimelineCompositionId] ??
+        context.timelineProject.compositions[context.timelineProject.rootCompositionId];
+      const fitted =
+        asset.kind === 'audio' ||
+        composition === undefined ||
+        asset.descriptor?.width === undefined ||
+        asset.descriptor.height === undefined
+          ? undefined
+          : calculateMediaFitTransform({
+              sourceWidth: asset.descriptor.width,
+              sourceHeight: asset.descriptor.height,
+              frameWidth: composition.width,
+              frameHeight: composition.height,
+              mode: 'fit',
+            });
       context.replaceVisualProject(
         bindClipToObject(
           {
@@ -5770,10 +5799,10 @@ function EditorWorkspace({
                 kind: 'null',
                 assetId: asset.id,
                 transform: {
-                  x: 0,
-                  y: 0,
-                  scaleX: 1,
-                  scaleY: 1,
+                  x: fitted?.x ?? 0,
+                  y: fitted?.y ?? 0,
+                  scaleX: fitted?.scaleX ?? 1,
+                  scaleY: fitted?.scaleY ?? 1,
                   rotationDeg: 0,
                   opacity: 1,
                   crop: { left: 0, top: 0, right: 0, bottom: 0 },
@@ -6538,20 +6567,18 @@ function EditorWorkspace({
             if (!shouldPlace) continue;
             const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${batchToken}-${index}`;
             const controllerId = `media-controller-${clipId}`;
-            let scale = 1;
-            if (
-              target.surface === 'monitor' &&
-              asset.kind !== 'audio' &&
-              asset.descriptor.width !== undefined &&
-              asset.descriptor.height !== undefined &&
-              asset.descriptor.width > 0 &&
-              asset.descriptor.height > 0
-            ) {
-              scale = Math.min(
-                composition.width / asset.descriptor.width,
-                composition.height / asset.descriptor.height,
-              );
-            }
+            const fitted =
+              asset.kind === 'audio' ||
+              asset.descriptor.width === undefined ||
+              asset.descriptor.height === undefined
+                ? undefined
+                : calculateMediaFitTransform({
+                    sourceWidth: asset.descriptor.width,
+                    sourceHeight: asset.descriptor.height,
+                    frameWidth: composition.width,
+                    frameHeight: composition.height,
+                    mode: 'fit',
+                  });
             nextVisualProject = bindClipToObject(
               {
                 ...nextVisualProject,
@@ -6562,10 +6589,10 @@ function EditorWorkspace({
                     kind: 'null',
                     assetId: asset.id,
                     transform: {
-                      x: 0,
-                      y: 0,
-                      scaleX: scale,
-                      scaleY: scale,
+                      x: fitted?.x ?? 0,
+                      y: fitted?.y ?? 0,
+                      scaleX: fitted?.scaleX ?? 1,
+                      scaleY: fitted?.scaleY ?? 1,
                       rotationDeg: 0,
                       opacity: 1,
                       crop: { left: 0, top: 0, right: 0, bottom: 0 },

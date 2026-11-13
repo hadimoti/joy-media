@@ -11,7 +11,7 @@ describe('place-timeline-element', () => {
         id: 'asset-image',
         kind: 'image',
         displayName: 'Poster',
-        descriptor: { mimeType: 'image/png', width: 640, height: 360 },
+        descriptor: { mimeType: 'image/png', width: 640, height: 480 },
       },
       clipId: 'clip-image',
       planned: {
@@ -30,6 +30,12 @@ describe('place-timeline-element', () => {
 
     expect(next.assets['asset-image']).toMatchObject({ id: 'asset-image', kind: 'image' });
     expect(next.visualObjects['media-controller-clip-image']).toMatchObject({ kind: 'image' });
+    expect(next.visualObjects['media-controller-clip-image']?.transform).toMatchObject({
+      x: 240,
+      y: 0,
+      scaleX: 2.25,
+      scaleY: 2.25,
+    });
     expect(next.pluginData['joy.clipObjects']).toEqual({
       'clip-image': 'media-controller-clip-image',
     });
