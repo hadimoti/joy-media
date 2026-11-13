@@ -13,6 +13,7 @@ import type {
   NodeRect,
 } from '@joy-media/render-ir';
 import {
+  cropNodeBox,
   flattenRenderNodes,
   frameToLocalPoint,
   isRotated,
@@ -97,9 +98,21 @@ function drawSurfaceRaw(
   height: number,
   node: Exclude<VisualRenderNode, { kind: 'text' }>,
 ): void {
-  const box = { x: 0, y: 0, width: node.width, height: node.height };
+  const box = cropNodeBox(
+    { x: 0, y: 0, width: node.width, height: node.height },
+    node.transform.crop,
+  );
   rasterizeRaw(pixels, width, height, node, box, (u, v) =>
-    u >= 0 && u < node.width && v >= 0 && v < node.height ? node.color : undefined,
+    u >= box.x &&
+    u < box.x + box.width &&
+    u >= 0 &&
+    u < node.width &&
+    v >= box.y &&
+    v < box.y + box.height &&
+    v >= 0 &&
+    v < node.height
+      ? node.color
+      : undefined,
   );
 }
 
@@ -113,8 +126,13 @@ function drawTextRaw(
   const textBounds = textPlateBounds(textWidth, 5, node.align);
   const plateBounds = textPlateBounds(textWidth, 5, node.align, 1);
   // The drawn box (rotation origin): the plate when there is one, else the run.
-  const box = node.background === undefined ? textBounds : plateBounds;
+  const box = cropNodeBox(
+    node.background === undefined ? textBounds : plateBounds,
+    node.transform.crop,
+  );
   rasterizeRaw(pixels, width, height, node, box, (u, v) => {
+    if (u < box.x || u >= box.x + box.width || v < box.y || v >= box.y + box.height)
+      return undefined;
     const textX = Math.floor(u - textBounds.x);
     const glyphColumn = textX % 4;
     const characterIndex = Math.floor(textX / 4);

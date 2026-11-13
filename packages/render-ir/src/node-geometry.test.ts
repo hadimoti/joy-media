@@ -110,6 +110,30 @@ describe('nodeBoundsFromBox', () => {
     expect(bounds.rotationDeg).toBe(0);
   });
 
+  it('reports the cropped local box after scale and rotation', () => {
+    const transform = {
+      translateX: 10,
+      translateY: 20,
+      scaleX: 2,
+      scaleY: 1.5,
+      rotationDeg: 90,
+      crop: { left: 0.25, top: 0.125, right: 0.1, bottom: 0.25 },
+    } as Transform2D;
+    const bounds = nodeBoundsFromBox('cropped', transform, { x: 0, y: 0, width: 100, height: 80 });
+
+    expect(bounds.width).toBe(130);
+    expect(bounds.height).toBe(75);
+    expect(bounds.center).toEqual({ x: 125, y: 72.5 });
+    expectPoint(bounds.corners[0], 162.5, 7.5);
+    expectPoint(bounds.corners[1], 162.5, 137.5);
+    expectPoint(bounds.corners[2], 87.5, 137.5);
+    expectPoint(bounds.corners[3], 87.5, 7.5);
+    expect(bounds.aabb.x).toBeCloseTo(87.5, 9);
+    expect(bounds.aabb.y).toBeCloseTo(7.5, 9);
+    expect(bounds.aabb.width).toBeCloseTo(75, 9);
+    expect(bounds.aabb.height).toBeCloseTo(130, 9);
+  });
+
   it('centred text: the box starts left of translate by half the text width', () => {
     const textBox = textPlateBounds(120, 30, 'center');
     const bounds = nodeBoundsFromBox(

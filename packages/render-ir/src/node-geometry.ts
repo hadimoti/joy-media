@@ -12,7 +12,7 @@
  * node is rotated. Renderers keep their old code path when the rotation is 0,
  * so frames without rotation stay bit-identical.
  */
-import type { Transform2D } from './model.js';
+import type { CropInsets, Transform2D } from './model.js';
 
 export interface NodePoint {
   readonly x: number;
@@ -25,6 +25,28 @@ export interface NodeRect {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+}
+
+const MAX_CROP_FRACTION = 0.49;
+
+function cropFraction(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return 0;
+  return Math.min(MAX_CROP_FRACTION, Math.max(0, value));
+}
+
+/** The visible part of a local box after fractional crop, before scale or rotation. */
+export function cropNodeBox(box: NodeRect, crop?: CropInsets): NodeRect {
+  const left = cropFraction(crop?.left);
+  const top = cropFraction(crop?.top);
+  const right = cropFraction(crop?.right);
+  const bottom = cropFraction(crop?.bottom);
+  if (left === 0 && top === 0 && right === 0 && bottom === 0) return box;
+  return {
+    x: box.x + box.width * left,
+    y: box.y + box.height * top,
+    width: box.width * (1 - left - right),
+    height: box.height * (1 - top - bottom),
+  };
 }
 
 /** The drawn rectangle of a node in authored frame pixels. */
@@ -120,11 +142,15 @@ export function frameToLocalPoint(
 
 /** The drawn rectangle of a node whose local box is `box`. */
 export function nodeBoundsFromBox(id: string, transform: Transform2D, box: NodeRect): NodeBounds {
+  const drawnBox = cropNodeBox(box, transform.crop);
   const corners = [
-    localToFramePoint(transform, box, { x: box.x, y: box.y }),
-    localToFramePoint(transform, box, { x: box.x + box.width, y: box.y }),
-    localToFramePoint(transform, box, { x: box.x + box.width, y: box.y + box.height }),
-    localToFramePoint(transform, box, { x: box.x, y: box.y + box.height }),
+    localToFramePoint(transform, drawnBox, { x: drawnBox.x, y: drawnBox.y }),
+    localToFramePoint(transform, drawnBox, { x: drawnBox.x + drawnBox.width, y: drawnBox.y }),
+    localToFramePoint(transform, drawnBox, {
+      x: drawnBox.x + drawnBox.width,
+      y: drawnBox.y + drawnBox.height,
+    }),
+    localToFramePoint(transform, drawnBox, { x: drawnBox.x, y: drawnBox.y + drawnBox.height }),
   ] as const;
   const xs = corners.map((corner) => corner.x);
   const ys = corners.map((corner) => corner.y);
@@ -133,14 +159,14 @@ export function nodeBoundsFromBox(id: string, transform: Transform2D, box: NodeR
   return {
     id,
     corners,
-    center: localToFramePoint(transform, box, {
-      x: box.x + box.width / 2,
-      y: box.y + box.height / 2,
+    center: localToFramePoint(transform, drawnBox, {
+      x: drawnBox.x + drawnBox.width / 2,
+      y: drawnBox.y + drawnBox.height / 2,
     }),
-    width: box.width * transform.scaleX,
-    height: box.height * transform.scaleY,
+    width: drawnBox.width * transform.scaleX,
+    height: drawnBox.height * transform.scaleY,
     rotationDeg: nodeRotationDeg(transform),
-    origin: localToFramePoint(transform, box, nodePivot(transform, box)),
+    origin: localToFramePoint(transform, drawnBox, nodePivot(transform, drawnBox)),
     aabb: { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY },
   };
 }
@@ -151,11 +177,12 @@ export function nodeBoundsContain(
   box: NodeRect,
   point: NodePoint,
 ): boolean {
-  const local = frameToLocalPoint(transform, box, point);
+  const drawnBox = cropNodeBox(box, transform.crop);
+  const local = frameToLocalPoint(transform, drawnBox, point);
   return (
-    local.x >= box.x &&
-    local.x <= box.x + box.width &&
-    local.y >= box.y &&
-    local.y <= box.y + box.height
+    local.x >= drawnBox.x &&
+    local.x <= drawnBox.x + drawnBox.width &&
+    local.y >= drawnBox.y &&
+    local.y <= drawnBox.y + drawnBox.height
   );
 }

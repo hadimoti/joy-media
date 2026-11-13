@@ -1147,13 +1147,70 @@ function validateVisualObject(
       diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'opacity must be in [0, 1]', path),
     );
   const crop = value.transform.crop;
-  if (
-    !isRecord(crop) ||
-    !['left', 'top', 'right', 'bottom'].every((key) => Number.isFinite(crop[key]))
-  )
-    diagnostics.push(
-      diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'crop edges must be finite', path),
-    );
+  if (crop !== undefined) {
+    if (!isRecord(crop)) {
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_VISUAL_OBJECT',
+          `clip "${value.id}" crop must be an object; remove it for no crop or provide all four edges`,
+          `${path}.transform.crop`,
+        ),
+      );
+    } else {
+      // Reject legacy saved crops that the renderer used to clamp silently,
+      // with repairable edge diagnostics. Missing crop stays a legacy no-crop
+      // value so older projects retain their existing load and draw behavior.
+      for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
+        const amount = crop[edge];
+        const edgePath = `${path}.transform.crop.${edge}`;
+        if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+          diagnostics.push(
+            diagnostic(
+              'PROJECT_SCHEMA_V1_VISUAL_OBJECT',
+              `clip "${value.id}" crop edge "${edge}" must be finite; set it within [0, 0.49] to repair the project`,
+              edgePath,
+            ),
+          );
+        } else if (amount < 0 || amount > 0.49) {
+          diagnostics.push(
+            diagnostic(
+              'PROJECT_SCHEMA_V1_VISUAL_OBJECT',
+              `clip "${value.id}" crop edge "${edge}" must be within [0, 0.49]; set it in range to repair the project`,
+              edgePath,
+            ),
+          );
+        }
+      }
+      if (
+        typeof crop.left === 'number' &&
+        Number.isFinite(crop.left) &&
+        typeof crop.right === 'number' &&
+        Number.isFinite(crop.right) &&
+        crop.left + crop.right >= 1
+      )
+        diagnostics.push(
+          diagnostic(
+            'PROJECT_SCHEMA_V1_VISUAL_OBJECT',
+            `clip "${value.id}" crop edges "left" and "right" must sum to less than 1; reduce either edge to repair the project`,
+            `${path}.transform.crop`,
+          ),
+        );
+      if (
+        typeof crop.top === 'number' &&
+        Number.isFinite(crop.top) &&
+        typeof crop.bottom === 'number' &&
+        Number.isFinite(crop.bottom) &&
+        crop.top + crop.bottom >= 1
+      )
+        diagnostics.push(
+          diagnostic(
+            'PROJECT_SCHEMA_V1_VISUAL_OBJECT',
+            `clip "${value.id}" crop edges "top" and "bottom" must sum to less than 1; reduce either edge to repair the project`,
+            `${path}.transform.crop`,
+          ),
+        );
+    }
+  }
   if (value.animations !== undefined) {
     if (!isRecord(value.animations)) {
       diagnostics.push(
