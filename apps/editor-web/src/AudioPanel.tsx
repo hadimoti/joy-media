@@ -20,6 +20,7 @@ import {
   CloudIcon,
   DeviceProcessorIcon,
   DownloadIcon,
+  InfoIcon,
   LayersIcon,
   MasterBusIcon,
   MuteIcon,
@@ -265,6 +266,9 @@ export function AudioPanel({
 }: AudioPanelProps) {
   const [tab, setTab] = useState('enhance');
   const [workflowId, setWorkflowId] = useState(AUDIO_WORKFLOW_PRESETS[0]!.id);
+  // The processing plan and Apply appear only after a preset is chosen (T-D15).
+  const [chosenWorkflowId, setChosenWorkflowId] = useState<string | null>(null);
+  const [engineInfoOpen, setEngineInfoOpen] = useState(false);
   const [scopeId, setScopeId] = useState<AudioEnhanceScopeId>('timeline');
   const [device, setDevice] = useState<'gpu' | 'cpu'>('gpu');
   const [modelCachePath, setModelCachePath] = useState(DEFAULT_MODEL_CACHE_PATH);
@@ -538,14 +542,47 @@ export function AudioPanel({
           </section>
 
           <section className="audio-enhance-route-summary" aria-label="Enhancement runtime summary">
-            <span data-state={browserDspReady ? 'ready' : 'blocked'}>
-              <DeviceProcessorIcon />
-              <span>Browser DSP {browserDspReady ? 'ready' : 'needs clips'}</span>
-            </span>
-            <span data-state={localWorkerReady ? 'ready' : 'blocked'}>
-              <AudioWorkerIcon />
-              <span>Local Worker {localWorkerReady ? 'connected' : 'disconnected'}</span>
-            </span>
+            <div className="audio-engine-status">
+              <button
+                type="button"
+                className="icon-button audio-engine-status-button"
+                aria-label="Engine status"
+                title="Engine status"
+                aria-expanded={engineInfoOpen}
+                aria-controls="audio-engine-status-popover"
+                onClick={() => setEngineInfoOpen((open) => !open)}
+              >
+                <InfoIcon />
+              </button>
+              {engineInfoOpen && (
+                <section
+                  id="audio-engine-status-popover"
+                  className="audio-engine-status-popover"
+                  aria-label="Engine status"
+                >
+                  <div className="audio-engine-status-heading">
+                    <strong>Engine status</strong>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Close engine status"
+                      title="Close"
+                      onClick={() => setEngineInfoOpen(false)}
+                    >
+                      <CloseIcon />
+                    </button>
+                  </div>
+                  <span data-state={browserDspReady ? 'ready' : 'blocked'}>
+                    <DeviceProcessorIcon />
+                    <span>Browser DSP {browserDspReady ? 'ready' : 'needs clips'}</span>
+                  </span>
+                  <span data-state={localWorkerReady ? 'ready' : 'blocked'}>
+                    <AudioWorkerIcon />
+                    <span>Local Worker {localWorkerReady ? 'connected' : 'disconnected'}</span>
+                  </span>
+                </section>
+              )}
+            </div>
             <div
               className="timeline-audio-dsp-pills"
               title="Real-time Audio DSP: DeepFilterNet & Normalization"
@@ -594,12 +631,17 @@ export function AudioPanel({
                 <button
                   key={preset.id}
                   type="button"
-                  className="audio-workflow-button"
+                  className="audio-workflow-choice"
                   aria-pressed={preset.id === selectedWorkflow.id}
                   title={preset.command}
-                  onClick={() => setWorkflowId(preset.id)}
+                  onClick={() => {
+                    setWorkflowId(preset.id);
+                    setChosenWorkflowId(preset.id);
+                    setReviewingWorkflow(null);
+                  }}
                 >
-                  {preset.label}
+                  <strong>{preset.label}</strong>
+                  <span>{preset.steps.length} steps</span>
                 </button>
               ))}
             </div>
@@ -646,90 +688,94 @@ export function AudioPanel({
                   </>
                 )}
               </div>
-              <section className="audio-execution-plan" aria-label="Processing plan">
-                <div className="audio-execution-plan-heading">
-                  <strong>Processing plan</strong>
-                  <span data-state={executionPlan.blockedSteps === 0 ? 'ready' : 'blocked'}>
-                    {executionPlan.readySteps}/{executionPlan.steps.length} ready
-                  </span>
-                </div>
-                <ul>
-                  {executionPlan.steps.map((step) => (
-                    <li key={step.id} data-state={step.ready ? 'ready' : 'blocked'}>
-                      <span>{step.label}</span>
-                      <span>{audioExecutionTargetLabel(step.target)}</span>
-                      <small>{step.ready ? 'Ready' : step.reason}</small>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-              <div className="audio-enhance-apply">
-                {selectedScope.clipIds.length === 0 ? (
-                  <span>Select a target with clips to continue.</span>
-                ) : executionPlan.browserDspRunnable ? (
-                  reviewingWorkflow === selectedWorkflow.id ? (
-                    <div className="audio-enhance-review" data-audio-review>
-                      <span>
-                        Review: apply {selectedWorkflow.label} to {selectedScope.clipIds.length}{' '}
-                        clip
-                        {selectedScope.clipIds.length === 1 ? '' : 's'}.
-                      </span>
-                      <div>
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label="Back to enhancement review"
-                          title="Back to enhancement review"
-                          data-guide="Back"
-                          onClick={() => setReviewingWorkflow(null)}
-                        >
-                          <CloseIcon />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-button icon-button-labeled is-primary"
-                          aria-label={
-                            runningTarget === 'browser-dsp' ? 'Applying changes' : 'Apply changes'
-                          }
-                          title={
-                            runningTarget === 'browser-dsp' ? 'Applying changes' : 'Apply changes'
-                          }
-                          data-guide={
-                            runningTarget === 'browser-dsp' ? 'Applying changes' : 'Apply changes'
-                          }
-                          disabled={runningTarget !== null}
-                          onClick={() => void applyBrowserWorkflow()}
-                        >
-                          <CheckIcon />
-                          <span>{runningTarget === 'browser-dsp' ? 'Applying…' : 'Apply'}</span>
-                        </button>
+              {chosenWorkflowId !== null && (
+                <section className="audio-execution-plan" aria-label="Processing plan">
+                  <div className="audio-execution-plan-heading">
+                    <strong>Processing plan</strong>
+                    <span data-state={executionPlan.blockedSteps === 0 ? 'ready' : 'blocked'}>
+                      {executionPlan.readySteps}/{executionPlan.steps.length} ready
+                    </span>
+                  </div>
+                  <ul>
+                    {executionPlan.steps.map((step) => (
+                      <li key={step.id} data-state={step.ready ? 'ready' : 'blocked'}>
+                        <span>{step.label}</span>
+                        <span>{audioExecutionTargetLabel(step.target)}</span>
+                        <small>{step.ready ? 'Ready' : step.reason}</small>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+              {chosenWorkflowId !== null && (
+                <div className="audio-enhance-apply">
+                  {selectedScope.clipIds.length === 0 ? (
+                    <span>Select a target with clips to continue.</span>
+                  ) : executionPlan.browserDspRunnable ? (
+                    reviewingWorkflow === selectedWorkflow.id ? (
+                      <div className="audio-enhance-review" data-audio-review>
+                        <span>
+                          Review: apply {selectedWorkflow.label} to {selectedScope.clipIds.length}{' '}
+                          clip
+                          {selectedScope.clipIds.length === 1 ? '' : 's'}.
+                        </span>
+                        <div>
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label="Back to enhancement review"
+                            title="Back to enhancement review"
+                            data-guide="Back"
+                            onClick={() => setReviewingWorkflow(null)}
+                          >
+                            <CloseIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button icon-button-labeled is-primary"
+                            aria-label={
+                              runningTarget === 'browser-dsp' ? 'Applying changes' : 'Apply changes'
+                            }
+                            title={
+                              runningTarget === 'browser-dsp' ? 'Applying changes' : 'Apply changes'
+                            }
+                            data-guide={
+                              runningTarget === 'browser-dsp' ? 'Applying changes' : 'Apply changes'
+                            }
+                            disabled={runningTarget !== null}
+                            onClick={() => void applyBrowserWorkflow()}
+                          >
+                            <CheckIcon />
+                            <span>{runningTarget === 'browser-dsp' ? 'Applying…' : 'Apply'}</span>
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="icon-button icon-button-labeled audio-enhance-primary"
+                        aria-label={`Review ${selectedWorkflow.label} changes`}
+                        title={`Review ${selectedWorkflow.label} changes`}
+                        data-guide="Review changes"
+                        data-audio-review-workflow
+                        onClick={() => setReviewingWorkflow(selectedWorkflow.id)}
+                      >
+                        <SlidersIcon />
+                        <span>Review</span>
+                      </button>
+                    )
                   ) : (
-                    <button
-                      type="button"
-                      className="icon-button icon-button-labeled audio-enhance-primary"
-                      aria-label="Review Voice Polish changes"
-                      title="Review Voice Polish changes"
-                      data-guide="Review changes"
-                      data-audio-review-workflow
-                      onClick={() => setReviewingWorkflow(selectedWorkflow.id)}
-                    >
-                      <SlidersIcon />
-                      <span>Review</span>
-                    </button>
-                  )
-                ) : (
-                  <span>
-                    This preset is not fully wired. Review the blocked steps or open Runtime.
-                  </span>
-                )}
-                {runError !== null && (
-                  <span className="audio-run-error" role="alert" data-audio-run-error>
-                    {runError}
-                  </span>
-                )}
-              </div>
+                    <span>
+                      This preset is not fully wired. Review the blocked steps or open Runtime.
+                    </span>
+                  )}
+                  {runError !== null && (
+                    <span className="audio-run-error" role="alert" data-audio-run-error>
+                      {runError}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </section>
         </div>
