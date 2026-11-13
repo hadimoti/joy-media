@@ -74,8 +74,7 @@ export async function keyboardOnly(page, { clipId }) {
     throw new Error('Alt+ArrowUp did not scale the element up');
 
   const turned = await press(page, clipId, ']');
-  if (turned.after.points === turned.before.points)
-    throw new Error('] did not rotate the element');
+  if (turned.after.points === turned.before.points) throw new Error('] did not rotate the element');
 
   await page.keyboard.press('Escape');
   const stillOnStage = await page.evaluate(
