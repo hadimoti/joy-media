@@ -528,7 +528,7 @@ export function MonitorViewport({
       ref={controller.viewportRef}
       tabIndex={0}
       role="group"
-      aria-label="Monitor picture. Tab selects the next element and Shift+Tab the previous; arrow keys move it, Shift+arrows move 10 pixels, Alt+arrows scale it, [ and ] rotate it; Esc leaves."
+      aria-label="Monitor picture: Tab selects elements, arrows move, Alt+arrows scale, [ ] rotate, Esc leaves"
       data-monitor-stage=""
       className={`monitor-canvas-wrap${dragOver ? ' drag-over' : ''}`}
       data-monitor-zoom={controller.view.zoom}

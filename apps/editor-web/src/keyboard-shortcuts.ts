@@ -176,7 +176,10 @@ export const SHORTCUT_REFERENCE: readonly ShortcutReferenceGroup[] = [
       { keys: 'Ctrl+D', action: 'Duplicate clip' },
       { keys: 'Delete / Backspace', action: 'Delete selected clip or marker' },
       { keys: 'S', action: 'Split clip at playhead' },
-      { keys: 'Tab / Shift+Tab (Monitor picture)', action: 'Select the next / previous element' },
+      {
+        keys: 'Tab / Shift+Tab (Monitor picture)',
+        action: 'Select the next / previous element; past the last or first, focus leaves',
+      },
       { keys: '← ↑ → ↓ (Monitor picture)', action: 'Move the selected element 1 pixel' },
       { keys: 'Shift+← ↑ → ↓ (Monitor picture)', action: 'Move the selected element 10 pixels' },
       {
@@ -185,7 +188,7 @@ export const SHORTCUT_REFERENCE: readonly ShortcutReferenceGroup[] = [
       },
       {
         keys: '[ / ] (Monitor picture)',
-        action: 'Rotate the selected element 1 degree ({ / }: 15 degrees)',
+        action: 'Rotate the selected element 1 degree (with Shift: 15 degrees)',
       },
       { keys: 'Esc (Monitor picture)', action: 'Leave the Monitor picture' },
     ],
