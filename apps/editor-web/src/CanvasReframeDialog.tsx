@@ -82,14 +82,18 @@ export function CanvasReframeDialog({
             </label>
           ))}
         </fieldset>
-        <p className="app-dialog-message">
-          Hand-set transforms scale by the same rule around the canvas centre.
-        </p>
-        {skippedObjectCount > 0 && cameraFramed && (
+        {!cameraFramed && (
           <p className="app-dialog-message">
-            Fit and Fill will leave {skippedObjectCount} clip object
-            {skippedObjectCount === 1 ? '' : 's'} alone: clips framed by a camera are left as they
-            are, because the camera frames them.
+            Hand-set transforms scale by the same rule around the canvas centre.
+          </p>
+        )}
+        {cameraFramed && (
+          <p className="app-dialog-message">
+            This project is framed by a camera, so Fit and Fill do not change any clip.
+            {skippedObjectCount > 0 &&
+              ` ${skippedObjectCount} clip object${skippedObjectCount === 1 ? ' is' : 's are'} left as ${
+                skippedObjectCount === 1 ? 'it is' : 'they are'
+              }, because the camera frames ${skippedObjectCount === 1 ? 'it' : 'them'}.`}
           </p>
         )}
         {skippedObjectCount > 0 && !cameraFramed && (

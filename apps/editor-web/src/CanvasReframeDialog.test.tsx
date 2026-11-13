@@ -66,12 +66,13 @@ describe('CanvasReframeDialog', () => {
   it('says plainly that camera-framed clips are left as they are', async () => {
     await renderDialog('fit', 2, true);
 
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
-      'Fit and Fill will leave 2 clip objects alone: clips framed by a camera are left as they are, because the camera frames them.',
+    const text = document.querySelector('[role="dialog"]')?.textContent ?? '';
+    expect(text).toContain(
+      'This project is framed by a camera, so Fit and Fill do not change any clip.',
     );
-    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(
-      'expressions or unsupported animation',
-    );
+    expect(text).toContain('2 clip objects are left as they are, because the camera frames them.');
+    expect(text).not.toContain('Hand-set transforms scale by the same rule');
+    expect(text).not.toContain('expressions or unsupported animation');
   });
 
   it('applies the selected mode', async () => {
