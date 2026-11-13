@@ -30,7 +30,7 @@ describe('demo-project.json fixture', () => {
     const pkg = parseProjectPackage(json);
     expect(pkg.format).toBe('joy-media-project');
     expect(pkg.schemaVersion).toBe(1);
-    expect(pkg.app).toBe('JOY Studio');
+    expect(pkg.app).toBe('JOY Media');
     expect(pkg.source.id).toBe('demo-project');
     expect(pkg.media).toHaveLength(3);
   });

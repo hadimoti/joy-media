@@ -24,6 +24,10 @@ import { readProjectBundle, type ProjectDocumentBundle } from './project-lifecyc
 /** Versioned, self-describing editable project interchange format. */
 export const PROJECT_PACKAGE_FORMAT = 'joy-media-project' as const;
 export const PROJECT_PACKAGE_SCHEMA_VERSION = 1 as const;
+/** The app name the package writer records. */
+export const PROJECT_PACKAGE_APP = 'JOY Media' as const;
+/** Packages written before the rename say this; the reader still accepts them. */
+export const LEGACY_PROJECT_PACKAGE_APP = 'JOY Studio' as const;
 
 export interface PortableMediaEntry {
   readonly asset: AssetRecordV1;
@@ -35,7 +39,8 @@ export interface PortableMediaEntry {
 export interface PortableProjectPackageV1 {
   readonly format: typeof PROJECT_PACKAGE_FORMAT;
   readonly schemaVersion: typeof PROJECT_PACKAGE_SCHEMA_VERSION;
-  readonly app: 'JOY Studio';
+  /** Written as JOY Media. JOY Studio is the name of packages exported before the rename. */
+  readonly app: typeof PROJECT_PACKAGE_APP | typeof LEGACY_PROJECT_PACKAGE_APP;
   readonly exportedAt: string;
   readonly source: {
     readonly id: string;
@@ -123,7 +128,7 @@ export async function createProjectPackage(
   return {
     format: PROJECT_PACKAGE_FORMAT,
     schemaVersion: PROJECT_PACKAGE_SCHEMA_VERSION,
-    app: 'JOY Studio',
+    app: PROJECT_PACKAGE_APP,
     exportedAt: (options.now ?? (() => new Date().toISOString()))(),
     source: {
       id: entry.id,
@@ -144,7 +149,11 @@ export function parseProjectPackage(value: unknown): PortableProjectPackageV1 {
   if (!isRecord(value)) throw new Error('This file is not a JOY project package.');
   if (value.format !== PROJECT_PACKAGE_FORMAT || value.schemaVersion !== 1)
     throw new Error('Unsupported JOY project package version.');
-  if (value.app !== 'JOY Studio' || !isRecord(value.source) || !isRecord(value.documents))
+  if (
+    (value.app !== PROJECT_PACKAGE_APP && value.app !== LEGACY_PROJECT_PACKAGE_APP) ||
+    !isRecord(value.source) ||
+    !isRecord(value.documents)
+  )
     throw new Error('JOY project package metadata is invalid.');
   if (!isRecord(value.source) || typeof value.source.id !== 'string')
     throw new Error('JOY project package has no source project identity.');
