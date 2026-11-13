@@ -97,9 +97,22 @@ import {
 } from './export-job-request.js';
 import { applyCanvasDimensions, applyExportPresetSelection } from './export-format-actions.js';
 import { CANVAS_FORMAT_POPOVER_ID, CanvasFormatPopover } from './CanvasFormatMenu.js';
+import { CanvasReframeDialog } from './CanvasReframeDialog.js';
+import {
+  canvasReframeIsCameraFramed,
+  canvasReframeSkippedObjectCount,
+  shouldAskCanvasReframe,
+  type CanvasReframeMode,
+  type CanvasSize,
+} from './canvas-reframe.js';
+import {
+  readCanvasReframePreference,
+  writeCanvasReframePreference,
+} from './canvas-reframe-preference.js';
 import { canvasFormatReadout } from './canvas-format.js';
 import {
   exportPresetMismatchMessage,
+  exportPresetCanvasSize,
   isExportPresetId,
   reconcileExportPresetOnLoad,
   resolveExportSettings,
@@ -124,7 +137,6 @@ registerBuiltins();
 
 /** One in-memory activity store for this editor instance; never persisted. */
 export const appAgentPresenceStore = createAgentPresenceStore();
-export { appAgentPreviewStore };
 
 /**
  * A human document edit invalidates any staged agent preview. Keep the
@@ -1065,6 +1077,26 @@ function EditorWorkspace({
       .catch(() => undefined);
   }, [exportHistory]);
   const [exportPresetMismatch, setExportPresetMismatch] = useState<ExportPresetMismatch>();
+  const [canvasReframeDefault, setCanvasReframeDefault] = useState<CanvasReframeMode>(() =>
+    readCanvasReframePreference(window.localStorage),
+  );
+  const [pendingCanvasReframe, setPendingCanvasReframe] = useState<
+    | {
+        readonly kind: 'canvas';
+        readonly source: CanvasSize;
+        readonly target: CanvasSize;
+        readonly width: number;
+        readonly height: number;
+        readonly label: string;
+      }
+    | {
+        readonly kind: 'preset';
+        readonly source: CanvasSize;
+        readonly target: CanvasSize;
+        readonly presetId: ExportPresetId;
+      }
+    | undefined
+  >(undefined);
   const exportPresetLoadReconciledRef = useRef<string | undefined>(undefined);
   const [audioState, setAudioStateRaw] = useState<AudioState>(() =>
     loadAudioState(storage, projectId),
@@ -3599,9 +3631,10 @@ function EditorWorkspace({
   // Choices from the Format popover (header button or monitor read-out). Each one is a
   // single undoable project change through the T-N02 helpers.
   const applyFormatCanvas = useCallback(
-    (width: number, height: number, label: string) => {
+    (width: number, height: number, label: string, reframeMode: CanvasReframeMode = 'keep') => {
       try {
-        if (applyCanvasDimensions(session, width, height, label)) bumpProjectRevision();
+        if (applyCanvasDimensions(session, width, height, label, reframeMode))
+          bumpProjectRevision();
         setExportPresetMismatch(undefined);
       } catch (reason) {
         showToast(
@@ -3613,9 +3646,9 @@ function EditorWorkspace({
     [bumpProjectRevision, session, showToast],
   );
   const applyFormatPreset = useCallback(
-    (presetId: ExportPresetId) => {
+    (presetId: ExportPresetId, reframeMode: CanvasReframeMode = 'keep') => {
       try {
-        if (applyExportPresetSelection(session, presetId)) bumpProjectRevision();
+        if (applyExportPresetSelection(session, presetId, reframeMode)) bumpProjectRevision();
         setExportPresetMismatch(undefined);
       } catch (reason) {
         showToast(
@@ -3625,6 +3658,59 @@ function EditorWorkspace({
       }
     },
     [bumpProjectRevision, session, showToast],
+  );
+  const requestFormatCanvas = useCallback(
+    (width: number, height: number, label: string) => {
+      const visualRoot =
+        session.visualProject.compositions[session.visualProject.rootCompositionId];
+      const timelineRoot =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+      const source = {
+        width: visualRoot?.width ?? exportCanvas.width,
+        height: visualRoot?.height ?? exportCanvas.height,
+      };
+      const target = { width, height };
+      const hasClips = timelineRoot?.tracks.some((track) => track.clips.length > 0) ?? false;
+      if (shouldAskCanvasReframe(source, target, hasClips)) {
+        setPendingCanvasReframe({ kind: 'canvas', source, target, width, height, label });
+        return;
+      }
+      applyFormatCanvas(width, height, label);
+    },
+    [applyFormatCanvas, exportCanvas.height, exportCanvas.width, session],
+  );
+  const requestFormatPreset = useCallback(
+    (presetId: ExportPresetId) => {
+      const visualRoot =
+        session.visualProject.compositions[session.visualProject.rootCompositionId];
+      const source = {
+        width: visualRoot?.width ?? exportCanvas.width,
+        height: visualRoot?.height ?? exportCanvas.height,
+      };
+      const target = exportPresetCanvasSize(presetId, source);
+      const timelineRoot =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+      const hasClips = timelineRoot?.tracks.some((track) => track.clips.length > 0) ?? false;
+      if (shouldAskCanvasReframe(source, target, hasClips)) {
+        setPendingCanvasReframe({ kind: 'preset', source, target, presetId });
+        return;
+      }
+      applyFormatPreset(presetId);
+    },
+    [applyFormatPreset, exportCanvas.height, exportCanvas.width, session],
+  );
+  const confirmCanvasReframe = useCallback(
+    (mode: CanvasReframeMode) => {
+      const pending = pendingCanvasReframe;
+      if (pending === undefined) return;
+      setPendingCanvasReframe(undefined);
+      setCanvasReframeDefault(mode);
+      writeCanvasReframePreference(window.localStorage, mode);
+      if (pending.kind === 'canvas')
+        applyFormatCanvas(pending.width, pending.height, pending.label, mode);
+      else applyFormatPreset(pending.presetId, mode);
+    },
+    [applyFormatCanvas, applyFormatPreset, pendingCanvasReframe],
   );
 
   const ensureDockPanels = useCallback((api: DockviewApi) => {
@@ -7294,11 +7380,22 @@ function EditorWorkspace({
                     width={exportCanvas.width}
                     height={exportCanvas.height}
                     presetId={exportPreset}
-                    onApplyCanvas={applyFormatCanvas}
-                    onApplyPreset={applyFormatPreset}
+                    onApplyCanvas={requestFormatCanvas}
+                    onApplyPreset={requestFormatPreset}
                   />
                 )}
               </div>
+              {pendingCanvasReframe !== undefined && (
+                <CanvasReframeDialog
+                  defaultMode={canvasReframeDefault}
+                  source={pendingCanvasReframe.source}
+                  target={pendingCanvasReframe.target}
+                  skippedObjectCount={canvasReframeSkippedObjectCount(session.visualProject)}
+                  cameraFramed={canvasReframeIsCameraFramed(session.visualProject)}
+                  onApply={confirmCanvasReframe}
+                  onCancel={() => setPendingCanvasReframe(undefined)}
+                />
+              )}
               <button
                 type="button"
                 className="header-export-btn"

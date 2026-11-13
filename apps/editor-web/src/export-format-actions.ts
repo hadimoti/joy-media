@@ -1,5 +1,6 @@
 import type { ExportPresetId, JoyProjectV1 } from '@joy-media/project-schema';
 import type { EditorSession } from './editor-session.js';
+import { reframeProjectClips, type CanvasReframeMode } from './canvas-reframe.js';
 import {
   EXPORT_PRESETS,
   exportPresetCanvasSize,
@@ -34,6 +35,7 @@ function updateSessionFormat(
   size: CanvasSize,
   exportPreset: ExportPresetId,
   label: string,
+  reframeMode: CanvasReframeMode = 'keep',
 ): boolean {
   const visualProject = session.visualProject;
   const visualRoot = visualProject.compositions[visualProject.rootCompositionId];
@@ -50,7 +52,11 @@ function updateSessionFormat(
     timelineRoot.height !== size.height;
   if (!changed) return false;
 
-  const document = updateRootCanvas(visualProject, size, exportPreset);
+  const document = updateRootCanvas(
+    reframeProjectClips(visualProject, size, reframeMode),
+    size,
+    exportPreset,
+  );
   const timeline =
     timelineRoot.width === size.width && timelineRoot.height === size.height
       ? undefined
@@ -77,6 +83,7 @@ function updateSessionFormat(
 export function applyExportPresetSelection(
   session: EditorSession,
   presetId: ExportPresetId,
+  reframeMode: CanvasReframeMode = 'keep',
 ): boolean {
   const root = session.visualProject.compositions[session.visualProject.rootCompositionId];
   if (root === undefined) throw new Error('The root composition is unavailable.');
@@ -86,6 +93,7 @@ export function applyExportPresetSelection(
     size,
     presetId,
     `Change format to ${EXPORT_PRESETS[presetId].label}`,
+    reframeMode,
   );
 }
 
@@ -94,7 +102,8 @@ export function applyCanvasDimensions(
   width: number,
   height: number,
   label = `Change canvas to ${width}×${height}`,
+  reframeMode: CanvasReframeMode = 'keep',
 ): boolean {
   const presetId = exportPresetForCanvas(width, height, session.visualProject.exportPreset);
-  return updateSessionFormat(session, { width, height }, presetId, label);
+  return updateSessionFormat(session, { width, height }, presetId, label, reframeMode);
 }

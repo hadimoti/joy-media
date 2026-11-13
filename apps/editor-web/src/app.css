@@ -2475,6 +2475,47 @@ h2 {
   font-size: var(--joy-type-xs);
   font-weight: 600;
 }
+.canvas-reframe-dialog {
+  width: min(100%, 30rem);
+}
+.canvas-reframe-options {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.canvas-reframe-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.6rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--joy-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-raised);
+  cursor: pointer;
+}
+.canvas-reframe-option:has(input:checked) {
+  border-color: color-mix(in srgb, var(--joy-accent) 70%, transparent);
+  background: color-mix(in srgb, var(--joy-accent) 10%, var(--joy-bg-raised));
+}
+.canvas-reframe-option input {
+  margin: 0.2rem 0 0;
+  accent-color: var(--joy-accent);
+}
+.canvas-reframe-option > span {
+  display: grid;
+  gap: 0.15rem;
+}
+.canvas-reframe-option strong {
+  color: var(--joy-text);
+  font-size: var(--joy-type-sm);
+}
+.canvas-reframe-option > span > span {
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+}
 /* The portrait workspace intentionally gives Program Monitor a narrow,
    full-height dock. Keep every transport control reachable instead of letting
    the settings cluster overflow beneath the neighbouring workspace. */
