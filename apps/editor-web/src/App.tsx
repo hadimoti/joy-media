@@ -290,6 +290,7 @@ import {
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
+import { fetchSampleBlob, registerSampleMedia } from './sample-media-cache.js';
 import type { NewProjectSpec } from './new-project-format.js';
 import {
   duplicateProject as duplicateProjectLifecycle,
@@ -1466,6 +1467,15 @@ function EditorWorkspace({
     if (entry === undefined) throw new Error(`unknown project "${projectId}"`);
     const seeds = seedsForCatalogEntry(entry);
     sessionRef.current = new EditorSession(storage, seeds.timeline, seeds.visual, {}, writer);
+    // A sample project's media is copied into this profile's original cache on first open, so it
+    // shows as present and exports (T-R01). Only the cache is written; a failure does not stop the editor.
+    const sampleAssetIds = [
+      ...Object.keys(seeds.visual.assets),
+      ...Object.keys((seeds.timeline as { assets?: Record<string, unknown> }).assets ?? {}),
+    ];
+    void originalAssetCachePromise
+      .then((cache) => registerSampleMedia(sampleAssetIds, { cache, fetchFile: fetchSampleBlob }))
+      .catch(() => undefined);
   }
   const session = sessionRef.current;
   const rootComposition =
