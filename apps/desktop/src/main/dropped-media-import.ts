@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { realpath as realpathCallback, type BigIntStats } from 'node:fs';
-import { access, open, readdir, stat, type FileHandle } from 'node:fs/promises';
+import { access, open, opendir, stat, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import {
   resolveDroppedPath,
@@ -82,12 +82,10 @@ interface DroppedMediaImportDeps {
   ) => Promise<ResolvedDroppedPath>;
   readonly fileSystem?: {
     open(filePath: string, flags: 'r'): Promise<FileHandle>;
+    opendir(directory: string): Promise<DroppedDirectoryHandle>;
     stat(filePath: string): Promise<BigIntStats>;
     realpathNative(filePath: string): Promise<string>;
   };
-  readonly readDirectory?: (
-    directory: string,
-  ) => Promise<readonly { readonly name: string; readonly isFile: boolean }[]>;
   readonly readChunks?: (
     file: FileHandle,
     signal: AbortSignal,
@@ -95,6 +93,15 @@ interface DroppedMediaImportDeps {
   ) => AsyncIterable<Uint8Array>;
   readonly fileExists?: (filePath: string) => Promise<boolean>;
   readonly onProgress?: (progress: DroppedMediaProgress) => void;
+}
+
+interface DroppedDirectoryEntry {
+  readonly name: string;
+  isFile(): boolean;
+}
+
+interface DroppedDirectoryHandle extends AsyncIterable<DroppedDirectoryEntry> {
+  close(): Promise<void>;
 }
 
 const MEDIA_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
@@ -124,6 +131,8 @@ const MEDIA_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
 };
 
 const MAX_DROPPED_ITEMS = 512;
+const MAX_DROPPED_FOLDER_ENTRIES = 2_000;
+const MAX_DROPPED_BATCH_ENTRIES = 5_000;
 const MAX_DROPPED_PATH_LENGTH = 32_768;
 const STREAM_CHUNK_BYTES = 1024 * 1024;
 const DROPPED_TICKET_TTL_MS = 2 * 60 * 1000;
@@ -238,17 +247,6 @@ async function stillMatchesOpenedFile(
   }
 }
 
-function defaultReadDirectory(
-  directory: string,
-): Promise<readonly { readonly name: string; readonly isFile: boolean }[]> {
-  return readdir(directory, { withFileTypes: true }).then((entries) =>
-    entries
-      .filter((entry) => entry.isFile())
-      .map((entry) => ({ name: entry.name, isFile: true }))
-      .sort((left, right) => left.name.localeCompare(right.name)),
-  );
-}
-
 async function defaultFileExists(filePath: string): Promise<boolean> {
   return access(filePath).then(
     () => true,
@@ -314,10 +312,10 @@ export function createDroppedMediaImportService(
   const resolvePath = deps.resolveDroppedPath ?? resolveDroppedPath;
   const fileSystem = deps.fileSystem ?? {
     open,
+    opendir,
     stat: (filePath: string) => stat(filePath, { bigint: true }),
     realpathNative: nativeRealpath,
   };
-  const readDirectory = deps.readDirectory ?? defaultReadDirectory;
   const readChunks = deps.readChunks ?? defaultReadChunks;
   const fileExists = deps.fileExists ?? defaultFileExists;
   const active = new Map<string, AbortController>();
@@ -410,13 +408,24 @@ export function createDroppedMediaImportService(
 
   return {
     async prepareDroppedPaths(value) {
-      const inputs = Array.isArray(value) ? value.slice(0, MAX_DROPPED_ITEMS) : [];
+      const allInputs = Array.isArray(value) ? value : [];
+      const inputs = allInputs.slice(0, MAX_DROPPED_ITEMS);
       const tickets: DroppedMediaTicket[] = [];
       const skippedNames: string[] = [];
+      let skippedFolderLimitFiles = 0;
+      let skippedBatchLimitFiles = 0;
+      let skippedBatchLimitRoots = 0;
+      const skippedRootLimitItems = Math.max(0, allInputs.length - inputs.length);
+      let batchEntryCount = 0;
       let folderCount = 0;
       for (let index = 0; index < inputs.length; index += 1) {
         const input = parseInput(inputs[index]);
         if (input === undefined) continue;
+        if (batchEntryCount >= MAX_DROPPED_BATCH_ENTRIES) {
+          skippedBatchLimitRoots += 1;
+          continue;
+        }
+        batchEntryCount += 1;
         let resolved: ResolvedDroppedPath;
         try {
           resolved = await resolvePath(input.path, 'direct');
@@ -426,26 +435,77 @@ export function createDroppedMediaImportService(
         }
         if (resolved.kind === 'directory') {
           folderCount += 1;
-          let entries: readonly { readonly name: string; readonly isFile: boolean }[];
+          let directory: DroppedDirectoryHandle;
           try {
-            entries = await readDirectory(resolved.path);
+            directory = await fileSystem.opendir(resolved.path);
           } catch {
             skippedNames.push(input.name);
             continue;
           }
-          for (const entry of entries) {
-            if (!entry.isFile) continue;
-            const childPath = path.join(resolved.path, entry.name);
-            await addCandidate(childPath, entry.name, index, 'folder-entry', tickets, skippedNames);
+          let folderEntryCount = 0;
+          try {
+            for await (const entry of directory) {
+              folderEntryCount += 1;
+              batchEntryCount += 1;
+              if (
+                folderEntryCount > MAX_DROPPED_FOLDER_ENTRIES ||
+                batchEntryCount > MAX_DROPPED_BATCH_ENTRIES
+              ) {
+                // Drain only Dirent metadata after a cap so the result can report the exact count;
+                // no paths are resolved and no tickets are minted for these entries.
+                if (entry.isFile()) {
+                  if (folderEntryCount > MAX_DROPPED_FOLDER_ENTRIES) skippedFolderLimitFiles += 1;
+                  else skippedBatchLimitFiles += 1;
+                }
+                continue;
+              }
+              if (!entry.isFile()) continue;
+              const childPath = path.join(resolved.path, entry.name);
+              await addCandidate(
+                childPath,
+                entry.name,
+                index,
+                'folder-entry',
+                tickets,
+                skippedNames,
+              );
+            }
+          } catch {
+            skippedNames.push(input.name);
+          } finally {
+            await directory.close().catch(() => undefined);
           }
           continue;
         }
         await addCandidate(resolved.path, input.name, index, 'registered', tickets, skippedNames);
       }
-      const skippedMessage =
-        skippedNames.length === 0
-          ? undefined
-          : `${skippedNames.length} ${skippedNames.length === 1 ? 'file was' : 'files were'} skipped: ${skippedNames.join(', ')}`;
+      const skippedMessages: string[] = [];
+      if (skippedNames.length > 0) {
+        skippedMessages.push(
+          `${skippedNames.length} ${skippedNames.length === 1 ? 'file was' : 'files were'} skipped: ${skippedNames.join(', ')}`,
+        );
+      }
+      if (skippedFolderLimitFiles > 0) {
+        skippedMessages.push(
+          `${skippedFolderLimitFiles} ${skippedFolderLimitFiles === 1 ? 'file was' : 'files were'} skipped because the dropped folder exceeded the ${MAX_DROPPED_FOLDER_ENTRIES}-entry limit.`,
+        );
+      }
+      if (skippedBatchLimitFiles > 0) {
+        skippedMessages.push(
+          `${skippedBatchLimitFiles} ${skippedBatchLimitFiles === 1 ? 'file was' : 'files were'} skipped because the ${MAX_DROPPED_BATCH_ENTRIES}-entry drop limit was reached.`,
+        );
+      }
+      if (skippedBatchLimitRoots > 0) {
+        skippedMessages.push(
+          `${skippedBatchLimitRoots} ${skippedBatchLimitRoots === 1 ? 'dropped item was' : 'dropped items were'} skipped because the ${MAX_DROPPED_BATCH_ENTRIES}-entry drop limit was reached.`,
+        );
+      }
+      if (skippedRootLimitItems > 0) {
+        skippedMessages.push(
+          `${skippedRootLimitItems} ${skippedRootLimitItems === 1 ? 'dropped item was' : 'dropped items were'} skipped because only the first ${MAX_DROPPED_ITEMS} dropped items are processed.`,
+        );
+      }
+      const skippedMessage = skippedMessages.length === 0 ? undefined : skippedMessages.join(' ');
       return {
         tickets,
         ...(skippedMessage === undefined ? {} : { skippedMessage }),

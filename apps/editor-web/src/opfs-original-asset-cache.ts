@@ -1,4 +1,5 @@
 import type { OpfsDirectoryHandle } from './opfs-asset-cache.js';
+import { sha256OfBlob } from './blob-sha256.js';
 
 export interface OriginalAssetDescriptor {
   readonly assetId: string;
@@ -30,9 +31,10 @@ export class OpfsOriginalAssetCache {
   }
 
   /**
-   * Caches the same disk-backed File after the desktop main process has verified its ticket path
-   * and SHA-256. Writing the Blob directly avoids copying the whole dropped file into a renderer
-   * ArrayBuffer; this method must only be used with the matching desktop import reply.
+   * Caches a disk-backed File after the desktop main process has verified its ticket path and
+   * SHA-256. The renderer verifies the Blob too because it may not contain the same bytes as the
+   * separately streamed main-process file. Hashing is chunked, so the whole file is not copied
+   * into a renderer ArrayBuffer.
    */
   async putFromVerifiedDesktopImport(
     descriptor: OriginalAssetDescriptor,
@@ -40,6 +42,21 @@ export class OpfsOriginalAssetCache {
   ): Promise<void> {
     validate(descriptor, file);
     if (this.root === undefined) throw new Error('OPFS is unavailable in this browser');
+    let hash: string;
+    try {
+      hash = await sha256OfBlob(file);
+    } catch {
+      console.warn(
+        'Skipping the local original cache because the dropped file could not be verified.',
+      );
+      return;
+    }
+    if (hash !== descriptor.sha256) {
+      console.warn(
+        'Skipping the local original cache because the dropped file SHA-256 does not match.',
+      );
+      return;
+    }
     const directory = await this.root.getDirectoryHandle('joy-media-assets', { create: true });
     const writable = await (
       await directory.getFileHandle(`${descriptor.assetId}.bin`, { create: true })

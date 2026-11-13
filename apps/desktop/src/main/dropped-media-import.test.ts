@@ -20,6 +20,13 @@ interface FakeFileInfo {
 
 interface TestFileSystem {
   readonly open: (filePath: string, flags: 'r') => Promise<FileHandle>;
+  readonly opendir: (directory: string) => Promise<{
+    readonly close: () => Promise<void>;
+    readonly [Symbol.asyncIterator]: () => AsyncIterator<{
+      readonly name: string;
+      isFile(): boolean;
+    }>;
+  }>;
   readonly stat: (filePath: string) => Promise<BigIntStats>;
   readonly realpathNative: (filePath: string) => Promise<string>;
 }
@@ -88,6 +95,23 @@ function makeHarness(
       fileByHandle.set(handle as object, found);
       options.afterOpen?.(filePath, files);
       return handle;
+    },
+    opendir: async (directory: string) => {
+      const prefix = directory.endsWith('\\') ? directory : `${directory}\\`;
+      return {
+        close: async () => undefined,
+        async *[Symbol.asyncIterator]() {
+          for (const candidate of files.keys()) {
+            if (!candidate.startsWith(prefix)) continue;
+            const name = candidate.slice(prefix.length);
+            if (name.includes('\\')) continue;
+            yield {
+              name,
+              isFile: () => files.get(prefix + name)?.kind === 'file',
+            };
+          }
+        },
+      };
     },
     stat: async (filePath: string) => makeStats(files.get(filePath)),
     realpathNative: async (filePath: string) => filePath,
@@ -182,18 +206,6 @@ function makeHarness(
           : { ok: false as const, error: options.libraryError };
       },
       removeEntry: async () => ({ removed: true }),
-    },
-    readDirectory: async (path) => {
-      const prefix = path.endsWith('\\') ? path : `${path}\\`;
-      return [...files.keys()]
-        .filter((candidate) => candidate.startsWith(prefix))
-        .map((candidate) => candidate.slice(prefix.length))
-        .filter((name) => !name.includes('\\'))
-        .map((name) => ({
-          name,
-          isFile: files.get(prefix + name)?.kind === 'file',
-          isDirectory: files.get(prefix + name)?.kind === 'directory',
-        }));
     },
     readChunks: async function* (handle) {
       readHandles.push(handle);
@@ -332,6 +344,54 @@ describe('dropped media import', () => {
 
     expect(result.tickets.map((ticket) => ticket.displayName)).toEqual(['clip.mp4']);
     expect(result.folderDepth).toBe(1);
+    expect(result.skippedMessage).toBeUndefined();
+  });
+
+  it('caps folder expansion and reports files skipped by that cap', async () => {
+    const harness = makeHarness();
+    harness.files.set('C:\\drop\\folder', { kind: 'directory' });
+    for (let index = 0; index < 2_001; index += 1) {
+      const name = `clip-${index}.mp4`;
+      harness.files.set(`C:\\drop\\folder\\${name}`, {
+        kind: 'file',
+        bytes: new Uint8Array([index & 0xff]),
+      });
+    }
+
+    const result = await harness.service.prepareDroppedPaths([
+      { path: 'C:\\drop\\folder', name: 'folder' },
+    ]);
+
+    expect(result.tickets).toHaveLength(2_000);
+    expect(result.skippedMessage).toBe(
+      '1 file was skipped because the dropped folder exceeded the 2000-entry limit.',
+    );
+  });
+
+  it('caps all expanded folders at 5,000 entries for one drop', async () => {
+    const harness = makeHarness();
+    for (let folder = 0; folder < 3; folder += 1) {
+      const folderPath = `C:\\drop\\folder-${folder}`;
+      harness.files.set(folderPath, { kind: 'directory' });
+      for (let index = 0; index < 2_000; index += 1) {
+        const name = `clip-${index}.mp4`;
+        harness.files.set(`${folderPath}\\${name}`, {
+          kind: 'file',
+          bytes: new Uint8Array([index & 0xff]),
+        });
+      }
+    }
+
+    const result = await harness.service.prepareDroppedPaths([
+      { path: 'C:\\drop\\folder-0', name: 'folder-0' },
+      { path: 'C:\\drop\\folder-1', name: 'folder-1' },
+      { path: 'C:\\drop\\folder-2', name: 'folder-2' },
+    ]);
+
+    expect(result.tickets).toHaveLength(4_997);
+    expect(result.skippedMessage).toBe(
+      '1003 files were skipped because the 5000-entry drop limit was reached.',
+    );
   });
 
   it('uses the existing asset when a second import has the same hash', async () => {
