@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ExportPresetId } from '@joy-media/project-schema';
 import { validateH264ExportDimensions } from '@joy-media/job-protocol';
 import {
@@ -44,6 +44,12 @@ export function CanvasFormatPopover({
   const [widthText, setWidthText] = useState(String(width));
   const [heightText, setHeightText] = useState(String(height));
   const [sizeError, setSizeError] = useState<string | undefined>(undefined);
+  // The popover mounts only while open. Focus moves to its first control, so keyboard users
+  // reach it from the monitor read-out or the header; closing returns focus to the opener.
+  const firstControlRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    firstControlRef.current?.focus();
+  }, []);
   // Shape choices and the preset list change the canvas while the popover is open,
   // so the typed sizes follow the document again.
   useEffect(() => {
@@ -84,6 +90,7 @@ export function CanvasFormatPopover({
     <section
       className="header-dropdown canvas-format-popover"
       id={CANVAS_FORMAT_POPOVER_ID}
+      role="dialog"
       aria-label="Format"
     >
       <div className="canvas-format-head">
@@ -92,6 +99,7 @@ export function CanvasFormatPopover({
           <span className="canvas-format-readout">{readout}</span>
         </div>
         <button
+          ref={firstControlRef}
           type="button"
           className="icon-button"
           aria-label="Close format options"

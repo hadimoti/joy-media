@@ -6966,6 +6966,7 @@ function EditorWorkspace({
                   aria-expanded={formatMenu.open}
                   aria-controls={CANVAS_FORMAT_POPOVER_ID}
                   aria-pressed={formatMenu.open}
+                  aria-label={`Format: ${formatReadout}`}
                   title={`Format: ${formatReadout}. Canvas and export preset.`}
                   data-guide="Format"
                   data-popup-trigger={POPUP_IDS.canvasFormat}

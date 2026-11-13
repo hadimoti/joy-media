@@ -79,6 +79,12 @@ describe('CanvasFormatPopover', () => {
     expect(markup).not.toContain('>Fit<');
   });
 
+  it('is a named dialog, as the other header and monitor popups are', () => {
+    const markup = renderPopover();
+
+    expect(markup).toMatch(/<section[^>]*role="dialog"[^>]*aria-label="Format"/);
+  });
+
   it('gives its icon-only close button an accessible name and a tooltip', () => {
     const markup = renderPopover();
 
@@ -108,5 +114,11 @@ describe('the Format control replaces the old export preset menu', () => {
   it('App mounts the popover once, from the header Format control', () => {
     expect(appSource.match(/<CanvasFormatPopover/g)).toHaveLength(1);
     expect(appSource).toContain('ref={formatMenu.rootRef}');
+  });
+
+  it('the header Format button keeps its full read-out as an accessible name at every width', () => {
+    // At 75rem and below .header-format-btn-label is display:none, so the name must be explicit.
+    expect(appSource).toContain('aria-label={`Format: ${formatReadout}`}');
+    expect(appSource).toContain('title={`Format: ${formatReadout}. Canvas and export preset.`}');
   });
 });
