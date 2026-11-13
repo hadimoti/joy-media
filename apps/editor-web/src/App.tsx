@@ -1110,6 +1110,8 @@ function EditorWorkspace({
       }
     | undefined
   >(undefined);
+  // Raised by the export dialog's Relink; the Assets panel opens its Review dialog and clears it.
+  const [missingReviewRequested, setMissingReviewRequested] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   useEffect(() => {
     if (!isDesktopHost()) return;
@@ -6926,6 +6928,8 @@ function EditorWorkspace({
               resyncTimelineMedia();
               setRevision((current) => current + 1);
             },
+            reviewRequested: missingReviewRequested,
+            onReviewRequestHandled: () => setMissingReviewRequested(false),
           }}
         />,
       );
@@ -7785,6 +7789,8 @@ function EditorWorkspace({
               fps={missingExportPrompt.fps}
               onRelink={() => {
                 setMissingExportPrompt(undefined);
+                // Opens the Review dialog directly, and shows the banner even if it was hidden.
+                setMissingReviewRequested(true);
                 activatePanel('media');
               }}
               onExportAnyway={() => {
