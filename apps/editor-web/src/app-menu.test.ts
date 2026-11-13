@@ -41,4 +41,14 @@ describe('app-menu catalog', () => {
     expect(panelIdFromMenuAction('window.panel.media')).toBe('media');
     expect(panelIdFromMenuAction('edit.undo')).toBeUndefined();
   });
+
+  it('does not expose Animate as a duplicate View or Window panel', () => {
+    const menuItems = APP_MENU_GROUPS.filter(
+      (group) => group.id === 'view' || group.id === 'window',
+    ).flatMap((group) => group.items);
+
+    expect(menuItems.map((item) => String(item.id))).not.toContain('view.panel.motion');
+    expect(menuItems.map((item) => String(item.id))).not.toContain('window.panel.motion');
+    expect(panelIdFromMenuAction('view.panel.motion')).toBeUndefined();
+  });
 });
