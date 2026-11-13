@@ -9,6 +9,7 @@ import {
   openDisposableWorkspace,
   openPanel,
 } from './wp29-r5-harness.js';
+import { clipNameWithoutExtension } from '../../apps/editor-web/src/media-label.js';
 
 async function importAnimatedGif(page: Page, name: string): Promise<void> {
   await openPanel(page, 'Assets');
@@ -24,7 +25,10 @@ async function importAnimatedGif(page: Page, name: string): Promise<void> {
   const card = page.locator('.asset-card', { hasText: name });
   await expect(card).toBeVisible({ timeout: 15_000 });
   await card.getByRole('button', { name: `Add ${name} to timeline` }).click();
-  await expect(page.locator(`.timeline-clip[aria-label^="${name},"]`)).toHaveCount(1);
+  // The timeline names a clip by its media name without the extension.
+  await expect(
+    page.locator(`.timeline-clip[aria-label^="${clipNameWithoutExtension(name)},"]`),
+  ).toHaveCount(1);
 }
 
 async function cleanup(page: Page): Promise<void> {

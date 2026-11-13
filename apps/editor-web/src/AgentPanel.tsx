@@ -33,6 +33,7 @@ import type { EditorSession } from './editor-session.js';
 import type { ProjectWriterStorage } from './project-writer.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import { PanelShell } from './PanelShell.js';
+import { objectDisplayLabel, objectDisplayLabels } from './object-display-label.js';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import { approvalPolicyForAgentPolicy } from './agent-policy-settings.js';
 import { JoyCodeLogo } from './JoyCodeLogo.js';
@@ -608,8 +609,7 @@ export function AgentPanel({
   } else if (capability === 'untested') {
     readinessText = 'The model capability is untested. Test a model in Agent Settings.';
   } else if (capability === 'incompatible') {
-    readinessText =
-      'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.';
+    readinessText = 'The configured model is incompatible. Test another model in Agent Settings.';
   } else if (capability === 'plan-only') {
     readinessText =
       'This model supports Creative Brief only. Connect a model with JOY edit tools in Agent Settings to run natural-language edits.';
@@ -1433,17 +1433,24 @@ export function AgentPanel({
     [],
   );
   const lookEntities = useMemo<readonly LivingLooksEntityOption[]>(() => {
-    const visual = Object.values(session.visualProject.visualObjects ?? {}).map((object) => ({
+    const objects = Object.values(session.visualProject.visualObjects ?? {});
+    const objectLabels = objectDisplayLabels(objects);
+    const visual = objects.map((object) => ({
       id: object.id,
-      label: `${object.id}${object.kind === 'text' && typeof object.text === 'string' ? ` — ${object.text.slice(0, 24)}` : ''}`,
+      label: objectLabels.get(object.id) ?? objectDisplayLabel(object),
       kind: 'visual-object' as const,
     }));
+    // Caption clips are named by their order on the timeline, never by id.
     const captions: LivingLooksEntityOption[] = [];
     for (const composition of Object.values(session.visualProject.compositions)) {
       for (const track of composition.tracks) {
         if (track.kind !== 'caption') continue;
         for (const clip of track.clips) {
-          captions.push({ id: clip.id, label: `${clip.id} (caption)`, kind: 'caption-clip' });
+          captions.push({
+            id: clip.id,
+            label: `Caption ${captions.length + 1}`,
+            kind: 'caption-clip',
+          });
         }
       }
     }
@@ -1554,7 +1561,7 @@ export function AgentPanel({
       'The model capability is untested. Test a model in Agent Settings before running recipes.';
   } else if (capability === 'incompatible') {
     recipeReadinessText =
-      'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.';
+      'The configured model is incompatible. Test another model in Agent Settings.';
   } else if (capability === 'plan-only') {
     recipeReadinessText =
       'This model supports Creative Brief only. Connect a model with JOY edit tools in Agent Settings to run recipes.';
@@ -1579,7 +1586,7 @@ export function AgentPanel({
       'The model capability is untested. Test a model in Agent Settings before asking JOY to work with Looks.';
   } else if (capability === 'incompatible') {
     lookReadinessText =
-      'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.';
+      'The configured model is incompatible. Test another model in Agent Settings.';
   } else if (capability === 'plan-only') {
     lookReadinessText =
       'This model supports Creative Brief only. Ask JOY for Looks needs a model with JOY edit tools.';
@@ -1949,8 +1956,7 @@ export function AgentPanel({
       ) {
         let message: string;
         if (connectionStatus.capability === 'incompatible') {
-          message =
-            'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.';
+          message = 'The configured model is incompatible. Test another model in Agent Settings.';
         } else if (connectionStatus.capability === 'untested') {
           message = 'The model capability is untested. Test a model in Agent Settings.';
         } else {

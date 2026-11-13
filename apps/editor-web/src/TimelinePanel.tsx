@@ -1534,8 +1534,11 @@ export function TimelinePanel({
   const dispatchDuplicate = (trackId: string, clip: Clip) => {
     const source = composition.tracks.find((t) => t.id === trackId);
     if (source === undefined || source.locked === true) return;
+    // The history entry names the clip by its media name, never by its id.
+    const mediaName = 'assetId' in clip ? assetDisplayNames?.[clip.assetId] : undefined;
+    const clipName = clipNameWithoutExtension(mediaName ?? '') || 'clip';
     onDispatch({
-      label: `Duplicate ${clip.id}`,
+      label: `Duplicate ${clipName}`,
       commands: [
         duplicateClipCommand(
           composition.id,
@@ -2486,12 +2489,9 @@ export function TimelinePanel({
             const trackLabelColor =
               localTrackLabelColors[track.id] ?? trackLabelColors?.[track.id] ?? source.labelColor;
             const kind: TimelineTrackKind = track.family === 'audio' ? 'audio' : 'video';
-            const trackName = professionalTrackName(
-              track.family,
-              track.familyIndex,
-              source.name ?? source.id,
-            );
             const trackCode = professionalTrackCode(track.family, track.familyIndex);
+            // An unnamed track shows its track code (V1, A1), never its id.
+            const trackName = source.name?.trim() ? source.name.trim() : trackCode;
             const startsAudioStack =
               track.family === 'audio' && (index === 0 || visible[index - 1]?.family !== 'audio');
             return (
@@ -2603,12 +2603,14 @@ export function TimelinePanel({
                         <span
                           className={`audio-dsp-pill dsp-dfn ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
                           title="Noise reduction (DeepFilterNet) active"
+                          aria-label="Noise reduction (DeepFilterNet) active"
                         >
                           Noise reduction
                         </span>
                         <span
                           className={`audio-dsp-pill dsp-norm ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
                           title="Loudness normalization (EBU R128) active"
+                          aria-label="Loudness normalization (EBU R128) active"
                         >
                           Loudness
                         </span>
@@ -2623,7 +2625,7 @@ export function TimelinePanel({
                       type="button"
                       className="timeline-track-kind-icon timeline-track-kind-button"
                       title="Change track color"
-                      aria-label={`Change label color for ${source.name ?? source.id}`}
+                      aria-label={`Change label color for ${trackName}`}
                       aria-haspopup="menu"
                       aria-expanded={colorMenuTrackId === track.id}
                       onClick={(event) => {

@@ -9,6 +9,7 @@ import {
   setKeyframe,
 } from '@joy-media/motion-core';
 import { KeyframeActiveIcon, KeyframeNoneIcon, KeyNextIcon, KeyPrevIcon } from './icons.js';
+import { objectDisplayLabel } from './object-display-label.js';
 
 const TRANSFORM_KEYS = ['x', 'y', 'scaleX', 'scaleY', 'rotationDeg', 'opacity'] as const;
 type TransformKey = (typeof TRANSFORM_KEYS)[number];
@@ -66,19 +67,6 @@ export function visiblePropertyKeys(
 
 function snapToFrame(timeUs: number, frameUs: number): number {
   return Math.max(0, Math.round(timeUs / frameUs) * frameUs);
-}
-
-const OBJECT_KIND_LABELS: Readonly<Record<string, string>> = {
-  image: 'Picture',
-  video: 'Video',
-  text: 'Text',
-};
-
-/** The name shown for a selected object: its text, or its kind. Ids are never shown. */
-function objectDisplayLabel(object: VisualObjectV1): string {
-  const text = object.kind === 'text' ? object.text?.trim() : undefined;
-  if (text !== undefined && text.length > 0) return text;
-  return OBJECT_KIND_LABELS[object.kind] ?? 'Object';
 }
 
 export function TimelinePropertyLanes({

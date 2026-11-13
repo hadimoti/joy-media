@@ -1,6 +1,7 @@
 import type { Clip, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import type { HistoryEntry } from './editor-session.js';
-import { polishMediaLabel } from './media-label.js';
+import { clipNameWithoutExtension, polishMediaLabel } from './media-label.js';
+import { objectDisplayLabel } from './object-display-label.js';
 import { readClipObjectMap } from './sticker-bindings.js';
 import {
   timelineTrackCode,
@@ -141,14 +142,14 @@ export function buildDualLensProjection(
     column: 3,
   });
 
-  for (const { trackName, clip } of clips) {
+  for (const [index, { trackName, clip }] of clips.entries()) {
     const clipId = `clip:${clip.id}`;
     const endUs = clip.startUs + clip.durationUs;
     addNode(
       {
         id: clipId,
         kind: 'clip',
-        label: polishMediaLabel(clip.id),
+        label: clipDisplayName(creative, clip, `Clip ${index + 1}`),
         detail: `${trackName} · ${formatSeconds(clip.durationUs)}`,
         column: 1,
         startUs: clip.startUs,
@@ -163,7 +164,8 @@ export function buildDualLensProjection(
         {
           id: assetId,
           kind: 'asset',
-          label: polishMediaLabel(asset?.displayName ?? clip.assetId),
+          // A source with no media name is shown as "Source media", never by its id.
+          label: asset?.displayName ? polishMediaLabel(asset.displayName) : 'Source media',
           detail: asset?.kind ?? 'video source',
           column: 0,
         },
@@ -292,6 +294,15 @@ export function buildDualLensProjection(
   };
 }
 
+/**
+ * A clip's name is its media file name without the extension, the same rule the
+ * timeline uses. Ids are never shown; a clip with no named media gets `fallback`.
+ */
+function clipDisplayName(creative: JoyProjectV1, clip: Clip, fallback: string): string {
+  const displayName = 'assetId' in clip ? creative.assets[clip.assetId]?.displayName : undefined;
+  return clipNameWithoutExtension(displayName ?? '') || fallback;
+}
+
 function buildLanes(
   timeline: SpikeProject,
   creative: JoyProjectV1,
@@ -322,9 +333,9 @@ function buildLanes(
       header: { kind, code, name },
       sourceTrackId: track.id,
       trackEnabled: track.enabled ?? true,
-      items: track.clips.map((clip) => ({
+      items: track.clips.map((clip, clipIndex) => ({
         id: clip.id,
-        label: polishMediaLabel(clip.id),
+        label: clipDisplayName(creative, clip, `Clip ${clipIndex + 1}`),
         clipId: clip.id,
         icon: timelineElementKindForClip(clip, elementKinds),
         elementKind: timelineElementKindForClip(clip, elementKinds),
@@ -340,7 +351,7 @@ function buildLanes(
       return [
         {
           id: objectId,
-          label: polishMediaLabel(object.text ?? object.id),
+          label: polishMediaLabel(objectDisplayLabel(object)),
           icon: 'text' as const,
           ...rangeForClip(clipId),
         },

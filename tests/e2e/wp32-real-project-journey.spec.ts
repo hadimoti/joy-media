@@ -10,6 +10,7 @@ import {
   openDisposableWorkspace,
   openPanel,
 } from './wp29-r5-harness.js';
+import { clipNameWithoutExtension } from '../../apps/editor-web/src/media-label.js';
 
 type JourneyCheckpoint = {
   readonly name: string;
@@ -90,7 +91,9 @@ async function addAssetToTimeline(page: Page, displayName: string): Promise<void
   await selectAssetCategory(page, displayName);
   const card = page.locator('.asset-card', { hasText: displayName }).first();
   await card.getByRole('button', { name: `Add ${displayName} to timeline` }).click();
-  await expect(page.locator(`.timeline-clip[aria-label^="${displayName},"]`)).toHaveCount(1);
+  // The timeline names a clip by its media name without the extension.
+  const clipName = clipNameWithoutExtension(displayName);
+  await expect(page.locator(`.timeline-clip[aria-label^="${clipName},"]`)).toHaveCount(1);
 }
 
 async function readControlPlaneProjectId(page: Page): Promise<string | undefined> {
@@ -220,7 +223,7 @@ test.describe('WP-32 real-project workflow acceptance', () => {
 
       await runCheckpoint(checkpoints, 'author a timeline edit', async () => {
         // The timeline names a clip by its file name without the extension.
-        const videoClipName = names.video.replace(/\.[^.]+$/, '');
+        const videoClipName = clipNameWithoutExtension(names.video);
         const videoClip = page.locator(`.timeline-clip[aria-label^="${videoClipName},"]`);
         await videoClip.click();
         await expect(videoClip).toHaveAttribute('aria-pressed', 'true');
@@ -250,7 +253,9 @@ test.describe('WP-32 real-project workflow acceptance', () => {
         checkpoints,
         'apply browser audio processing and mix controls',
         async () => {
-          await page.locator(`.timeline-clip[aria-label^="${names.audio},"]`).click();
+          await page
+            .locator(`.timeline-clip[aria-label^="${clipNameWithoutExtension(names.audio)},"]`)
+            .click();
           await openPanel(page, 'Audio');
           await page.getByRole('button', { name: 'Review Voice Polish changes' }).click();
           const browserRun = page.getByRole('button', { name: 'Apply changes' });
