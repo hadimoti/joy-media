@@ -2543,6 +2543,8 @@ h2 {
   left: 50%;
   transform: translateX(-50%);
   width: 28rem;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
   padding: 0.75rem;
   background: #2f2f31;
   box-shadow: 0 1rem 3rem #0008;
@@ -16964,6 +16966,16 @@ label {
 .shortcut-row:hover {
   background: var(--joy-bg-hover);
 }
+.shortcut-group + .shortcut-group {
+  margin-top: var(--space-2);
+}
+.shortcut-group-heading {
+  margin: 0;
+  padding: 4px var(--space-3);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--joy-text-secondary);
+}
 .shortcut-action {
   font-size: 13px;
   color: var(--joy-text);
@@ -17440,11 +17452,14 @@ label {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  /* Safe margin: the whole picture sits inside the tile, not cut at its edges (T-D15). */
+  padding: var(--space-3);
+  box-sizing: border-box;
 }
 .template-card-preview-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 /* Placeholder glyph for the preview well */
@@ -17974,22 +17989,6 @@ label {
   gap: 0.3rem;
   padding: 0.05rem 0 0.25rem;
 }
-.audio-workflow-button {
-  min-width: 0;
-  min-height: 1.7rem;
-  padding: 0.1rem 0.3rem;
-  border: 1px solid var(--joy-border);
-  border-radius: var(--radius-xs);
-  background: var(--joy-bg-control);
-  color: var(--joy-text-secondary);
-  font-size: var(--joy-type-xs);
-  text-align: center;
-  cursor: pointer;
-}
-.audio-workflow-button[aria-pressed='true'] {
-  border-color: var(--joy-accent);
-  color: var(--joy-accent);
-}
 .audio-workflow-resources,
 .audio-capability-foot,
 .audio-model-caps,
@@ -18161,19 +18160,6 @@ label {
 }
 .audio-workflow-pickers {
   padding: 0 0 0.2rem;
-}
-.audio-workflow-button {
-  border-radius: var(--radius-sm);
-  font: inherit;
-}
-.audio-workflow-button:hover:not(:disabled) {
-  border-color: var(--joy-border-hover);
-  color: var(--joy-text);
-}
-.audio-workflow-button[aria-pressed='true'] {
-  border-color: var(--joy-accent);
-  background: var(--joy-bg-active);
-  color: var(--joy-accent);
 }
 .audio-workflow-card {
   min-width: 0;
@@ -19589,4 +19575,67 @@ label {
 .timeline-timecode,
 .monitor-meta {
   font-variant-numeric: tabular-nums;
+}
+
+/* T-D15: Audio presets as cards in a 2 x 3 grid (three columns, two rows). */
+.audio-workflow-choice {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-secondary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.audio-workflow-choice strong {
+  color: var(--joy-text);
+  font-size: var(--joy-type-sm);
+  font-weight: 600;
+}
+.audio-workflow-choice span {
+  font-size: var(--joy-type-xs);
+}
+.audio-workflow-choice:hover:not(:disabled) {
+  border-color: var(--joy-border-hover);
+}
+.audio-workflow-choice[aria-pressed='true'] {
+  border-color: var(--joy-accent);
+}
+
+/* T-D15: engine status, in a small info popover next to the route pills. */
+.audio-engine-status {
+  position: relative;
+  display: inline-flex;
+}
+.audio-engine-status-popover {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 0.25rem);
+  inset-inline-start: 0;
+  display: grid;
+  gap: 0.35rem;
+  min-width: 13rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-panel);
+  box-shadow: 0 0.25rem 1rem #000a;
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
+.audio-engine-status-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* T-D15: outline text styles sit on a mid-grey tile so the outline can be seen. */
+.text-template-preview.is-outline {
+  background: #7d7f89;
+  border-radius: var(--radius-xs);
 }

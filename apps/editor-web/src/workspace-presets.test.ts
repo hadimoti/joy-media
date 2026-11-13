@@ -1,13 +1,15 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { dockLayoutKey, verticalDockLayout } from './dock-layout.js';
+import { DEFAULT_VIEW_MODE, dockLayoutKey, verticalDockLayout } from './dock-layout.js';
 import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
   persistWorkspacePresetLayout,
+  resetWorkspaceTarget,
   workspacePresetLayoutKey,
   workspacePresetLayout,
 } from './workspace-presets.js';
+import { DEFAULT_EDITOR_UI_PREFERENCES } from './ui-preferences.js';
 import { PANEL_IDS } from './workspace.js';
 
 function leafIds(layout: unknown): string[] {
@@ -174,6 +176,81 @@ describe('first-run layout', () => {
     expect(plan.restored).toBe(false);
     expect(storage.getItem(dockLayoutKey('vertical'))).toBeNull();
     expect(leafIds(plan.layout)).not.toContain('agent-col');
+  });
+
+  it('gives a fresh profile the preview-first Edit layout (T-D12)', () => {
+    const storage = memoryStorage();
+
+    const plan = planWorkspaceLayout(storage, 'edit', DEFAULT_VIEW_MODE);
+
+    expect(DEFAULT_VIEW_MODE).toBe('widescreen');
+    expect(plan.restored).toBe(false);
+    expect(plan.key).toBe(dockLayoutKey('widescreen'));
+    // The widescreen seed puts the monitor in the top row, centre of the screen.
+    expect(leafIds(plan.layout)).toContain('monitor-row');
+    expect(leafIds(plan.layout)).not.toContain('agent-col');
+  });
+
+  it('restores a stored layout from the old default exactly as it was saved (T-D12)', () => {
+    // A layout saved before this change: the old vertical default, Joy Code in its column.
+    const oldLayout = JSON.stringify(verticalDockLayout());
+    const storage = memoryStorage({ [dockLayoutKey('vertical')]: oldLayout });
+
+    const plan = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(plan.restored).toBe(true);
+    // The old vertical seed's monitor column is 500 wide, beside a 1000-wide tool area: kept as saved.
+    const root = (plan.layout as { grid: { root: { data: { size: number; data: unknown }[] } } })
+      .grid.root;
+    expect(root.data[1]?.size).toBe(500);
+    expect(leafIds(plan.layout)).toContain('monitor-col');
+    expect(leafIds(plan.layout)).toContain('agent-col');
+    // The stored bytes are not rewritten by the restore.
+    expect(storage.getItem(dockLayoutKey('vertical'))).toBe(oldLayout);
+  });
+
+  it('the preview-first Edit layout puts the monitor top-centre and large (T-D12 round 2)', () => {
+    const layout = planWorkspaceLayout(memoryStorage(), 'edit', 'widescreen').layout as {
+      grid: { root: { data: { size: number; data: { id?: string } & unknown }[] } };
+    };
+    const [topRow, bottomRow] = layout.grid.root.data as unknown as [
+      { size: number; data: { size: number; data: { id: string } }[] },
+      { size: number },
+    ];
+    // The top row is 550 of 1000: the picture is the first thing on screen.
+    expect(topRow.size).toBe(550);
+    expect(bottomRow.size).toBe(450);
+    // Browser, monitor, context across the top; the monitor is the middle and the largest.
+    const row = topRow.data as unknown as { size: number; data: { id: string } }[];
+    expect(row.map((cell) => cell.data.id)).toEqual(['browser', 'monitor-row', 'context']);
+    expect(row[1]!.size).toBeGreaterThan(row[0]!.size);
+    expect(row[1]!.size).toBeGreaterThan(row[2]!.size);
+  });
+
+  it('Reset Workspace applies the mode and preset the preferences are reset to (T-D12 round 2)', async () => {
+    expect(resetWorkspaceTarget()).toEqual({
+      mode: DEFAULT_EDITOR_UI_PREFERENCES.viewMode,
+      preset: DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset,
+    });
+    const appSource = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
+    const start = appSource.indexOf('const resetWorkspace = useCallback');
+    const end = appSource.indexOf('const switchEditorView = useCallback', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const block = appSource.slice(start, end);
+    expect(block).toContain('applyDockLayout(api, target.mode, target.preset)');
+    expect(block).not.toContain("applyDockLayout(api, 'vertical'");
+    // The older view-mode key must be cleared too, or a saved 'vertical' comes back on the next launch.
+    expect(block).toContain("storage.removeItem('joy-media.view-mode.v1')");
+  });
+
+  it('a stored widescreen layout also loads unchanged (T-D12)', () => {
+    const savedWidescreen = JSON.stringify(firstRunWorkspaceLayout('edit', 'widescreen'));
+    const storage = memoryStorage({ [dockLayoutKey('widescreen')]: savedWidescreen });
+
+    const plan = planWorkspaceLayout(storage, 'edit', 'widescreen');
+
+    expect(plan.restored).toBe(true);
+    expect(storage.getItem(dockLayoutKey('widescreen'))).toBe(savedWidescreen);
   });
 });
 

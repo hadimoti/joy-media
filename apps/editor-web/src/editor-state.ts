@@ -1,4 +1,5 @@
 import type { TimeUs } from '@joy-media/project-schema';
+import { APP_MENU_GROUPS, type AppMenuActionId, type AppMenuItem } from './app-menu.js';
 
 export interface EphemeralEditorState {
   readonly selectedIds: readonly string[];
@@ -7,40 +8,71 @@ export interface EphemeralEditorState {
 
 export const EMPTY_EDITOR_STATE: EphemeralEditorState = { selectedIds: [], playheadUs: 0 };
 
+/** One command-palette entry. Every menu action is one entry, under the same id. */
 export interface EditorAction {
-  readonly id: string;
+  readonly id: AppMenuActionId;
   readonly title: string;
   readonly shortcut: string;
+  readonly item: AppMenuItem;
 }
 
-export const EDITOR_ACTIONS: readonly EditorAction[] = [
-  { id: 'history.undo', title: 'Undo', shortcut: 'Ctrl+Z' },
-  { id: 'history.redo', title: 'Redo', shortcut: 'Ctrl+Shift+Z' },
-  { id: 'view.commandPalette', title: 'Open Command Palette', shortcut: 'Ctrl+K' },
-  { id: 'monitor.frameBack', title: 'Monitor: step back one frame', shortcut: ',' },
-  { id: 'monitor.frameForward', title: 'Monitor: step forward one frame', shortcut: '.' },
-  {
-    id: 'monitor.reverse',
-    title: 'Monitor: play in reverse (J, press again to go faster)',
-    shortcut: 'J',
-  },
-  { id: 'monitor.stop', title: 'Monitor: stop (K)', shortcut: 'K' },
-  {
-    id: 'monitor.forward',
-    title: 'Monitor: play forward (L, press again to go faster)',
-    shortcut: 'L',
-  },
-  { id: 'monitor.loop', title: 'Monitor: loop on or off', shortcut: '\\' },
-  { id: 'monitor.setIn', title: 'Monitor: set in point', shortcut: 'I' },
-  { id: 'monitor.setOut', title: 'Monitor: set out point', shortcut: 'O' },
-  { id: 'monitor.clearMarks', title: 'Monitor: clear in and out points', shortcut: 'Shift+X' },
-  { id: 'monitor.playInToOut', title: 'Monitor: play in to out', shortcut: '/' },
-  { id: 'monitor.fullscreen', title: 'Monitor: full-screen preview (Esc leaves)', shortcut: 'F' },
-];
+/**
+ * The palette list is built from the menu catalog, so every menu action is in the
+ * palette. An id that sits in two menus (Delete is in Edit and Clip) appears once.
+ */
+export function paletteActionsFromMenu(): readonly EditorAction[] {
+  const seen = new Map<AppMenuActionId, EditorAction>();
+  for (const group of APP_MENU_GROUPS) {
+    for (const item of group.items) {
+      if (seen.has(item.id)) continue;
+      seen.set(item.id, {
+        id: item.id,
+        title: item.label,
+        shortcut: item.shortcut ?? '',
+        item,
+      });
+    }
+  }
+  return [...seen.values()];
+}
+
+export const EDITOR_ACTIONS: readonly EditorAction[] = paletteActionsFromMenu();
 
 export function searchActions(query: string): readonly EditorAction[] {
   const needle = query.trim().toLowerCase();
   return needle.length === 0
     ? EDITOR_ACTIONS
     : EDITOR_ACTIONS.filter((action) => action.title.toLowerCase().includes(needle));
+}
+
+interface SpeedTimelineClip {
+  readonly id: string;
+  readonly kind: string;
+}
+
+/**
+ * Whether Clip > Speed applies to the selection. The Inspector's Speed tab exists only
+ * for a video clip, and it follows the first selected id that the timeline holds, so
+ * this uses the same rule.
+ */
+export function selectedClipSupportsSpeed(
+  timelineProject: {
+    readonly compositions: Readonly<
+      Record<
+        string,
+        { readonly tracks: readonly { readonly clips: readonly SpeedTimelineClip[] }[] }
+      >
+    >;
+  },
+  selectedIds: readonly string[],
+): boolean {
+  for (const clipId of selectedIds) {
+    for (const composition of Object.values(timelineProject.compositions)) {
+      for (const track of composition.tracks) {
+        const clip = track.clips.find((candidate) => candidate.id === clipId);
+        if (clip !== undefined) return clip.kind === 'video';
+      }
+    }
+  }
+  return false;
 }

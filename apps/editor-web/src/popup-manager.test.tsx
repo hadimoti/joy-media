@@ -513,6 +513,7 @@ describe('app menu bar on the popup manager', () => {
     canUndo: true,
     canRedo: true,
     hasSelection: true,
+    supportsSpeed: true,
     exporting: false,
     onAction: vi.fn(),
   };

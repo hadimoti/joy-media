@@ -137,6 +137,57 @@ export function resolveShortcut(event: ShortcutKeyEvent): ShortcutAction | undef
   }
 }
 
+export interface ShortcutReferenceRow {
+  readonly keys: string;
+  readonly action: string;
+}
+
+export interface ShortcutReferenceGroup {
+  readonly title: 'Playback' | 'Editing' | 'View';
+  readonly rows: readonly ShortcutReferenceRow[];
+}
+
+/** What the Keyboard Shortcuts dialog lists, in three groups. */
+export const SHORTCUT_REFERENCE: readonly ShortcutReferenceGroup[] = [
+  {
+    title: 'Playback',
+    rows: [
+      { keys: 'Space', action: 'Toggle playback' },
+      { keys: '← / →', action: 'Step back / forward 1s' },
+      { keys: 'Shift+← / Shift+→', action: 'Fine step 100ms' },
+      { keys: 'Home / End', action: 'Go to start / end' },
+      { keys: ', / .', action: 'Step back / forward one frame' },
+      { keys: '← / → (Monitor)', action: 'Step one frame when the Monitor has focus' },
+      {
+        keys: 'J / K / L',
+        action: 'Reverse / stop / forward; press J or L again to go faster (up to 8x)',
+      },
+      { keys: 'I / O', action: 'Set in point / out point' },
+      { keys: 'Shift+X', action: 'Clear in and out points' },
+      { keys: '/', action: 'Play in to out' },
+      { keys: '\\', action: 'Loop on or off' },
+    ],
+  },
+  {
+    title: 'Editing',
+    rows: [
+      { keys: 'Ctrl+Z', action: 'Undo' },
+      { keys: 'Ctrl+Y', action: 'Redo' },
+      { keys: 'Ctrl+D', action: 'Duplicate clip' },
+      { keys: 'Delete / Backspace', action: 'Delete selected clip or marker' },
+      { keys: 'S', action: 'Split clip at playhead' },
+    ],
+  },
+  {
+    title: 'View',
+    rows: [
+      { keys: 'Ctrl+K', action: 'Command palette' },
+      { keys: 'F', action: 'Full-screen preview (Esc leaves)' },
+      { keys: '?', action: 'Toggle this panel' },
+    ],
+  },
+];
+
 /** A key press as the scoped key table sees it (`code` is optional for tests). */
 export interface ScopedKeyEvent extends ShortcutKeyEvent {
   readonly code?: string;
