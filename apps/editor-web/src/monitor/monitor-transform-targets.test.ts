@@ -7,7 +7,9 @@ import {
   type Transform2D,
   type VideoFrameNode,
 } from '@joy-media/render-ir';
+import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import { bindClipToObject } from '../sticker-bindings.js';
+import { groupGeometry } from './monitor-transform-group.js';
 import { captionNodeId } from './monitor-ids.js';
 import { buildMonitorElements } from './monitor-selection.js';
 import {
@@ -113,13 +115,13 @@ const TRANSFORMS: Record<string, Transform2D> = {
   [CAPTION]: { translateX: 0, translateY: 1500, scaleX: 1, scaleY: 1 },
 };
 
-function frame(): RenderFrameIR {
+function frame(transforms: Record<string, Transform2D> = TRANSFORMS): RenderFrameIR {
   return {
     version: 1,
     compositionId: 'root',
     timeUs: 0,
     viewport: { width: 1080, height: 1920, dpr: 1 },
-    nodes: Object.entries(TRANSFORMS).map(
+    nodes: Object.entries(transforms).map(
       ([id, transform], index) =>
         ({
           id,
@@ -141,14 +143,16 @@ function targets(
     project?: JoyProjectV1;
     locked?: readonly string[];
     agentPreviewOnScreen?: boolean;
+    transforms?: Record<string, Transform2D>;
   } = {},
 ) {
   const visual = options.project ?? project();
-  const drawn = frame();
+  const transforms = options.transforms ?? TRANSFORMS;
+  const drawn = frame(transforms);
   const elements = buildMonitorElements({
     frame: drawn,
     nodeBounds: (id) =>
-      TRANSFORMS[id] === undefined ? undefined : nodeBoundsFromBox(id, TRANSFORMS[id]!, BOX),
+      transforms[id] === undefined ? undefined : nodeBoundsFromBox(id, transforms[id]!, BOX),
     project: visual,
     timeline: timeline(options.locked),
   });
@@ -509,6 +513,79 @@ describe('T-M05b: keyframed values and the anchor point on the targets', () => {
       project: project({ objects: { holder: { transform: t(0, 0, { scaleX: 0 }) } } }),
     })[0]!;
     expect(flat.anchorBlocked).toBe('parent-zero-scale');
+  });
+
+  it('a parent and its child both selected: only the parent is written, the child follows (review fix)', () => {
+    // The child hangs from the shape (at 100, 200, not turned): drawn at 110, 200.
+    const visual = project({
+      objects: { child: { parentId: 'shape', transform: t(10, 0) } as Partial<VisualObjectV1> },
+    });
+    const transforms = {
+      ...TRANSFORMS,
+      child: { translateX: 110, translateY: 200, scaleX: 1, scaleY: 1 },
+    };
+    const list = targets(['clip-shape', 'clip-child'], { project: visual, transforms });
+    expect(list.find((target) => target.objectId === 'child')!.ancestorObjectIds).toEqual([
+      'shape',
+    ]);
+    const group = groupGeometry(list.map((target) => target.geometry))!;
+    const none = { shift: false, alt: false };
+    const world = (objects: JoyProjectV1['visualObjects'], id: string) =>
+      evaluateCameraExpressionTransform(id, undefined, objects, 0, 1920).transform;
+    const before = world(visual.visualObjects, 'child');
+    const written = (patches: ReturnType<typeof gesturePatches>) => {
+      expect(patches).toBeDefined();
+      expect([...patches!.keys()]).toEqual(['shape']);
+      const next = withTransformPatches(visual, patches!, 0).visualObjects;
+      // The child's own values are untouched: it follows its parent.
+      expect(next.child).toEqual(visual.visualObjects.child);
+      return { next, parent: patches!.get('shape')! };
+    };
+
+    // Move: the child moves by the drag once (not twice, as when both were patched).
+    const moved = written(
+      gesturePatches(list, { kind: 'move' }, { x: 0, y: 0 }, { x: 10, y: 5 }, none),
+    );
+    const movedChild = world(moved.next, 'child');
+    expect(movedChild.x).toBeCloseTo(before.x + 10, 9);
+    expect(movedChild.y).toBeCloseTo(before.y + 5, 9);
+
+    // Scale: the child is scaled by the parent's factor once.
+    const corner = group.corners[2];
+    const scaled = written(
+      gesturePatches(
+        list,
+        { kind: 'group-scale', handle: 'se' },
+        corner,
+        { x: corner.x + 40, y: corner.y + 40 },
+        none,
+      ),
+    );
+    expect(scaled.parent.scaleX).not.toBeCloseTo(1, 6);
+    expect(world(scaled.next, 'child').scaleX).toBeCloseTo(scaled.parent.scaleX, 9);
+    expect(world(scaled.next, 'child').scaleY).toBeCloseTo(scaled.parent.scaleY, 9);
+
+    // Rotate: the child turns by the parent's turn once, rigidly about the group.
+    const { center } = group;
+    const turned = written(
+      gesturePatches(
+        list,
+        { kind: 'group-rotate' },
+        { x: center.x, y: center.y - 100 },
+        { x: center.x + 100, y: center.y },
+        none,
+      ),
+    );
+    expect(turned.parent.rotationDeg).toBeCloseTo(90, 6);
+    const turnedChild = world(turned.next, 'child');
+    const turnedParent = world(turned.next, 'shape');
+    expect(turnedChild.rotationDeg).toBeCloseTo(90, 6);
+    // The child stays 10 px from its parent along the parent's turned x axis.
+    expect(turnedChild.x - turnedParent.x).toBeCloseTo(0, 6);
+    expect(turnedChild.y - turnedParent.y).toBeCloseTo(10, 6);
+
+    // A nudge follows the same rule.
+    expect([...nudgePatches(list, { x: 1, y: 0 })!.keys()]).toEqual(['shape']);
   });
 
   it('the release writes a key on the keyframed channel and a static value on the others', () => {

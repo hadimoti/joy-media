@@ -79,6 +79,12 @@ export interface MonitorTransformTarget {
   readonly anchorBlocked?: TransformBlockReason;
   /** The parent's world values, when the object has a parent. */
   readonly parent?: ParentTransform;
+  /**
+   * The object's parent, grandparent and so on, nearest first (absent when it
+   * has no parent). A gesture on a selection that holds an ancestor too
+   * writes only the ancestor: this element follows it through the hierarchy.
+   */
+  readonly ancestorObjectIds?: readonly string[];
   /** Why a gesture is not allowed, per gesture. */
   readonly blocked: Readonly<Partial<Record<MonitorTransformGestureKind, TransformBlockReason>>>;
 }
@@ -107,6 +113,19 @@ export function objectIdForNode(
   if (isCaptionNodeId(nodeId)) return undefined;
   if (project.visualObjects[nodeId] !== undefined) return nodeId;
   return nodeId === clipId ? clipIdToObjectId(project, clipId) : undefined;
+}
+
+/** The object's parent, grandparent and so on, nearest first (a loop or a missing parent ends it). */
+export function ancestorObjectIds(project: JoyProjectV1, object: VisualObjectV1): string[] {
+  const ids: string[] = [];
+  let parentId = object.parentId;
+  while (parentId !== undefined && parentId !== object.id && !ids.includes(parentId)) {
+    const parent = project.visualObjects[parentId];
+    if (parent === undefined) break;
+    ids.push(parentId);
+    parentId = parent.parentId;
+  }
+  return ids;
 }
 
 function parentWorld(
@@ -220,6 +239,7 @@ export function buildTransformTargets(
       object === undefined
         ? { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0 }
         : localValuesAt(object, input.timeUs);
+    const ancestors = object === undefined ? [] : ancestorObjectIds(input.project, object);
     const geometry = boxGeometry(element.bounds, transform);
     const anchorBlocked = anchorReason(
       reasonForAll,
@@ -236,6 +256,7 @@ export function buildTransformTargets(
       ...(object === undefined ? {} : { anchor: transformAnchor(object.transform) }),
       ...(anchorBlocked === undefined ? {} : { anchorBlocked }),
       ...(parent === undefined ? {} : { parent }),
+      ...(ancestors.length === 0 ? {} : { ancestorObjectIds: ancestors }),
       blocked: blockedGestures(reasonForAll, object, parent),
     });
   }

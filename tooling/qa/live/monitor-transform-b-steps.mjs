@@ -16,6 +16,11 @@
  *   D-M05-5 group scale and group rotate: with two elements selected, a group
  *           corner scales both and the group rotate handle turns both, each in
  *           one undo step
+ *   D-M05-6 a parent and its child both selected: a move, a group scale and
+ *           a group rotate write only the parent; the child's own values stay
+ *           as they were and its picture follows the parent exactly once (the
+ *           child's box moves by the same amount as the parent's); one Ctrl+Z
+ *           each
  *
  * Callbacks given by the runner (the app has no page-side document reader):
  *   readTransform(clipId)  -> { x, y, scaleX, scaleY, rotationDeg, anchorX?, anchorY? }
@@ -244,8 +249,79 @@ export async function groupScaleAndRotate(page, clipIds, callbacks) {
   return `group of ${clipIds.length}: scale x${ratio.toFixed(3)} and rotate ${turn} deg, one undo each`;
 }
 
+function centroid(points) {
+  const sum = points.reduce((total, point) => ({ x: total.x + point.x, y: total.y + point.y }), {
+    x: 0,
+    y: 0,
+  });
+  return { x: sum.x / points.length, y: sum.y / points.length };
+}
+
+/**
+ * D-M05-6: a parent and its child both selected (review fix). `parentClipId`'s
+ * object must be the parent of `childClipId`'s object, neither with
+ * keyframes or expressions on its transform, and the parent not turned.
+ */
+export async function parentAndChildSelected(page, parentClipId, childClipId, callbacks) {
+  needs(callbacks, 'readTransform');
+  const { readTransform } = callbacks;
+  const clipIds = [parentClipId, childClipId];
+  await selectClips(page, clipIds, callbacks);
+  const parentBefore = await readTransform(parentClipId);
+  const childBefore = await readTransform(childClipId);
+  const parentCorners = centroid(await corners(page, parentClipId));
+  const childCorners = centroid(await corners(page, childClipId));
+  const childUnchanged = async (what) => {
+    if (!sameTransform(await readTransform(childClipId), childBefore))
+      throw new Error(`${what} wrote the child's own values (it must follow its parent)`);
+  };
+  const undoBoth = async (what) => {
+    await page.keyboard.press('Control+z');
+    if (
+      !sameTransform(await readTransform(parentClipId), parentBefore) ||
+      !sameTransform(await readTransform(childClipId), childBefore)
+    )
+      throw new Error(`one undo did not undo the ${what}`);
+  };
+
+  // Move: both boxes move by the same amount, the child only once.
+  await drag(page, await centreOf(box(page, parentClipId), 'the parent box'), DRAG_PX, DRAG_PX);
+  await childUnchanged('the move');
+  const parentMoved = centroid(await corners(page, parentClipId));
+  const childMoved = centroid(await corners(page, childClipId));
+  const shift = { x: parentMoved.x - parentCorners.x, y: parentMoved.y - parentCorners.y };
+  if (near(shift.x, 0, 1) && near(shift.y, 0, 1))
+    throw new Error('the move did not move the parent');
+  if (
+    !near(childMoved.x - childCorners.x, shift.x, 1) ||
+    !near(childMoved.y - childCorners.y, shift.y, 1)
+  )
+    throw new Error('the child did not move by the same amount as its parent');
+  await undoBoth('move');
+
+  // Group scale: the parent is scaled, the child follows.
+  const corner = await centreOf(groupHandle(page, 'se'), 'the group se handle');
+  await drag(page, corner, DRAG_PX, DRAG_PX, ['Shift']);
+  const parentScaled = await readTransform(parentClipId);
+  if (near(parentScaled.scaleX, parentBefore.scaleX, 1e-6))
+    throw new Error('group scale did not scale the parent');
+  await childUnchanged('the group scale');
+  await undoBoth('group scale');
+
+  // Group rotate: the parent turns, the child follows (turned once, not twice).
+  const rotate = await centreOf(groupHandle(page, 'rotate'), 'the group rotate handle');
+  await drag(page, rotate, DRAG_PX * 3, DRAG_PX, ['Shift']);
+  const parentTurned = await readTransform(parentClipId);
+  const turn = parentTurned.rotationDeg - parentBefore.rotationDeg;
+  if (near(turn, 0, 1e-6)) throw new Error('group rotate did not turn the parent');
+  await childUnchanged('the group rotate');
+  await undoBoth('group rotate');
+  return `parent and child selected: move, scale and rotate (${turn} deg) wrote only the parent, one undo each`;
+}
+
 export const MONITOR_TRANSFORM_B_CASES = {
   'D-M05-3': keyframeOnRelease,
   'D-M05-4': anchorMove,
   'D-M05-5': groupScaleAndRotate,
+  'D-M05-6': parentAndChildSelected,
 };

@@ -160,6 +160,10 @@ function drawnAfter(
 /**
  * The new local values of every target for a gesture from `start` to `now`.
  * Only the values the gesture owns are changed; each object appears once.
+ * The patches are hierarchy-aware: when an element's parent (or any
+ * ancestor) is selected too, only the topmost selected ancestor gets a patch
+ * and the element follows it through the hierarchy. Patching both would move
+ * the child twice, because its patch is local to the parent's old values.
  * `undefined` when the gesture is not allowed on these targets.
  */
 export function gesturePatches(
@@ -179,9 +183,13 @@ export function gesturePatches(
           return group === undefined ? {} : { group };
         })()
       : {};
+  const selectedObjects = new Set(
+    targets.flatMap((target) => (target.objectId === undefined ? [] : [target.objectId])),
+  );
   const patches = new Map<string, TransformPatch>();
   for (const target of targets) {
     if (target.objectId === undefined || patches.has(target.objectId)) continue;
+    if (target.ancestorObjectIds?.some((id) => selectedObjects.has(id)) === true) continue;
     const after = drawnAfter(target, gesture, start, now, modifiers, context);
     if (after === undefined) return undefined;
     const changed = applyWorldChange(target.local, target.geometry.transform, after, target.parent);
