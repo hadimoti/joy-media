@@ -3841,8 +3841,7 @@ function EditorWorkspace({
       const exportTimelineProject = structuredClone(session.timelineProject);
       const exportVisualProject = structuredClone(session.visualProject);
       const exportAudioState = structuredClone(audioState);
-      const compositionV1 =
-        exportVisualProject.compositions[exportVisualProject.rootCompositionId];
+      const compositionV1 = exportVisualProject.compositions[exportVisualProject.rootCompositionId];
       const exportSettings = resolveExportSettings(activeExportPreset, {
         width: compositionV1?.width ?? 1080,
         height: compositionV1?.height ?? 1920,

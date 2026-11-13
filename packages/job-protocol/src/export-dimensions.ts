@@ -6,8 +6,7 @@ export const MAX_H264_EXPORT_DIMENSION = 4_096;
 export const MAX_H264_EXPORT_PIXELS = 8_294_400;
 
 export type H264ExportDimensionsResult =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly reason: string };
+  { readonly ok: true } | { readonly ok: false; readonly reason: string };
 
 /** Validate H.264 export dimensions shared by the editor, export core, and Worker. */
 export function validateH264ExportDimensions(

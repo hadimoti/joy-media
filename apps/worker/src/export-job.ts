@@ -43,12 +43,7 @@ export function executeLeasedExport(
 ): ExportJobResult {
   try {
     const manifest = freezeManifest(input.payload.manifest);
-    remuxBrowserMp4(
-      input.sourcePath,
-      outputPath,
-      manifest.frameRate,
-      input.payload.frameCount,
-    );
+    remuxBrowserMp4(input.sourcePath, outputPath, manifest.frameRate, input.payload.frameCount);
     const probe = verifyExportAgainstManifest(outputPath, manifest);
     coordinator.complete(workerId, jobId, undefined, undefined, leaseToken);
     return { outputPath, videoCodec: probe.videoCodec, audioCodec: probe.audioCodec };
