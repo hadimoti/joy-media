@@ -9,6 +9,7 @@ import {
   setKeyframe,
 } from '@joy-media/motion-core';
 import { KeyframeActiveIcon, KeyframeNoneIcon, KeyNextIcon, KeyPrevIcon } from './icons.js';
+import { objectDisplayLabel } from './object-display-label.js';
 
 const TRANSFORM_KEYS = ['x', 'y', 'scaleX', 'scaleY', 'rotationDeg', 'opacity'] as const;
 type TransformKey = (typeof TRANSFORM_KEYS)[number];
@@ -94,6 +95,7 @@ export function TimelinePropertyLanes({
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
 }) {
   const lanes = useMemo(() => buildLegacyTransformPropertyLanes(object), [object]);
+  const objectLabel = objectDisplayLabel(object);
   const visibleLanes = showAnimatedOnly ? lanes.filter((lane) => lane.keys.length > 0) : lanes;
   const viewportStartUs = Math.max(0, (scrollLeft / pixelsPerSecond) * 1_000_000);
   const viewportEndUs = ((scrollLeft + viewportWidthPx) / pixelsPerSecond) * 1_000_000;
@@ -142,11 +144,11 @@ export function TimelinePropertyLanes({
   };
 
   return (
-    <section className="timeline-property-lanes" aria-label={`${object.id} animated properties`}>
+    <section className="timeline-property-lanes" aria-label={`${objectLabel} animated properties`}>
       <header className="timeline-property-lanes-header">
         <div className="timeline-property-lanes-title">
           <strong>Properties</strong>
-          <span title={object.id}>{object.id}</span>
+          <span title={objectLabel}>{objectLabel}</span>
         </div>
         <label className="timeline-property-lanes-filter">
           <input

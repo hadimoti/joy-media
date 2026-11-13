@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { polishMediaLabel } from './media-label.js';
+import { clipNameWithoutExtension, polishMediaLabel } from './media-label.js';
+
+describe('clipNameWithoutExtension', () => {
+  it('drops the file extension from a file name', () => {
+    expect(clipNameWithoutExtension('product-shot.mp4')).toBe('product-shot');
+    expect(clipNameWithoutExtension('  Intro Take 2.MOV ')).toBe('Intro Take 2');
+  });
+
+  it('keeps names that have no file extension', () => {
+    expect(clipNameWithoutExtension('intro')).toBe('intro');
+    expect(clipNameWithoutExtension('v1.2 intro')).toBe('v1.2 intro');
+    expect(clipNameWithoutExtension('Mr.Bean')).toBe('Mr.Bean');
+  });
+});
 
 describe('polishMediaLabel', () => {
   it('title-cases simple clip ids', () => {

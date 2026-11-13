@@ -122,7 +122,9 @@ describe('AudioPanel Enhance workspace', () => {
     expect(markup).toContain('timeline-audio-dsp-pills');
     expect(markup).toContain('audio-dsp-pill dsp-dfn');
     expect(markup).toContain('audio-dsp-pill dsp-norm');
-    expect(markup).toContain('DFN');
-    expect(markup).toContain('NORM');
+    expect(markup).toContain('Noise reduction');
+    expect(markup).toContain('Loudness');
+    expect(markup).not.toContain('>DFN<');
+    expect(markup).not.toContain('>NORM<');
   });
 });

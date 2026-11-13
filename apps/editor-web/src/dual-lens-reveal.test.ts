@@ -112,7 +112,8 @@ describe('Dual Lens reveal bridge', () => {
         'visual:intro-title',
         'output:program',
       ]);
-      expect(formatProvenanceRibbon(steps)).toBe('Asset-intro → Intro → JOY → Program Output');
+      // Neither the source nor the clip shows its id: no media name → "Source media", "Clip 1".
+      expect(formatProvenanceRibbon(steps)).toBe('Source media → Clip 1 → JOY → Program Output');
     });
 
     it('places a generative provider before the asset it produced, not beside it', () => {
@@ -128,7 +129,8 @@ describe('Dual Lens reveal bridge', () => {
         'output:program',
       ]);
       expect(formatProvenanceRibbon(steps)).toBe(
-        'Flux-dev → Generated Intro → Intro → JOY → Program Output',
+        // The clip is named by its media name, as on the timeline.
+        'Flux-dev → Generated Intro → Generated intro → JOY → Program Output',
       );
     });
 
