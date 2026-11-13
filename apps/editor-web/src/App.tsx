@@ -150,6 +150,31 @@ function isOwnerVisibleDockviewPanel(api: IDockviewPanelProps['api']): boolean {
   return api.isVisible;
 }
 
+/**
+ * Where a panel lands when it is opened on demand.
+ *
+ * Joy Code is collapsed on the first run, so opening it has to put it back
+ * where it belongs: a column of its own, the way the seed layout had it. The
+ * neighbour depends on the view mode (the Inspector group in the vertical
+ * layout, the timeline row in the widescreen one). A layout without that
+ * neighbour keeps the default placement.
+ */
+function joyCodeDockPosition(
+  api: DockviewApi,
+  panelId: string,
+  mode: EditorViewMode,
+): {
+  readonly position?: {
+    readonly referencePanel: string;
+    readonly direction: 'right';
+  };
+} {
+  if (panelId !== 'agent') return {};
+  const reference = mode === 'widescreen' ? 'timeline' : 'inspector';
+  if (api.getPanel(reference) === undefined) return {};
+  return { position: { referencePanel: reference, direction: 'right' } };
+}
+
 function useOwnerVisibleDockviewPanel(api: IDockviewPanelProps['api']): boolean {
   const [ownerVisible, setOwnerVisible] = useState(() => isOwnerVisibleDockviewPanel(api));
   useEffect(() => {
@@ -3369,6 +3394,7 @@ function EditorWorkspace({
         title: panelLabel(dockPanelId),
         minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
         minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
+        ...joyCodeDockPosition(api, dockPanelId, viewModeRef.current),
       });
       panel = api.getPanel(dockPanelId);
     }
