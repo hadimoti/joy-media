@@ -421,7 +421,6 @@ import {
   loadEditorUiPreferences,
   saveEditorUiPreferences,
   updateEditorUiPreferences,
-  DEFAULT_EDITOR_UI_PREFERENCES,
   EDITOR_UI_PREFERENCES_KEY,
 } from './ui-preferences.js';
 import type { EditorUiPreferencesV2 } from './ui-preferences.js';
@@ -432,6 +431,7 @@ import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
   persistWorkspacePresetLayout,
+  resetWorkspaceTarget,
   workspacePresetLayoutKey,
 } from './workspace-presets.js';
 import {
@@ -3647,13 +3647,18 @@ function EditorWorkspace({
       }
     }
     storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
-    workspacePresetRef.current = DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset;
-    setWorkspacePreset(DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset);
+    // The older view-mode key would otherwise bring the previous mode back on the next launch.
+    storage.removeItem('joy-media.view-mode.v1');
+    // The same mode and preset as the defaults the preferences were reset to, so the layout and the saved
+    // preferences agree (T-D12 round 2).
+    const target = resetWorkspaceTarget();
+    workspacePresetRef.current = target.preset;
+    setWorkspacePreset(target.preset);
     setEnhanceTool('effects');
-    setViewMode(DEFAULT_EDITOR_UI_PREFERENCES.viewMode);
-    viewModeRef.current = DEFAULT_EDITOR_UI_PREFERENCES.viewMode;
+    setViewMode(target.mode);
+    viewModeRef.current = target.mode;
     const api = dockviewApiRef.current;
-    if (api !== null) applyDockLayout(api, 'vertical', 'edit');
+    if (api !== null) applyDockLayout(api, target.mode, target.preset);
   }, [applyDockLayout, storage]);
 
   const switchEditorView = useCallback(() => {
