@@ -7,7 +7,11 @@ import {
   TRANSITION_CATEGORIES,
   TRANSITION_OPTIONS,
   buildPixiTransitionFragment,
+  isSuppliedTransitionUniformType,
   listTransitionShaders,
+  resolveTransitionUniforms,
+  transitionUniformSize,
+  type TransitionCatalogEntry,
 } from './index.js';
 
 const shadersDir = resolve(dirname(fileURLToPath(import.meta.url)), 'shaders');
@@ -32,15 +36,38 @@ function uniforms(source: string): { type: string; name: string }[] {
   }));
 }
 
+type ShaderLike = Pick<TransitionCatalogEntry, 'id' | 'glsl' | 'defaultParams' | 'paramsTypes'>;
+
 /**
- * Vector uniforms of two entries kept from before T-V08. They compile, but the Pixi filter
- * (gl-transition-filter.ts) feeds only float uniforms, so at run time they stay at zero.
- * No new entry may add one; see the T-V08 report.
+ * Shader uniforms the Pixi transition filter would leave at zero: a type it does not bind, no
+ * catalogue type or a type that differs from the shader, or no default of the right size. The
+ * filter binds exactly what `resolveTransitionUniforms` returns, so that is checked too.
  */
-const KNOWN_UNFED_VECTOR_UNIFORMS: Readonly<Record<string, readonly string[]>> = {
-  'gl:Directional': ['direction'],
-  'gl:CircleCrop': ['bgcolor'],
-};
+function unsuppliedUniforms(entry: ShaderLike): string[] {
+  const supplied = new Map(
+    entry.id.startsWith('test:')
+      ? []
+      : resolveTransitionUniforms(entry.id).map((uniform) => [uniform.name, uniform] as const),
+  );
+  const problems: string[] = [];
+  for (const uniform of uniforms(entry.glsl)) {
+    const label = `${uniform.type} ${uniform.name}`;
+    const type = entry.paramsTypes[uniform.name];
+    const value = entry.defaultParams[uniform.name];
+    if (!isSuppliedTransitionUniformType(uniform.type) || type !== uniform.type) {
+      problems.push(label);
+      continue;
+    }
+    const size = transitionUniformSize(uniform.type);
+    const fits =
+      size === 1
+        ? typeof value === 'number'
+        : Array.isArray(value) && value.length === size && value.every(Number.isFinite);
+    if (!fits) problems.push(label);
+    else if (!entry.id.startsWith('test:') && !supplied.has(uniform.name)) problems.push(label);
+  }
+  return problems;
+}
 
 describe('transition catalogue (T-V08)', () => {
   it('has at least 30 transitions for v1.1.1, including the three dips', () => {
@@ -142,22 +169,32 @@ describe('transition catalogue (T-V08)', () => {
       expect(code, entry.id).not.toMatch(/\btexture\b/);
       expect(code, entry.id).not.toMatch(/[(,]\s*(in|inout)\s+\w/);
       expect(code, entry.id).not.toMatch(/#version|\bmain\s*\(/);
-      for (const uniform of uniforms(source)) {
-        if (uniform.type === 'float') {
-          expect(typeof entry.defaultParams[uniform.name], `${entry.id} ${uniform.name}`).toBe(
-            'number',
-          );
-          expect(entry.paramsTypes[uniform.name], `${entry.id} ${uniform.name}`).toBe('float');
-        } else {
-          expect(KNOWN_UNFED_VECTOR_UNIFORMS[entry.id] ?? [], entry.id).toContain(uniform.name);
-        }
-      }
+      // Every uniform a shader declares must be one the filter supplies; no exceptions.
+      expect(unsuppliedUniforms(entry), entry.id).toEqual([]);
       const declared = new Set(uniforms(source).map((uniform) => uniform.name));
       for (const name of Object.keys(entry.defaultParams))
         expect(declared, entry.id).toContain(name);
       const fragment = buildPixiTransitionFragment(source);
       expect(fragment).toContain('transition(vTextureCoord)');
     }
+  });
+
+  it('fails a shader that needs a uniform the filter does not supply', () => {
+    const shader = (
+      glsl: string,
+      params: ShaderLike['defaultParams'],
+      types: ShaderLike['paramsTypes'],
+    ) => unsuppliedUniforms({ id: 'test:shader', glsl, defaultParams: params, paramsTypes: types });
+    expect(shader('uniform vec2 direction;', {}, {})).toEqual(['vec2 direction']);
+    expect(shader('uniform vec4 bgcolor;', { bgcolor: [0, 0, 0] }, { bgcolor: 'vec4' })).toEqual([
+      'vec4 bgcolor',
+    ]);
+    expect(shader('uniform int count;', { count: 3 }, { count: 'int' })).toEqual(['int count']);
+    expect(shader('uniform bool flip;', { flip: 1 }, { flip: 'bool' })).toEqual(['bool flip']);
+    expect(shader('uniform float amount;', {}, { amount: 'float' })).toEqual(['float amount']);
+    expect(shader('uniform vec2 direction;', { direction: [1, 0] }, { direction: 'vec2' })).toEqual(
+      [],
+    );
   });
 
   it('matches each float default to the value written in the shader file', () => {

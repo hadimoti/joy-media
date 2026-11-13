@@ -118,8 +118,8 @@ export function getTransitionShader(type: string): TransitionCatalogEntry | unde
 
 /**
  * Descriptor view consumed by the universal animation layer. Uniforms that
- * are not scalar are still advertised for UI/catalog introspection, but the
- * first render adapter only evaluates numeric float uniforms.
+ * are not scalar are still advertised for UI/catalog introspection. The Pixi filter binds float and
+ * vector uniforms (`resolveTransitionUniforms`); keyframes evaluate float uniforms only.
  */
 export function listTransitionUniformDescriptors(
   type: string,
@@ -155,6 +155,110 @@ export function mergeTransitionParams(
   return merged;
 }
 
+/**
+ * GLSL uniform types the Pixi transition filter (renderer-pixi `gl-transition-filter.ts`) binds
+ * from a catalogue entry. A shader uniform of any other type would stay at zero on the GPU, so the
+ * catalogue test refuses an entry that declares one.
+ */
+export const SUPPLIED_TRANSITION_UNIFORM_TYPES = [
+  'float',
+  'vec2',
+  'vec3',
+  'vec4',
+  'ivec2',
+  'ivec3',
+  'ivec4',
+] as const;
+
+export type SuppliedTransitionUniformType = (typeof SUPPLIED_TRANSITION_UNIFORM_TYPES)[number];
+
+export function isSuppliedTransitionUniformType(
+  type: string,
+): type is SuppliedTransitionUniformType {
+  return (SUPPLIED_TRANSITION_UNIFORM_TYPES as readonly string[]).includes(type);
+}
+
+/** Component count of a supplied uniform type: 1 for `float`, N for `vecN` and `ivecN`. */
+export function transitionUniformSize(type: SuppliedTransitionUniformType): number {
+  return type === 'float' ? 1 : Number(type.slice(-1));
+}
+
+const COMPONENT_SLOTS: Readonly<Record<string, number>> = {
+  x: 0,
+  y: 1,
+  z: 2,
+  w: 3,
+  r: 0,
+  g: 1,
+  b: 2,
+  a: 3,
+};
+
+/**
+ * The project stores transition params as numbers only (`TransitionV1.params`). A vector uniform is
+ * stored one number per component under `<uniform>.<component>`: `direction.x`, `direction.y` for
+ * a direction, `bgcolor.r` … `bgcolor.a` for a colour (x/y/z/w and r/g/b/a name the same slots).
+ * Returns the uniform name and slot, or `undefined` for a plain key.
+ */
+export function parseTransitionComponentKey(
+  key: string,
+): { readonly name: string; readonly index: number } | undefined {
+  const match = /^([A-Za-z_]\w*)\.([xyzwrgba])$/.exec(key);
+  if (match === null) return undefined;
+  return { name: match[1]!, index: COMPONENT_SLOTS[match[2]!]! };
+}
+
+export interface ResolvedTransitionUniform {
+  readonly name: string;
+  readonly type: SuppliedTransitionUniformType;
+  /** A number for `float`; one number per component for vectors. */
+  readonly value: number | readonly number[];
+}
+
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+/**
+ * Every uniform a catalogue entry declares in `paramsTypes`, with the value the filter binds:
+ * the catalogue default, then a whole override from `params` (a number for a float, an array for a
+ * vector), then single component keys such as `direction.x` or `bgcolor.r`. `ivec` values are
+ * rounded. Unknown ids resolve to an empty list.
+ */
+export function resolveTransitionUniforms(
+  type: string,
+  params?: Readonly<Record<string, TransitionParamValue>>,
+): readonly ResolvedTransitionUniform[] {
+  const entry = getTransitionShader(type);
+  if (entry === undefined) return [];
+  const resolved: ResolvedTransitionUniform[] = [];
+  for (const [name, uniformType] of Object.entries(entry.paramsTypes)) {
+    if (!isSuppliedTransitionUniformType(uniformType)) continue;
+    const fallback = entry.defaultParams[name];
+    const override = params?.[name];
+    if (uniformType === 'float') {
+      resolved.push({ name, type: uniformType, value: finiteOr(override, finiteOr(fallback, 0)) });
+      continue;
+    }
+    const size = transitionUniformSize(uniformType);
+    const base = Array.isArray(fallback) ? fallback : [];
+    const whole = Array.isArray(override) ? override : [];
+    const value = Array.from({ length: size }, (_, index) =>
+      finiteOr(whole[index], finiteOr(base[index], 0)),
+    );
+    for (const [key, item] of Object.entries(params ?? {})) {
+      const component = parseTransitionComponentKey(key);
+      if (component === undefined || component.name !== name || component.index >= size) continue;
+      value[component.index] = finiteOr(item, value[component.index]!);
+    }
+    resolved.push({
+      name,
+      type: uniformType,
+      value: uniformType.startsWith('ivec') ? value.map((item) => Math.round(item)) : value,
+    });
+  }
+  return resolved;
+}
 /**
  * Wrap a gl-transitions `transition(vec2)` body for Pixi v8 Filter usage.
  * Expects uniforms: uTexture (from), uTextureTo (to), uProgress, uRatio, plus params.

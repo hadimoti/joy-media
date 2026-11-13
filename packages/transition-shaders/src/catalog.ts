@@ -197,7 +197,7 @@ export const TRANSITION_CATALOG = [
     id: 'gl:Directional',
     glName: 'Directional',
     label: 'Slide',
-    description: 'The next clip pushes the current one out of the frame.',
+    description: 'The next clip pushes in from the right; the current one leaves to the left.',
     category: 'slides-pushes',
     options: ['duration', 'direction'],
     license: 'MIT',
@@ -205,7 +205,7 @@ export const TRANSITION_CATALOG = [
     credit: 'Gaëtan Renaudeau (MIT), from gl-transitions Directional.glsl',
     glslFile: 'Directional.glsl',
     defaultParams: {
-      direction: [0, 1],
+      direction: [1, 0],
     },
     paramsTypes: {
       direction: 'vec2',

@@ -565,6 +565,36 @@ describe('transition timing', () => {
     expect(node.color.a).toBe(0);
   });
 
+  it('passes stored direction and colour components to the transition node (T-V08 review)', () => {
+    const slide: TransitionV1 = {
+      id: 't-slide',
+      trackId: 'track-v',
+      leftClipId: 'left',
+      rightClipId: 'right',
+      type: 'slide',
+      durationUs: 1_000_000,
+      params: { 'direction.x': 0, 'direction.y': -1 },
+    };
+    const crop: TransitionV1 = {
+      ...slide,
+      id: 't-crop',
+      type: 'gl:CircleCrop',
+      params: { 'bgcolor.r': 1, 'bgcolor.g': 1, 'bgcolor.b': 1 },
+    };
+    const nodeFor = (item: TransitionV1) => {
+      const frame = buildRenderFrameIR('c', 4_500_000, 100, 100, [], {
+        transitions: [item],
+        clipTimes,
+      });
+      const node = frame.nodes.find((n) => n.kind === 'transition');
+      if (node?.kind !== 'transition') throw new Error('expected transition');
+      return node;
+    };
+    expect(nodeFor(slide).shaderId).toBe('gl:Directional');
+    expect(nodeFor(slide).params).toEqual({ 'direction.x': 0, 'direction.y': -1 });
+    expect(nodeFor(crop).params).toEqual({ 'bgcolor.r': 1, 'bgcolor.g': 1, 'bgcolor.b': 1 });
+  });
+
   it('samples transition uniforms in transition-local time', () => {
     const animated: TransitionV1 = {
       ...transition,
