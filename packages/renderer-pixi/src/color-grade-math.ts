@@ -354,3 +354,18 @@ function finiteOr(value: number, fallback: number): number {
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
+
+/**
+ * Hue (degrees, 0 up to 360), saturation and lightness of an RGB colour
+ * (channels 0..1), with the conversion the HSL bands select on. The editor's
+ * eyedropper (T-K04) uses it, so a picked colour lands in the band the
+ * engine would put it in.
+ */
+export function colorGradeRgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  return rgbToHsl(r, g, b);
+}
+
+/** The distance between two hues around the colour circle, in degrees (0..180). */
+export function circularHueDistance(a: number, b: number): number {
+  return circularDistance(wrapHue(a), wrapHue(b));
+}

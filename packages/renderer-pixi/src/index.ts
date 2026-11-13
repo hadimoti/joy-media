@@ -38,8 +38,15 @@ import {
 
 export { applyColorGradeToPixels } from './effects-cpu.js';
 export { MAX_CUBE_LUT_BYTES, parseCubeLut, sampleCubeLut } from './lut.js';
-// The editor draws its curves with the same spline the colour engine renders with (T-K03).
-export { sampleColorCurve } from './color-grade-math.js';
+// The editor draws its curves with the same spline the colour engine renders with (T-K03),
+// and its eyedropper finds bands with the engine's hue maths (T-K04).
+export {
+  circularHueDistance,
+  colorGradeRgbToHsl,
+  MAX_COLOR_GRADE_HSL_BANDS,
+  normalizeColorGradeHslBands,
+  sampleColorCurve,
+} from './color-grade-math.js';
 export type { ParsedCubeLut } from './lut.js';
 
 export const PACKAGE_NAME = '@joy-media/renderer-pixi' as const;
