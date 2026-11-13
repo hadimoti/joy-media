@@ -270,6 +270,19 @@ export function joyCodeKeyForRunError(code: unknown): JoyCodeMessageKey {
     : 'unexpected-failure';
 }
 
+/**
+ * The key for a failed plan execution. Each error is mapped on its own; the
+ * first one that is a run code picks the entry. Any other text is never used,
+ * so an unrecognised error gets the generic entry.
+ */
+export function joyCodeKeyForExecutionErrors(errors: readonly unknown[]): JoyCodeMessageKey {
+  for (const error of errors) {
+    const key = joyCodeKeyForRunError(error);
+    if (key !== 'unexpected-failure') return key;
+  }
+  return 'unexpected-failure';
+}
+
 /** The code carried on a thrown error, or undefined. The error's own text is never used. */
 export function joyCodeCodeOfThrown(error: unknown): unknown {
   return typeof error === 'object' && error !== null && 'code' in error

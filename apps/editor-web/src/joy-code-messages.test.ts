@@ -9,6 +9,7 @@ import {
   isJoyCodeMessageKey,
   joyCodeCodeOfThrown,
   joyCodeKeyForBlockReason,
+  joyCodeKeyForExecutionErrors,
   joyCodeKeyForHostFailure,
   joyCodeKeyForLookBlockReason,
   joyCodeKeyForRecipeStop,
@@ -92,6 +93,22 @@ describe('Joy Code plain messages', () => {
     expect(joyCodeKeyForLookBlockReason('whatever')).toBe('look-unknown');
   });
 
+  it('maps each execution error to its run code, and unknown text to the generic entry', () => {
+    expect(joyCodeKeyForExecutionErrors(['JOY_AGENT_STALE_REVISION'])).toBe(
+      'JOY_AGENT_STALE_REVISION',
+    );
+    expect(
+      joyCodeKeyForExecutionErrors([
+        'Command failed at C:\\Users\\someone\\clip.json',
+        'JOY_AGENT_TIMEOUT',
+      ]),
+    ).toBe('JOY_AGENT_TIMEOUT');
+    expect(joyCodeKeyForExecutionErrors(['Provider said: SECRET-LOOKING-TEXT-123'])).toBe(
+      'unexpected-failure',
+    );
+    expect(joyCodeKeyForExecutionErrors([])).toBe('unexpected-failure');
+  });
+
   it('takes the host failure code from a thrown CODE:reason and never the reason', () => {
     expect(joyCodeKeyForHostFailure('NO_PREPARED_CHANGE:some_reason')).toBe('NO_PREPARED_CHANGE');
     expect(joyCodeKeyForHostFailure('PREVIEW_NOT_RENDERED')).toBe('PREVIEW_NOT_RENDERED');
@@ -110,7 +127,7 @@ describe('Joy Code plain messages', () => {
   });
 
   it('shows the entry for a thrown run code, never the thrown text', () => {
-    const refused = Object.assign(new Error('Provider said: sk-secret-looking-text'), {
+    const refused = Object.assign(new Error('Provider said: SECRET-LOOKING-TEXT-123'), {
       code: 'JOY_AGENT_BILLING_REQUIRED',
     });
     expect(joyCodeKeyForThrown(refused)).toBe('JOY_AGENT_BILLING_REQUIRED');
@@ -132,7 +149,7 @@ describe('Joy Code plain messages', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     reportJoyCodeFailure('JOY_AGENT_TIMEOUT');
     reportJoyCodeFailure('C:\\Users\\someone\\secret\\file.json');
-    reportJoyCodeFailure('sk-live-123 raw provider text');
+    reportJoyCodeFailure('SECRET-LOOKING-TEXT-123 raw provider text');
     reportJoyCodeFailure(undefined);
     expect(warn.mock.calls.map((call) => call[0])).toEqual([
       '[joy-code] failure code: JOY_AGENT_TIMEOUT',

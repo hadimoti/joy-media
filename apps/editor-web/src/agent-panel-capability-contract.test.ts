@@ -130,14 +130,62 @@ describe('Joy Code capability panel contract', () => {
     expect(panelSource).toContain('codesFromDiagnostics(result.diagnostics)');
   });
 
-  it('re-runs the request that failed through the card, not a stale closure', () => {
-    expect(panelSource).toContain('onRetry={retryLastJoyCodeRequest}');
-    expect(panelSource).toContain("retryRequestRef.current = { kind: 'recipe', skillId };");
-    expect(panelSource).toContain("retryRequestRef.current = { kind: 'look', request };");
-    expect(panelSource).toContain(
-      "retryRequestRef.current = { kind: 'agent-look', prompt: trimmed };",
+  it('saves the exact request each failure retries, on that failure only', () => {
+    // One saved target per failure message; no shared "last request" slot.
+    expect(panelSource).not.toContain('retryRequestRef');
+    expect(panelSource).not.toContain('retryLastJoyCodeRequest');
+    expect(panelSource).toContain('const [retryTargets] = useState(createJoyCodeRetryTargets);');
+    expect(panelSource).toContain('if (retry !== undefined) retryTargets.save(id, retry);');
+    expect(panelSource).toContain('failureCardProps(message.id, message.failureKey)');
+
+    // Each failure site passes the request it failed with, in its own block.
+    const block = (start: string, end: string) => {
+      const from = panelSource.indexOf(start);
+      expect(from, start).toBeGreaterThanOrEqual(0);
+      return panelSource.slice(from, panelSource.indexOf(end, from + start.length));
+    };
+    const uses = (text: string, name: string) => (text.match(new RegExp(name, 'g')) ?? []).length;
+
+    // Plan: declared once, then used by the builder and approval failures.
+    const planBlock = block('  function plan(intent: AgentIntent', '  function submitPrompt(');
+    expect(uses(planBlock, 'failedPlan')).toBe(3);
+    // Engine prompt: declared once, then used by the run-failed event and the catch.
+    const promptBlock = block('  function submitPrompt(', '  async function runRecipe(');
+    expect(uses(promptBlock, 'failedPrompt')).toBe(3);
+    // Recipe: declared once, then used by the blocked, stale-authority and catch paths.
+    const recipeBlock = block('  async function runRecipe(', '  function detachLook(');
+    expect(uses(recipeBlock, 'failedRecipe')).toBe(4);
+    // Look: declared once, then used by the blocked, stale-authority and catch paths.
+    const lookBlock = block('  async function runLook(', '  /**\n   * Decode the active');
+    expect(uses(lookBlock, 'failedLook')).toBe(4);
+    // Audio bake: declared once, then used by the audio-load and no-operations failures.
+    const bakeBlock = block(
+      '  async function bakeLookFromCompositionAudio(',
+      '  /**\n   * Ask the JOY agent',
     );
-    expect(panelSource).toContain("retryRequestRef.current = { kind: 'prompt', prompt: body };");
+    expect(uses(bakeBlock, 'failedBake')).toBe(3);
+    // Agent Look: declared once, then used by the failed-result, stale-authority and catch paths.
+    const agentLookBlock = block('  async function runAgentLook(', '  function rejectModelDraft(');
+    expect(uses(agentLookBlock, 'failedAgentLook')).toBe(4);
+
+    // Apply and execution failures save nothing: Dismiss only, never a replay.
+    const applyBlock = block(
+      '  function applyModelDraft(',
+      '  function isTerminalPreparedChangeError(',
+    );
+    expect(applyBlock).not.toContain('retry');
+  });
+
+  it('shows the table sentence for every failure path, never the engine text', () => {
+    expect(panelSource).not.toContain("appendMessage(threadId, 'assistant', built.reason)");
+    expect(panelSource).not.toContain('${approval.reason}');
+    expect(panelSource).not.toContain('Dry-run errors:');
+    expect(panelSource).not.toContain('executionResult.errors.join');
+    expect(panelSource).not.toContain('lastRun.executionResult.errors');
+    expect(panelSource).not.toContain('errors: [error.message]');
+    expect(panelSource).toContain('joyCodeKeyForExecutionErrors(executionResult.errors)');
+    expect(panelSource).toContain('joyCodeMessageByKey(lastRun.failureKey).sentence');
+    expect(panelSource).toContain('joyCodeKeyForBlockReason(built.reason)');
   });
 
   it('hides the grey live-status strip while a run has failed', () => {
