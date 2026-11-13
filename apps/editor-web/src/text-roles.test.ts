@@ -135,18 +135,25 @@ describe('the three text roles (T-D09)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('holds primary and secondary to 4.5:1 on the panel background', () => {
+  it('holds the three roles to their measured contrast on the panel background', () => {
     const panel = tokens.get('--joy-bg-panel');
     expect(panel, 'the panel background must be a token').toBeTruthy();
 
-    const primary = contrastBetween(tokens.get('--joy-text')!, panel!);
-    const secondary = contrastBetween(tokens.get('--joy-text-secondary')!, panel!);
-    const faint = contrastBetween(tokens.get('--joy-text-faint')!, panel!);
+    // The measured ratios, on the panel background. All three clear 4.5:1
+    // with room to spare, and they are pinned here so a change to a token
+    // cannot quietly change them.
+    const measured: readonly { role: string; token: string; ratio: number }[] = [
+      { role: 'primary', token: '--joy-text', ratio: 14.22 },
+      { role: 'secondary', token: '--joy-text-secondary', ratio: 7.52 },
+      { role: 'faint', token: '--joy-text-faint', ratio: 5.21 },
+    ];
 
-    // The card asks for 4.5:1 on primary and secondary. Faint is metadata
-    // and rides above that floor too, so it is held to the same mark.
-    expect(primary, 'primary on the panel background').toBeGreaterThanOrEqual(4.5);
-    expect(secondary, 'secondary on the panel background').toBeGreaterThanOrEqual(4.5);
-    expect(faint, 'faint on the panel background').toBeGreaterThanOrEqual(4.5);
+    for (const { role, token, ratio } of measured) {
+      const value = tokens.get(token);
+      expect(value, `${token} must be a token`).toBeTruthy();
+      const computed = contrastBetween(value as string, panel as string);
+      expect(computed, `${role} on the panel background`).toBeGreaterThanOrEqual(4.5);
+      expect(computed, `${role} on the panel background`).toBeCloseTo(ratio, 1);
+    }
   });
 });
