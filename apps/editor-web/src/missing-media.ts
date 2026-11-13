@@ -23,9 +23,17 @@ export interface BatchMatchResult {
 }
 
 /**
+ * Asset kinds that are not files, so they can never be missing media (T-R01). A text,
+ * caption, motion, effect, filter, adjustment layer, overlay or HTML scene is recorded as
+ * an `other` asset with no original; a LUT is a grade, not a media original.
+ */
+export const NON_FILE_ASSET_KINDS: ReadonlySet<AssetRecordV1['kind']> = new Set(['lut', 'other']);
+
+/**
  * Derives the project's missing media from its asset records and the local
  * original cache. The control-plane catalog is deliberately not consulted: a
  * package-imported asset exists only in the project and this profile's cache.
+ * Only the asset's kind decides which records are skipped; saved projects are not changed.
  */
 export async function deriveMissingMedia(
   assets: Readonly<Record<string, AssetRecordV1>>,
@@ -33,7 +41,7 @@ export async function deriveMissingMedia(
 ): Promise<readonly MissingMediaEntry[]> {
   const missing: MissingMediaEntry[] = [];
   for (const [assetId, record] of Object.entries(assets)) {
-    if (record.kind === 'lut') continue;
+    if (NON_FILE_ASSET_KINDS.has(record.kind)) continue;
     if ((await cache.get(assetId)) === undefined) missing.push({ assetId, record });
   }
   return missing;
