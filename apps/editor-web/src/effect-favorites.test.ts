@@ -87,7 +87,7 @@ describe('library favourites (T-V06)', () => {
     expect([...readEffectFavorites(storage, KNOWN)]).toEqual([]);
   });
 
-  it('does not restore legacy favourites when the versioned key cannot be read', () => {
+  it('keeps a legacy favourite when the versioned key cannot be read and another is toggled', () => {
     const storage = memoryStore();
     storage.setItem('joy-media.effect-favorites', '["sepia"]');
     const unreadable = {
@@ -97,8 +97,36 @@ describe('library favourites (T-V06)', () => {
         return storage.getItem(key);
       },
     };
-    expect([...readEffectFavorites(unreadable, KNOWN)]).toEqual([]);
-    expect([...toggleEffectFavorite(unreadable, new Set(), 'halftone')]).toEqual(['halftone']);
+    const before = readEffectFavorites(unreadable, KNOWN);
+    expect([...before]).toEqual(['sepia']);
+
+    // The versioned write lands but cannot be read back, so the legacy key is kept.
+    const after = toggleEffectFavorite(unreadable, before, 'halftone');
+    expect([...after].sort()).toEqual(['halftone', 'sepia']);
+    expect(storage.map.get(EFFECT_FAVORITES_KEY)).toBe('["sepia","halftone"]');
+    expect(storage.map.get('joy-media.effect-favorites')).toBe('["sepia"]');
+
+    // After a reload with readable storage, both favourites are present.
+    expect([...readEffectFavorites(storage, KNOWN)].sort()).toEqual(['halftone', 'sepia']);
+  });
+
+  it('retires the legacy key once an unreadable versioned key is written and read back', () => {
+    const storage = memoryStore();
+    storage.setItem('joy-media.effect-favorites', '["sepia"]');
+    let versionedReads = 0;
+    const flaky = {
+      ...storage,
+      getItem: (key: string) => {
+        if (key === EFFECT_FAVORITES_KEY && versionedReads++ === 0) {
+          throw new Error('storage unavailable');
+        }
+        return storage.getItem(key);
+      },
+    };
+    const after = toggleEffectFavorite(flaky, new Set(), 'halftone');
+    expect([...after].sort()).toEqual(['halftone', 'sepia']);
+    expect(storage.map.has('joy-media.effect-favorites')).toBe(false);
+    expect([...readEffectFavorites(storage, KNOWN)].sort()).toEqual(['halftone', 'sepia']);
   });
 
   it('tolerates malformed storage', () => {
