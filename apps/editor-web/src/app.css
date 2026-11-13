@@ -10980,11 +10980,23 @@ label {
   border-color: var(--joy-accent);
   box-shadow: 0 0 0 1px var(--joy-accent);
 }
+/* The generic `.project-library-create input` rule sizes every input; a radio
+   must reset all of it, or it covers the tile's picture and text. */
 .new-project-format input[type='radio'] {
   position: absolute;
   top: 0.45rem;
   left: 0.45rem;
+  width: 1rem;
+  height: 1rem;
+  min-width: 0;
+  min-height: 0;
   margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
   accent-color: var(--joy-accent);
 }
 .new-project-format:focus-within {

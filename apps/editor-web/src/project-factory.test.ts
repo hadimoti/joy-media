@@ -100,6 +100,16 @@ describe('seedsForCatalogEntry: the sample projects keep their own sizes', () =>
     expect(rootOf(seeds.timeline, 'root')).toMatchObject({ width: 1080, height: 1920 });
   });
 
+  it('seeds a blank project on the open path at the old 1080×1920, with no export preset', () => {
+    const seeds = seedsForCatalogEntry(
+      entry({ id: 'blank-old', timelineProjectId: 'blank-old', visualProjectId: 'blank-old' }),
+    );
+
+    expect(rootOf(seeds.timeline, 'root')).toMatchObject({ width: 1080, height: 1920 });
+    expect(rootOf(seeds.visual, 'root')).toMatchObject({ width: 1080, height: 1920 });
+    expect(seeds.visual.exportPreset).toBeUndefined();
+  });
+
   it('keeps the reference project on its own timeline id', () => {
     const seeds = seedsForCatalogEntry(
       entry({

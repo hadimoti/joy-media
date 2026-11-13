@@ -13,6 +13,13 @@ import {
 } from './timeline-elements-showcase.js';
 
 /**
+ * The seed the open path has always used for a blank project's missing logs:
+ * portrait 1080×1920, with no export preset stored. Opening a project never
+ * applies the New project default.
+ */
+const OPEN_PATH_SEED_CANVAS: CanvasSize = Object.freeze({ width: 1080, height: 1920 });
+
+/**
  * Blank creative documents for a brand-new library project (same id on both slices).
  * The canvas is the one the person chose in New project (default 1920×1080);
  * the export preset defaults to the one that matches that canvas.
@@ -23,6 +30,16 @@ export function createBlankProjectDocuments(
   now: string = new Date().toISOString(),
   canvas: CanvasSize = DEFAULT_COMPOSITION_SIZE,
   exportPreset: ExportPresetId = exportPresetForCanvas(canvas.width, canvas.height),
+): { readonly timeline: SpikeProject; readonly visual: JoyProjectV1 } {
+  return blankProjectDocuments(projectId, title, now, canvas, exportPreset);
+}
+
+function blankProjectDocuments(
+  projectId: string,
+  title: string,
+  now: string,
+  canvas: CanvasSize,
+  exportPreset: ExportPresetId | undefined,
 ): { readonly timeline: SpikeProject; readonly visual: JoyProjectV1 } {
   const base = emptySpikeProject({
     trackCount: 2,
@@ -53,7 +70,7 @@ export function createBlankProjectDocuments(
     createdAt: now,
     updatedAt: now,
     rootCompositionId: 'root',
-    exportPreset,
+    ...(exportPreset === undefined ? {} : { exportPreset }),
     settings: { defaultLocale: 'en' },
     compositions: {
       root: {
@@ -116,5 +133,11 @@ export function seedsForCatalogEntry(entry: ProjectCatalogEntry): {
       },
     };
   }
-  return createBlankProjectDocuments(entry.id, entry.title, entry.createdAt);
+  return blankProjectDocuments(
+    entry.id,
+    entry.title,
+    entry.createdAt,
+    OPEN_PATH_SEED_CANVAS,
+    undefined,
+  );
 }

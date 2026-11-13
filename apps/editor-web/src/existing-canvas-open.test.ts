@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { BrowserProjectStore } from '@joy-media/project-persistence';
 import type { ExportPresetId, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
-import { EditorSession } from './editor-session.js';
-import { createBlankProjectDocuments } from './project-factory.js';
+import {
+  EditorSession,
+  TIMELINE_PROJECT_LOG_KEY,
+  VISUAL_OBJECT_PROJECT_LOG_KEY,
+} from './editor-session.js';
+import type { ProjectCatalogEntry } from './project-catalog.js';
+import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
 
 // Existing projects were saved before the New project form changed. Opening
 // one must keep the canvas it was saved with, whatever the current default is.
@@ -79,4 +85,66 @@ describe('existing projects open unchanged', () => {
     expect(rootSize(reopened.visualProject, 'root')).toEqual(LANDSCAPE);
     expect(reopened.visualProject.exportPreset).toBeUndefined();
   });
+});
+
+function catalogEntryFor(id: string): ProjectCatalogEntry {
+  return {
+    id,
+    title: `${id} saved`,
+    createdAt: SAVED_AT,
+    updatedAt: SAVED_AT,
+    timelineProjectId: id,
+    visualProjectId: id,
+  };
+}
+
+/** Saves both logs, drops one of them, then opens the project the way the library does. */
+function openWithOneLogMissing(
+  id: string,
+  canvas: { readonly width: number; readonly height: number },
+  exportPreset: ExportPresetId,
+  missing: 'timeline' | 'visual',
+): EditorSession {
+  const storage = memoryStorage();
+  const saved = savedProject(id, canvas, exportPreset);
+  new EditorSession(storage, saved.timeline, saved.visual);
+  const missingKey =
+    missing === 'timeline' ? TIMELINE_PROJECT_LOG_KEY : VISUAL_OBJECT_PROJECT_LOG_KEY;
+  new BrowserProjectStore(storage, missingKey).deleteProject(id);
+
+  const seeds = seedsForCatalogEntry(catalogEntryFor(id));
+  return new EditorSession(storage, seeds.timeline, seeds.visual);
+}
+
+describe('a saved project with one log missing opens on the saved canvas', () => {
+  const cases = [
+    ['16:9', LANDSCAPE, 'youtube-1080'],
+    ['9:16', PORTRAIT, 'reels-1080'],
+  ] as const;
+
+  it.each(cases)(
+    '%s, timeline log only: both logs agree and match the saved canvas',
+    (_, canvas, preset) => {
+      const reopened = openWithOneLogMissing(`tl-only-${canvas.width}`, canvas, preset, 'visual');
+
+      expect(rootSize(reopened.timelineProject, 'root')).toEqual(canvas);
+      expect(rootSize(reopened.visualProject, 'root')).toEqual(canvas);
+    },
+  );
+
+  it.each(cases)(
+    '%s, visual log only: both logs agree and match the saved canvas',
+    (_, canvas, preset) => {
+      const reopened = openWithOneLogMissing(
+        `vis-only-${canvas.width}`,
+        canvas,
+        preset,
+        'timeline',
+      );
+
+      expect(rootSize(reopened.timelineProject, 'root')).toEqual(canvas);
+      expect(rootSize(reopened.visualProject, 'root')).toEqual(canvas);
+      expect(reopened.visualProject.exportPreset).toBe(preset);
+    },
+  );
 });
