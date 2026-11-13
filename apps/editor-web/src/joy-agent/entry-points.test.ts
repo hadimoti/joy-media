@@ -341,7 +341,11 @@ describe('JOY Agent entry points', () => {
         baseRevision: 'rev-1',
         signal: controller.signal,
       }),
-    ).resolves.toEqual({ kind: 'failed', message: 'The recipe run was cancelled.' });
+    ).resolves.toEqual({
+      kind: 'failed',
+      message: 'The recipe run was cancelled.',
+      code: 'JOY_AGENT_ABORTED',
+    });
     expect(client.startRun).not.toHaveBeenCalled();
   });
 
@@ -387,6 +391,7 @@ describe('JOY Agent entry points', () => {
     await expect(result).resolves.toEqual({
       kind: 'failed',
       message: 'The recipe run was cancelled.',
+      code: 'JOY_AGENT_ABORTED',
     });
   });
 });

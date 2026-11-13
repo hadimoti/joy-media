@@ -2,11 +2,14 @@
  * Plain messages for every Joy Code failure (T-J01, owner items OB-13a and OB-13c).
  *
  * One table holds every reason and failure code the Joy Code surface can show.
- * Each entry has a title, one plain sentence and one action button. A raw code
- * is never shown to the owner: the code goes to the log, and the owner reads
- * the sentence. The table is typed against the real unions, so a new reason or
- * code without an entry fails the typecheck, and the unit test reads the same
- * runtime lists so a missing entry fails the test too.
+ * Each entry has a title, one plain sentence and one action button. The chat
+ * shows the entry as one card; a raw code is never shown to the owner. The
+ * code goes to the console log only (`reportJoyCodeFailure`), and never a key,
+ * a path or a provider payload.
+ *
+ * The table is typed against the real unions, so a new reason or code without
+ * an entry fails the typecheck, and the unit test reads the same runtime lists
+ * so a missing entry fails the test too.
  */
 import {
   CREATIVE_SKILL_BLOCK_REASONS,
@@ -39,6 +42,7 @@ export const JOY_CODE_UI_MESSAGE_KEYS = [
   'look-compile-failed',
   'look-staging-failed',
   'look-unknown',
+  'audio-not-prepared',
   'unexpected-failure',
 ] as const;
 
@@ -216,6 +220,11 @@ export const JOY_CODE_MESSAGES: Readonly<Record<JoyCodeMessageKey, JoyCodeMessag
     sentence: `Joy Code could not prepare a safe change from this request. ${NOTHING_APPLIED}`,
     action: TRY_AGAIN,
   },
+  'audio-not-prepared': {
+    title: 'The audio could not be read',
+    sentence: `Joy Code could not read the audio in this composition. ${NOTHING_APPLIED}`,
+    action: TRY_AGAIN,
+  },
   'unexpected-failure': {
     title: 'Joy Code stopped',
     sentence: `Joy Code could not finish this run safely. ${NOTHING_APPLIED}`,
@@ -223,53 +232,99 @@ export const JOY_CODE_MESSAGES: Readonly<Record<JoyCodeMessageKey, JoyCodeMessag
   },
 };
 
-/** The message for a recipe run that stopped with a block reason. */
-export function joyCodeMessageForBlockReason(reason: string): JoyCodeMessage {
-  return (CREATIVE_SKILL_BLOCK_REASONS as readonly string[]).includes(reason)
-    ? JOY_CODE_MESSAGES[reason as CreativeSkillBlockReason]
-    : JOY_CODE_MESSAGES['unexpected-failure'];
+/** True when a value is a key the table holds. */
+export function isJoyCodeMessageKey(value: unknown): value is JoyCodeMessageKey {
+  return (
+    typeof value === 'string' && Object.prototype.hasOwnProperty.call(JOY_CODE_MESSAGES, value)
+  );
 }
 
-/** The message for a Look run that was blocked. The Look host reports its reason as text. */
-export function joyCodeMessageForLookBlockReason(reason: string): JoyCodeMessage {
+/** The table entry for a stored key. Anything unknown gets the generic entry. */
+export function joyCodeMessageByKey(key: unknown): JoyCodeMessage {
+  return JOY_CODE_MESSAGES[isJoyCodeMessageKey(key) ? key : 'unexpected-failure'];
+}
+
+/** The key for a recipe reason. Only a reason in the union picks its own entry. */
+export function joyCodeKeyForBlockReason(reason: unknown): JoyCodeMessageKey {
+  return (CREATIVE_SKILL_BLOCK_REASONS as readonly unknown[]).includes(reason)
+    ? (reason as CreativeSkillBlockReason)
+    : 'unexpected-failure';
+}
+
+/** The key for a Look that was blocked. The Look host reports its reason as text. */
+export function joyCodeKeyForLookBlockReason(reason: string): JoyCodeMessageKey {
   if (reason === 'stale-authority' || reason === 'LOOK_PREVIEW_AUTHORITY_LOST')
-    return JOY_CODE_MESSAGES['stale-authority'];
-  if (reason === 'no-operations') return JOY_CODE_MESSAGES['look-no-operations'];
-  if (reason === 'invalid-proposal') return JOY_CODE_MESSAGES['look-invalid-proposal'];
+    return 'stale-authority';
+  if (reason === 'no-operations') return 'look-no-operations';
+  if (reason === 'invalid-proposal') return 'look-invalid-proposal';
   if (reason === 'compile-failed' || reason.startsWith('LOOK_COMPILE_'))
-    return JOY_CODE_MESSAGES['look-compile-failed'];
-  if (reason === 'staging-failed' || reason === 'staging-rejected')
-    return JOY_CODE_MESSAGES['look-staging-failed'];
-  return JOY_CODE_MESSAGES['look-unknown'];
+    return 'look-compile-failed';
+  if (reason === 'staging-failed' || reason === 'staging-rejected') return 'look-staging-failed';
+  return 'look-unknown';
 }
 
-/** The message for a run error code. Unknown codes fall back to the generic message. */
-export function joyCodeMessageForRunError(code: unknown): JoyCodeMessage {
+/** The key for a run error code. Unknown codes fall back to the generic entry. */
+export function joyCodeKeyForRunError(code: unknown): JoyCodeMessageKey {
   return (JOY_AGENT_RUN_ERROR_CODES as readonly unknown[]).includes(code)
-    ? JOY_CODE_MESSAGES[code as JoyAgentRunErrorCode]
-    : JOY_CODE_MESSAGES['unexpected-failure'];
+    ? (code as JoyAgentRunErrorCode)
+    : 'unexpected-failure';
+}
+
+/** The code carried on a thrown error, or undefined. The error's own text is never used. */
+export function joyCodeCodeOfThrown(error: unknown): unknown {
+  return typeof error === 'object' && error !== null && 'code' in error
+    ? (error as { readonly code?: unknown }).code
+    : undefined;
+}
+
+/** The key for a thrown error. Only a run error code carried on the error picks an entry. */
+export function joyCodeKeyForThrown(error: unknown): JoyCodeMessageKey {
+  return joyCodeKeyForRunError(joyCodeCodeOfThrown(error));
 }
 
 /**
- * The message for a thrown error. Only a run error code carried on the error
- * picks a message; the error's own text is never shown, because it can name
- * internal codes and paths.
+ * The key for a host failure. The thrown text is `CODE` or `CODE:reason`; only
+ * the code picks the entry, and the reason stays out of the sentence.
  */
-export function joyCodeMessageForThrown(error: unknown): JoyCodeMessage {
-  const code =
-    typeof error === 'object' && error !== null && 'code' in error
-      ? (error as { readonly code?: unknown }).code
-      : undefined;
-  return joyCodeMessageForRunError(code);
-}
-
-/**
- * The message for a host failure. The thrown text is `CODE` or `CODE:reason`;
- * only the code picks the message, and the reason stays out of the sentence.
- */
-export function joyCodeMessageForHostFailure(thrown: string): JoyCodeMessage {
+export function joyCodeKeyForHostFailure(thrown: string): JoyCodeMessageKey {
   const code = thrown.split(':', 1)[0] ?? '';
   return (CREATIVE_SKILL_HOST_FAILURE_CODES as readonly string[]).includes(code)
-    ? JOY_CODE_MESSAGES[code as CreativeSkillHostFailureCode]
-    : JOY_CODE_MESSAGES['unexpected-failure'];
+    ? (code as CreativeSkillHostFailureCode)
+    : 'unexpected-failure';
+}
+
+/**
+ * The key for a recipe that stopped. A host or run code the runner kept wins
+ * over the generic block reason, so a failed adapter step shows its own message.
+ */
+export function joyCodeKeyForRecipeStop(reason: unknown, failureCode?: unknown): JoyCodeMessageKey {
+  if (typeof failureCode === 'string') {
+    const hostKey = joyCodeKeyForHostFailure(failureCode);
+    if (hostKey !== 'unexpected-failure') return hostKey;
+    const runKey = joyCodeKeyForRunError(failureCode);
+    if (runKey !== 'unexpected-failure') return runKey;
+  }
+  return joyCodeKeyForBlockReason(reason);
+}
+
+const SAFE_LOG_CODE = /^[A-Za-z][A-Za-z0-9_]{0,79}$/;
+
+/**
+ * Log a failure code to the console. Only the code goes out: a value that is
+ * not a plain code (it may carry a path, a key or a provider payload) is logged
+ * as `unrecognised`, never as text.
+ */
+export function reportJoyCodeFailure(code: unknown): void {
+  const safe = typeof code === 'string' && SAFE_LOG_CODE.test(code) ? code : 'unrecognised';
+  console.warn(`[joy-code] failure code: ${safe}`);
+}
+
+const DIAGNOSTIC_CODE = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g;
+
+/**
+ * The code-shaped tokens in a Look's diagnostic lines (for example
+ * `LOOK_COMPILE_BAKE_KEYS`). The lines themselves are never shown or logged.
+ */
+export function codesFromDiagnostics(diagnostics: readonly string[]): readonly string[] {
+  return diagnostics.flatMap((line) => line.match(DIAGNOSTIC_CODE) ?? []);
 }

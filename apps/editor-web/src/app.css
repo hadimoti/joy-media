@@ -8811,6 +8811,42 @@ label {
   font-size: 0.72rem;
   line-height: 1.2;
 }
+/* Joy Code's failure card (T-J01): title, one plain sentence, one action. */
+.joy-code-failure-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-self: stretch;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-control);
+}
+.joy-code-failure-card-text {
+  min-width: 0;
+  flex: 1 1 14rem;
+}
+.joy-code-failure-card-title {
+  display: block;
+  color: var(--joy-text);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+.joy-code-failure-card-sentence {
+  margin: 0.15rem 0 0;
+  color: var(--joy-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.joy-code-failure-card-action {
+  flex: 0 0 auto;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
 .joy-code-brief-artifact {
   display: flex;
   align-items: center;

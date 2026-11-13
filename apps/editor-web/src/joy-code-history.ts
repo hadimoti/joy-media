@@ -6,6 +6,11 @@ export interface JoyCodeMessage {
   readonly role: JoyCodeMessageRole;
   readonly body: string;
   readonly createdAt: string;
+  /**
+   * A failure shown as one card: the key of its entry in the Joy Code message
+   * table (joy-code-messages.ts). The card renders from the table, not the body.
+   */
+  readonly failureKey?: string;
 }
 
 export interface JoyCodeThread {
@@ -29,6 +34,7 @@ const MAX_THREAD_TITLE_CHARS = 160;
 const MAX_MESSAGE_ID_CHARS = 128;
 const MAX_MESSAGE_BODY_CHARS = 8_000;
 const MAX_TIMESTAMP_CHARS = 64;
+const MAX_FAILURE_KEY_CHARS = 64;
 export const JOY_CODE_HISTORY_PREFIX = 'joy-media.joy-code-history.v1';
 
 export function joyCodeHistoryKey(projectId: string): string {
@@ -182,6 +188,9 @@ function isJoyCodeMessage(value: unknown): value is JoyCodeMessage {
     typeof candidate.createdAt === 'string' &&
     candidate.id.length <= MAX_MESSAGE_ID_CHARS &&
     candidate.body.length <= MAX_MESSAGE_BODY_CHARS &&
-    candidate.createdAt.length <= MAX_TIMESTAMP_CHARS
+    candidate.createdAt.length <= MAX_TIMESTAMP_CHARS &&
+    (candidate.failureKey === undefined ||
+      (typeof candidate.failureKey === 'string' &&
+        candidate.failureKey.length <= MAX_FAILURE_KEY_CHARS))
   );
 }

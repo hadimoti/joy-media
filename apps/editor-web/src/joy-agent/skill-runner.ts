@@ -6,6 +6,10 @@ import {
   type CreativeSkillManifest,
   type CreativeSkillRuntime,
 } from '@joy-media/agent-tools';
+import { CREATIVE_SKILL_HOST_FAILURE_CODES } from './creative-skill-host-adapter.js';
+import type { CreativeSkillHostFailureCode } from './creative-skill-host-adapter.js';
+import { JOY_AGENT_RUN_ERROR_CODES } from './run-events.js';
+import type { JoyAgentRunErrorCode } from './run-events.js';
 
 /** A run scope is display/lifecycle identity only; it is never an edit grant. */
 export interface CreativeSkillRunScope {
@@ -72,6 +76,9 @@ export const CREATIVE_SKILL_BLOCK_REASONS = [
 
 export type CreativeSkillBlockReason = (typeof CREATIVE_SKILL_BLOCK_REASONS)[number];
 
+/** A host or run code a failing step can carry out of the runner. */
+export type CreativeSkillFailureCode = CreativeSkillHostFailureCode | JoyAgentRunErrorCode;
+
 export type CreativeSkillRunResult =
   | {
       readonly kind: 'unavailable';
@@ -85,6 +92,11 @@ export type CreativeSkillRunResult =
       readonly skill: CreativeSkillManifest;
       readonly reason: CreativeSkillBlockReason;
       readonly artifacts: readonly CreativeSkillArtifact[];
+      /**
+       * The code the failing step threw, kept for the message table and the log.
+       * Set only for `adapter-failed`; the thrown text itself is never kept.
+       */
+      readonly failureCode?: CreativeSkillFailureCode;
     }
   | {
       readonly kind: 'completed' | 'ready-for-approval';
@@ -188,10 +200,14 @@ export function createCreativeSkillRunner(
               signal: signal ?? new AbortController().signal,
             }),
           );
-        } catch {
+        } catch (error) {
           const reason = currentBlockReason(input.scope, signal, isCurrent) ?? 'adapter-failed';
           emit(input, skill, checkpoint, 'blocked', now, reason);
-          return blockedResult(skill, reason);
+          return blockedResult(
+            skill,
+            reason,
+            reason === 'adapter-failed' ? failureCodeOf(error) : undefined,
+          );
         }
         const after = currentBlockReason(input.scope, signal, isCurrent);
         if (after !== undefined) {
@@ -256,6 +272,7 @@ function emit(
 function blockedResult(
   skill: CreativeSkillManifest,
   reason: CreativeSkillBlockReason,
+  failureCode?: CreativeSkillFailureCode,
 ): CreativeSkillRunResult {
   return Object.freeze({
     kind: 'blocked' as const,
@@ -263,7 +280,22 @@ function blockedResult(
     reason,
     // Do not publish a partial effect list when the run authority ceased to be current.
     artifacts: Object.freeze([]),
+    ...(failureCode === undefined ? {} : { failureCode }),
   });
+}
+
+/** The code a thrown adapter or primitive error carries, when it is one we know. */
+function failureCodeOf(error: unknown): CreativeSkillFailureCode | undefined {
+  const code =
+    typeof error === 'object' && error !== null
+      ? (error as { readonly code?: unknown }).code
+      : undefined;
+  if (typeof code !== 'string') return undefined;
+  if ((CREATIVE_SKILL_HOST_FAILURE_CODES as readonly string[]).includes(code))
+    return code as CreativeSkillHostFailureCode;
+  if ((JOY_AGENT_RUN_ERROR_CODES as readonly string[]).includes(code))
+    return code as JoyAgentRunErrorCode;
+  return undefined;
 }
 
 function normalizeArtifacts(value: unknown): readonly CreativeSkillArtifact[] | undefined {

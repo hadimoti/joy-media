@@ -27,6 +27,15 @@ import {
   type CreativeSkillRunResult,
   type CreativeSkillRunScope,
 } from './skill-runner.js';
+import { JOY_AGENT_RUN_ERROR_CODES, type JoyAgentRunErrorCode } from './run-events.js';
+
+/** The run error code an engine event carries, when it is one we know. */
+function runErrorCodeOf(value: unknown): JoyAgentRunErrorCode | undefined {
+  return typeof value === 'string' &&
+    (JOY_AGENT_RUN_ERROR_CODES as readonly string[]).includes(value)
+    ? (value as JoyAgentRunErrorCode)
+    : undefined;
+}
 
 /** Product-owned map: every model-assisted surface uses the same Worker client. */
 export const JOY_AGENT_ENTRY_POINTS = [
@@ -170,11 +179,18 @@ export class JoyAgentTaskError extends Error {
     | 'stale-result'
     | 'remote-disabled'
     | 'host-required';
+  /** The engine's run error code for a failed run, when it sent one. */
+  readonly runErrorCode: JoyAgentRunErrorCode | undefined;
 
-  constructor(code: JoyAgentTaskError['code'], message: string) {
+  constructor(
+    code: JoyAgentTaskError['code'],
+    message: string,
+    runErrorCode?: JoyAgentRunErrorCode,
+  ) {
     super(message);
     this.name = 'JoyAgentTaskError';
     this.code = code;
+    this.runErrorCode = runErrorCode;
   }
 }
 
@@ -226,7 +242,11 @@ export async function runJoyAgentTask(input: RunJoyAgentTaskInput): Promise<JoyA
   for await (const event of input.client.startRun(request, input.host)) {
     input.onEvent?.(event);
     if (event.phase === 'failed')
-      throw new JoyAgentTaskError('failed', event.message ?? 'JOY Agent Engine failed');
+      throw new JoyAgentTaskError(
+        'failed',
+        event.message ?? 'JOY Agent Engine failed',
+        runErrorCodeOf(event.errorCode),
+      );
     if (event.phase === 'cancelled')
       throw new JoyAgentTaskError('cancelled', 'JOY Agent Engine run cancelled');
     if (event.phase === 'previewing' && event.proposal !== undefined)
@@ -398,7 +418,11 @@ export async function runScopedCreativeSkillToolLoop(input: {
   };
   if (input.signal !== undefined) {
     if (input.signal.aborted)
-      return Promise.resolve({ kind: 'failed', message: 'The recipe run was cancelled.' });
+      return Promise.resolve({
+        kind: 'failed',
+        message: 'The recipe run was cancelled.',
+        code: 'JOY_AGENT_ABORTED',
+      });
     input.signal.addEventListener('abort', abort, { once: true });
   }
   try {
@@ -435,10 +459,16 @@ export async function runScopedCreativeSkillToolLoop(input: {
     return { kind: 'failed', message: 'The recipe run produced no prepared change or answer.' };
   } catch (error) {
     if (error instanceof JoyAgentTaskError && error.code === 'cancelled')
-      return { kind: 'failed', message: 'The recipe run was cancelled.' };
+      return {
+        kind: 'failed',
+        message: 'The recipe run was cancelled.',
+        code: 'JOY_AGENT_ABORTED',
+      };
+    const code = error instanceof JoyAgentTaskError ? error.runErrorCode : undefined;
     return {
       kind: 'failed',
       message: error instanceof Error ? error.message.slice(0, 480) : 'The recipe run failed.',
+      ...(code === undefined ? {} : { code }),
     };
   } finally {
     input.signal?.removeEventListener('abort', abort);

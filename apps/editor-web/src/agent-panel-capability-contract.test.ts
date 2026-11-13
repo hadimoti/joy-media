@@ -45,12 +45,11 @@ describe('Joy Code capability panel contract', () => {
     expect(appCss).toContain('.joy-code-settings-trigger-btn:focus-visible');
   });
 
-  it('requires all four terminal catch paths to use the shared Joy Code failure formatter', () => {
-    // Each catch block in the four error paths must invoke the shared
-    // formatter so that every failure notice carries the plain message and
-    // its "no edits were applied" disclaimer. The formatter is
-    // joyCodeMessageForThrown (joy-code-messages.ts, T-J01); it never shows
-    // the thrown text itself.
+  it('requires the terminal catch paths to use the shared Joy Code failure table', () => {
+    // Each catch block in the four error paths must pick its failure from the
+    // shared table, so that every failure card carries the plain message and
+    // its "no edits were applied" disclaimer. The picker is joyCodeKeyForThrown
+    // (joy-code-messages.ts, T-J01); it never shows the thrown text itself.
 
     // 1. direct model run
     const region1Start = panelSource.indexOf(
@@ -60,7 +59,7 @@ describe('Joy Code capability panel contract', () => {
     expect(region1Start).toBeGreaterThanOrEqual(0);
     expect(region1End).toBeGreaterThan(region1Start);
     const region1 = panelSource.slice(region1Start, region1End);
-    expect(region1).toContain('joyCodeMessageForThrown(error)');
+    expect(region1).toContain('joyCodeKeyForThrown(error)');
 
     // 2. recipe runner
     const region2Start = panelSource.indexOf('async function runRecipe(');
@@ -68,7 +67,7 @@ describe('Joy Code capability panel contract', () => {
     expect(region2Start).toBeGreaterThanOrEqual(0);
     expect(region2End).toBeGreaterThan(region2Start);
     const region2 = panelSource.slice(region2Start, region2End);
-    expect(region2).toContain('joyCodeMessageForThrown(error)');
+    expect(region2).toContain('joyCodeKeyForThrown(error)');
 
     // 3. manual Look runner
     const region3Start = panelSource.indexOf('async function runLook(');
@@ -79,7 +78,7 @@ describe('Joy Code capability panel contract', () => {
     expect(region3Start).toBeGreaterThanOrEqual(0);
     expect(region3End).toBeGreaterThan(region3Start);
     const region3 = panelSource.slice(region3Start, region3End);
-    expect(region3).toContain('joyCodeMessageForThrown(error)');
+    expect(region3).toContain('joyCodeKeyForThrown(error)');
 
     // 4. JOY-agent Look runner
     const region4Start = panelSource.indexOf('async function runAgentLook(');
@@ -87,12 +86,13 @@ describe('Joy Code capability panel contract', () => {
     expect(region4Start).toBeGreaterThanOrEqual(0);
     expect(region4End).toBeGreaterThan(region4Start);
     const region4 = panelSource.slice(region4Start, region4End);
-    expect(region4).toContain('joyCodeMessageForThrown(error)');
+    expect(region4).toContain('joyCodeKeyForThrown(error)');
 
-    // Exactly four formatter references across the whole file.
-    const formatterRefs = panelSource.match(/joyCodeMessageForThrown\(error\)/g);
-    expect(formatterRefs).not.toBeNull();
-    expect(formatterRefs!.length).toBe(4);
+    // Six table lookups for a thrown error: the four runner catch paths, plus the
+    // apply path and the plan path, which also show a failure card.
+    const tableRefs = panelSource.match(/joyCodeKeyForThrown\(error\)/g);
+    expect(tableRefs).not.toBeNull();
+    expect(tableRefs!.length).toBe(6);
 
     // None of the old inline Error/fallback expressions should remain.
     expect(panelSource).not.toMatch(
@@ -104,5 +104,43 @@ describe('Joy Code capability panel contract', () => {
     expect(panelSource).not.toMatch(
       /error\s+instanceof\s+Error\s*\?\s*error\.message\s*:\s*'The Look run failed safely\.'/,
     );
+  });
+
+  it('shows every failure as the calm card from the table, never the engine or host text', () => {
+    // The card replaces the chat line for a failure.
+    expect(panelSource).toContain('<JoyCodeFailureCard');
+    expect(panelSource).toContain('failureKey: key');
+    expect(panelSource).toContain('message.failureKey !== undefined');
+
+    // No failure interpolates the text of a result, a load or an event into the chat.
+    expect(panelSource).not.toMatch(/\$\{(?:result|loaded|event)\.message\b/);
+    expect(panelSource).not.toMatch(/\$\{failureMessage\}/);
+    expect(panelSource).not.toMatch(/\(\$\{(?:result|loaded)\.message\}\)/);
+    expect(panelSource).not.toMatch(/\$\{joyCodeMessageFor\w*\(/);
+
+    // The old code paths that picked a message by the raw reason text are gone.
+    expect(panelSource).not.toContain('joyCodeMessageForThrown(');
+    expect(panelSource).not.toContain('joyCodeMessageForRunError(');
+    expect(panelSource).not.toContain('joyCodeMessageForBlockReason(');
+    expect(panelSource).not.toContain('joyCodeMessageForLookBlockReason(');
+
+    // Every failure is logged by its code, through one reporter.
+    expect(panelSource).toContain('reportJoyCodeFailure(code)');
+    expect(panelSource).toContain('joyCodeKeyForRecipeStop(result.reason, result.failureCode)');
+    expect(panelSource).toContain('codesFromDiagnostics(result.diagnostics)');
+  });
+
+  it('re-runs the request that failed through the card, not a stale closure', () => {
+    expect(panelSource).toContain('onRetry={retryLastJoyCodeRequest}');
+    expect(panelSource).toContain("retryRequestRef.current = { kind: 'recipe', skillId };");
+    expect(panelSource).toContain("retryRequestRef.current = { kind: 'look', request };");
+    expect(panelSource).toContain(
+      "retryRequestRef.current = { kind: 'agent-look', prompt: trimmed };",
+    );
+    expect(panelSource).toContain("retryRequestRef.current = { kind: 'prompt', prompt: body };");
+  });
+
+  it('hides the grey live-status strip while a run has failed', () => {
+    expect(panelSource).toContain("liveAgentPhase !== undefined && liveAgentPhase !== 'failed'");
   });
 });
