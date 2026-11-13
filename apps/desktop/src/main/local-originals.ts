@@ -15,6 +15,8 @@ export type StoreOriginalResult =
 
 export interface LocalOriginalWriter {
   storeOriginal(assetId: string, bytes: Uint8Array): Promise<StoreOriginalResult>;
+  /** Starts a staged copy before its content hash and final asset ID are known. */
+  beginOriginalUpload(uploadId: string, expectedBytes: number): Promise<StoreOriginalResult>;
   /**
    * Writes the next piece of a chunked upload. `offset` must equal the bytes already written, and
    * offset 0 starts a new upload, replacing any unfinished one.
@@ -24,12 +26,12 @@ export interface LocalOriginalWriter {
     offset: number,
     bytes: Uint8Array,
   ): Promise<StoreOriginalResult>;
-  /** Checks a finished chunked upload against its registration and commits it under its checksum. */
-  finishOriginalUpload(assetId: string): Promise<StoreOriginalResult>;
+  /** Checks a finished upload against its registration and commits it under its checksum. */
+  finishOriginalUpload(uploadId: string, assetId?: string): Promise<StoreOriginalResult>;
   /** Marks a finished upload as retained after its caller commits the surrounding operation. */
-  commitOriginalUpload(assetId: string): void;
+  commitOriginalUpload(uploadId: string): void;
   /** Drops an unfinished upload, or rolls back a just-finished upload not yet committed by its caller. */
-  abortOriginalUpload(assetId: string): Promise<void>;
+  abortOriginalUpload(uploadId: string): Promise<void>;
   /** Drops every unfinished chunked upload and its temporary file. Called when the app quits. */
   abortAllOriginalUploads(): Promise<void>;
 }
@@ -41,6 +43,7 @@ const STORE_FAILED = 'Original could not be stored';
 interface PartialUpload {
   readonly path: string;
   readonly handle: FileHandle;
+  readonly expectedBytes: number;
   written: number;
 }
 
@@ -70,6 +73,23 @@ export function createLocalOriginalWriter(options: {
     uploads.delete(assetId);
     await upload.handle.close().catch(() => undefined);
     await unlink(upload.path).catch(() => undefined);
+  };
+
+  const startUpload = async (uploadId: string, expectedBytes: number): Promise<boolean> => {
+    const path = join(options.directory, `${randomUUID()}.upload`);
+    try {
+      await mkdir(options.directory, { recursive: true });
+      uploads.set(uploadId, {
+        path,
+        handle: await open(path, 'w'),
+        expectedBytes,
+        written: 0,
+      });
+      return true;
+    } catch {
+      await unlink(path).catch(() => undefined);
+      return false;
+    }
   };
 
   /** Runs `step` once every earlier step for this asset has finished. */
@@ -111,31 +131,53 @@ export function createLocalOriginalWriter(options: {
       return { ok: true };
     },
 
+    beginOriginalUpload(uploadId, expectedBytes) {
+      return inOrder<StoreOriginalResult>(uploadId, async () => {
+        if (
+          !Number.isSafeInteger(expectedBytes) ||
+          expectedBytes < 1 ||
+          expectedBytes > MAX_LOCAL_ORIGINAL_BYTES
+        ) {
+          return { ok: false, error: 'Original size is invalid' };
+        }
+        await discardUpload(uploadId);
+        const finished = finishedUploads.get(uploadId);
+        finishedUploads.delete(uploadId);
+        if (finished?.created) await unlink(finished.path).catch(() => undefined);
+        return (await startUpload(uploadId, expectedBytes))
+          ? { ok: true }
+          : { ok: false, error: STORE_FAILED };
+      });
+    },
+
     appendOriginalChunk(assetId, offset, bytes) {
       return inOrder<StoreOriginalResult>(assetId, async () => {
         const asset = options.assets.get(assetId);
-        if (asset === undefined) return { ok: false, error: 'Asset is not registered' };
         if (bytes.byteLength > MAX_ORIGINAL_CHUNK_BYTES) {
           return { ok: false, error: 'Original piece is larger than one message allows' };
         }
-        if (offset === 0) await discardUpload(assetId);
         let upload = uploads.get(assetId);
         if (upload === undefined) {
+          if (asset === undefined) return { ok: false, error: 'Asset is not registered' };
           if (offset !== 0) return { ok: false, error: 'Original upload is out of order' };
-          try {
-            const path = join(options.directory, `${randomUUID()}.upload`);
-            await mkdir(options.directory, { recursive: true });
-            upload = { path, handle: await open(path, 'w'), written: 0 };
-          } catch {
+          if (!(await startUpload(assetId, asset.bytes))) {
             return { ok: false, error: STORE_FAILED };
           }
-          uploads.set(assetId, upload);
+          upload = uploads.get(assetId);
+        } else if (offset === 0 && upload.written > 0) {
+          await discardUpload(assetId);
+          if (asset === undefined) return { ok: false, error: 'Asset is not registered' };
+          if (!(await startUpload(assetId, asset.bytes))) {
+            return { ok: false, error: STORE_FAILED };
+          }
+          upload = uploads.get(assetId);
         }
+        if (upload === undefined) return { ok: false, error: STORE_FAILED };
         if (offset !== upload.written) {
           await discardUpload(assetId);
           return { ok: false, error: 'Original upload is out of order' };
         }
-        if (upload.written + bytes.byteLength > asset.bytes) {
+        if (upload.written + bytes.byteLength > upload.expectedBytes) {
           await discardUpload(assetId);
           return { ok: false, error: 'Original size does not match its registration' };
         }
@@ -158,13 +200,13 @@ export function createLocalOriginalWriter(options: {
       });
     },
 
-    finishOriginalUpload(assetId) {
-      return inOrder<StoreOriginalResult>(assetId, async () => {
+    finishOriginalUpload(uploadId, assetId = uploadId) {
+      return inOrder<StoreOriginalResult>(uploadId, async () => {
         const asset = options.assets.get(assetId);
         if (asset === undefined) return { ok: false, error: 'Asset is not registered' };
-        const upload = uploads.get(assetId);
+        const upload = uploads.get(uploadId);
         if (upload === undefined) return { ok: false, error: 'Original upload is incomplete' };
-        uploads.delete(assetId);
+        uploads.delete(uploadId);
         // Flush the bytes before the file gets its final name, so a crash cannot commit a short file.
         const flushed = await upload.handle.sync().then(
           () => true,
@@ -176,6 +218,10 @@ export function createLocalOriginalWriter(options: {
           return { ok: false, error: STORE_FAILED };
         }
         if (upload.written !== asset.bytes) {
+          await unlink(upload.path).catch(() => undefined);
+          return { ok: false, error: 'Original size does not match its registration' };
+        }
+        if (upload.expectedBytes !== asset.bytes) {
           await unlink(upload.path).catch(() => undefined);
           return { ok: false, error: 'Original size does not match its registration' };
         }
@@ -202,7 +248,7 @@ export function createLocalOriginalWriter(options: {
           return { ok: false, error: STORE_FAILED };
         }
         options.assets.markStored(assetId, target);
-        finishedUploads.set(assetId, { path: target, created: createdTarget });
+        finishedUploads.set(uploadId, { path: target, created: createdTarget });
         return { ok: true };
       });
     },

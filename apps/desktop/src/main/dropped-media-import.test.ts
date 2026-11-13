@@ -15,6 +15,7 @@ interface FakeFileInfo {
   readonly kind: 'file' | 'directory';
   readonly bytes?: Uint8Array;
   mtimeNs?: bigint;
+  ctimeNs?: bigint;
 }
 
 interface TestFileSystem {
@@ -31,6 +32,12 @@ function makeHarness(
     readonly fileSystem?: TestFileSystem;
     readonly afterOpen?: (filePath: string, files: Map<string, FakeFileInfo>) => void;
     readonly afterStream?: (file: FakeFileInfo, streamNumber: number) => void;
+    readonly duringStream?: (file: FakeFileInfo, streamNumber: number) => void;
+    readonly sourceBytesForStream?: (
+      file: FakeFileInfo,
+      streamNumber: number,
+    ) => Uint8Array | undefined;
+    readonly zeroInode?: boolean;
   } = {},
 ) {
   const files = new Map<string, FakeFileInfo>();
@@ -56,12 +63,14 @@ function makeHarness(
   const makeStats = (file: FakeFileInfo | undefined): BigIntStats =>
     ({
       dev: 1n,
-      ino: getInode(file),
+      ino: options.zeroInode ? 0n : getInode(file),
       size: BigInt(file?.bytes?.byteLength ?? 0),
       mtimeNs: file?.mtimeNs ?? 1n,
+      ctimeNs: file?.ctimeNs ?? 1n,
       isFile: () => file?.kind === 'file',
     }) as unknown as BigIntStats;
   const storedAssetIds: string[] = [];
+  const storedAssetBytes = new Map<string, Uint8Array>();
   const abortedAssetIds: string[] = [];
   const libraryAddedAssetIds: string[] = [];
   let ticketSequence = 0;
@@ -88,6 +97,10 @@ function makeHarness(
       ok: false,
       error: 'unused',
     })),
+    beginOriginalUpload: vi.fn(async (uploadId: string, _expectedBytes: number) => {
+      partial.set(uploadId, new Uint8Array());
+      return { ok: true as const };
+    }),
     appendOriginalChunk: vi.fn(async (assetId: string, offset: number, bytes: Uint8Array) => {
       if (offset === 0) partial.set(assetId, new Uint8Array());
       const current = partial.get(assetId) ?? new Uint8Array();
@@ -97,11 +110,21 @@ function makeHarness(
       partial.set(assetId, next);
       return { ok: true as const };
     }),
-    finishOriginalUpload: vi.fn(async (assetId: string) => {
-      partial.delete(assetId);
+    finishOriginalUpload: vi.fn(async (uploadId: string, assetId = uploadId) => {
+      const bytes = partial.get(uploadId);
+      partial.delete(uploadId);
       const asset = assets.get(assetId);
-      if (asset !== undefined) assets.set(assetId, { ...asset, storedPath: `stored:${assetId}` });
+      if (
+        bytes === undefined ||
+        asset === undefined ||
+        bytes.byteLength !== asset.bytes ||
+        createHash('sha256').update(bytes).digest('hex') !== asset.sha256
+      ) {
+        return { ok: false as const, error: 'Original does not match its registered checksum' };
+      }
+      assets.set(assetId, { ...asset, storedPath: `stored:${assetId}` });
       storedAssetIds.push(assetId);
+      storedAssetBytes.set(assetId, bytes);
       options.onFinished?.(assetId);
       return { ok: true as const };
     }),
@@ -174,16 +197,19 @@ function makeHarness(
     },
     readChunks: async function* (handle) {
       readHandles.push(handle);
+      const currentStream = ++streamNumber;
       const sourcePath = pathByHandle.get(handle as object);
       const file = fileByHandle.get(handle as object);
       if (sourcePath === undefined || file === undefined)
         throw new Error('test file handle is not registered');
       readPaths.push(sourcePath);
-      const bytes = file.bytes ?? new Uint8Array();
+      const bytes =
+        options.sourceBytesForStream?.(file, currentStream) ?? file.bytes ?? new Uint8Array();
       const midpoint = Math.max(1, Math.floor(bytes.byteLength / 2));
       yield bytes.subarray(0, midpoint);
+      options.duringStream?.(file, currentStream);
       yield bytes.subarray(midpoint);
-      options.afterStream?.(file, ++streamNumber);
+      options.afterStream?.(file, currentStream);
     },
     fileExists: async (path) => [...assets.values()].some((asset) => asset.storedPath === path),
     onProgress: (event) => options.onProgress?.(event.ticketId, event.stage),
@@ -196,6 +222,7 @@ function makeHarness(
     readHandles,
     openedPaths,
     storedAssetIds,
+    storedAssetBytes,
     abortedAssetIds,
     libraryAddedAssetIds,
     originals,
@@ -333,6 +360,64 @@ describe('dropped media import', () => {
     expect(harness.storedAssetIds).toEqual([`joylib-${sha256}`]);
   });
 
+  it('stores exactly the bytes hashed from one source stream', async () => {
+    const path = 'C:\\drop\\clip.mp4';
+    const bytes = new TextEncoder().encode('first stream bytes');
+    const secondReadBytes = new TextEncoder().encode('different second read');
+    const harness = makeHarness({
+      sourceBytesForStream: (_file, streamNumber) =>
+        streamNumber === 1 ? bytes : secondReadBytes,
+    });
+    harness.files.set(path, { kind: 'file', bytes });
+    const batch = await harness.service.prepareDroppedPaths([{ path, name: 'clip.mp4' }]);
+
+    const result = await harness.service.importTicket(batch.tickets[0]!.id);
+
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    expect(result).toMatchObject({ ok: true, data: { id: `joylib-${sha256}`, sha256 } });
+    expect(harness.readPaths).toEqual([path]);
+    expect(harness.storedAssetBytes.get(`joylib-${sha256}`)).toEqual(bytes);
+  });
+
+  it('imports a zero-inode file using one hashed staging stream', async () => {
+    const path = 'C:\\drop\\clip.mp4';
+    const bytes = new TextEncoder().encode('zero inode media');
+    const harness = makeHarness({ zeroInode: true });
+    harness.files.set(path, { kind: 'file', bytes });
+    const batch = await harness.service.prepareDroppedPaths([{ path, name: 'clip.mp4' }]);
+
+    const result = await harness.service.importTicket(batch.tickets[0]!.id);
+
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    expect(result).toMatchObject({ ok: true, data: { id: `joylib-${sha256}`, sha256 } });
+    expect(harness.readPaths).toEqual([path]);
+    expect(harness.storedAssetBytes.get(`joylib-${sha256}`)).toEqual(bytes);
+  });
+
+  it('detects a zero-inode source change during streaming and removes the staged bytes', async () => {
+    const path = 'C:\\drop\\clip.mp4';
+    const harness = makeHarness({
+      zeroInode: true,
+      duringStream: (file, streamNumber) => {
+        if (streamNumber === 1) {
+          file.bytes?.set([1, 2, 99, 4]);
+          file.ctimeNs = 2n;
+        }
+      },
+    });
+    harness.files.set(path, { kind: 'file', bytes: new Uint8Array([1, 2, 3, 4]) });
+    const batch = await harness.service.prepareDroppedPaths([{ path, name: 'clip.mp4' }]);
+
+    const result = await harness.service.importTicket(batch.tickets[0]!.id);
+
+    expect(result).toEqual({ ok: false, error: 'The selected media file changed during import' });
+    expect(harness.readPaths).toEqual([path]);
+    expect(harness.originals.appendOriginalChunk).toHaveBeenCalled();
+    expect(harness.partial.size).toBe(0);
+    expect(harness.abortedAssetIds).toHaveLength(1);
+    expect(harness.storedAssetIds).toEqual([]);
+  });
+
   it('serializes concurrent imports with the same hash into one stored asset', async () => {
     const harness = makeHarness();
     const bytes = new TextEncoder().encode('same concurrent media bytes');
@@ -388,8 +473,8 @@ describe('dropped media import', () => {
 
   it('aborts the staged copy when the opened file changes during streaming', async () => {
     const harness = makeHarness({
-      afterStream: (file, streamIndex) => {
-        if (streamIndex === 2) file.mtimeNs = 2n;
+      duringStream: (file, streamIndex) => {
+        if (streamIndex === 1) file.mtimeNs = 2n;
       },
     });
     harness.files.set('C:\\drop\\clip.mp4', {
@@ -403,6 +488,7 @@ describe('dropped media import', () => {
     const result = await harness.service.importTicket(batch.tickets[0]!.id);
 
     expect(result).toEqual({ ok: false, error: 'The selected media file changed during import' });
+    expect(harness.readPaths).toHaveLength(1);
     expect(harness.originals.appendOriginalChunk).toHaveBeenCalled();
     expect(harness.abortedAssetIds).toHaveLength(1);
     expect(harness.storedAssetIds).toEqual([]);
@@ -439,6 +525,7 @@ describe('dropped media import', () => {
     const result = await service.importTicket(batch.tickets[0]!.id);
 
     expect(result).toEqual({ ok: false, error: 'Import cancelled' });
+    expect(harness.readPaths).toHaveLength(1);
     expect(harness.partial.size).toBe(0);
     expect(harness.abortedAssetIds).toHaveLength(1);
     expect(harness.storedAssetIds).toHaveLength(0);
@@ -480,6 +567,6 @@ describe('dropped media import', () => {
     expect(result.ok).toBe(true);
     expect(harness.readPaths).toContain(path);
     expect(harness.openedPaths).toEqual([path]);
-    expect(harness.readHandles[0]).toBe(harness.readHandles[1]);
+    expect(harness.readHandles).toHaveLength(1);
   });
 });

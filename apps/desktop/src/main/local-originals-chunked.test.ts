@@ -66,6 +66,40 @@ describe('chunked original uploads', () => {
     expect(partialFiles(directory)).toEqual([]);
   });
 
+  it('commits a staged upload under the registered hash after its bytes are verified', async () => {
+    const { directory, writer } = setup();
+
+    expect(await writer.beginOriginalUpload('drop-ticket-1', BYTES.byteLength)).toEqual({
+      ok: true,
+    });
+    expect(await writer.appendOriginalChunk('drop-ticket-1', 0, BYTES.subarray(0, 8))).toEqual({
+      ok: true,
+    });
+    expect(await writer.appendOriginalChunk('drop-ticket-1', 8, BYTES.subarray(8))).toEqual({
+      ok: true,
+    });
+    expect(await writer.finishOriginalUpload('drop-ticket-1', 'asset-1')).toEqual({ ok: true });
+    writer.commitOriginalUpload('drop-ticket-1');
+
+    expect(readFileSync(join(directory, `${SHA256}.bin`))).toEqual(Buffer.from(BYTES));
+    expect(partialFiles(directory)).toEqual([]);
+  });
+
+  it('removes a cancelled staged upload before its asset ID is known', async () => {
+    const { directory, writer } = setup();
+    expect(await writer.beginOriginalUpload('drop-ticket-2', BYTES.byteLength)).toEqual({
+      ok: true,
+    });
+    expect(await writer.appendOriginalChunk('drop-ticket-2', 0, BYTES.subarray(0, 5))).toEqual({
+      ok: true,
+    });
+
+    await writer.abortOriginalUpload('drop-ticket-2');
+
+    expect(partialFiles(directory)).toEqual([]);
+    expect(existsSync(join(directory, `${SHA256}.bin`))).toBe(false);
+  });
+
   it('refuses a piece that does not start where the last one ended', async () => {
     const { directory, writer } = setup();
     await writer.appendOriginalChunk('asset-1', 0, BYTES.subarray(0, 5));

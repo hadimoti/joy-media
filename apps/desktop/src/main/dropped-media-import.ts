@@ -182,12 +182,28 @@ export async function sameCanonicalRealPath(
 }
 
 function sameFileVersion(left: BigIntStats, right: BigIntStats): boolean {
-  const sameSizeAndMtime = left.size === right.size && left.mtimeNs === right.mtimeNs;
-  if (left.ino === 0n || right.ino === 0n) {
-    // Some filesystems report ino=0; callers also require matching realpaths and metadata.
-    return sameSizeAndMtime;
-  }
-  return left.dev === right.dev && left.ino === right.ino && sameSizeAndMtime;
+  return (
+    left.ino !== 0n &&
+    right.ino !== 0n &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    sameFileMetadata(left, right)
+  );
+}
+
+function sameFileMetadata(left: BigIntStats, right: BigIntStats): boolean {
+  return (
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+function sameOpenedFileVersion(left: BigIntStats, right: BigIntStats): boolean {
+  return (
+    sameFileMetadata(left, right) &&
+    (left.ino === 0n || right.ino === 0n || sameFileVersion(left, right))
+  );
 }
 
 async function stillMatchesOpenedFile(
@@ -197,22 +213,26 @@ async function stillMatchesOpenedFile(
   validatedPath: string,
   initialPathInfo: BigIntStats,
   initialHandleInfo: BigIntStats,
+  hasUsableFileIdentity: boolean,
 ): Promise<boolean> {
   try {
-    const [currentHandleInfo, currentPathInfo] = await Promise.all([
-      file.stat({ bigint: true }),
+    const currentHandleInfo = await file.stat({ bigint: true });
+    if (
+      !currentHandleInfo.isFile() ||
+      !sameOpenedFileVersion(initialHandleInfo, currentHandleInfo)
+    ) {
+      return false;
+    }
+    if (!hasUsableFileIdentity) return true;
+
+    const [currentPathInfo, pathStillResolvesToTarget] = await Promise.all([
       fileSystem.stat(validatedPath),
+      sameCanonicalRealPath(sourcePath, validatedPath, fileSystem.realpathNative),
     ]);
-    if (!currentHandleInfo.isFile() || !currentPathInfo.isFile()) return false;
-    const pathStillResolvesToTarget = await sameCanonicalRealPath(
-      sourcePath,
-      validatedPath,
-      fileSystem.realpathNative,
-    );
     return (
+      currentPathInfo.isFile() &&
       pathStillResolvesToTarget &&
       sameFileVersion(initialPathInfo, initialHandleInfo) &&
-      sameFileVersion(initialHandleInfo, currentHandleInfo) &&
       sameFileVersion(initialHandleInfo, currentPathInfo)
     );
   } catch {
@@ -461,8 +481,8 @@ export function createDroppedMediaImportService(
       let committed = false;
       let originalFinished = false;
       let openedFile: FileHandle | undefined;
-      let assetId: string | undefined;
       let registeredAssetId: string | undefined;
+      const uploadId = `dropped-${ticketId}`;
       const addToLibrary = async (id: string) => {
         if (isCancelled(controller.signal)) throw cancellationError();
         const result = await deps.library?.addAsset(id);
@@ -510,9 +530,13 @@ export function createDroppedMediaImportService(
         if (openedInfo.size > BigInt(MAX_LOCAL_ORIGINAL_BYTES)) {
           return { ok: false, error: 'The selected media file is too large' };
         }
+        const hasUsableFileIdentity = validatedPathInfo.ino !== 0n && openedInfo.ino !== 0n;
+        // An inode of 0 cannot prove path/handle identity. In that case, the single stream below
+        // hashes the staged bytes, and finishOriginalUpload verifies the copy without rereading
+        // the source path.
         if (
           openedInfo.size !== BigInt(info.size) ||
-          !sameFileVersion(validatedPathInfo, openedInfo)
+          (hasUsableFileIdentity && !sameFileVersion(validatedPathInfo, openedInfo))
         ) {
           return { ok: false, error: 'The selected media file changed during import' };
         }
@@ -521,23 +545,45 @@ export function createDroppedMediaImportService(
 
         const hash = createHash('sha256');
         let hashedBytes = 0;
+        let written = 0;
+        const started = await deps.originals.beginOriginalUpload(uploadId, openedSize);
+        if (!started.ok) return { ok: false, error: 'The original could not be stored' };
+        uploadStarted = true;
         for await (const piece of readChunks(openedFile, controller.signal, openedSize)) {
           if (isCancelled(controller.signal)) throw cancellationError();
           const bytes = Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength);
-          hashedBytes += bytes.byteLength;
-          if (hashedBytes > openedSize || hashedBytes > MAX_LOCAL_ORIGINAL_BYTES) {
+          if (
+            hashedBytes + bytes.byteLength > openedSize ||
+            hashedBytes + bytes.byteLength > MAX_LOCAL_ORIGINAL_BYTES
+          ) {
             return { ok: false, error: 'The selected media file changed during import' };
           }
-          hash.update(bytes);
-          reportProgress({
-            ticketId,
-            stage: 'hash',
-            ratio: Math.min(1, hashedBytes / openedSize),
-          });
+          for (let offset = 0; offset < bytes.byteLength; offset += MAX_ORIGINAL_CHUNK_BYTES) {
+            if (isCancelled(controller.signal)) throw cancellationError();
+            const chunk = Buffer.from(
+              bytes.subarray(offset, Math.min(bytes.byteLength, offset + MAX_ORIGINAL_CHUNK_BYTES)),
+            );
+            const result = await deps.originals.appendOriginalChunk(uploadId, written, chunk);
+            if (!result.ok) return { ok: false, error: 'The original could not be stored' };
+            hash.update(chunk);
+            hashedBytes += chunk.byteLength;
+            written += chunk.byteLength;
+            reportProgress({
+              ticketId,
+              stage: 'hash',
+              ratio: Math.min(1, hashedBytes / openedSize),
+            });
+            reportProgress({
+              ticketId,
+              stage: 'store',
+              ratio: Math.min(1, written / openedSize),
+            });
+          }
         }
         if (isCancelled(controller.signal)) throw cancellationError();
         if (
           hashedBytes !== openedSize ||
+          written !== openedSize ||
           !(await stillMatchesOpenedFile(
             fileSystem,
             openedFile,
@@ -545,13 +591,13 @@ export function createDroppedMediaImportService(
             info.path,
             validatedPathInfo,
             openedInfo,
+            hasUsableFileIdentity,
           ))
         ) {
           return { ok: false, error: 'The selected media file changed during import' };
         }
         const sha256 = hash.digest('hex');
         const importAssetId = `joylib-${sha256}`;
-        assetId = importAssetId;
         const kind = mediaKind(mimeType);
         const displayName = pending.displayName;
         const descriptor = safeDescriptor(mimeType, rawDescriptor);
@@ -566,6 +612,9 @@ export function createDroppedMediaImportService(
           }
 
           if (existing?.storedPath !== undefined && (await fileExists(existing.storedPath))) {
+            await deps.originals.abortOriginalUpload(uploadId);
+            uploadStarted = false;
+            if (isCancelled(controller.signal)) throw cancellationError();
             const libraryResult = await addToLibrary(importAssetId);
             if (isCancelled(controller.signal)) {
               if (libraryResult?.ok)
@@ -602,46 +651,7 @@ export function createDroppedMediaImportService(
           }
           registeredAssetId = importAssetId;
 
-          let written = 0;
-          for await (const piece of readChunks(openedFile!, controller.signal, openedSize)) {
-            if (isCancelled(controller.signal)) throw cancellationError();
-            const bytes = Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength);
-            for (let offset = 0; offset < bytes.byteLength; offset += MAX_ORIGINAL_CHUNK_BYTES) {
-              if (isCancelled(controller.signal)) throw cancellationError();
-              const chunk = bytes.subarray(
-                offset,
-                Math.min(bytes.byteLength, offset + MAX_ORIGINAL_CHUNK_BYTES),
-              );
-              uploadStarted = true;
-              const result = await deps.originals.appendOriginalChunk(
-                importAssetId,
-                written,
-                chunk,
-              );
-              if (!result.ok) return { ok: false, error: 'The original could not be stored' };
-              written += chunk.byteLength;
-              reportProgress({
-                ticketId,
-                stage: 'store',
-                ratio: Math.min(1, written / openedSize),
-              });
-            }
-          }
-          if (isCancelled(controller.signal)) throw cancellationError();
-          if (
-            written !== openedSize ||
-            !(await stillMatchesOpenedFile(
-              fileSystem,
-              openedFile!,
-              sourcePath,
-              info.path,
-              validatedPathInfo,
-              openedInfo,
-            ))
-          ) {
-            return { ok: false, error: 'The selected media file changed during import' };
-          }
-          const finished = await deps.originals.finishOriginalUpload(importAssetId);
+          const finished = await deps.originals.finishOriginalUpload(uploadId, importAssetId);
           if (!finished.ok) {
             if (isCancelled(controller.signal)) throw cancellationError();
             return { ok: false, error: 'The original could not be stored' };
@@ -657,7 +667,7 @@ export function createDroppedMediaImportService(
           if (libraryResult !== undefined && !libraryResult.ok) {
             return { ok: false, error: 'The asset library could not be updated' };
           }
-          deps.originals.commitOriginalUpload(importAssetId);
+          deps.originals.commitOriginalUpload(uploadId);
           committed = true;
           return {
             ok: true,
@@ -681,11 +691,11 @@ export function createDroppedMediaImportService(
         };
       } finally {
         await openedFile?.close().catch(() => undefined);
-        if (uploadStarted && !committed && assetId !== undefined) {
+        if (uploadStarted && !committed) {
           if (originalFinished && !isCancelled(controller.signal)) {
-            deps.originals.commitOriginalUpload(assetId);
+            deps.originals.commitOriginalUpload(uploadId);
           } else {
-            await deps.originals.abortOriginalUpload(assetId).catch(() => undefined);
+            await deps.originals.abortOriginalUpload(uploadId).catch(() => undefined);
           }
         }
         if (
