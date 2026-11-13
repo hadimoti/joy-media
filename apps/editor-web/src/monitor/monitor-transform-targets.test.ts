@@ -550,6 +550,16 @@ describe('T-M05b: keyframed values and the anchor point on the targets', () => {
     expect(scripted.anchorBlocked).toBe('expression');
   });
 
+  it('an expression-driven scale on the selected object blocks moving its anchor', () => {
+    for (const channel of ['scaleX', 'scaleY'] as const) {
+      const scripted = targets(['clip-shape'], {
+        project: project({ objects: { shape: { expressions: { [channel]: '2' } } } }),
+      })[0]!;
+
+      expect(scripted.anchorBlocked, channel).toBe('expression');
+    }
+  });
+
   it('expression-driven scale or rotation on an ancestor blocks moving the child anchor', () => {
     for (const channel of ['scaleX', 'scaleY', 'rotationDeg'] as const) {
       const scriptedAncestor = targets(['clip-child'], {
