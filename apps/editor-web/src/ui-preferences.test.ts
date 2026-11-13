@@ -52,3 +52,71 @@ describe('editor UI preferences', () => {
     expect(loadEditorUiPreferences(store).monitorPreview).toEqual({ quality: 'auto' });
   });
 });
+
+describe('the default view mode is preview-first (T-D12)', () => {
+  it('gives a fresh profile the widescreen view mode', () => {
+    expect(loadEditorUiPreferences(storage()).viewMode).toBe('widescreen');
+    expect(DEFAULT_EDITOR_UI_PREFERENCES.viewMode).toBe('widescreen');
+  });
+
+  it('keeps a legacy saved vertical choice', () => {
+    expect(
+      loadEditorUiPreferences(storage({ 'joy-media.view-mode.v1': 'vertical' })).viewMode,
+    ).toBe('vertical');
+  });
+});
+
+describe('the view mode from stored values (T-D12 round 2)', () => {
+  const layoutKey = (mode: 'vertical' | 'widescreen') => `joy-media.dockview.${mode}.v12`;
+
+  it('a saved preference blob with viewMode vertical restores as vertical', () => {
+    const blob = { ...DEFAULT_EDITOR_UI_PREFERENCES, viewMode: 'vertical' };
+    expect(
+      loadEditorUiPreferences(storage({ [EDITOR_UI_PREFERENCES_KEY]: JSON.stringify(blob) }))
+        .viewMode,
+    ).toBe('vertical');
+  });
+
+  it('a malformed blob with no layouts saved falls back to widescreen', () => {
+    expect(
+      loadEditorUiPreferences(storage({ [EDITOR_UI_PREFERENCES_KEY]: '{not json' })).viewMode,
+    ).toBe('widescreen');
+  });
+
+  it('a malformed viewMode makes the blob unreadable: the saved layouts decide the mode', () => {
+    const blob = { ...DEFAULT_EDITOR_UI_PREFERENCES, viewMode: 'sideways' };
+    expect(
+      loadEditorUiPreferences(
+        storage({
+          [EDITOR_UI_PREFERENCES_KEY]: JSON.stringify(blob),
+          [layoutKey('vertical')]: '{"grid":{}}',
+        }),
+      ).viewMode,
+    ).toBe('vertical');
+    expect(
+      loadEditorUiPreferences(
+        storage({
+          [EDITOR_UI_PREFERENCES_KEY]: '{not json',
+          [layoutKey('vertical')]: '{"grid":{}}',
+        }),
+      ).viewMode,
+    ).toBe('vertical');
+  });
+
+  it('with no readable preferences, a saved vertical layout and no widescreen layout means vertical', () => {
+    expect(
+      loadEditorUiPreferences(storage({ [layoutKey('vertical')]: '{"grid":{}}' })).viewMode,
+    ).toBe('vertical');
+  });
+
+  it('with both layouts saved and no readable preferences, the default widescreen applies', () => {
+    expect(
+      loadEditorUiPreferences(
+        storage({
+          [layoutKey('vertical')]: '{"grid":{}}',
+          [layoutKey('widescreen')]: '{"grid":{}}',
+        }),
+      ).viewMode,
+    ).toBe('widescreen');
+  });
+});
