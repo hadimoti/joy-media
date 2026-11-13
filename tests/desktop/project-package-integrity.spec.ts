@@ -152,7 +152,9 @@ async function createPackagedVideoProject(
   const assetCard = page.locator('.asset-card', { hasText: mediaName }).first();
   await expect(assetCard).toBeVisible();
   await assetCard.getByRole('button', { name: `Add ${mediaName} to timeline` }).click();
-  await expect(page.locator(`.timeline-clip[aria-label^="${mediaName},"]`).first()).toBeVisible();
+  await expect(
+    page.locator(`.timeline-clip[aria-label^="${mediaName.replace(/\.mp4$/, '')},"]`).first(),
+  ).toBeVisible();
 }
 
 async function exportEditableProject(
@@ -206,7 +208,9 @@ async function expectRestoredProject(
   mediaName: string,
 ): Promise<void> {
   await expect(page.getByRole('heading', { name: projectTitle, level: 1 })).toBeVisible();
-  await expect(page.locator(`.timeline-clip[aria-label^="${mediaName},"]`)).toHaveCount(1);
+  await expect(
+    page.locator(`.timeline-clip[aria-label^="${mediaName.replace(/\.mp4$/, '')},"]`),
+  ).toHaveCount(1);
   await openPanel(page, 'Assets');
   await page.getByRole('button', { name: /^My media/ }).click();
   const assetSearch = page.getByPlaceholder('Search media…');
@@ -317,7 +321,9 @@ test.describe('desktop.file-project-package', () => {
       ).toHaveCount(1);
       await expect(freshPage.getByRole('dialog')).toHaveCount(0);
       await expect(freshPage.getByRole('heading', { name: projectTitle, level: 1 })).toBeVisible();
-      await expect(freshPage.locator(`.timeline-clip[aria-label^="${mediaName},"]`)).toHaveCount(1);
+      await expect(
+        freshPage.locator(`.timeline-clip[aria-label^="${mediaName.replace(/\.mp4$/, '')},"]`),
+      ).toHaveCount(1);
     } finally {
       await app?.close().catch(() => undefined);
       rmSync(sourceProfile, { recursive: true, force: true });

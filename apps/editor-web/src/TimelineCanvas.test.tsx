@@ -43,9 +43,12 @@ describe('TimelineCanvas track visibility controls', () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Hide visible-track"');
+    // Names come from the track label, never from the track id.
+    expect(markup).toContain('aria-label="Hide Visible track"');
     expect(markup).toContain('title="Hide track"');
-    expect(markup).toContain('aria-label="Show hidden-track"');
+    expect(markup).toContain('aria-label="Show Hidden track"');
+    expect(markup).not.toContain('visible-track');
+    expect(markup).not.toContain('hidden-track');
     expect(markup).toContain('title="Show track"');
     expect(markup).toContain('timeline-track-controls');
     expect(markup).toContain('timeline-track-label');

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createLiveDriver, EXPECTED_JOY_HASH, verifyAfterRun } from './driver.mjs';
+import * as liveDriver from './driver.mjs';
 
 test('the expected joy protocol hash is the owner baseline', () => {
   assert.equal(
@@ -46,6 +47,8 @@ function driverFor(run, overrides = {}) {
     {
       preflightDeps: {
         platform: 'win32',
+        ownerHome: run.root,
+        installedDir: join(run.root, 'installed'),
         joyHash: EXPECTED_JOY_HASH,
         ownerLibraryFiles: 3221,
         electronVersion: '44.3.0',
@@ -120,4 +123,49 @@ test('refuses Electron versions other than 44.3.0', async (t) => {
   await assert.rejects(fake.driver.launch(), /Electron 44\.3\.0 is required/u);
   assert.equal(fake.launches(), 0);
   await fake.driver.close();
+});
+
+test('defines a drop target for the timeline, monitor, and media panel', () => {
+  assert.deepEqual(liveDriver.OS_FILE_DROP_SELECTORS, {
+    timeline: '.timeline-lane, .timeline-empty-state, .timeline-file-new-track-drop',
+    monitor: '.monitor-canvas-wrap',
+    media: '.asset-library-main',
+  });
+});
+
+test('dispatches trusted CDP file-drop events with real scratch file paths', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'live-drop-driver-test-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const file = join(root, 'fixture.png');
+  writeFileSync(file, 'image fixture');
+  const calls = [];
+  const session = {
+    async send(method, params) {
+      calls.push({ method, params });
+    },
+    async detach() {
+      calls.push({ method: 'detach' });
+    },
+  };
+  const page = {
+    locator(selector) {
+      assert.equal(selector, liveDriver.OS_FILE_DROP_SELECTORS.monitor);
+      const locator = { boundingBox: async () => ({ x: 10, y: 20, width: 100, height: 80 }) };
+      return { ...locator, first: () => locator };
+    },
+    context() {
+      return { newCDPSession: async () => session };
+    },
+  };
+
+  await liveDriver.dispatchOSFileDrop?.(page, 'monitor', [file], { allowedRoot: root });
+
+  assert.deepEqual(
+    calls
+      .filter((call) => call.method === 'Input.dispatchDragEvent')
+      .map((call) => call.params.type),
+    ['dragEnter', 'dragOver', 'drop'],
+  );
+  assert.deepEqual(calls.find((call) => call.params?.type === 'drop')?.params.data.files, [file]);
+  assert.equal(calls.at(-1)?.method, 'detach');
 });

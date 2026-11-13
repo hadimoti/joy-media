@@ -1643,7 +1643,8 @@ export function SpeedSection({
   };
 
   const requestRamp = (ramp: SpeedRampPreset) => {
-    const label = `Speed ramp ${clipId} → ${
+    // The Inspector always shows the selected clip, so the history names it that way.
+    const label = `Speed ramp on selected clip → ${
       SPEED_RAMP_PRESETS.find((preset) => preset.id === ramp)?.label ?? ramp
     }`;
     onChange?.({ ramp }, label);

@@ -17,6 +17,8 @@ import {
   ZoomInIcon,
 } from '../icons.js';
 import type { MonitorGpuPreviewStatus, MonitorPreviewRenderer } from './monitor-view.js';
+import { MonitorViewMenu } from './MonitorViewMenu.js';
+import type { MonitorViewOptions } from './monitor-view-options.js';
 import { MONITOR_ZOOM_PRESETS, formatZoomPercent, parseZoomPercent } from './monitor-view-state.js';
 
 /** Props are the monitor's own state and setters, passed through unchanged. */
@@ -49,6 +51,9 @@ export interface MonitorTransportProps {
   readonly height: number;
   /** Export preset in effect for this canvas, for the read-out. */
   readonly canvasPresetId: ExportPresetId;
+  /** The Monitor View options (safe areas, guides, background, preview overlay). */
+  readonly viewOptions: MonitorViewOptions;
+  readonly onViewOptionsChange: (next: MonitorViewOptions) => void;
 }
 
 /** The bar under the monitor: zoom drawer, play controls, quality, renderer, ratio. */
@@ -77,6 +82,8 @@ export function MonitorTransport({
   width,
   height,
   canvasPresetId,
+  viewOptions,
+  onViewOptionsChange,
 }: MonitorTransportProps) {
   const formatReadout = canvasFormatReadout({ width, height }, canvasPresetId);
   const formatShape = canvasShapeLabel(width, height);
@@ -249,6 +256,7 @@ export function MonitorTransport({
                 ? 'Local fallback'
                 : 'Local'}
         </span>
+        <MonitorViewMenu options={viewOptions} onChange={onViewOptionsChange} />
         <button
           type="button"
           className="monitor-transport-btn"

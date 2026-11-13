@@ -44,7 +44,11 @@ async function addFixtureVideo(page: Parameters<typeof authenticate>[0]): Promis
     .first()
     .getByRole('button', { name: `Add ${videoName} to timeline` })
     .click();
-  const timelineClip = page.locator(`.timeline-clip[data-clip-id][aria-label^="${videoName},"]`);
+  // The timeline names a clip by its file name without the extension.
+  const videoClipName = videoName.replace(/\.[^.]+$/, '');
+  const timelineClip = page.locator(
+    `.timeline-clip[data-clip-id][aria-label^="${videoClipName},"]`,
+  );
   await expect(timelineClip).toHaveCount(1);
   const clipId = await timelineClip.getAttribute('data-clip-id');
   if (clipId === null) throw new Error('Fixture clip id is unavailable');
@@ -54,7 +58,7 @@ async function addFixtureVideo(page: Parameters<typeof authenticate>[0]): Promis
   // the real keyboard trim path so the shortened source is persisted through
   // the same editor/session contract that the export fingerprints below
   // verify.
-  const trimEnd = page.getByRole('button', { name: `Trim end of ${clipId}` });
+  const trimEnd = timelineClip.getByRole('button', { name: /^Trim end of / });
   await trimEnd.press('Shift+ArrowLeft');
   await trimEnd.press('Shift+ArrowLeft');
   for (let step = 0; step < 5; step += 1) await trimEnd.press('ArrowLeft');

@@ -206,10 +206,11 @@ export function CaptionsPanel({
           </button>
         </div>
       ) : (
-        slots.map((slot) => (
+        slots.map((slot, slotIndex) => (
           <CaptionSlotEditor
             key={`${slot.trackId}:${slot.clip.id}`}
             slot={slot}
+            slotNumber={slotIndex + 1}
             query={query}
             activeTab={activeTab}
             playheadUs={playheadUs}
@@ -227,6 +228,7 @@ export function CaptionsPanel({
 
 function CaptionSlotEditor({
   slot,
+  slotNumber,
   query,
   activeTab,
   playheadUs,
@@ -237,6 +239,8 @@ function CaptionSlotEditor({
   transcriptionError,
 }: {
   readonly slot: CaptionSlot;
+  /** 1-based position of this caption track in the panel, shown instead of its id. */
+  readonly slotNumber: number;
   readonly query: string;
   readonly activeTab: CaptionsTab;
   readonly playheadUs: number;
@@ -393,7 +397,7 @@ function CaptionSlotEditor({
     <section aria-label={`Captions ${document.language}`}>
       <header className="captions-slot-header">
         <div className="caption-track-summary">
-          <strong>{slot.trackId}</strong>
+          <strong>Caption track {slotNumber}</strong>
           <span className="caption-summary-chip">{document.language}</span>
           <span className="caption-summary-chip">{direction.toUpperCase()}</span>
           <span className="caption-summary-chip">{segments.length} cues</span>
@@ -471,7 +475,9 @@ function CaptionSlotEditor({
           </div>
           {segments.length === 0 && <p>No matching captions found.</p>}
           <ol className="captions-list">
-            {segments.map((segment) => {
+            {segments.map((segment, segmentIndex) => {
+              // Cues are named by their order, never by their id.
+              const cueNumber = segmentIndex + 1;
               const range = segmentTimelineRange(clip, segment);
               const active =
                 range !== undefined &&
@@ -505,7 +511,7 @@ function CaptionSlotEditor({
                   <input
                     type="text"
                     className="caption-source"
-                    aria-label={`Caption text ${segment.id}`}
+                    aria-label={`Caption text ${cueNumber}`}
                     title={source.length > 0 ? `Source: ${source}` : 'Manual caption text'}
                     value={drafts[segment.id] ?? displayText}
                     dir={direction}
@@ -536,7 +542,7 @@ function CaptionSlotEditor({
                   {segment.textOverride !== undefined && (
                     <button
                       className="icon-button caption-undo-btn"
-                      aria-label={`Revert caption ${segment.id} to source text`}
+                      aria-label={`Revert caption ${cueNumber} to source text`}
                       title={`Revert to source: ${source}`}
                       onClick={() =>
                         onDispatch({
@@ -559,7 +565,7 @@ function CaptionSlotEditor({
                   )}
                   <button
                     className="icon-button caption-delete-btn"
-                    aria-label={`Delete caption ${segment.id}`}
+                    aria-label={`Delete caption ${cueNumber}`}
                     title="Delete caption"
                     onClick={() =>
                       onDispatch({

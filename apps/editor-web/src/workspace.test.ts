@@ -42,6 +42,6 @@ describe('editor workspace contracts', () => {
   });
 
   it('exposes command-palette actions through one shortcut registry', () => {
-    expect(searchActions('undo')).toMatchObject([{ id: 'history.undo', shortcut: 'Mod+Z' }]);
+    expect(searchActions('undo')).toMatchObject([{ id: 'history.undo', shortcut: 'Ctrl+Z' }]);
   });
 });

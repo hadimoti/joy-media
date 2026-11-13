@@ -54,4 +54,53 @@ describe('TimelineEmptyState interactions', () => {
     expect(onImportClick).toHaveBeenCalledTimes(3);
     expect(onAddFromLibrary).toHaveBeenCalledTimes(1);
   });
+
+  it('passes the drop point from an OS file drop to timeline placement', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const file = new File(['media'], 'clip.mp4', { type: 'video/mp4' });
+    const onFilesDrop = vi.fn();
+    await act(async () => {
+      root!.render(
+        <TimelineEmptyState
+          project={emptySpikeProject({ trackCount: 0 })}
+          _playheadUs={0}
+          compositionDurationUs={30_000_000}
+          viewportPixelsPerSecond={20}
+          onSeek={vi.fn()}
+          onImportClick={vi.fn()}
+          onAddFromLibrary={vi.fn()}
+          onFilesDrop={onFilesDrop}
+          onContextMenu={vi.fn()}
+        />,
+      );
+    });
+    const target = container.querySelector<HTMLElement>('.timeline-empty-state')!;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
+      left: 40,
+      right: 240,
+      top: 0,
+      bottom: 50,
+      width: 200,
+      height: 50,
+      x: 40,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    const event = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperties(event, {
+      clientX: { value: 140 },
+      dataTransfer: { value: { types: ['Files'], files: [file], getData: () => '' } },
+    });
+
+    await act(async () => {
+      target.dispatchEvent(event);
+    });
+
+    expect(onFilesDrop).toHaveBeenCalledWith(
+      [file],
+      expect.objectContaining({ clientX: 140, rect: expect.objectContaining({ left: 40 }) }),
+    );
+  });
 });

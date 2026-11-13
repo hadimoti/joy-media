@@ -14,9 +14,9 @@ export interface EditorAction {
 }
 
 export const EDITOR_ACTIONS: readonly EditorAction[] = [
-  { id: 'history.undo', title: 'Undo', shortcut: 'Mod+Z' },
-  { id: 'history.redo', title: 'Redo', shortcut: 'Mod+Shift+Z' },
-  { id: 'view.commandPalette', title: 'Open Command Palette', shortcut: 'Mod+K' },
+  { id: 'history.undo', title: 'Undo', shortcut: 'Ctrl+Z' },
+  { id: 'history.redo', title: 'Redo', shortcut: 'Ctrl+Shift+Z' },
+  { id: 'view.commandPalette', title: 'Open Command Palette', shortcut: 'Ctrl+K' },
 ];
 
 export function searchActions(query: string): readonly EditorAction[] {
