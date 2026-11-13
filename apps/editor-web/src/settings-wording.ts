@@ -3,13 +3,20 @@ import type { AgentExecutionMode, ToolCapability } from '@joy-media/agent-tools'
 /**
  * The wording of the Joy Code Settings dialog, in plain English.
  *
- * Every word this card rewrites lives here, so the wording can be read in
- * one place, checked against the table, and held by a test that keeps a
- * snapshot of it. The table in `docs/qa/v1.1.1/SETTINGS-WORDING.md` says what
- * each of these words was before.
+ * Every word the dialog shows lives here: the pages, the modes, the labels,
+ * the notices and the refusals. The dialog reads them from this one file, so
+ * the wording can be read in one place, checked against the table in
+ * `docs/qa/v1.1.1/SETTINGS-WORDING.md`, and held by a test that keeps a
+ * snapshot of it.
  *
  * The words are sentence case and free of jargon: no "workspace", no
  * "vault", no "probe", no "BYOK".
+ *
+ * Two rules the words must keep:
+ *
+ * 1. They say what the code does. The cost number is the point at which
+ *    JOY Media asks, not a cap on the run, so the words say exactly that.
+ * 2. Nothing here is a secret, a key or a token.
  */
 
 /** The five pages of the dialog, in the order the list on the left shows them. */
@@ -48,7 +55,8 @@ export const SETTINGS_PAGES: Readonly<Record<SettingsPageId, SettingsPageWording
     name: 'Safety and limits',
     kicker: 'How much Joy Code does on its own',
     title: 'Safety and limits',
-    description: 'Choose how much Joy Code does on its own, and how much a single run may spend.',
+    description:
+      'Choose how much Joy Code does on its own, and when it should ask you before it spends.',
   },
   experience: {
     name: 'Live preview',
@@ -71,11 +79,13 @@ export const SETTINGS_PAGES: Readonly<Record<SettingsPageId, SettingsPageWording
   },
 };
 
-/** The dialog itself: its title and the line under it. */
+/** The dialog itself: its title, the line under it, and its frame. */
 export const SETTINGS_DIALOG = {
   title: 'Joy Code Settings',
   subtitle: 'Settings for Joy Code',
   categoriesLabel: 'Categories',
+  categoriesNavLabel: 'Settings categories',
+  closeLabel: 'Close settings',
   doneLabel: 'Done',
 } as const;
 
@@ -109,17 +119,25 @@ export const SETTINGS_MODES: Readonly<Record<AgentExecutionMode, SettingsModeWor
   'full-auto-limited': {
     name: 'Work on its own',
     sentence:
-      'Joy Code works through a whole task on its own, as long as it stays inside the limits you set.',
+      'Joy Code works through a whole task on its own, and asks you first when one step may cost more than your limit.',
   },
 };
 
-/** The cost limit of one run. */
+/**
+ * The cost number.
+ *
+ * The code does not stop a run when it goes over this number. The number is
+ * the auto-approval threshold of "Work on its own": the approval engine
+ * looks at the estimate of each step, and a step that may cost more than
+ * this is sent to you for approval. The words say exactly that, and nothing
+ * more.
+ */
 export const SETTINGS_BUDGET = {
-  title: 'Cost limit for each run',
+  title: 'When to ask you about cost',
   /** `{amount}` is the limit, for example 0.50. */
-  tag: 'Up to {amount} per run',
-  field: 'Maximum spend per run (USD)',
-  hint: 'JOY Media stops a run that would cost more than this. Prices are estimates from the provider. JOY Media itself charges nothing.',
+  tag: 'Ask above {amount} for one step',
+  field: 'Ask me before a step that may cost more than this (USD)',
+  hint: 'In "Work on its own", JOY Media asks for your approval when one step of a run may cost more than this. It is not a limit on what a whole run may spend. Prices are estimates from the provider. JOY Media itself charges nothing.',
 } as const;
 
 /** Where the settings and the keys are kept. */
@@ -139,6 +157,21 @@ export const SETTINGS_MEDIA_CHECK = {
   diagnosticsTitle: 'Does the model understand media?',
   diagnosticsHint: 'Checks whether the model you chose understands pictures, sound and video.',
   notCheckedYet: 'Not checked yet for this model.',
+  configuredModel: 'Configured model:',
+  imageLabel: 'Image',
+  audioLabel: 'Audio',
+  videoLabel: 'Video',
+  supported: 'Supported',
+  unavailable: 'Unavailable',
+  check: 'Check media support',
+  checking: 'Checking media support…',
+  checkingShort: 'Checking…',
+  invalidResult:
+    'Media capability check returned an invalid result. Reconnect the model and try again.',
+  couldNotComplete:
+    'Media capability check could not be completed. Reconnect the model and try again.',
+  /** `{model}` is the model that was checked. */
+  completeFor: 'Media capability check complete for {model}.',
 } as const;
 
 /** What Joy Code may change. */
@@ -180,7 +213,7 @@ export const SETTINGS_DIAGNOSTICS = {
   backgroundWorker: 'Background worker',
 } as const;
 
-/** The models page: the connection, the key and the models. */
+/** The models page: the connection, the key, the models and the check. */
 export const SETTINGS_MODELS = {
   browseButton: 'Browse models and connections',
   presetTitle: 'Your own API key',
@@ -189,37 +222,137 @@ export const SETTINGS_MODELS = {
   readyToEdit: 'Ready to edit your project',
   briefOnly: 'Ready for a creative brief only',
   connectBelow: 'Connect a model below to start.',
+  connectionFailed: 'Connection failed. See the details below.',
   savedConnections: 'Saved connections',
   legacyProfile: 'Old connection, no longer used',
+  keyUnreadable: 'Saved key could not be read. Enter it again.',
+  keyConfirmAgain: 'Enter the key again to confirm this endpoint.',
+  disconnect: 'Disconnect',
+  useButton: 'Use',
+  laterButton: 'Later',
+  working: 'Working…',
   signInAgain: 'Sign in again',
   signOutAndRevoke: 'Sign out and remove access',
+  removeChatGptLabel: 'Remove ChatGPT profile locally',
+  /** `{profile}` is the name of the saved connection. */
+  removeProfileLabel: 'Remove {profile} profile',
   connectionTitle: 'Connection and sign-in',
+  providerTagNone: 'No provider',
+  providerTagOpenRouter: 'OpenRouter',
   yourOwnEndpoint: 'Your own endpoint',
   providerLabel: 'Provider',
+  chooseProvider: 'Choose a provider',
   openRouterOption: 'OpenRouter (your own key)',
   otherProviderOption: 'Another provider (OpenAI compatible)',
+  regionLabel: 'Region',
+  getKeyAt: 'Get a key at',
   connectionNameLabel: 'Name this connection (optional)',
+  connectionNamePlaceholder: 'e.g. My OpenRouter, Local Ollama',
   serviceAddressLabel: 'Service address (base URL)',
+  serviceAddressPlaceholder: 'https://...',
   keyLabel: 'Your API key',
+  savedKeyPlaceholder: '•••••••••••••••• (Leave blank to keep saved)',
+  keyPlaceholder: 'sk-...',
+  customEndpointConsent:
+    'I understand that custom endpoints may log requests according to their own policy.',
   modelIdLabel: 'Model ID (you can change this)',
+  modelIdName: 'Model ID',
+  modelIdPlaceholder: 'provider/model',
   showModelList: 'Show model list',
   hideModelList: 'Hide model list',
   findModelsTooltip: 'Find the models this service offers',
   findingModels: 'Finding models…',
   findModels: 'Find models',
+  lookAgain: 'Look again',
+  lookAgainName: 'Look again for models',
+  lookAgainTitle: 'Ask this service for its models again',
+  connect: 'Connect model',
+  connecting: 'Connecting…',
+  clearConnection: 'Clear connection',
   modelsTitle: 'Models found on this service',
   modelsReady: '{count} models ready',
   openToFind: 'Open to find models',
   modelsHint: 'Choose a model to fill in the model ID, or type a word to filter the list.',
   checkingAgain: 'Checking again…',
-  lookAgain: 'Look again',
   lookingForModels: 'Looking for models…',
   noModelsYet:
     'No models yet. Enter the service address and your key above, then choose Find models.',
   noModelMatches: 'No model matches that filter.',
+  filterPlaceholder: 'Filter models (e.g. free, sonnet, 4o)...',
+  filterAll: 'All',
+  filterFree: 'Free',
+  filterClaude: 'Claude',
+  filterGpt: 'GPT',
+  browserOnly: 'Live model discovery requires Joy Media Desktop.',
 } as const;
 
-/** Fills `{amount}` in the cost limit tag. */
+/**
+ * Everything the dialog says when it answers, refuses or reports.
+ *
+ * These are the notices and the refusals. They are plain sentences, and they
+ * are kept here with the rest of the wording.
+ */
+export const SETTINGS_MESSAGES = {
+  profilesDidNotLoad: 'The saved profiles did not load in time.',
+  profilesUnreadable:
+    'The saved profiles could not be read. Close and reopen settings to try again.',
+  profilesLoading: 'The saved profiles are still loading.',
+  slotNotReady: 'This agent slot cannot run yet. Save it with a profile and a model.',
+  chooseProviderBeforeDiscovery: 'Choose a provider before discovering models.',
+  chooseProviderBeforeConnect: 'Choose a provider before connecting.',
+  ambiguousEndpoint:
+    'More than one saved profile uses this endpoint. Choose one in the list first.',
+  consentBeforeDiscovery: 'Enter the custom-provider acknowledgement before discovering models.',
+  consentBeforeConnect: 'Enter the custom-provider acknowledgement before connecting.',
+  acknowledgeEndpoint: 'Acknowledge this custom endpoint before connecting.',
+  keyForOtherEndpoint: 'The key was entered for a different provider or endpoint. Enter it again.',
+  keyAgain: 'Enter the API key again to confirm this endpoint.',
+  keyAgainThenConnect: 'Enter the API key again to confirm this endpoint, then connect.',
+  baseUrlBeforeDiscovery: 'Please enter a Base URL before discovering models',
+  discoveryFailed: 'Failed to discover models behind endpoint',
+  connectionFailed: 'The connection failed.',
+  configureFailed: 'Unable to configure connection',
+  providerNoToolLoop: 'The provider responded, but JOY could not use its tool loop.',
+  connectedReady: 'Connected successfully. JOY is ready to edit in this session.',
+  connectedBriefOnly:
+    'Connected successfully in plan-only mode. Creative Brief is ready in this session.',
+  /** `{reason}` is why the connection failed. */
+  connectionFailedWith: 'Connection failed: {reason}',
+  savedKeyOtherEndpoint:
+    'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.',
+  apiKeyRequired: 'API key is required.',
+  modelIdRequired: 'Model ID is required.',
+  baseUrlRequired: 'Base URL is required.',
+  profileNotReadBack: 'The saved profile could not be read back. Try connecting again.',
+  connectionNotSaved: 'This connection could not be saved in the desktop app.',
+  removeChatGptConfirm:
+    'Remove this ChatGPT connection from JOY Media without revoking its authorization? This does not revoke access in ChatGPT.',
+  removeLabel: 'Remove',
+  removeFailed: 'Could not remove the saved profile.',
+  reauthorized: 'ChatGPT connection reauthorized.',
+  reauthorizeFailed: 'ChatGPT reauthorization did not complete.',
+  signOutConfirm:
+    'Sign out of this ChatGPT connection and revoke its saved authorization? JOY Media will remove the saved profile after ChatGPT confirms revocation.',
+  signOutLabel: 'Sign out',
+  revoked: 'ChatGPT authorization revoked and the saved connection was removed.',
+  signOutFailed: 'ChatGPT could not confirm sign-out.',
+  removeLocallyLabel: 'Remove locally',
+  removeLocallyConfirm:
+    'Remove this connection from JOY Media locally without revoking it? This does not revoke access in ChatGPT.',
+  removedLocally: 'ChatGPT connection removed locally. This did not revoke access in ChatGPT.',
+  removeLocallyFailed: 'Could not remove the saved profile locally.',
+  connectionCleared: 'Connection cleared. Your API key was removed from this page session.',
+  /** `{items}` is the list of what is still missing. */
+  missingItems: 'Enter {items} before connecting.',
+  missingKeyAgain: 'the API key again to confirm this endpoint',
+  missingNewKey: 'a new API key because the saved key belongs to a different provider or endpoint',
+  missingAnyKey: 'an API key',
+  missingModelId: 'a model ID',
+  missingBaseUrl: 'a base URL',
+  missingConsent: 'the custom-provider acknowledgement',
+} as const;
+
+/** Fills `{amount}` in the cost tag. */
 export function budgetTag(amount: string): string {
   return SETTINGS_BUDGET.tag.replace('{amount}', `$${amount}`);
 }
@@ -234,4 +367,24 @@ export function allowedToolsTag(allowed: number, total: number): string {
 /** Fills `{count}` in the number of models that were found. */
 export function modelsReadyTag(count: number): string {
   return SETTINGS_MODELS.modelsReady.replace('{count}', String(count));
+}
+
+/** Fills `{model}` in the message of a finished media check. */
+export function mediaCheckComplete(model: string): string {
+  return SETTINGS_MEDIA_CHECK.completeFor.replace('{model}', model);
+}
+
+/** Fills `{reason}` in the message of a failed connection. */
+export function connectionFailedMessage(reason: string): string {
+  return SETTINGS_MESSAGES.connectionFailedWith.replace('{reason}', reason);
+}
+
+/** Fills `{profile}` in the name of the button that removes a saved connection. */
+export function removeProfileLabel(profile: string): string {
+  return SETTINGS_MODELS.removeProfileLabel.replace('{profile}', profile);
+}
+
+/** Fills `{items}` in the message that says what is still missing. */
+export function missingItemsMessage(items: string): string {
+  return SETTINGS_MESSAGES.missingItems.replace('{items}', items);
 }
