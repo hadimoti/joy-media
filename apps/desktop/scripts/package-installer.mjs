@@ -1,5 +1,5 @@
 import { cp, mkdir, rm, writeFile, stat } from 'node:fs/promises';
-import { existsSync, createReadStream } from 'node:fs';
+import { existsSync, createReadStream, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -12,6 +12,9 @@ const desktopDistDir = resolve(desktopRoot, 'dist');
 const unpackedDir = resolve(desktopDistDir, 'joy-media-unpacked');
 const standaloneDir = resolve(desktopDistDir, 'joy-media-win32-x64');
 const releasesDir = resolve(desktopDistDir, 'releases');
+
+const desktopPackage = JSON.parse(readFileSync(resolve(desktopRoot, 'package.json'), 'utf8'));
+const version = desktopPackage.version;
 
 // Find electron prebuilt binaries
 const electronDistDir = resolve(desktopRoot, 'node_modules', 'electron', 'dist');
@@ -182,7 +185,7 @@ if ($null -ne $newPath) {
 $uninstallKey = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JoyMedia"
 New-Item -Path $uninstallKey -Force | Out-Null
 Set-ItemProperty -Path $uninstallKey -Name "DisplayName" -Value "JOY Media" -Force
-Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value "1.1.0" -Force
+Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value "${version}" -Force
 Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "JOY Team" -Force
 Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value $exePath -Force
 Set-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $InstallPath -Force
@@ -245,7 +248,6 @@ console.log('4. Creating distributable zip release...');
 await rm(releasesDir, { recursive: true, force: true });
 await mkdir(releasesDir, { recursive: true });
 
-const version = '1.1.0';
 const releaseZipName = `joy-media-windows-x64-v${version}.zip`;
 const releaseZipPath = resolve(releasesDir, releaseZipName);
 
