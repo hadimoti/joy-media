@@ -13,7 +13,7 @@ if ([string]::IsNullOrWhiteSpace($ApiUrl)) { $ApiUrl = $env:JOY_MEDIA_API_URL }
 if ([string]::IsNullOrWhiteSpace($ApiUrl)) {
     throw 'JOY_MEDIA_API_URL is required: set it to http://127.0.0.1:<port> from the JOY Media desktop app.'
 }
-$loopbackApi = [regex]::Match($ApiUrl, '^http://127\.0\.0\.1:([1-9][0-9]{0,4})/?$')
+$loopbackApi = [regex]::Match($ApiUrl, '^http://127\.0\.0\.1:([1-9][0-9]{0,4})$')
 if (-not $loopbackApi.Success -or [int]$loopbackApi.Groups[1].Value -gt 65535) {
     throw 'JOY_MEDIA_API_URL must be http://127.0.0.1:<port>; remote addresses are refused.'
 }

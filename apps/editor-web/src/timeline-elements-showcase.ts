@@ -397,7 +397,8 @@ export function buildTimelineElementsShowcase(
         id: 'showcase-audio-asset',
         kind: 'audio',
         displayName: 'Audio',
-        descriptor: { mimeType: 'audio/wav', durationUs: 30_000_000 },
+        // The shipped file is AAC in an M4A container (tooling/qa/fixtures/make-sample-media.ps1).
+        descriptor: { mimeType: 'audio/mp4', durationUs: 30_000_000 },
       },
     },
     variables: {},
