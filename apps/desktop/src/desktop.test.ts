@@ -36,6 +36,17 @@ describe('desktop shell boundaries', () => {
     files.revoke(ref);
     expect(() => files.requestDerivative(ref, 'proxy')).toThrow();
   });
+  it.each([
+    ['a UNC path', '\\\\server\\share\\clip.mp4'],
+    ['a Win32 device path', '\\\\.\\C:\\clip.mp4'],
+    ['a Win32 extended path', '\\\\?\\C:\\clip.mp4'],
+    ['the CON device name', 'C:\\Media\\CON.mp4'],
+    ['the NUL device name', 'C:\\Media\\NUL.txt'],
+    ['a COM device name', 'C:\\Media\\COM1.wav'],
+  ])('rejects %s before exposing a local file reference', (_description, path) => {
+    const files = createFileBoundary(() => 'unsafe-ref');
+    expect(() => files.registerSelection(path)).toThrow();
+  });
   it('normalizes caller-provided local display names before exposing them', () => {
     const files = createFileBoundary(() => 'local-2');
     expect(files.registerSelection('C:\\Media\\clip.mp4', 'C:\\private\\secret.mp4')).toEqual({

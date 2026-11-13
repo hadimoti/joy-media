@@ -56,6 +56,7 @@ import {
 import { TimelineContextMenu } from './TimelineContextMenu.js';
 import { ActionOverflowMenu, type ActionOverflowMenuItem } from './ActionOverflowMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
+import { DroppedImportProgress, type DroppedImportProgressState } from './DroppedImportProgress.js';
 import { TimelineTrackVisibilityButton } from './TimelineTrackVisibilityButton.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 import { type TimelineTrackKind } from './timeline-track-kind.js';
@@ -661,6 +662,8 @@ export function TimelinePanel({
   onOpenAssetLibrary,
   onImportMedia,
   onImportFiles,
+  droppedImportProgress,
+  onCancelDroppedImport,
   onMediaPlaced,
   assetDisplayNames,
   showToast,
@@ -718,6 +721,8 @@ export function TimelinePanel({
   readonly onOpenAssetLibrary?: () => void;
   readonly onImportMedia?: (file: File) => Promise<TimelineMediaAsset>;
   readonly onImportFiles?: (files: readonly File[]) => void;
+  readonly droppedImportProgress?: DroppedImportProgressState;
+  readonly onCancelDroppedImport?: () => void;
   readonly onMediaPlaced?: (asset: TimelineMediaAsset, clipId: string) => void;
   /** Human labels from the creative asset catalog, keyed by opaque asset id. */
   readonly assetDisplayNames?: Readonly<Record<string, string>>;
@@ -2354,6 +2359,10 @@ export function TimelinePanel({
         )}
         <ActionOverflowMenu items={overflowItems} />
       </div>
+
+      {droppedImportProgress !== undefined && onCancelDroppedImport !== undefined && (
+        <DroppedImportProgress progress={droppedImportProgress} onCancel={onCancelDroppedImport} />
+      )}
 
       <TimelineEmptyState
         project={project}

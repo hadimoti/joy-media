@@ -10,10 +10,19 @@ import {
 } from './opfs-original-asset-cache.js';
 import { inspectImageAnimation, validateImageAnimationBudget } from './animated-image-metadata.js';
 import { revokeDetachedObjectUrl } from './media-object-url.js';
+import {
+  onDesktopDroppedImportProgress,
+  prepareDesktopDroppedFiles,
+  revokeDesktopDroppedFileTickets,
+  type DesktopDroppedFileTicket,
+} from './desktop-client.js';
 
 export interface MediaImportProgress {
   readonly ratio: number;
   readonly message: string;
+  readonly fileName?: string;
+  readonly current?: number;
+  readonly total?: number;
 }
 
 export interface MediaImportOptions {
@@ -36,6 +45,34 @@ export interface MediaImportOptions {
     mimeType: string,
   ) => Promise<BrowserMediaDescriptor>;
   readonly createAssetId?: () => string;
+}
+
+export interface DroppedMediaImportOptions {
+  readonly projectId: string;
+  readonly projectTitle: string;
+  readonly files: readonly File[];
+  readonly client?: Pick<
+    BrowserControlPlaneClient,
+    'ensureProject' | 'importDroppedAsset' | 'cancelDroppedImport'
+  >;
+  readonly originalAssetCache?:
+    | Pick<OpfsOriginalAssetCache, 'putFromVerifiedDesktopImport'>
+    | Promise<Pick<OpfsOriginalAssetCache, 'putFromVerifiedDesktopImport'>>;
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (progress: MediaImportProgress) => void;
+  readonly onImported?: (
+    asset: BrowserAsset,
+    ticket: DesktopDroppedFileTicket,
+  ) => void | Promise<void>;
+}
+
+export interface DroppedMediaImportBatchResult {
+  readonly assets: readonly BrowserAsset[];
+  readonly failures: readonly { readonly displayName: string; readonly message: string }[];
+  readonly cancelled: boolean;
+  readonly skippedMessage?: string;
+  readonly folderDepth: 1;
+  readonly folderCount: number;
 }
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
@@ -149,6 +186,132 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
   return uploaded;
 }
 
+/** Imports OS-dropped files through main-process tickets; browser imports keep the regular path. */
+export async function importDroppedMediaFiles(
+  options: DroppedMediaImportOptions,
+): Promise<DroppedMediaImportBatchResult | undefined> {
+  if (options.signal?.aborted) throw new Error('Import cancelled');
+  const batch = await prepareDesktopDroppedFiles(options.files);
+  if (batch === undefined) return undefined;
+  const client = options.client ?? new BrowserControlPlaneClient();
+  const assets: BrowserAsset[] = [];
+  const failures: { displayName: string; message: string }[] = [];
+  const ticketIds = batch.tickets.map((ticket) => ticket.id);
+  let activeTicketId: string | undefined;
+  let activeName = '';
+  let cancelled = false;
+  const reportTicketProgress = (
+    ticket: DesktopDroppedFileTicket,
+    index: number,
+    ratio: number,
+    progressMessage: string,
+  ): void => {
+    options.onProgress?.({
+      ratio: Math.min(1, Math.max(0, ratio)),
+      message: progressMessage,
+      fileName: ticket.displayName,
+      current: index + 1,
+      total: batch.tickets.length,
+    });
+  };
+  const unsubscribe = onDesktopDroppedImportProgress((progress) => {
+    if (progress.ticketId !== activeTicketId) return;
+    const ratio = progress.stage === 'hash' ? 0.4 * progress.ratio : 0.4 + 0.55 * progress.ratio;
+    const ticketIndex = batch.tickets.findIndex((ticket) => ticket.id === activeTicketId);
+    const ticket = batch.tickets[ticketIndex];
+    if (ticket !== undefined) {
+      reportTicketProgress(ticket, ticketIndex, ratio, `Importing ${activeName} locally...`);
+    }
+  });
+  const cancelActive = (): void => {
+    if (activeTicketId !== undefined) {
+      void client.cancelDroppedImport(activeTicketId).catch(() => undefined);
+    }
+  };
+  options.signal?.addEventListener('abort', cancelActive);
+  try {
+    const cache = await (options.originalAssetCache ?? openOpfsOriginalAssetCache());
+    if (options.signal?.aborted) {
+      cancelled = true;
+    } else {
+      await client.ensureProject(options.projectId, options.projectTitle);
+    }
+
+    for (let index = 0; index < batch.tickets.length && !cancelled; index += 1) {
+      if (options.signal?.aborted) {
+        cancelled = true;
+        break;
+      }
+      const ticket = batch.tickets[index]!;
+      activeTicketId = ticket.id;
+      activeName = ticket.displayName;
+      const source = options.files[ticket.sourceIndex];
+      const file = source?.name === ticket.displayName ? source : undefined;
+      try {
+        reportTicketProgress(ticket, index, 0.01, `Preparing ${activeName}...`);
+        const descriptor =
+          file === undefined
+            ? { mimeType: ticket.mimeType }
+            : await describeDroppedMedia(file, ticket.mediaKind, ticket.mimeType);
+        reportTicketProgress(ticket, index, 0.02, `Importing ${activeName} locally...`);
+        if (options.signal?.aborted) {
+          cancelled = true;
+          break;
+        }
+        const imported = await client.importDroppedAsset(options.projectId, ticket.id, descriptor);
+        if (options.signal?.aborted) {
+          cancelled = true;
+          break;
+        }
+        if (file !== undefined) {
+          await cache
+            .putFromVerifiedDesktopImport(
+              {
+                assetId: imported.id,
+                sha256: imported.sha256,
+                bytes: imported.bytes,
+                mimeType: imported.descriptor.mimeType,
+              },
+              file,
+            )
+            .catch(() => undefined);
+        }
+        if (options.signal?.aborted) {
+          cancelled = true;
+          break;
+        }
+        assets.push(imported);
+        await options.onImported?.(imported, ticket);
+        reportTicketProgress(ticket, index, 1, `${activeName} stored in the local media library.`);
+      } catch (error) {
+        if (options.signal?.aborted) {
+          cancelled = true;
+          break;
+        }
+        failures.push({
+          displayName: ticket.displayName,
+          message: message(error),
+        });
+      } finally {
+        activeTicketId = undefined;
+      }
+    }
+  } finally {
+    options.signal?.removeEventListener('abort', cancelActive);
+    unsubscribe();
+    await revokeDesktopDroppedFileTickets(ticketIds).catch(() => undefined);
+  }
+
+  return {
+    assets,
+    failures,
+    cancelled,
+    ...(batch.skippedMessage === undefined ? {} : { skippedMessage: batch.skippedMessage }),
+    folderDepth: batch.folderDepth,
+    folderCount: batch.folderCount,
+  };
+}
+
 /** Content-addressed IDs are shared with the asset library. */
 export function createImportedAssetId(sha256: string): string {
   return `joylib-${sha256}`;
@@ -218,6 +381,26 @@ async function describeImage(file: File, mimeType: string): Promise<BrowserMedia
         height: bitmap.height,
         ...(animation === undefined ? {} : { animation, durationUs: animation.cycleDurationUs }),
       };
+    } finally {
+      bitmap.close();
+    }
+  } catch {
+    throw new Error(`unable to decode ${file.name} as ${mimeType}`);
+  }
+}
+
+/** Uses image dimensions without reading the full dropped file into a renderer ArrayBuffer. */
+async function describeDroppedMedia(
+  file: File,
+  kind: BrowserAsset['kind'],
+  mimeType: string,
+): Promise<BrowserMediaDescriptor> {
+  if (kind !== 'image') return describeTimedMedia(file, kind);
+  if (typeof createImageBitmap !== 'function') return { mimeType };
+  try {
+    const bitmap = await createImageBitmap(file);
+    try {
+      return { mimeType, width: bitmap.width, height: bitmap.height };
     } finally {
       bitmap.close();
     }
