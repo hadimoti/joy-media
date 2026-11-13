@@ -9140,6 +9140,17 @@ label {
 }
 
 /* Joy Code's one calm card: optional, one sentence, one gold action. */
+/* The connect step as a keyboard-reachable control (T-J02): a gold button, same text role as the card. */
+.joy-code-connect-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--joy-type-xs);
+  cursor: pointer;
+  user-select: none;
+}
 .joy-code-connect-card {
   display: flex;
   align-items: center;
@@ -9949,7 +9960,8 @@ label {
   line-height: 1.4;
 }
 .joy-code-input textarea::placeholder {
-  color: var(--joy-text-disabled);
+  /* Readable hint: 8:1 on the input field (T-J02). */
+  color: var(--joy-text-secondary);
 }
 .joy-code-send {
   display: inline-grid;
@@ -9965,9 +9977,10 @@ label {
   cursor: pointer;
 }
 .joy-code-send:disabled {
+  /* Still visible when idle: at least 4.5:1 on the control background (T-J02). */
   border-color: var(--joy-border);
   background: var(--joy-bg-control);
-  color: var(--joy-text-disabled);
+  color: var(--joy-text-secondary);
   cursor: default;
 }
 @container (max-width: 300px) {

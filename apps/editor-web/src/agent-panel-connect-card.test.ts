@@ -36,17 +36,36 @@ describe('Joy Code not-connected card wiring', () => {
     expect(chat).not.toContain('to run natural-language JOY edits.');
   });
 
+  it('keeps the Recipes Run buttons visible but disabled until a model is connected', () => {
+    // The gate decides disabled, hover text and the connect click (T-J02).
+    expect(panelSource).toContain('<RecipeRunControls');
+    expect(panelSource).toContain('ready={isRecipeRunnerReady}');
+    expect(panelSource).toContain('noModel={capability === undefined}');
+    expect(panelSource).not.toContain('{isRecipeRunnerReady && (');
+    // A click on the recipe card body opens the connect step, through the shared helper (T-J02 review).
+    expect(panelSource).toContain('connectOnCardClick(onOpenSettings)');
+  });
+
+  it('adds the "Run recipe" message only from the run start, never before the run', () => {
+    // The one append of the message sits inside the start announcer, not in the run body.
+    const appends = panelSource.match(/appendMessage\(threadId, 'user', `Run recipe/g) ?? [];
+    expect(appends).toHaveLength(1);
+    expect(panelSource).toMatch(
+      /createRunStartAnnouncer\(\(\) =>\s*appendMessage\(threadId, 'user', `Run recipe/,
+    );
+    expect(panelSource).toContain('runAnnouncer.observe(checkpoint);');
+  });
+
+  it('offers the connect step from the Creative Brief card when no model is connected', () => {
+    expect(panelSource).toContain('noModelConnected={capability === undefined}');
+  });
+
   it('states an incompatible model in plain words, with no fallback sentence', () => {
     // Four incompatible-model messages (chat, Recipes, Looks, send guard) share this copy.
     expect(panelSource).not.toContain('no fallback provider was selected');
     expect(panelSource).toContain(
       'The configured model is incompatible. Test another model in Agent Settings.',
     );
-  });
-
-  it('hides the Recipes Run buttons until a model is connected', () => {
-    expect(panelSource).toContain('{isRecipeRunnerReady && (');
-    expect(panelSource).not.toContain('!isRecipeRunnerReady ||');
   });
 
   it('keeps one message and one action for the not-connected state', () => {
