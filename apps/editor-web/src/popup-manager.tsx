@@ -70,6 +70,9 @@ function isTriggerOf(target: EventTarget | null, id: string): boolean {
 function usePopupStore(): PopupManager {
   const [openId, setOpenId] = useState<string | null>(null);
   const openIdRef = useRef<string | null>(null);
+  // Bumped on every open and close. A deferred close captures it at detach time and acts only
+  // if it is unchanged, so a popup closed and reopened in between is not closed by a stale check.
+  const generationRef = useRef(0);
   const openerRef = useRef<HTMLElement | null>(null);
   const rootsRef = useRef(new Map<string, HTMLElement>());
   const rootRefsRef = useRef(new Map<string, (element: HTMLElement | null) => void>());
@@ -86,6 +89,7 @@ function usePopupStore(): PopupManager {
       openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
     }
     openIdRef.current = id;
+    generationRef.current += 1;
     setOpenId(id);
   }, []);
 
@@ -94,6 +98,7 @@ function usePopupStore(): PopupManager {
     const opener = openerRef.current;
     openerRef.current = null;
     openIdRef.current = null;
+    generationRef.current += 1;
     setOpenId(null);
     if (options?.restoreFocus !== false && opener !== null && opener.isConnected) {
       opener.focus();
@@ -128,10 +133,15 @@ function usePopupStore(): PopupManager {
         if (openIdRef.current !== id) return;
         // The open popup's root has gone, so the popup is gone too. Check after the commit:
         // an inline ref callback detaches and re-attaches the same root on every render.
+        const generation = generationRef.current;
         queueMicrotask(() => {
-          if (rootsRef.current.has(id) || openIdRef.current !== id) return;
+          // Act only if this is still the same open popup: no reattach, and no close or reopen
+          // since the detach (which would bump the generation).
+          if (rootsRef.current.has(id) || generationRef.current !== generation) return;
+          if (openIdRef.current !== id) return;
           openIdRef.current = null;
           openerRef.current = null;
+          generationRef.current += 1;
           setOpenId(null);
         });
       };

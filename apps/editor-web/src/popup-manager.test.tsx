@@ -5,7 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PopupProvider, usePopup, usePopupManager, usePopupsClosedWhile } from './popup-manager.js';
+import {
+  PopupProvider,
+  usePopup,
+  usePopupManager,
+  usePopupsClosedWhile,
+  type PopupManager,
+} from './popup-manager.js';
 import { AppMenuBar } from './AppMenuBar.js';
 import {
   POPUP_IDS,
@@ -688,5 +694,69 @@ describe('popup roots', () => {
       scanRootRegistration('const p = usePopup(POPUP_IDS.exportPreset);\nf({p});', new Set(['p'])),
     ).toEqual([]);
     expect(scanRootRegistration('const x = 1;', new Set())).toEqual([]);
+  });
+});
+
+// Hands the shared manager out of the React tree, so a test can drive a root's ref callback
+// directly and control the exact order of detach, close and open.
+let latestManager: PopupManager | undefined;
+function ManagerProbe() {
+  latestManager = usePopupManager();
+  return null;
+}
+
+describe('a deferred close after a root detaches', () => {
+  const ID = POPUP_IDS.exportPreset;
+
+  function manager(): PopupManager {
+    if (latestManager === undefined) throw new Error('manager not rendered');
+    return latestManager;
+  }
+
+  it('does not close a popup that was closed and reopened with the same id before the microtask ran', async () => {
+    await render(
+      <PopupProvider>
+        <ManagerProbe />
+      </PopupProvider>,
+    );
+    const ref = manager().registerRoot(ID);
+    const root = document.createElement('div');
+
+    await act(async () => {
+      manager().open(ID);
+      ref(root);
+    });
+    expect(manager().openId).toBe(ID);
+
+    // All three calls run in one synchronous block, so the queued deferred close has not run yet.
+    await act(async () => {
+      ref(null);
+      manager().close(ID, { restoreFocus: false });
+      manager().open(ID);
+    });
+    await act(async () => {});
+
+    expect(manager().openId).toBe(ID);
+  });
+
+  it('still closes an open popup whose root detaches and is not reattached', async () => {
+    await render(
+      <PopupProvider>
+        <ManagerProbe />
+      </PopupProvider>,
+    );
+    const ref = manager().registerRoot(ID);
+    const root = document.createElement('div');
+
+    await act(async () => {
+      manager().open(ID);
+      ref(root);
+    });
+    await act(async () => {
+      ref(null);
+    });
+    await act(async () => {});
+
+    expect(manager().openId).toBeNull();
   });
 });
