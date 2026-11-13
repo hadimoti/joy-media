@@ -3647,6 +3647,8 @@ function EditorWorkspace({
       }
     }
     storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
+    // The older view-mode key would otherwise bring the previous mode back on the next launch.
+    storage.removeItem('joy-media.view-mode.v1');
     // The same mode and preset as the defaults the preferences were reset to, so the layout and the saved
     // preferences agree (T-D12 round 2).
     const target = resetWorkspaceTarget();

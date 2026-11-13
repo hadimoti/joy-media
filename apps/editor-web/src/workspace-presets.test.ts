@@ -239,6 +239,8 @@ describe('first-run layout', () => {
     const block = appSource.slice(start, end);
     expect(block).toContain('applyDockLayout(api, target.mode, target.preset)');
     expect(block).not.toContain("applyDockLayout(api, 'vertical'");
+    // The older view-mode key must be cleared too, or a saved 'vertical' comes back on the next launch.
+    expect(block).toContain("storage.removeItem('joy-media.view-mode.v1')");
   });
 
   it('a stored widescreen layout also loads unchanged (T-D12)', () => {
