@@ -7,6 +7,7 @@ import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
 import {
   ffmpegArgs,
   freezeManifest,
+  dimensionsForPreset,
   remuxBrowserMp4,
   renderFixture,
   renderRgbaFrames,
@@ -27,6 +28,33 @@ describe('deterministic export contract', () => {
     expect(freezeManifest(manifest)).toEqual(manifest);
     expect(ffmpegArgs(manifest, 'out.mp4')).toContain('libx264');
   });
+
+  it('accepts a normal canvas export size', () => {
+    expect(freezeManifest({ ...manifest, width: 1920, height: 1080 })).toMatchObject({
+      width: 1920,
+      height: 1080,
+    });
+  });
+
+  it('rejects odd H.264 canvas dimensions instead of changing the output size', () => {
+    expect(() => freezeManifest({ ...manifest, width: 65, height: 36 })).toThrow(/even/i);
+  });
+
+  it('rejects a canvas above the documented H.264 export limit', () => {
+    expect(() => freezeManifest({ ...manifest, width: 3840, height: 2162 })).toThrow(
+      /export limit|maximum|supports up to/i,
+    );
+  });
+
+  it.each(['reels-1080', 'shorts-1080', 'youtube-1080', 'high-bitrate'] as const)(
+    'keeps canvas dimensions for the %s export preset',
+    (preset) => {
+      expect(dimensionsForPreset(preset, { width: 1234, height: 987 })).toEqual({
+        width: 1234,
+        height: 987,
+      });
+    },
+  );
   it('produces a verified H.264/AAC fixture through ffmpeg', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-export-'));
     const output = join(directory, 'fixture.mp4');

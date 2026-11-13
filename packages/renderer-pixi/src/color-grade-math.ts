@@ -1,6 +1,7 @@
 import type { ColorGradeIR } from '@joy-media/render-ir';
 import type { ParsedCubeLut } from './lut.js';
 import { sampleCubeLut } from './lut.js';
+import { ColorCurveSpline } from './color-curve-spline.js';
 
 export type Rgb = readonly [number, number, number];
 export type ColorCurveLuts = Readonly<Record<'rgb' | 'red' | 'green' | 'blue', Uint8Array>>;
@@ -208,58 +209,26 @@ export function applyColorGradeV2(
 
 /** Builds a 256-entry, channel-addressable LUT from monotone cubic splines. */
 export function buildColorCurveLut(points: readonly { x: number; y: number }[]): Uint8Array {
-  return Uint8Array.from({ length: 256 }, (_, index) =>
-    Math.round(sampleColorCurve(points, index / 255) * 255),
-  );
+  // The spline is prepared once for the whole table, not once per entry.
+  const spline = new ColorCurveSpline(points.length).prepare(points);
+  const lut = new Uint8Array(256);
+  for (let index = 0; index < 256; index += 1)
+    lut[index] = Math.round(spline.valueAt(index / 255) * 255);
+  return lut;
 }
 
+/** One spline reused by every single sample, so a sample allocates nothing new. */
+const sharedSpline = new ColorCurveSpline();
+
+/**
+ * One sample of the monotone cubic spline through `points`. To sample one
+ * curve many times, prepare a `ColorCurveSpline` once instead.
+ */
 export function sampleColorCurve(
   points: readonly { x: number; y: number }[],
   input: number,
 ): number {
-  if (points.length < 2) return clamp01(input);
-  const sorted = points
-    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
-    .map((point) => ({ x: clamp01(point.x), y: clamp01(point.y) }))
-    .sort((left, right) => left.x - right.x)
-    .filter((point, index, values) => index === 0 || point.x > values[index - 1]!.x);
-  if (sorted.length < 2) return clamp01(input);
-  const x = clamp01(input);
-  if (x <= sorted[0]!.x) return sorted[0]!.y;
-  const lastIndex = sorted.length - 1;
-  if (x >= sorted[lastIndex]!.x) return sorted[lastIndex]!.y;
-  const slopes = sorted.slice(0, -1).map((point, index) => {
-    const next = sorted[index + 1]!;
-    return (next.y - point.y) / (next.x - point.x);
-  });
-  const tangents = sorted.map((_, index) => {
-    if (index === 0) return slopes[0]!;
-    if (index === lastIndex) return slopes[lastIndex - 1]!;
-    const before = slopes[index - 1]!;
-    const after = slopes[index]!;
-    if (before === 0 || after === 0 || Math.sign(before) !== Math.sign(after)) return 0;
-    const h0 = sorted[index]!.x - sorted[index - 1]!.x;
-    const h1 = sorted[index + 1]!.x - sorted[index]!.x;
-    const w1 = 2 * h1 + h0;
-    const w2 = h1 + 2 * h0;
-    return (w1 + w2) / (w1 / before + w2 / after);
-  });
-  for (let index = 0; index < lastIndex; index += 1) {
-    const left = sorted[index]!;
-    const right = sorted[index + 1]!;
-    if (x > right.x) continue;
-    const width = right.x - left.x;
-    const t = (x - left.x) / width;
-    const t2 = t * t;
-    const t3 = t2 * t;
-    return clamp01(
-      (2 * t3 - 3 * t2 + 1) * left.y +
-        (t3 - 2 * t2 + t) * width * tangents[index]! +
-        (-2 * t3 + 3 * t2) * right.y +
-        (t3 - t2) * width * tangents[index + 1]!,
-    );
-  }
-  return sorted[lastIndex]!.y;
+  return sharedSpline.prepare(points).valueAt(input);
 }
 
 function applyBuiltInLook(rgb: Rgb, look: string): Rgb {
@@ -353,4 +322,19 @@ function finiteOr(value: number, fallback: number): number {
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+/**
+ * Hue (degrees, 0 up to 360), saturation and lightness of an RGB colour
+ * (channels 0..1), with the conversion the HSL bands select on. The editor's
+ * eyedropper (T-K04) uses it, so a picked colour lands in the band the
+ * engine would put it in.
+ */
+export function colorGradeRgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  return rgbToHsl(r, g, b);
+}
+
+/** The distance between two hues around the colour circle, in degrees (0..180). */
+export function circularHueDistance(a: number, b: number): number {
+  return circularDistance(wrapHue(a), wrapHue(b));
 }

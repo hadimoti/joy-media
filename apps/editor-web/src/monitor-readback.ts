@@ -1,4 +1,5 @@
 import type { ScopePixels } from './ColorPanel.js';
+import type { PixelWindow, UngradedPixelReader, WindowPixels } from './color-eyedropper.js';
 
 let reader: (() => ScopePixels | undefined) | undefined;
 
@@ -8,4 +9,29 @@ export function setMonitorPixelReader(next: (() => ScopePixels | undefined) | un
 
 export function readMonitorPixels(): ScopePixels | undefined {
   return reader?.();
+}
+
+/**
+ * The Monitor's picture BEFORE the colour grade (T-K04 eyedropper).
+ *
+ * `readMonitorPixels` gives the graded picture the scopes show. The
+ * eyedropper needs the colour the grade starts from, so a pick stays the same
+ * while the grade changes: the Monitor draws the frame once without any grade,
+ * copies it and draws it again with the grade (`MonitorPanel`).
+ */
+let ungradedReader: UngradedPixelReader | undefined;
+
+export function setMonitorUngradedPixelReader(next: UngradedPixelReader | undefined): void {
+  ungradedReader = next;
+}
+
+/** `region` (frame pixels) reads only that window of the frame (T-K04 review fix). */
+export function readUngradedMonitorPixels(
+  maxWidth: number,
+  maxHeight: number,
+  region?: PixelWindow,
+): WindowPixels | undefined {
+  return region === undefined
+    ? ungradedReader?.(maxWidth, maxHeight)
+    : ungradedReader?.(maxWidth, maxHeight, region);
 }

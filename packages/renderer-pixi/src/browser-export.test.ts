@@ -110,6 +110,31 @@ describe('browser export contracts', () => {
     expect(harness.removeTrack).toHaveBeenCalledWith(harness.audioTrack);
   });
 
+  it('uses the preset video and audio bitrates supplied by the export manifest', async () => {
+    const harness = installRecorderHarness('video/mp4');
+    await downloadBrowserMp4({
+      manifest: {
+        ...manifest,
+        width: 640,
+        height: 360,
+        frameRate: 24,
+        videoBitrate: 8_000_000,
+        audio: { codec: 'aac', sampleRate: 44_100, channels: 2, bitrate: 96_000 },
+      },
+      frameCount: 1,
+      canvas: harness.canvas,
+      audioTrack: harness.audioTrack,
+      mimeType: 'video/mp4',
+      paintFrame: () => {},
+    });
+
+    expect(harness.recorderOptions).toMatchObject({
+      videoBitsPerSecond: 8_000_000,
+      audioBitsPerSecond: 96_000,
+    });
+    expect(harness.canvas).toMatchObject({ width: 640, height: 360 });
+  });
+
   it('falls back to a timed capture stream when manual frame requests are unavailable', async () => {
     const harness = installRecorderHarness('video/mp4', { manualCapture: false });
     await downloadBrowserMp4({
