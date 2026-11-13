@@ -5,6 +5,7 @@ import {
   listTrashedCatalogProjects,
   type ProjectCatalogEntry,
 } from './project-catalog.js';
+import { usePopupManager } from './popup-manager.js';
 import {
   loadEditorUiPreferences,
   saveEditorUiPreferences,
@@ -69,7 +70,11 @@ export function ProjectLibrary({
   const [view, setView] = useState<EditorUiPreferencesV2['projectLibrary']['view']>(
     initialUiPreferences.current.projectLibrary.view,
   );
-  const [menuProjectId, setMenuProjectId] = useState<string | null>(null);
+  const [menuEntryId, setMenuEntryId] = useState<string | null>(null);
+  // The project action menu is one popup among the app's popups (OB-18).
+  const popups = usePopupManager();
+  const { open: openPopup, close: closePopup } = popups;
+  const menuProjectId = popups.openId === 'project-menu' ? menuEntryId : null;
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [dialog, setDialog] = useState<DialogState | undefined>(undefined);
   const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
@@ -107,12 +112,13 @@ export function ProjectLibrary({
   const closeMenu = useCallback(
     (restoreFocus: boolean) => {
       const projectId = menuProjectId;
-      setMenuProjectId(null);
+      setMenuEntryId(null);
+      closePopup('project-menu', { restoreFocus: false });
       if (restoreFocus && projectId !== null) {
         window.setTimeout(() => triggerRefs.current.get(projectId)?.focus(), 0);
       }
     },
-    [menuProjectId],
+    [closePopup, menuProjectId],
   );
 
   useEffect(() => {
@@ -226,7 +232,8 @@ export function ProjectLibrary({
 
   const openMenu = (entry: ProjectCatalogEntry, trigger: HTMLButtonElement) => {
     triggerRefs.current.set(entry.id, trigger);
-    setMenuProjectId(entry.id);
+    setMenuEntryId(entry.id);
+    openPopup('project-menu', trigger);
   };
 
   const menuEntry =
@@ -254,7 +261,8 @@ export function ProjectLibrary({
               className={!showTrash ? 'is-active' : undefined}
               onClick={() => {
                 setShowTrash(false);
-                setMenuProjectId(null);
+                setMenuEntryId(null);
+                closePopup('project-menu', { restoreFocus: false });
                 setNotice(undefined);
               }}
             >
@@ -266,7 +274,8 @@ export function ProjectLibrary({
               className={showTrash ? 'is-active' : undefined}
               onClick={() => {
                 setShowTrash((active) => !active);
-                setMenuProjectId(null);
+                setMenuEntryId(null);
+                closePopup('project-menu', { restoreFocus: false });
                 setNotice(undefined);
               }}
             >
