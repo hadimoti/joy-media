@@ -7,6 +7,7 @@ import {
   seedDockLayout,
 } from './dock-layout.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
+import { DEFAULT_EDITOR_UI_PREFERENCES } from './ui-preferences.js';
 
 export interface WorkspacePresetSpec {
   readonly id: WorkspacePresetId;
@@ -39,6 +40,20 @@ export function workspacePresetLabel(id: WorkspacePresetId): string {
 export function workspacePresetLayoutKey(mode: EditorViewMode, preset: WorkspacePresetId): string {
   if (preset === 'edit') return dockLayoutKey(mode);
   return `joy-media.workspace.${preset}.${mode}.v2`;
+}
+
+/**
+ * The mode and preset Reset Workspace applies. They are the preference defaults, so the layout on screen and
+ * the saved preferences agree (T-D12 round 2).
+ */
+export function resetWorkspaceTarget(): {
+  readonly mode: EditorViewMode;
+  readonly preset: WorkspacePresetId;
+} {
+  return {
+    mode: DEFAULT_EDITOR_UI_PREFERENCES.viewMode,
+    preset: DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset,
+  };
 }
 
 /** Persists one dock layout under the owning preset's key for that view mode. */

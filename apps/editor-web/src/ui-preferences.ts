@@ -1,4 +1,4 @@
-import type { EditorViewMode } from './dock-layout.js';
+import { dockLayoutKey, type EditorViewMode } from './dock-layout.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
 import type { PreviewQuality } from './preview-quality.js';
 import {
@@ -90,16 +90,26 @@ export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiP
     }
   }
 
-  // A profile with no saved preferences gets the default view mode; an older
-  // saved choice (the legacy key) is still honoured.
+  // A profile with no readable preferences: an older saved choice (the legacy key) is honoured; otherwise the
+  // mode is inferred from the saved layouts, so a saved vertical layout is still used (T-D12 round 2).
   const legacyViewMode = storage.getItem('joy-media.view-mode.v1');
   return {
     ...DEFAULT_EDITOR_UI_PREFERENCES,
     viewMode:
       legacyViewMode === 'widescreen' || legacyViewMode === 'vertical'
         ? legacyViewMode
-        : DEFAULT_EDITOR_UI_PREFERENCES.viewMode,
+        : inferredViewMode(storage),
   };
+}
+
+/**
+ * The mode a profile was using, from the layouts it saved: a vertical layout with no widescreen layout means
+ * vertical. Otherwise the default (T-D12 round 2).
+ */
+function inferredViewMode(storage: UiPreferenceStorage): EditorViewMode {
+  const hasVertical = storage.getItem(dockLayoutKey('vertical')) !== null;
+  const hasWidescreen = storage.getItem(dockLayoutKey('widescreen')) !== null;
+  return hasVertical && !hasWidescreen ? 'vertical' : DEFAULT_EDITOR_UI_PREFERENCES.viewMode;
 }
 
 export function saveEditorUiPreferences(

@@ -77,9 +77,10 @@ export function canvasToScreenPoint(view: MonitorViewState, point: MonitorPoint)
   return { x: point.x * view.zoom + view.panX, y: point.y * view.zoom + view.panY };
 }
 
-/** The zoom at which the whole frame fits the viewport, clamped to the zoom range. */
 /** Fit keeps this many CSS px of space around the frame on every side (T-D12). */
 export const MONITOR_FIT_PADDING_PX = 16;
+
+/** The zoom at which the whole frame fits the viewport, clamped to the zoom range. */
 
 export function fitZoom(viewport: MonitorSize, frame: MonitorSize): number {
   if (viewport.width <= 0 || viewport.height <= 0 || frame.width <= 0 || frame.height <= 0)

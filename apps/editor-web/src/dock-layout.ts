@@ -3,7 +3,7 @@
  *
  * Two named view modes — panel placement only; composition size is unchanged.
  *
- * Vertical (default) — Monitor full-height right for 1080×1920 short-form:
+ * Vertical — Monitor full-height right for 1080×1920 short-form:
  *
  *   ┌──────────┬──────────┬──────────┬─────────┐
  *   │ Assets   │ Inspector│ Agent    │         │
