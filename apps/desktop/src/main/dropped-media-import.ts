@@ -1,8 +1,13 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { access, readdir, stat } from 'node:fs/promises';
+import { access, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import type { OpaqueFileRef } from '../file-boundary.js';
+import {
+  resolveDroppedPath,
+  type DroppedPathSource,
+  type OpaqueFileRef,
+  type ResolvedDroppedPath,
+} from '../file-boundary.js';
 import type { FileRegistry } from './file-registry.js';
 import {
   MAX_LOCAL_ORIGINAL_BYTES,
@@ -59,6 +64,7 @@ export interface DroppedMediaImportService {
   prepareDroppedPaths(value: unknown): Promise<DroppedFileBatch>;
   importTicket(ticketId: string, descriptor?: unknown): Promise<DroppedMediaResult>;
   cancel(ticketId: string): Promise<{ readonly ok: boolean }>;
+  revokeTickets(ticketIds: readonly string[]): void;
 }
 
 interface DroppedMediaImportDeps {
@@ -66,14 +72,14 @@ interface DroppedMediaImportDeps {
   readonly assets: {
     get(assetId: string): LocalAsset | undefined;
     register(asset: LocalAssetRegistration): LocalAssetRegistrationResult;
+    remove(assetId: string): void;
   };
   readonly originals: LocalOriginalWriter;
   readonly library?: AssetLibraryPort;
-  readonly statPath?: (filePath: string) => Promise<{
-    readonly isFile: boolean;
-    readonly isDirectory: boolean;
-    readonly size: number;
-  }>;
+  readonly resolveDroppedPath?: (
+    value: string,
+    source?: DroppedPathSource,
+  ) => Promise<ResolvedDroppedPath>;
   readonly readDirectory?: (
     directory: string,
   ) => Promise<readonly { readonly name: string; readonly isFile: boolean }[]>;
@@ -111,18 +117,7 @@ const MEDIA_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
 const MAX_DROPPED_ITEMS = 512;
 const MAX_DROPPED_PATH_LENGTH = 32_768;
 const STREAM_CHUNK_BYTES = 1024 * 1024;
-
-function defaultStat(filePath: string): Promise<{
-  readonly isFile: boolean;
-  readonly isDirectory: boolean;
-  readonly size: number;
-}> {
-  return stat(filePath).then((result) => ({
-    isFile: result.isFile(),
-    isDirectory: result.isDirectory(),
-    size: result.size,
-  }));
-}
+const DROPPED_TICKET_TTL_MS = 2 * 60 * 1000;
 
 async function* defaultReadChunks(
   filePath: string,
@@ -205,12 +200,40 @@ function cancellationError(): Error {
 export function createDroppedMediaImportService(
   deps: DroppedMediaImportDeps,
 ): DroppedMediaImportService {
-  const statPath = deps.statPath ?? defaultStat;
+  const resolvePath = deps.resolveDroppedPath ?? resolveDroppedPath;
   const readDirectory = deps.readDirectory ?? defaultReadDirectory;
   const readChunks = deps.readChunks ?? defaultReadChunks;
   const fileExists = deps.fileExists ?? defaultFileExists;
   const active = new Map<string, AbortController>();
+  const pendingTickets = new Map<
+    string,
+    {
+      readonly timer: ReturnType<typeof setTimeout>;
+      readonly displayName: string;
+      readonly mimeType: string;
+    }
+  >();
   const assetQueues = new Map<string, Promise<void>>();
+  const revokePendingTicket = (ticketId: string): void => {
+    const pending = pendingTickets.get(ticketId);
+    if (pending === undefined) return;
+    clearTimeout(pending.timer);
+    pendingTickets.delete(ticketId);
+    deps.fileRegistry.revoke({
+      kind: 'local-file',
+      id: ticketId,
+      displayName: pending.displayName,
+    });
+  };
+  const rememberTicket = (ticket: DroppedMediaTicket): void => {
+    const timer = setTimeout(() => revokePendingTicket(ticket.id), DROPPED_TICKET_TTL_MS);
+    timer.unref?.();
+    pendingTickets.set(ticket.id, {
+      timer,
+      displayName: ticket.displayName,
+      mimeType: ticket.mimeType,
+    });
+  };
   const reportProgress = (progress: DroppedMediaProgress): void => {
     try {
       deps.onProgress?.(progress);
@@ -235,21 +258,35 @@ export function createDroppedMediaImportService(
     }
   };
 
-  const addCandidate = (
+  const addCandidate = async (
     filePath: string,
     fallbackName: string,
     sourceIndex: number,
+    source: DroppedPathSource,
     tickets: DroppedMediaTicket[],
     skippedNames: string[],
-  ): void => {
-    const mimeType = mediaType(filePath);
+  ): Promise<void> => {
+    let resolved: ResolvedDroppedPath;
+    try {
+      resolved = await resolvePath(filePath, source);
+    } catch {
+      skippedNames.push(safeName(fallbackName));
+      return;
+    }
+    if (resolved.kind !== 'file') {
+      skippedNames.push(safeName(fallbackName));
+      return;
+    }
+    const mimeType = mediaType(fallbackName) ?? mediaType(resolved.path);
     if (mimeType === undefined) {
       skippedNames.push(safeName(fallbackName));
       return;
     }
     try {
-      const ref = deps.fileRegistry.registerSelection(filePath, fallbackName);
-      tickets.push({ ...ref, mediaKind: mediaKind(mimeType), mimeType, sourceIndex });
+      const ref = deps.fileRegistry.registerSelection(resolved.path, fallbackName);
+      const ticket = { ...ref, mediaKind: mediaKind(mimeType), mimeType, sourceIndex };
+      rememberTicket(ticket);
+      tickets.push(ticket);
     } catch {
       skippedNames.push(safeName(fallbackName));
     }
@@ -264,31 +301,30 @@ export function createDroppedMediaImportService(
       for (let index = 0; index < inputs.length; index += 1) {
         const input = parseInput(inputs[index]);
         if (input === undefined) continue;
-        let info: Awaited<ReturnType<typeof statPath>>;
+        let resolved: ResolvedDroppedPath;
         try {
-          info = await statPath(input.path);
+          resolved = await resolvePath(input.path, 'direct');
         } catch {
           skippedNames.push(input.name);
           continue;
         }
-        if (info.isDirectory) {
+        if (resolved.kind === 'directory') {
           folderCount += 1;
           let entries: readonly { readonly name: string; readonly isFile: boolean }[];
           try {
-            entries = await readDirectory(input.path);
+            entries = await readDirectory(resolved.path);
           } catch {
             skippedNames.push(input.name);
             continue;
           }
           for (const entry of entries) {
             if (!entry.isFile) continue;
-            const childPath = path.join(input.path, entry.name);
-            addCandidate(childPath, entry.name, index, tickets, skippedNames);
+            const childPath = path.join(resolved.path, entry.name);
+            await addCandidate(childPath, entry.name, index, 'folder-entry', tickets, skippedNames);
           }
           continue;
         }
-        if (info.isFile) addCandidate(input.path, input.name, index, tickets, skippedNames);
-        else skippedNames.push(input.name);
+        await addCandidate(resolved.path, input.name, index, 'registered', tickets, skippedNames);
       }
       const skippedMessage =
         skippedNames.length === 0
@@ -303,14 +339,22 @@ export function createDroppedMediaImportService(
     },
 
     async importTicket(ticketId, rawDescriptor) {
-      if (!/^[A-Za-z0-9._-]{1,128}$/.test(ticketId) || active.has(ticketId)) {
+      const pending = pendingTickets.get(ticketId);
+      if (
+        !/^[A-Za-z0-9._-]{1,128}$/.test(ticketId) ||
+        pending === undefined ||
+        active.has(ticketId)
+      ) {
         return { ok: false, error: 'Dropped media ticket is invalid' };
       }
+      clearTimeout(pending.timer);
+      pendingTickets.delete(ticketId);
       const ref: OpaqueFileRef = { kind: 'local-file', id: ticketId, displayName: '' };
       let sourcePath: string;
       try {
         sourcePath = deps.fileRegistry.resolvePath(ref);
       } catch {
+        deps.fileRegistry.revoke(ref);
         return { ok: false, error: 'Dropped media ticket is invalid' };
       }
       const controller = new AbortController();
@@ -318,10 +362,11 @@ export function createDroppedMediaImportService(
       let uploadStarted = false;
       let committed = false;
       let assetId: string | undefined;
+      let registeredAssetId: string | undefined;
       try {
-        const info = await statPath(sourcePath);
-        const mimeType = mediaType(sourcePath);
-        if (!info.isFile || mimeType === undefined) {
+        const info = await resolvePath(sourcePath, 'registered');
+        const mimeType = pending.mimeType;
+        if (info.kind !== 'file' || mimeType === undefined) {
           return { ok: false, error: 'Dropped media ticket is invalid' };
         }
         if (info.size < 1) return { ok: false, error: 'Selected media file is empty' };
@@ -349,7 +394,7 @@ export function createDroppedMediaImportService(
         const importAssetId = `joylib-${sha256}`;
         assetId = importAssetId;
         const kind = mediaKind(mimeType);
-        const displayName = path.basename(sourcePath).slice(0, 255) || 'selected media';
+        const displayName = pending.displayName;
         const descriptor = safeDescriptor(mimeType, rawDescriptor);
         return await withAssetQueue(importAssetId, async () => {
           if (isCancelled(controller.signal)) throw cancellationError();
@@ -391,6 +436,7 @@ export function createDroppedMediaImportService(
           if (registration.kind === 'conflict') {
             return { ok: false, error: 'Asset ID is already registered with other content' };
           }
+          registeredAssetId = importAssetId;
 
           let written = 0;
           for await (const piece of readChunks(sourcePath, controller.signal)) {
@@ -448,6 +494,10 @@ export function createDroppedMediaImportService(
         if (uploadStarted && !committed && assetId !== undefined) {
           await deps.originals.abortOriginalUpload(assetId).catch(() => undefined);
         }
+        if (isCancelled(controller.signal) && !committed && registeredAssetId !== undefined) {
+          await deps.library?.removeEntry(registeredAssetId).catch(() => undefined);
+          deps.assets.remove(registeredAssetId);
+        }
         deps.fileRegistry.revoke(ref);
         active.delete(ticketId);
       }
@@ -458,6 +508,10 @@ export function createDroppedMediaImportService(
       if (controller === undefined) return { ok: false };
       controller.abort();
       return { ok: true };
+    },
+
+    revokeTickets(ticketIds) {
+      for (const ticketId of ticketIds) revokePendingTicket(ticketId);
     },
   };
 }

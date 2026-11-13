@@ -101,6 +101,12 @@ export function onDesktopDroppedImportProgress(
   return subscribe?.(listener) ?? (() => undefined);
 }
 
+/** Revokes every unused ticket returned for a dropped batch. */
+export async function revokeDesktopDroppedFileTickets(ticketIds: readonly string[]): Promise<void> {
+  if (!isDesktopHost() || ticketIds.length === 0) return;
+  await requireBridge().invoke('desktop.media.asset.revoke-dropped', { ticketIds });
+}
+
 function requireBridge(): DesktopJoyBridge {
   if (typeof window === 'undefined' || window.joyDesktop === undefined) {
     throw new Error('joy-desktop bridge is unavailable outside the desktop host');

@@ -13,12 +13,16 @@ import { revokeDetachedObjectUrl } from './media-object-url.js';
 import {
   onDesktopDroppedImportProgress,
   prepareDesktopDroppedFiles,
+  revokeDesktopDroppedFileTickets,
   type DesktopDroppedFileTicket,
 } from './desktop-client.js';
 
 export interface MediaImportProgress {
   readonly ratio: number;
   readonly message: string;
+  readonly fileName?: string;
+  readonly current?: number;
+  readonly total?: number;
 }
 
 export interface MediaImportOptions {
@@ -65,6 +69,7 @@ export interface DroppedMediaImportOptions {
 export interface DroppedMediaImportBatchResult {
   readonly assets: readonly BrowserAsset[];
   readonly failures: readonly { readonly displayName: string; readonly message: string }[];
+  readonly cancelled: boolean;
   readonly skippedMessage?: string;
   readonly folderDepth: 1;
   readonly folderCount: number;
@@ -185,23 +190,38 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
 export async function importDroppedMediaFiles(
   options: DroppedMediaImportOptions,
 ): Promise<DroppedMediaImportBatchResult | undefined> {
+  if (options.signal?.aborted) throw new Error('Import cancelled');
   const batch = await prepareDesktopDroppedFiles(options.files);
   if (batch === undefined) return undefined;
   const client = options.client ?? new BrowserControlPlaneClient();
-  const cache = await (options.originalAssetCache ?? openOpfsOriginalAssetCache());
-  await client.ensureProject(options.projectId, options.projectTitle);
-
   const assets: BrowserAsset[] = [];
   const failures: { displayName: string; message: string }[] = [];
+  const ticketIds = batch.tickets.map((ticket) => ticket.id);
   let activeTicketId: string | undefined;
   let activeName = '';
+  let cancelled = false;
+  const reportTicketProgress = (
+    ticket: DesktopDroppedFileTicket,
+    index: number,
+    ratio: number,
+    progressMessage: string,
+  ): void => {
+    options.onProgress?.({
+      ratio: Math.min(1, Math.max(0, ratio)),
+      message: progressMessage,
+      fileName: ticket.displayName,
+      current: index + 1,
+      total: batch.tickets.length,
+    });
+  };
   const unsubscribe = onDesktopDroppedImportProgress((progress) => {
     if (progress.ticketId !== activeTicketId) return;
     const ratio = progress.stage === 'hash' ? 0.4 * progress.ratio : 0.4 + 0.55 * progress.ratio;
-    options.onProgress?.({
-      ratio: Math.min(1, Math.max(0, ratio)),
-      message: `Importing ${activeName} locally...`,
-    });
+    const ticketIndex = batch.tickets.findIndex((ticket) => ticket.id === activeTicketId);
+    const ticket = batch.tickets[ticketIndex];
+    if (ticket !== undefined) {
+      reportTicketProgress(ticket, ticketIndex, ratio, `Importing ${activeName} locally...`);
+    }
   });
   const cancelActive = (): void => {
     if (activeTicketId !== undefined) {
@@ -210,18 +230,34 @@ export async function importDroppedMediaFiles(
   };
   options.signal?.addEventListener('abort', cancelActive);
   try {
-    for (const ticket of batch.tickets) {
-      if (options.signal?.aborted) throw new Error('Import cancelled');
+    const cache = await (options.originalAssetCache ?? openOpfsOriginalAssetCache());
+    if (options.signal?.aborted) {
+      cancelled = true;
+    } else {
+      await client.ensureProject(options.projectId, options.projectTitle);
+    }
+
+    for (let index = 0; index < batch.tickets.length && !cancelled; index += 1) {
+      if (options.signal?.aborted) {
+        cancelled = true;
+        break;
+      }
+      const ticket = batch.tickets[index]!;
       activeTicketId = ticket.id;
       activeName = ticket.displayName;
       const source = options.files[ticket.sourceIndex];
       const file = source?.name === ticket.displayName ? source : undefined;
       try {
+        reportTicketProgress(ticket, index, 0.01, `Preparing ${activeName}...`);
         const descriptor =
           file === undefined
             ? { mimeType: ticket.mimeType }
             : await describeDroppedMedia(file, ticket.mediaKind, ticket.mimeType);
-        options.onProgress?.({ ratio: 0.02, message: `Importing ${activeName} locally...` });
+        reportTicketProgress(ticket, index, 0.02, `Importing ${activeName} locally...`);
+        if (options.signal?.aborted) {
+          cancelled = true;
+          break;
+        }
         const imported = await client.importDroppedAsset(options.projectId, ticket.id, descriptor);
         assets.push(imported);
         if (file !== undefined) {
@@ -238,11 +274,12 @@ export async function importDroppedMediaFiles(
             .catch(() => undefined);
         }
         await options.onImported?.(imported, ticket);
-        options.onProgress?.({
-          ratio: 1,
-          message: `${activeName} stored in the local media library.`,
-        });
+        reportTicketProgress(ticket, index, 1, `${activeName} stored in the local media library.`);
       } catch (error) {
+        if (options.signal?.aborted) {
+          cancelled = true;
+          break;
+        }
         failures.push({
           displayName: ticket.displayName,
           message: message(error),
@@ -254,11 +291,13 @@ export async function importDroppedMediaFiles(
   } finally {
     options.signal?.removeEventListener('abort', cancelActive);
     unsubscribe();
+    await revokeDesktopDroppedFileTickets(ticketIds).catch(() => undefined);
   }
 
   return {
     assets,
     failures,
+    cancelled,
     ...(batch.skippedMessage === undefined ? {} : { skippedMessage: batch.skippedMessage }),
     folderDepth: batch.folderDepth,
     folderCount: batch.folderCount,

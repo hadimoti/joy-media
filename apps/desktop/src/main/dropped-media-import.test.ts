@@ -58,6 +58,9 @@ function makeHarness(
     fileRegistry: ticketRegistry,
     assets: {
       get: (id) => assets.get(id),
+      remove: (id) => {
+        assets.delete(id);
+      },
       register: (asset) => {
         const current = assets.get(asset.id);
         if (
@@ -70,6 +73,24 @@ function makeHarness(
         return { kind: 'registered' };
       },
     },
+    resolveDroppedPath: async (path: string) => {
+      if (
+        !/^[A-Za-z]:[\\/]/.test(path) ||
+        path
+          .replaceAll('/', '\\')
+          .split('\\')
+          .some((segment) => /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(segment))
+      ) {
+        throw new Error('Dropped path is not a supported local path');
+      }
+      const found = files.get(path);
+      if (found === undefined) throw new Error('Dropped path does not exist');
+      return {
+        path,
+        kind: found.kind,
+        size: found.bytes?.byteLength ?? 0,
+      };
+    },
     originals,
     library: {
       addAsset: async () =>
@@ -77,16 +98,6 @@ function makeHarness(
           ? { ok: true as const }
           : { ok: false as const, error: options.libraryError },
       removeEntry: async () => ({ removed: true }),
-    },
-    statPath: async (path) => {
-      const found = files.get(path);
-      return found?.kind === 'directory'
-        ? { isFile: false, isDirectory: true, size: 0 }
-        : {
-            isFile: found?.kind === 'file',
-            isDirectory: false,
-            size: found?.bytes?.byteLength ?? 0,
-          };
     },
     readDirectory: async (path) => {
       const prefix = path.endsWith('\\') ? path : `${path}\\`;
@@ -110,7 +121,16 @@ function makeHarness(
     fileExists: async (path) => [...assets.values()].some((asset) => asset.storedPath === path),
     onProgress: (event) => options.onProgress?.(event.ticketId, event.stage),
   });
-  return { files, assets, partial, readPaths, storedAssetIds, abortedAssetIds, originals, service };
+  return {
+    files,
+    assets,
+    partial,
+    readPaths,
+    storedAssetIds,
+    abortedAssetIds,
+    originals,
+    service,
+  };
 }
 
 describe('dropped media import', () => {
@@ -139,6 +159,64 @@ describe('dropped media import', () => {
 
     expect(result).toEqual({ ok: false, error: 'Dropped media ticket is invalid' });
     expect(harness.originals.appendOriginalChunk).not.toHaveBeenCalled();
+  });
+
+  it('rejects UNC, device, and reserved-name paths before stat or read', async () => {
+    const harness = makeHarness();
+    const batch = await harness.service.prepareDroppedPaths([
+      { path: '\\\\server\\share\\clip.mp4', name: 'clip.mp4' },
+      { path: '\\\\.\\C:\\clip.mp4', name: 'clip.mp4' },
+      { path: 'C:\\drop\\NUL.mp4', name: 'NUL.mp4' },
+    ]);
+
+    expect(batch.tickets).toEqual([]);
+    expect(harness.readPaths).toEqual([]);
+  });
+
+  it('expires unused tickets after two minutes', async () => {
+    const harness = makeHarness();
+    harness.files.set('C:\\drop\\clip.mp4', { kind: 'file', bytes: new Uint8Array([1, 2]) });
+    vi.useFakeTimers();
+    try {
+      const batch = await harness.service.prepareDroppedPaths([
+        { path: 'C:\\drop\\clip.mp4', name: 'clip.mp4' },
+      ]);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await expect(harness.service.importTicket(batch.tickets[0]!.id)).resolves.toEqual({
+        ok: false,
+        error: 'Dropped media ticket is invalid',
+      });
+      expect(harness.readPaths).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('revokes every ticket when a prepared batch is abandoned', async () => {
+    const harness = makeHarness();
+    harness.files.set('C:\\drop\\first.mp4', { kind: 'file', bytes: new Uint8Array([1]) });
+    harness.files.set('C:\\drop\\second.mp4', { kind: 'file', bytes: new Uint8Array([2]) });
+    const batch = await harness.service.prepareDroppedPaths([
+      { path: 'C:\\drop\\first.mp4', name: 'first.mp4' },
+      { path: 'C:\\drop\\second.mp4', name: 'second.mp4' },
+    ]);
+    const revokeTickets = (
+      harness.service as unknown as { revokeTickets?: (ticketIds: readonly string[]) => void }
+    ).revokeTickets;
+
+    expect(typeof revokeTickets).toBe('function');
+    revokeTickets?.call(
+      harness.service,
+      batch.tickets.map((ticket) => ticket.id),
+    );
+
+    for (const ticket of batch.tickets) {
+      await expect(harness.service.importTicket(ticket.id)).resolves.toEqual({
+        ok: false,
+        error: 'Dropped media ticket is invalid',
+      });
+    }
+    expect(harness.readPaths).toEqual([]);
   });
 
   it('walks a dropped folder one level and ignores nested folders', async () => {
@@ -244,6 +322,7 @@ describe('dropped media import', () => {
     expect(harness.partial.size).toBe(0);
     expect(harness.abortedAssetIds).toHaveLength(1);
     expect(harness.storedAssetIds).toHaveLength(0);
+    expect(harness.assets.size).toBe(0);
   });
 
   it('preserves Persian names and absolute paths longer than MAX_PATH', async () => {

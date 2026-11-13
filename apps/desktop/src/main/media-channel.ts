@@ -47,6 +47,7 @@ export const MEDIA_CHANNELS = [
   'desktop.media.asset.upload-original-abort',
   'desktop.media.asset.import-dropped',
   'desktop.media.asset.cancel-dropped-import',
+  'desktop.media.asset.revoke-dropped',
   'desktop.media.project.document.get',
   'desktop.media.project.document.put',
   'desktop.media.render.enqueue',
@@ -76,7 +77,10 @@ export interface MediaChannelDeps {
   readonly assets: LocalAssetPort;
   readonly originals: LocalOriginalWriter;
   /** Main-process drop tickets and streaming imports. Absent means the import route refuses. */
-  readonly droppedMediaImports?: Pick<DroppedMediaImportService, 'importTicket' | 'cancel'>;
+  readonly droppedMediaImports?: Pick<
+    DroppedMediaImportService,
+    'importTicket' | 'cancel' | 'revokeTickets'
+  >;
   readonly library?: AssetLibraryPort;
   readonly whisper?: {
     readonly getEndpoint: () => { readonly endpoint: string; readonly modelId: string } | undefined;
@@ -687,6 +691,23 @@ export function createMediaChannelHandlers(
       : { ok: false, error: 'Import is not running' };
   };
 
+  const revokeDroppedMediaTickets = (payload: unknown): MediaResult => {
+    if (deps.droppedMediaImports === undefined) return notAvailable();
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'Invalid dropped media ticket batch' };
+    }
+    const ticketIds = (payload as Record<string, unknown>)['ticketIds'];
+    if (
+      !Array.isArray(ticketIds) ||
+      ticketIds.length > 512 ||
+      !ticketIds.every((ticketId) => typeof ticketId === 'string' && ID_PATTERN.test(ticketId))
+    ) {
+      return { ok: false, error: 'Invalid dropped media ticket batch' };
+    }
+    deps.droppedMediaImports.revokeTickets(ticketIds);
+    return { ok: true, data: { revoked: true } };
+  };
+
   const getDocument = (payload: unknown): MediaResult => {
     const request = asDocumentRead(payload);
     if (request === undefined) return { ok: false, error: 'Invalid media request' };
@@ -722,6 +743,7 @@ export function createMediaChannelHandlers(
     'desktop.media.asset.upload-original-abort': abortOriginalUpload,
     'desktop.media.asset.import-dropped': importDroppedMedia,
     'desktop.media.asset.cancel-dropped-import': cancelDroppedMediaImport,
+    'desktop.media.asset.revoke-dropped': revokeDroppedMediaTickets,
     'desktop.media.project.document.get': getDocument,
     'desktop.media.project.document.put': putDocument,
     'desktop.media.preview.frame': notAvailable,

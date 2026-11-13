@@ -14,6 +14,59 @@ const {
 } = require('./ipc-channels.cjs');
 
 const IPC_ENDPOINT = 'joy-desktop-ipc';
+const DROP_AUTH_WINDOW_MS = 2000;
+let authorizedDrop;
+
+/** @param {unknown} file */
+function droppedFileEntry(file) {
+  const name = file && typeof file.name === 'string' ? file.name.slice(0, 255) : 'unnamed file';
+  let path = '';
+  try {
+    path = webUtils.getPathForFile(file);
+  } catch {
+    // A JavaScript-created File has no filesystem-backed path. Main will skip it.
+  }
+  return {
+    path,
+    name,
+    size: file && typeof file.size === 'number' ? file.size : -1,
+    lastModified: file && typeof file.lastModified === 'number' ? file.lastModified : -1,
+    type: file && typeof file.type === 'string' ? file.type : '',
+  };
+}
+
+function sameDroppedFiles(expected, received) {
+  return (
+    expected.length === received.length &&
+    expected.every((entry, index) => {
+      const candidate = received[index];
+      return (
+        candidate !== undefined &&
+        entry.path === candidate.path &&
+        entry.name === candidate.name &&
+        entry.size === candidate.size &&
+        entry.lastModified === candidate.lastModified &&
+        entry.type === candidate.type
+      );
+    })
+  );
+}
+
+// The editor must consume this capture-phase authorization from its drop handler.
+window.addEventListener(
+  'drop',
+  (event) => {
+    authorizedDrop = undefined;
+    if (event.isTrusted !== true || !event.dataTransfer) return;
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (files.length === 0 || files.length > 512) return;
+    authorizedDrop = {
+      entries: files.map(droppedFileEntry),
+      expiresAt: Date.now() + DROP_AUTH_WINDOW_MS,
+    };
+  },
+  true,
+);
 
 /** @param {string} channel @param {unknown} [payload] */
 async function invoke(channel, payload) {
@@ -35,16 +88,16 @@ contextBridge.exposeInMainWorld('joyDesktop', {
     if (!Array.isArray(files) || files.length > 512) {
       throw new Error('Dropped media list is invalid');
     }
-    const entries = files.map((file) => {
-      const name = file && typeof file.name === 'string' ? file.name.slice(0, 255) : 'unnamed file';
-      let path = '';
-      try {
-        path = webUtils.getPathForFile(file);
-      } catch {
-        // A JavaScript-created File has no filesystem-backed path. Main will name it as skipped.
-      }
-      return { path, name };
-    });
+    const drop = authorizedDrop;
+    authorizedDrop = undefined;
+    const entries = files.map(droppedFileEntry);
+    if (
+      drop === undefined ||
+      Date.now() >= drop.expiresAt ||
+      !sameDroppedFiles(drop.entries, entries)
+    ) {
+      throw new Error('Dropped files must come from the current trusted drop event');
+    }
     const result = await ipcRenderer.invoke(DROP_FILES_ENDPOINT, entries);
     if (!result || result.ok !== true) {
       throw new Error((result && result.error) || 'Dropped files could not be prepared');

@@ -2,11 +2,57 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BrowserAsset, BrowserAssetRegistration } from './control-plane-client.js';
 import {
   describeMedia,
+  importDroppedMediaFiles,
   importMediaFile,
   normalizedMimeType,
   sniffMediaMimeType,
   type MediaImportOptions,
 } from './media-import.js';
+
+function installDroppedFileBridge(batch: {
+  readonly tickets: readonly {
+    readonly kind: 'local-file';
+    readonly id: string;
+    readonly displayName: string;
+    readonly mediaKind: 'video' | 'audio' | 'image';
+    readonly mimeType: string;
+    readonly sourceIndex: number;
+  }[];
+  readonly folderDepth: 1;
+  readonly folderCount: number;
+}) {
+  const listeners: ((progress: {
+    ticketId: string;
+    stage: 'hash' | 'store';
+    ratio: number;
+  }) => void)[] = [];
+  const bridge = {
+    channels: [],
+    invoke: vi.fn(async () => undefined),
+    importDroppedFiles: vi.fn(async () => batch),
+    onDroppedImportProgress: vi.fn((listener) => {
+      listeners.push(listener);
+      return () => {
+        const index = listeners.indexOf(listener);
+        if (index >= 0) listeners.splice(index, 1);
+      };
+    }),
+  };
+  const priorWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', {
+    value: { joyDesktop: bridge },
+    configurable: true,
+    writable: true,
+  });
+  return {
+    bridge,
+    listeners,
+    restore() {
+      if (priorWindow === undefined) Reflect.deleteProperty(globalThis, 'window');
+      else Object.defineProperty(globalThis, 'window', priorWindow);
+    },
+  };
+}
 
 describe('importMediaFile', () => {
   it('uses the content-addressed asset ID for registration and the original cache by default', async () => {
@@ -253,6 +299,130 @@ describe('importMediaFile', () => {
         'image/png',
       ),
     ).toBe('image/webp');
+  });
+});
+
+describe('importDroppedMediaFiles', () => {
+  const ticket = {
+    kind: 'local-file' as const,
+    id: 'drop-ticket-1',
+    displayName: 'clip.mp4',
+    mediaKind: 'video' as const,
+    mimeType: 'video/mp4',
+    sourceIndex: 0,
+  };
+  const batch = { tickets: [ticket], folderDepth: 1 as const, folderCount: 0 };
+
+  it('does not request tickets or start imports when already cancelled', async () => {
+    const dropped = installDroppedFileBridge(batch);
+    const controller = new AbortController();
+    controller.abort();
+    const importDroppedAsset = vi.fn();
+    try {
+      await expect(
+        importDroppedMediaFiles({
+          projectId: 'project-1',
+          projectTitle: 'Project',
+          files: [new File(['bytes'], 'clip.mp4', { type: 'video/mp4' })],
+          signal: controller.signal,
+          client: {
+            ensureProject: vi.fn(async () => undefined),
+            importDroppedAsset,
+            cancelDroppedImport: vi.fn(async () => undefined),
+          },
+          originalAssetCache: { putFromVerifiedDesktopImport: vi.fn(async () => undefined) },
+        }),
+      ).rejects.toThrow(/cancel/i);
+      expect(dropped.bridge.importDroppedFiles).not.toHaveBeenCalled();
+      expect(importDroppedAsset).not.toHaveBeenCalled();
+    } finally {
+      dropped.restore();
+    }
+  });
+
+  it('checks cancellation after metadata inspection and revokes the abandoned batch', async () => {
+    const dropped = installDroppedFileBridge(batch);
+    const controller = new AbortController();
+    const importDroppedAsset = vi.fn(async () => {
+      throw new Error('must not start after cancellation');
+    });
+    try {
+      const result = await importDroppedMediaFiles({
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        files: [new File(['bytes'], 'clip.mp4', { type: 'video/mp4' })],
+        signal: controller.signal,
+        client: {
+          ensureProject: vi.fn(async () => undefined),
+          importDroppedAsset,
+          cancelDroppedImport: vi.fn(async () => undefined),
+        },
+        originalAssetCache: { putFromVerifiedDesktopImport: vi.fn(async () => undefined) },
+        onProgress: ({ ratio }) => {
+          if (ratio === 0.02) controller.abort();
+        },
+      });
+
+      expect(importDroppedAsset).not.toHaveBeenCalled();
+      expect(result?.cancelled).toBe(true);
+      expect(dropped.bridge.invoke).toHaveBeenCalledWith('desktop.media.asset.revoke-dropped', {
+        ticketIds: ['drop-ticket-1'],
+      });
+    } finally {
+      dropped.restore();
+    }
+  });
+
+  it('reports file name, batch count, percentage, and progress from the main-process stream', async () => {
+    const dropped = installDroppedFileBridge(batch);
+    const file = new File(['bytes'], 'clip.mp4', { type: 'video/mp4' });
+    const importedAsset = browserAsset({
+      id: 'asset-1',
+      kind: 'video',
+      displayName: 'clip.mp4',
+      sha256: 'a'.repeat(64),
+      bytes: file.size,
+      descriptor: { mimeType: 'video/mp4' },
+      locations: [],
+    });
+    const progress: {
+      ratio: number;
+      message: string;
+      fileName?: string;
+      current?: number;
+      total?: number;
+    }[] = [];
+    try {
+      await importDroppedMediaFiles({
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        files: [file],
+        client: {
+          ensureProject: vi.fn(async () => undefined),
+          importDroppedAsset: vi.fn(async () => {
+            dropped.listeners[0]?.({ ticketId: ticket.id, stage: 'store', ratio: 0.5 });
+            return importedAsset;
+          }),
+          cancelDroppedImport: vi.fn(async () => undefined),
+        },
+        originalAssetCache: { putFromVerifiedDesktopImport: vi.fn(async () => undefined) },
+        onProgress: (event) => progress.push(event),
+      });
+
+      expect(progress).toContainEqual(
+        expect.objectContaining({
+          fileName: 'clip.mp4',
+          current: 1,
+          total: 1,
+          ratio: 0.675,
+        }),
+      );
+      expect(dropped.bridge.invoke).toHaveBeenCalledWith('desktop.media.asset.revoke-dropped', {
+        ticketIds: ['drop-ticket-1'],
+      });
+    } finally {
+      dropped.restore();
+    }
   });
 });
 

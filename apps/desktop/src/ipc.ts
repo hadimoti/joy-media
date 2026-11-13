@@ -37,6 +37,7 @@ export const IPC_CHANNELS = [
   'desktop.media.asset.upload-original-abort',
   'desktop.media.asset.import-dropped',
   'desktop.media.asset.cancel-dropped-import',
+  'desktop.media.asset.revoke-dropped',
   'desktop.media.project.document.get',
   'desktop.media.project.document.put',
   'desktop.media.render.enqueue',

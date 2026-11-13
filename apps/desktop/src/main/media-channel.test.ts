@@ -97,10 +97,11 @@ describe('publicJobError', () => {
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {
     expect(new Set(MEDIA_CHANNELS).size).toBe(MEDIA_CHANNELS.length);
-    expect(MEDIA_CHANNELS).toHaveLength(18);
+    expect(MEDIA_CHANNELS).toHaveLength(19);
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-chunk');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-finish');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-abort');
+    expect(MEDIA_CHANNELS).toContain('desktop.media.asset.revoke-dropped');
   });
 
   it('connects localhost through 127.0.0.1 while preserving the Host header and saved model provenance', async () => {

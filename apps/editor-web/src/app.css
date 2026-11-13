@@ -2521,6 +2521,53 @@ label {
 .timeline-toolbar {
   gap: 0.4rem;
 }
+.dropped-import-progress {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  margin: 0.15rem 0 0.45rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-bg-control) 70%, transparent);
+  color: var(--joy-text-primary);
+  font-size: 0.75rem;
+}
+.dropped-import-progress-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dropped-import-progress-count {
+  flex: none;
+  color: var(--joy-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.dropped-import-progress progress {
+  flex: none;
+  width: 7rem;
+  height: 0.45rem;
+  accent-color: var(--joy-accent);
+}
+.dropped-import-progress button {
+  flex: none;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.dropped-import-progress button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
 .timeline-track {
   /* Must be 0: playhead/grid/ruler origin is exactly the header width.
      A flex gap here shifts the lane and leaves an empty strip at t=0. */
