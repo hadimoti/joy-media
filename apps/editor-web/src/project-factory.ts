@@ -1,21 +1,28 @@
-import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
+import type { ExportPresetId, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import {
   buildReferenceSpikeProject,
   emptySpikeProject,
   REFERENCE_PROJECT,
 } from '@joy-media/test-fixtures';
 import { INITIAL_EDITOR_PROJECT, DEFAULT_COMPOSITION_SIZE } from './editor-project.js';
+import { exportPresetForCanvas, type CanvasSize } from './export-presets.js';
 import type { ProjectCatalogEntry } from './project-catalog.js';
 import {
   buildTimelineElementsShowcase,
   TIMELINE_ELEMENTS_SHOWCASE,
 } from './timeline-elements-showcase.js';
 
-/** Blank creative documents for a brand-new library project (same id on both slices). */
+/**
+ * Blank creative documents for a brand-new library project (same id on both slices).
+ * The canvas is the one the person chose in New project (default 1920×1080);
+ * the export preset defaults to the one that matches that canvas.
+ */
 export function createBlankProjectDocuments(
   projectId: string,
   title: string,
   now: string = new Date().toISOString(),
+  canvas: CanvasSize = DEFAULT_COMPOSITION_SIZE,
+  exportPreset: ExportPresetId = exportPresetForCanvas(canvas.width, canvas.height),
 ): { readonly timeline: SpikeProject; readonly visual: JoyProjectV1 } {
   const base = emptySpikeProject({
     trackCount: 2,
@@ -29,6 +36,8 @@ export function createBlankProjectDocuments(
       ...base.compositions,
       root: {
         ...base.compositions.root!,
+        width: canvas.width,
+        height: canvas.height,
         tracks: base.compositions.root!.tracks.map((track, index) =>
           index === 0
             ? { ...track, family: 'visual' as const, name: 'Visual 1', order: 1 }
@@ -44,13 +53,14 @@ export function createBlankProjectDocuments(
     createdAt: now,
     updatedAt: now,
     rootCompositionId: 'root',
+    exportPreset,
     settings: { defaultLocale: 'en' },
     compositions: {
       root: {
         id: 'root',
         name: 'Root composition',
-        width: DEFAULT_COMPOSITION_SIZE.width,
-        height: DEFAULT_COMPOSITION_SIZE.height,
+        width: canvas.width,
+        height: canvas.height,
         pixelAspectRatio: { num: 1, den: 1 },
         frameRate: { num: 30, den: 1 },
         durationUs: 60_000_000,
