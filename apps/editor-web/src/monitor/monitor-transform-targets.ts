@@ -50,7 +50,7 @@ export const TRANSFORM_BLOCK_MESSAGES: Readonly<Record<TransformBlockReason, str
   'parent-zero-scale': 'The parent has no size, so this element cannot be moved or scaled here.',
   expression: 'An expression sets this value. Edit the expression in the Inspector.',
   animated:
-    'Position or rotation is animated, so moving the anchor point would move the picture. Remove those keyframes first.',
+    'Position, size, or rotation is animated, so moving the anchor point could move the picture later. Remove those keyframes first.',
 };
 
 /** The document values each gesture writes. */
@@ -171,6 +171,7 @@ function channelReason(
 function anchorReason(
   reasonForAll: TransformBlockReason | undefined,
   object: VisualObjectV1 | undefined,
+  ancestors: readonly VisualObjectV1[],
   parent: ParentTransform | undefined,
   drawnRotationDeg: number,
 ): TransformBlockReason | undefined {
@@ -181,6 +182,13 @@ function anchorReason(
     drawnRotationDeg === 0 ? ['rotationDeg'] : ['rotationDeg', 'x', 'y'];
   if (channels.some((channel) => object.expressions?.[channel] !== undefined)) return 'expression';
   if (channels.some((channel) => object.animations?.[channel] !== undefined)) return 'animated';
+  const ancestorChannels = ['rotationDeg', 'scaleX', 'scaleY'] as const;
+  if (
+    ancestors.some((ancestor) =>
+      ancestorChannels.some((channel) => ancestor.animations?.[channel] !== undefined),
+    )
+  )
+    return 'animated';
   return undefined;
 }
 
@@ -240,10 +248,12 @@ export function buildTransformTargets(
         ? { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0 }
         : localValuesAt(object, input.timeUs);
     const ancestors = object === undefined ? [] : ancestorObjectIds(input.project, object);
+    const ancestorObjects = ancestors.map((id) => input.project.visualObjects[id]!);
     const geometry = boxGeometry(element.bounds, transform);
     const anchorBlocked = anchorReason(
       reasonForAll,
       object,
+      ancestorObjects,
       parent,
       geometry.transform.rotationDeg,
     );

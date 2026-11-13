@@ -62,14 +62,29 @@ describe('the anchor point in the transform', () => {
     expect(validateJoyProjectV1(withTransform({ ...TRANSFORM }))).toEqual([]);
   });
 
-  it('accepts any finite anchor, inside or outside the box', () => {
+  it('accepts finite anchors from one box-size outside through two box-sizes across', () => {
     for (const anchor of [
+      { anchorX: -1, anchorY: 2 },
       { anchorX: 0, anchorY: 0 },
       { anchorX: 1, anchorY: 1 },
-      { anchorX: -0.5, anchorY: 2.25 },
       { anchorX: 0.3 },
     ])
       expect(validateJoyProjectV1(withTransform({ ...TRANSFORM, ...anchor }))).toEqual([]);
+  });
+
+  it('rejects anchors outside [-1, 2] and names the visual object', () => {
+    for (const [key, value] of [
+      ['anchorX', -1.01],
+      ['anchorY', 2.01],
+    ] as const) {
+      const diagnostics = validateJoyProjectV1(withTransform({ ...TRANSFORM, [key]: value }));
+      expect(diagnostics).toContainEqual(
+        expect.objectContaining({
+          path: 'visualObjects.shape',
+          message: `visual object "shape" transform ${key} must be within [-1, 2]`,
+        }),
+      );
+    }
   });
 
   it('rejects an anchor that is not a finite number', () => {
@@ -77,13 +92,14 @@ describe('the anchor point in the transform', () => {
       const messages = validateJoyProjectV1(
         withTransform({ ...TRANSFORM, anchorX: bad, anchorY: bad }),
       ).map((diagnostic) => diagnostic.message);
-      expect(messages).toContain('transform anchorX must be finite');
-      expect(messages).toContain('transform anchorY must be finite');
+      expect(messages).toContain('visual object "shape" transform anchorX must be finite');
+      expect(messages).toContain('visual object "shape" transform anchorY must be finite');
     }
   });
 
-  it('the migration leaves an old project exactly as it was (no anchor is added)', () => {
-    const old = withTransform({ ...TRANSFORM });
+  it('loading old project JSON leaves its transform and centred drawing unchanged', () => {
+    const old = JSON.parse(JSON.stringify(withTransform({ ...TRANSFORM }))) as JoyProjectV1;
+    expect(validateJoyProjectV1(old)).toEqual([]);
     const before = JSON.stringify(old);
     const latest = migrateToLatest(old);
     expect(JSON.stringify(old)).toBe(before);
@@ -91,14 +107,25 @@ describe('the anchor point in the transform', () => {
     expect('anchorX' in latest.visualObjects.shape!.transform).toBe(false);
     expect('anchorY' in latest.visualObjects.shape!.transform).toBe(false);
     expect(validateJoyProjectV3(latest)).toEqual([]);
+    expect(transformAnchor(latest.visualObjects.shape!.transform)).toEqual({ x: 0.5, y: 0.5 });
   });
 
-  it('the migration keeps a saved anchor and the latest schema accepts it', () => {
-    const anchored = withTransform({ ...TRANSFORM, anchorX: 0, anchorY: 0.75 });
-    const latest = migrateToLatest(anchored);
-    expect(latest.visualObjects.shape!.transform.anchorX).toBe(0);
-    expect(latest.visualObjects.shape!.transform.anchorY).toBe(0.75);
-    expect(validateJoyProjectV3(latest)).toEqual([]);
+  it('a saved anchor survives a JSON round trip and latest-schema migration', () => {
+    const anchored = withTransform({ ...TRANSFORM, anchorX: -1, anchorY: 2 });
+    const saved = JSON.parse(JSON.stringify(anchored)) as JoyProjectV1;
+    expect(validateJoyProjectV1(saved)).toEqual([]);
+    const latest = migrateToLatest(saved);
+    const restored = JSON.parse(JSON.stringify(latest)) as JoyProjectV1;
+    expect(restored.visualObjects.shape!.transform).toEqual({
+      ...TRANSFORM,
+      anchorX: -1,
+      anchorY: 2,
+    });
+    expect(validateJoyProjectV3(restored)).toEqual([]);
+  });
+
+  it('the latest schema also rejects an anchor that is not finite', () => {
+    const latest = migrateToLatest(withTransform({ ...TRANSFORM, anchorX: 0, anchorY: 0.75 }));
     const broken = {
       ...latest,
       visualObjects: {
@@ -106,7 +133,7 @@ describe('the anchor point in the transform', () => {
       },
     };
     expect(validateJoyProjectV3(broken).map((diagnostic) => diagnostic.message)).toContain(
-      'transform anchorY must be finite',
+      'visual object "shape" transform anchorY must be finite',
     );
   });
 });

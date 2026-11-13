@@ -500,6 +500,34 @@ describe('T-M05b: keyframed values and the anchor point on the targets', () => {
     expect(TRANSFORM_BLOCK_MESSAGES.animated).toMatch(/anchor point/);
   });
 
+  it('an animated parent rotation or any farther ancestor scale blocks the anchor', () => {
+    const animatedParent = targets(['clip-child'], {
+      project: project({
+        objects: {
+          holder: { animations: { rotationDeg: curve(90) } } as Partial<VisualObjectV1>,
+        },
+      }),
+    })[0]!;
+    expect(animatedParent.anchorBlocked).toBe('animated');
+
+    const animatedGrandparent = targets(['clip-child'], {
+      project: project({
+        objects: {
+          holder: { parentId: 'outer' } as Partial<VisualObjectV1>,
+          outer: {
+            id: 'outer',
+            kind: 'null',
+            transform: t(0, 0),
+            animations: { scaleX: curve(1) },
+          } as Partial<VisualObjectV1>,
+        },
+      }),
+    })[0]!;
+    expect(animatedGrandparent.ancestorObjectIds).toEqual(['holder', 'outer']);
+    expect(animatedGrandparent.anchorBlocked).toBe('animated');
+    expect(TRANSFORM_BLOCK_MESSAGES.animated).toMatch(/picture later/i);
+  });
+
   it('what greys everything greys the anchor too', () => {
     expect(targets(['clip-shape'], { locked: ['clip-shape'] })[0]!.anchorBlocked).toBe('locked');
     expect(targets(['clip-shape'], { project: project({ camera: true }) })[0]!.anchorBlocked).toBe(

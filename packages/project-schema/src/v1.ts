@@ -90,7 +90,8 @@ export interface VisualObjectTransformV1 {
   /**
    * The anchor point (T-M05b, ADR-0046 section 5.8): the point the element
    * turns about, as a fraction of its drawn (cropped) box, 0 at the left (top)
-   * edge and 1 at the right (bottom) edge. Absent means 0.5, the centre, which
+   * edge and 1 at the right (bottom) edge. Values from -1 through 2 are
+   * allowed. Absent means 0.5, the centre, which
    * is where every element turned before v1.1.1, so older projects draw and
    * export exactly as before. It never moves the element by itself (with
    * rotation 0 it changes nothing) and it is not animatable.
@@ -1159,9 +1160,16 @@ function validateVisualObject(
       diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'transform positionZ must be finite', path),
     );
   for (const key of ['anchorX', 'anchorY'] as const) {
-    if (value.transform[key] !== undefined && !Number.isFinite(value.transform[key]))
+    const anchor = value.transform[key];
+    const label = `visual object "${value.id}" transform ${key}`;
+    if (anchor === undefined) continue;
+    if (typeof anchor !== 'number' || !Number.isFinite(anchor))
       diagnostics.push(
-        diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', `transform ${key} must be finite`, path),
+        diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', `${label} must be finite`, path),
+      );
+    else if (anchor < -1 || anchor > 2)
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', `${label} must be within [-1, 2]`, path),
       );
   }
   if (typeof value.transform.scaleX === 'number' && value.transform.scaleX <= 0)
