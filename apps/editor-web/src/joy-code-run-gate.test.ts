@@ -118,6 +118,14 @@ describe('contrast', () => {
     expect(ratio).toBeGreaterThanOrEqual(4.5);
   });
 
+  it('colours the ready send glyph with the accent-on token (glyph on an accent fill)', () => {
+    // --joy-on-accent is the documented token for text and glyphs printed on the accent
+    // fill; the text-roles test only restricts --joy-text* names, so this is allowed.
+    expect(ruleColourToken('.joy-code-send', 'color')).toBe('--joy-on-accent');
+    expect(ruleColourToken('.joy-code-send', 'background')).toBe('--joy-accent');
+    expect(rootToken('--joy-on-accent')).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
   it('reads the send button at 4.5 to 1 or more when it is ready to send', () => {
     const colour = ruleColourToken('.joy-code-send', 'color');
     const background = ruleColourToken('.joy-code-send', 'background');
