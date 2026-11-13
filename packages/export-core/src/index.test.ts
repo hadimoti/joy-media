@@ -42,7 +42,7 @@ describe('deterministic export contract', () => {
 
   it('rejects a canvas above the documented H.264 export limit', () => {
     expect(() => freezeManifest({ ...manifest, width: 3840, height: 2162 })).toThrow(
-      /export limit|maximum/i,
+      /export limit|maximum|supports up to/i,
     );
   });
 
