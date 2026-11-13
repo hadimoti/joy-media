@@ -65,6 +65,7 @@ import { useMonitorViewOptions } from './MonitorViewMenu.js';
 import { createMonitorPerformanceTracker, recordMonitorFrame } from './monitor-performance.js';
 import { monitorZoomLabel } from './monitor-view.js';
 import {
+  MONITOR_KEY_SCOPE,
   MonitorViewport,
   monitorFrameRect,
   useDevicePixelRatio,
@@ -72,6 +73,8 @@ import {
   useSpaceHold,
   type MonitorViewportSelection,
 } from './MonitorViewport.js';
+import { nextElementClipId } from './monitor-keyboard.js';
+import { scopedKeyTable } from '../keyboard-shortcuts.js';
 import { MonitorSelectionOverlay } from './MonitorSelectionOverlay.js';
 import { MonitorTransformBox } from './MonitorTransformBox.js';
 import { boxContainsPoint } from './monitor-hit-test.js';
@@ -426,6 +429,42 @@ function MonitorPanelContent({
       },
     };
   }, [clearSelection, selectClips, toggleSelection, transformController]);
+  // Keyboard-only editing of the picture (T-M12): with focus on the picture (its
+  // stage), Tab and Shift+Tab select the next and previous element, and Esc leaves it.
+  useEffect(() => {
+    const onStage = (target: EventTarget | null) =>
+      target instanceof HTMLElement && target.hasAttribute('data-monitor-stage');
+    const visibleIds = () =>
+      readMonitorElementsRef
+        .current()
+        .filter((element) => element.hidden !== true)
+        .map((element) => element.clipId);
+    const removeTab = scopedKeyTable.register({
+      scope: MONITOR_KEY_SCOPE,
+      match: (event) =>
+        event.key === 'Tab' &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        onStage(event.target ?? null) &&
+        visibleIds().length > 0,
+      run: (event) => {
+        const next = nextElementClipId(visibleIds(), selectedIdsRef.current, event.shiftKey);
+        if (next !== undefined) selectClips([next]);
+      },
+    });
+    const removeEscape = scopedKeyTable.register({
+      scope: MONITOR_KEY_SCOPE,
+      match: (event) => event.key === 'Escape' && onStage(event.target ?? null),
+      run: (event) => {
+        if (event.target instanceof HTMLElement) event.target.blur();
+      },
+    });
+    return () => {
+      removeTab();
+      removeEscape();
+    };
+  }, [selectClips]);
   const monitorResourceTokenRef = useRef(
     `monitor:${crypto.randomUUID?.() ?? Date.now().toString(36)}`,
   );
