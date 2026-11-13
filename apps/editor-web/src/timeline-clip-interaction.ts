@@ -1,5 +1,5 @@
 import type { CommandTransaction } from '@joy-media/commands';
-import type { Clip } from '@joy-media/project-schema';
+import type { Clip, Composition } from '@joy-media/project-schema';
 
 export const TIMELINE_KEYBOARD_NUDGE_US = 100_000;
 
@@ -120,6 +120,105 @@ export function buildTimelineClipGroupMoveTransaction(input: {
       {
         type: 'timeline.moveElements',
         payload: { compositionId: input.compositionId, moves },
+      },
+    ],
+  };
+}
+
+/** Build one undoable transaction that inserts media and shifts later clips. */
+export function buildTimelineClipInsertTransaction(input: {
+  readonly composition: Composition;
+  readonly trackId: string;
+  readonly asset: {
+    readonly assetId: string;
+    readonly displayName: string;
+    readonly durationUs: number;
+  };
+  readonly clipId: string;
+  readonly startUs: number;
+}): CommandTransaction | undefined {
+  const track = input.composition.tracks.find((candidate) => candidate.id === input.trackId);
+  const startUs = Math.round(input.startUs);
+  const durationUs = input.asset.durationUs;
+  if (
+    track === undefined ||
+    track.locked === true ||
+    input.asset.assetId.length === 0 ||
+    input.clipId.length === 0 ||
+    !Number.isSafeInteger(startUs) ||
+    startUs < 0 ||
+    !Number.isSafeInteger(durationUs) ||
+    durationUs <= 0 ||
+    input.composition.tracks.some((candidate) =>
+      candidate.clips.some((clip) => clip.id === input.clipId),
+    ) ||
+    track.clips.some((clip) => clip.startUs < startUs && clip.startUs + clip.durationUs > startUs)
+  ) {
+    return undefined;
+  }
+
+  const commands: CommandTransaction['commands'][number][] = track.clips
+    .filter((clip) => clip.startUs >= startUs)
+    .sort((left, right) => right.startUs - left.startUs)
+    .map((clip) => ({
+      type: 'timeline.moveClip',
+      payload: {
+        compositionId: input.composition.id,
+        trackId: input.trackId,
+        clipId: clip.id,
+        newStartUs: clip.startUs + durationUs,
+      },
+    }));
+  commands.push({
+    type: 'timeline.insertClip',
+    payload: {
+      compositionId: input.composition.id,
+      trackId: input.trackId,
+      clip: {
+        id: input.clipId,
+        kind: 'video',
+        assetId: input.asset.assetId,
+        startUs,
+        durationUs,
+        sourceInUs: 0,
+      },
+    },
+  });
+
+  return { label: `Insert ${input.asset.displayName}`, commands };
+}
+
+/** Repoint an existing video clip at another media asset without changing its range. */
+export function buildTimelineClipReplaceTransaction(input: {
+  readonly composition: Composition;
+  readonly trackId: string;
+  readonly clip: Clip;
+  readonly assetId: string;
+  readonly displayName: string;
+}): CommandTransaction | undefined {
+  const track = input.composition.tracks.find((candidate) => candidate.id === input.trackId);
+  if (
+    track === undefined ||
+    track.locked === true ||
+    input.clip.kind !== 'video' ||
+    input.assetId.length === 0 ||
+    input.assetId === input.clip.assetId ||
+    !track.clips.some((candidate) => candidate.id === input.clip.id)
+  ) {
+    return undefined;
+  }
+
+  return {
+    label: `Replace with ${input.displayName}`,
+    commands: [
+      {
+        type: 'timeline.setClipAsset',
+        payload: {
+          compositionId: input.composition.id,
+          trackId: input.trackId,
+          clipId: input.clip.id,
+          assetId: input.assetId,
+        },
       },
     ],
   };

@@ -1323,6 +1323,7 @@ export function EffectsSection({
                 key={effect.id}
                 className="inspector-effect-item"
                 data-effect-instance-id={effect.id}
+                data-effect-id={effect.effectId}
                 onDragOver={(event) => {
                   if (draggedEffectId !== null && draggedEffectId !== effect.id) {
                     event.preventDefault();

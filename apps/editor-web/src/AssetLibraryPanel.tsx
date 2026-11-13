@@ -63,7 +63,7 @@ import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import { MissingMediaSection } from './MissingMediaSection.js';
 import type { MissingMediaHost } from './missing-media-host.js';
 import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-icons.js';
-import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
+import { beginEditorPointerDrag } from './editor-pointer-dnd.js';
 import {
   summarizeBulkDeleteOutcomes,
   type BulkDeleteOutcome,
@@ -1221,8 +1221,31 @@ export function AssetLibraryPanel({
                       key={asset.id}
                       data-asset-id={asset.id}
                       className={`asset-card${selected ? ' is-selected' : ''}`}
-                      draggable
-                      title={`${asset.displayName} — ${detailHint}. Drag onto a timeline track`}
+                      onPointerDown={(event) => {
+                        if (
+                          (event.target as HTMLElement).closest(
+                            '.asset-card-actions, input, label, [data-no-drag]',
+                          ) !== null
+                        )
+                          return;
+                        beginEditorPointerDrag(
+                          event.nativeEvent,
+                          event.currentTarget,
+                          {
+                            kind: 'media',
+                            asset: {
+                              assetId: asset.id,
+                              kind: asset.kind,
+                              displayName: asset.displayName,
+                              sha256: asset.sha256,
+                              bytes: asset.bytes,
+                              descriptor: asset.descriptor,
+                            },
+                          },
+                          { allowInteractiveTarget: true },
+                        );
+                      }}
+                      title={`${asset.displayName} — ${detailHint}. Drag onto the timeline or Monitor. Ctrl inserts; Alt replaces a clip.`}
                       onClick={(event) => {
                         if ((event.target as HTMLElement).closest('button, input, label') !== null)
                           return;
@@ -1233,18 +1256,6 @@ export function AssetLibraryPanel({
                         ) {
                           void openPreview(asset, derivatives);
                         }
-                      }}
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData(
-                          JOY_MEDIA_ASSET_DND,
-                          JSON.stringify({
-                            assetId: asset.id,
-                            kind: asset.kind,
-                            displayName: asset.displayName,
-                            descriptor: asset.descriptor,
-                          }),
-                        );
-                        event.dataTransfer.effectAllowed = 'copy';
                       }}
                     >
                       <label
