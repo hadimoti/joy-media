@@ -63,6 +63,7 @@ import { focusCoverTransform, getFirstPartySceneThumbUrl } from './html-scene-th
 import { EditorPanelContext } from './editor-panel-context.js';
 import { JOY_COLORS } from './theme.js';
 import { PanelShell } from './PanelShell.js';
+import { objectDisplayLabel, objectDisplayLabels } from './object-display-label.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { createMotionScene, type MotionSceneCatalogEntry } from './motion-scene-catalog.js';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
@@ -662,8 +663,8 @@ function HtmlSceneInfoPanel({ scene }: { readonly scene: FirstPartyScenePackage 
           <dd>{scene.name}</dd>
         </div>
         <div>
-          <dt>Package id</dt>
-          <dd dir="ltr">{scene.id}</dd>
+          <dt>Kind</dt>
+          <dd>HTML scene</dd>
         </div>
         <div>
           <dt>Duration</dt>
@@ -915,7 +916,9 @@ function HtmlScenesSection({
             {existing.map((scene) => {
               const packageId = scene.scenePackageId ?? '';
               const pkg = findFirstPartyScene(packageId);
-              const label = pkg?.name ?? packageId;
+              // Names only: the scene's name, or "HTML scene" when its package is unknown.
+              const label = pkg?.name ?? 'HTML scene';
+              const removeName = pkg === undefined ? label : `HTML scene ${pkg.name}`;
               const listInfoActive = infoSceneId === `inst:${scene.id}`;
               return (
                 <li key={scene.id} dir="ltr">
@@ -937,11 +940,11 @@ function HtmlScenesSection({
                   <button
                     type="button"
                     className="icon-button"
-                    title={`Remove ${scene.id}`}
-                    aria-label={`Remove HTML scene ${scene.id}`}
+                    title={`Remove ${removeName}`}
+                    aria-label={`Remove ${removeName}`}
                     onClick={() =>
                       onDispatch({
-                        label: `Remove HTML scene ${scene.id}`,
+                        label: `Remove ${removeName}`,
                         commands: [{ type: 'htmlScene.remove', payload: { objectId: scene.id } }],
                       })
                     }
@@ -1177,6 +1180,8 @@ export function MotionPanel({
   const needsSelection = subtab === 'presets' || subtab === 'spatial';
   const inactive = needsSelection && object === undefined;
   const target = object ?? IDLE_OBJECT;
+  const objectLabels = objectDisplayLabels(Object.values(allObjects));
+  const targetLabel = objectLabels.get(target.id) ?? objectDisplayLabel(target);
 
   return (
     <PanelShell
@@ -1250,8 +1255,8 @@ export function MotionPanel({
             <div className="motion-presets">
               <header className="motion-presets-target">
                 <span className="motion-presets-target-label">Target</span>
-                <p className="motion-object-id" title={target.id}>
-                  {inactive ? 'Select a clip' : target.id}
+                <p className="motion-object-id" title={inactive ? undefined : targetLabel}>
+                  {inactive ? 'Select a clip' : targetLabel}
                 </p>
               </header>
               <div className="motion-controls motion-presets-toolbar">
@@ -1265,8 +1270,7 @@ export function MotionPanel({
                     <option value="">(none)</option>
                     {parentCandidates.map((candidate) => (
                       <option key={candidate.id} value={candidate.id}>
-                        {candidate.id}
-                        {candidate.kind === 'null' ? ' (null)' : ''}
+                        {objectLabels.get(candidate.id) ?? objectDisplayLabel(candidate)}
                       </option>
                     ))}
                   </select>

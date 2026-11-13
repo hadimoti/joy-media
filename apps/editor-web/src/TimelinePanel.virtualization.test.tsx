@@ -44,7 +44,7 @@ describe('TimelinePanel virtualization focus behavior', () => {
     });
 
     const scrollRoot = container.querySelector<HTMLElement>('.timeline-tracks');
-    const lockButton = container.querySelector<HTMLButtonElement>('[aria-label="Lock track-0"]');
+    const lockButton = container.querySelector<HTMLButtonElement>('[aria-label="Lock V1"]');
     expect(scrollRoot).not.toBeNull();
     expect(lockButton).not.toBeNull();
     Object.defineProperties(scrollRoot!, {
@@ -64,8 +64,8 @@ describe('TimelinePanel virtualization focus behavior', () => {
     expect(scrollRoot!.scrollTop).toBeLessThanOrEqual(
       scrollRoot!.scrollHeight - scrollRoot!.clientHeight,
     );
-    expect(container.querySelector('[aria-label="Lock track-0"]')).not.toBeNull();
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Lock track-0');
+    expect(container.querySelector('[aria-label="Lock V1"]')).not.toBeNull();
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Lock V1');
     expect(composition.tracks).toHaveLength(20);
 
     await act(async () => root.unmount());

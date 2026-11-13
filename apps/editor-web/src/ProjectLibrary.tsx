@@ -454,7 +454,7 @@ export function ProjectLibrary({
                           ? `Moved to Trash: ${formatUpdated(entry.trashedAt)}`
                           : `Last updated: ${formatUpdated(entry.updatedAt)}`}
                       </span>
-                      <span>Local project · Timeline ready</span>
+                      <span>Local project · Ready to edit</span>
                     </span>
                   </button>
                   <button

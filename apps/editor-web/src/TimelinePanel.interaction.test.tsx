@@ -40,7 +40,9 @@ describe('TimelinePanel clip interaction semantics', () => {
     );
     expect(markup).toContain('>V1</span>');
     expect(markup).toContain('>V2</span>');
-    expect(markup).toContain('>track-1</span>');
+    // Track ids stay in data attributes only; an unnamed track shows its code.
+    expect(markup).not.toContain('>track-1<');
+    expect(markup).not.toContain('Change label color for track-1');
   });
 
   it('renders an explicit Back control while drilling into a merged composition', () => {
