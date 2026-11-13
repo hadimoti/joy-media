@@ -178,12 +178,18 @@ function anchorReason(
   if (reasonForAll !== undefined) return reasonForAll;
   if (object === undefined) return 'no-object';
   if (!parentSpaceInvertible(parent)) return 'parent-zero-scale';
-  const channels: (keyof LocalTransform)[] =
-    drawnRotationDeg === 0 ? ['rotationDeg'] : ['rotationDeg', 'x', 'y'];
-  if (channels.some((channel) => object.expressions?.[channel] !== undefined)) return 'expression';
-  if (channels.some((channel) => object.animations?.[channel] !== undefined)) return 'animated';
+  const channels: (keyof LocalTransform)[] = ['rotationDeg', 'scaleX', 'scaleY'];
+  if (drawnRotationDeg !== 0) channels.push('x', 'y');
   const ancestorChannels = ['rotationDeg', 'scaleX', 'scaleY'] as const;
   if (
+    channels.some((channel) => object.expressions?.[channel] !== undefined) ||
+    ancestors.some((ancestor) =>
+      ancestorChannels.some((channel) => ancestor.expressions?.[channel] !== undefined),
+    )
+  )
+    return 'expression';
+  if (
+    channels.some((channel) => object.animations?.[channel] !== undefined) ||
     ancestors.some((ancestor) =>
       ancestorChannels.some((channel) => ancestor.animations?.[channel] !== undefined),
     )

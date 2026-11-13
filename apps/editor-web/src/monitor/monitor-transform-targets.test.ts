@@ -486,10 +486,6 @@ describe('T-M05b: keyframed values and the anchor point on the targets', () => {
       }),
     })[0]!;
     expect(rotating.anchorBlocked).toBe('animated');
-    const scripted = targets(['clip-shape'], {
-      project: project({ objects: { shape: { expressions: { rotationDeg: 'time' } } } }),
-    })[0]!;
-    expect(scripted.anchorBlocked).toBe('expression');
     // The child is drawn turned a quarter (by its parent): its position must hold still too.
     const child = targets(['clip-child'], {
       project: project({
@@ -526,6 +522,50 @@ describe('T-M05b: keyframed values and the anchor point on the targets', () => {
     expect(animatedGrandparent.ancestorObjectIds).toEqual(['holder', 'outer']);
     expect(animatedGrandparent.anchorBlocked).toBe('animated');
     expect(TRANSFORM_BLOCK_MESSAGES.animated).toMatch(/picture later/i);
+  });
+
+  it('an animated scale on a turned object blocks moving its anchor', () => {
+    for (const channel of ['scaleX', 'scaleY'] as const) {
+      const turned = targets(['clip-shape'], {
+        project: project({
+          objects: {
+            shape: { animations: { [channel]: curve(1) } } as Partial<VisualObjectV1>,
+          },
+        }),
+        transforms: {
+          ...TRANSFORMS,
+          shape: { translateX: 100, translateY: 200, scaleX: 1, scaleY: 1, rotationDeg: 45 },
+        },
+      })[0]!;
+
+      expect(turned.anchorBlocked, channel).toBe('animated');
+    }
+  });
+
+  it('an expression-driven rotation on the selected object blocks moving its anchor', () => {
+    const scripted = targets(['clip-shape'], {
+      project: project({ objects: { shape: { expressions: { rotationDeg: 'time' } } } }),
+    })[0]!;
+
+    expect(scripted.anchorBlocked).toBe('expression');
+  });
+
+  it('expression-driven scale or rotation on an ancestor blocks moving the child anchor', () => {
+    for (const channel of ['scaleX', 'scaleY', 'rotationDeg'] as const) {
+      const scriptedAncestor = targets(['clip-child'], {
+        project: project({
+          objects: { holder: { expressions: { [channel]: 'time' } } },
+        }),
+      })[0]!;
+
+      expect(scriptedAncestor.anchorBlocked, channel).toBe('expression');
+    }
+  });
+
+  it('leaves anchor movement available when transforms are not animated or expression-driven', () => {
+    const [shape] = targets(['clip-shape']);
+
+    expect(shape!.anchorBlocked).toBeUndefined();
   });
 
   it('what greys everything greys the anchor too', () => {
