@@ -385,6 +385,8 @@ import {
 } from './ui-preferences.js';
 import type { EditorUiPreferencesV2 } from './ui-preferences.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
+import { usePopup, usePopupManager, usePopupsClosedWhile } from './popup-manager.js';
+import { POPUP_IDS } from './popup-ids.js';
 import { workspacePresetLayout, workspacePresetLayoutKey } from './workspace-presets.js';
 import {
   DOCK_LAYOUT_KEY,
@@ -950,7 +952,15 @@ function EditorWorkspace({
   });
   const [timelineTrackFlags, setTimelineTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const [timelineAutoFit, setTimelineAutoFit] = useState(true);
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  // Header popups and the command palette share one open slot (OB-18): opening one closes the rest.
+  const {
+    openId: openPopupId,
+    open: openPopup,
+    close: closePopup,
+    toggle: togglePopup,
+  } = usePopupManager();
+  const paletteOpen = openPopupId === POPUP_IDS.commandPalette;
+  const paletteMenu = usePopup(POPUP_IDS.commandPalette);
   const [query, setQuery] = useState('');
   const [transcriptionError, setTranscriptionError] = useState<string>();
   const [exporting, setExporting] = useState(false);
@@ -987,12 +997,12 @@ function EditorWorkspace({
     loadAudioState(storage, projectId),
   );
   const [audioHydrated, setAudioHydrated] = useState(false);
-  const [processesOpen, setProcessesOpen] = useState(false);
+  const processesMenu = usePopup(POPUP_IDS.recentProcesses);
   const [processFilter, setProcessFilter] = useState<EditorUiPreferencesV2['processFilter']>(
     () => loadEditorUiPreferences(storage).processFilter,
   );
   const projectPackageInputRef = useRef<HTMLInputElement | null>(null);
-  const [exportPresetOpen, setExportPresetOpen] = useState(false);
+  const exportPresetMenu = usePopup(POPUP_IDS.exportPreset);
   const [stickerTick, setStickerTick] = useState(0);
   const [joyAgentAttachedAssets, setJoyAgentAttachedAssets] = useState<
     readonly JoyAgentAttachedAsset[]
@@ -1112,6 +1122,10 @@ function EditorWorkspace({
     }[]
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
+  // A dialog that opens closes every header popup and the palette (OB-18).
+  usePopupsClosedWhile(
+    keyboardShortcutsOpen || agentSettingsOpen || modelDrawerOpen || assetLibrarySettingsOpen,
+  );
   const [viewMode, setViewMode] = useState<EditorViewMode>(
     () => loadEditorUiPreferences(storage).viewMode,
   );
@@ -1124,7 +1138,6 @@ function EditorWorkspace({
   workspacePresetRef.current = workspacePreset;
   const [createTool, setCreateTool] = useState<FeatureToolId>('media');
   const [enhanceTool, setEnhanceTool] = useState<FeatureToolId>('effects');
-  const paletteRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
   const [effectStudioSession, setEffectStudioSession] = useState<
     { readonly recipeId: string; readonly objectId?: string } | undefined
@@ -3335,9 +3348,9 @@ function EditorWorkspace({
     (id: string) => {
       if (id === 'history.undo') undo();
       if (id === 'history.redo') redo();
-      setPaletteOpen(false);
+      closePopup(POPUP_IDS.commandPalette);
     },
-    [redo, undo],
+    [closePopup, redo, undo],
   );
   const activatePanel = useCallback((panelId: string) => {
     const route = featureActivationRoute(panelId);
@@ -3576,18 +3589,6 @@ function EditorWorkspace({
     applyDockLayout(api, next, workspacePresetRef.current);
   }, [applyDockLayout, persistUiPreferences, storage]);
 
-  useEffect(() => {
-    if (!paletteOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const root = paletteRef.current;
-      if (root === null || root.contains(event.target as Node)) return;
-      setPaletteOpen(false);
-    };
-    // Capture so we close before other UI consumes the event; skip the same
-    // gesture that opened the palette by listening only after mount.
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [paletteOpen]);
   const recordExportEntry = useCallback(
     (entry: ProjectExportProcessEntry) => {
       const next = upsertProjectEntry(exportHistoryRef.current, entry);
@@ -3643,11 +3644,11 @@ function EditorWorkspace({
           redo();
           break;
         case 'palette.toggle':
-          setPaletteOpen((open) => !open);
+          togglePopup(POPUP_IDS.commandPalette);
           break;
         case 'palette.close':
-          setPaletteOpen(false);
-          setProcessesOpen(false);
+          closePopup(POPUP_IDS.commandPalette);
+          closePopup(POPUP_IDS.recentProcesses);
           break;
         case 'playhead.back':
           seek(Math.max(0, current.playheadUs - 1_000_000));
@@ -3756,7 +3757,18 @@ function EditorWorkspace({
       window.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('blur', onBlur);
     };
-  }, [dispatchTimeline, redo, seek, session, showToast, timelineTrackFlags, togglePlayback, undo]);
+  }, [
+    closePopup,
+    dispatchTimeline,
+    redo,
+    seek,
+    session,
+    showToast,
+    timelineTrackFlags,
+    togglePlayback,
+    togglePopup,
+    undo,
+  ]);
 
   const runSelectedClipAction = useCallback(
     (kind: 'split' | 'duplicate' | 'delete') => {
@@ -5116,7 +5128,7 @@ function EditorWorkspace({
           break;
         case 'edit.commandPalette':
         case 'view.commandPalette':
-          setPaletteOpen(true);
+          openPopup(POPUP_IDS.commandPalette);
           break;
         case 'clip.split':
           runSelectedClipAction('split');
@@ -5167,6 +5179,7 @@ function EditorWorkspace({
       handleExport,
       issueAgentPanelCommand,
       onBackToLibrary,
+      openPopup,
       redo,
       runSelectedClipAction,
       undo,
@@ -6763,7 +6776,10 @@ function EditorWorkspace({
               </button>
               <button
                 className="icon-button"
-                onClick={() => setPaletteOpen(true)}
+                aria-haspopup="dialog"
+                aria-expanded={paletteOpen}
+                data-popup-trigger={POPUP_IDS.commandPalette}
+                onClick={(event) => paletteMenu.toggle(event.currentTarget)}
                 aria-label="Command palette"
                 title="Command palette (Ctrl+K)"
               >
@@ -6840,18 +6856,15 @@ function EditorWorkspace({
                   <CloseIcon />
                 </button>
               )}
-              <div className="header-menu">
+              <div className="header-menu" ref={exportPresetMenu.rootRef}>
                 <button
                   type="button"
                   className="icon-button header-export-preset-trigger"
                   aria-label="Export preset"
                   aria-haspopup="menu"
-                  aria-expanded={exportPresetOpen}
+                  aria-expanded={exportPresetMenu.open}
                   title={`Export preset: ${EXPORT_PRESETS[exportPreset].label} (${exportCanvas.width}×${exportCanvas.height})`}
-                  onClick={() => {
-                    setExportPresetOpen((open) => !open);
-                    setProcessesOpen(false);
-                  }}
+                  onClick={(event) => exportPresetMenu.toggle(event.currentTarget)}
                 >
                   <span className="header-export-preset-label">
                     {EXPORT_PRESETS[exportPreset].label}
@@ -6860,7 +6873,7 @@ function EditorWorkspace({
                     <ChevronDownIcon />
                   </span>
                 </button>
-                {exportPresetOpen && (
+                {exportPresetMenu.open && (
                   <section
                     className="header-dropdown header-export-preset-dropdown"
                     aria-label="Export preset"
@@ -6883,7 +6896,7 @@ function EditorWorkspace({
                                   'error',
                                 );
                               }
-                              setExportPresetOpen(false);
+                              exportPresetMenu.close();
                             }}
                           >
                             <span className="preset-icon-group" aria-hidden="true">
@@ -6905,16 +6918,14 @@ function EditorWorkspace({
                   </section>
                 )}
               </div>
-              <div className="header-menu">
+              <div className="header-menu" ref={processesMenu.rootRef}>
                 <button
                   className="icon-button header-processes-trigger"
                   aria-label="Recent processes"
-                  aria-expanded={processesOpen}
+                  aria-haspopup="dialog"
+                  aria-expanded={processesMenu.open}
                   title="Recent processes"
-                  onClick={() => {
-                    setProcessesOpen((open) => !open);
-                    setExportPresetOpen(false);
-                  }}
+                  onClick={(event) => processesMenu.toggle(event.currentTarget)}
                 >
                   <PngMaskIcon src="/assets/24_recent-exports.png" size={14} />
                   {processCounts.active + processCounts.attention > 0 && (
@@ -6926,8 +6937,8 @@ function EditorWorkspace({
                     </span>
                   )}
                 </button>
-                {processesOpen && (
-                  <section className="header-dropdown" aria-label="Recent processes">
+                {processesMenu.open && (
+                  <section className="header-dropdown" role="dialog" aria-label="Recent processes">
                     <h3>Process Center</h3>
                     <div className="process-filter-row" role="group" aria-label="Process filter">
                       {(
@@ -7107,7 +7118,12 @@ function EditorWorkspace({
           </header>
 
           {paletteOpen && (
-            <section ref={paletteRef} className="palette" aria-label="Command palette">
+            <section
+              ref={paletteMenu.rootRef}
+              className="palette"
+              role="dialog"
+              aria-label="Command palette"
+            >
               <input
                 autoFocus
                 value={query}

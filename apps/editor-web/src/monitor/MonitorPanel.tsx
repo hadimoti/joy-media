@@ -66,6 +66,8 @@ import {
   mediaControlPlaneClient,
   stickerImageCache,
 } from '../editor-runtime-singletons.js';
+import { usePopup } from '../popup-manager.js';
+import { POPUP_IDS } from '../popup-ids.js';
 import { MonitorTransport } from './MonitorTransport.js';
 import { monitorZoomLabel } from './monitor-view.js';
 import {
@@ -223,9 +225,9 @@ function MonitorPanelContent({
     agentPreviewState.document.preview === previewVisualProject
       ? agentPreviewState.document
       : undefined;
-  const [zoomDrawerOpen, setZoomDrawerOpen] = useState(false);
+  // The zoom drawer is one popup (OB-18): outside click, Escape and a second popup close it.
+  const zoomDrawer = usePopup(POPUP_IDS.monitorZoom);
   const panelRef = useRef<HTMLElement | null>(null);
-  const transportRef = useRef<HTMLDivElement | null>(null);
   const initialPreviewPreference = useRef(
     loadEditorUiPreferences(storage).monitorPreview ??
       DEFAULT_EDITOR_UI_PREFERENCES.monitorPreview!,
@@ -414,24 +416,6 @@ function MonitorPanelContent({
     document.addEventListener('fullscreenchange', syncFullscreenState);
     return () => document.removeEventListener('fullscreenchange', syncFullscreenState);
   }, []);
-
-  useEffect(() => {
-    if (!zoomDrawerOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const root = transportRef.current;
-      if (root === null || root.contains(event.target as Node)) return;
-      setZoomDrawerOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setZoomDrawerOpen(false);
-    };
-    window.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [zoomDrawerOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1020,9 +1004,7 @@ function MonitorPanelContent({
         />
       </MonitorViewport>
       <MonitorTransport
-        transportRef={transportRef}
-        zoomDrawerOpen={zoomDrawerOpen}
-        setZoomDrawerOpen={setZoomDrawerOpen}
+        zoomDrawer={zoomDrawer}
         zoomFit={monitorView.fit}
         zoom={monitorView.view.zoom}
         onZoomFit={monitorView.setFit}
