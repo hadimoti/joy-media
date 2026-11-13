@@ -3033,7 +3033,9 @@ label {
   left: auto;
   right: auto;
   bottom: auto;
-  z-index: 30;
+  /* Portaled to body, so it must clear Dockview's overlay band (--dv-overlay-z-index 999; floating
+     groups stack up from it by 2 each) and stay below the dialog layer (AppDialogs, 1100). */
+  z-index: 1050;
   display: grid;
   box-sizing: border-box;
   min-width: min(12rem, calc(100vw - 1rem));

@@ -55,8 +55,10 @@ export function PanelHeaderMenu({
       onSelect: () => moveTo(position),
     })),
     {
-      id: 'reset-layout',
-      label: 'Reset layout',
+      id: 'reset-workspace',
+      label: 'Reset workspace',
+      tooltip:
+        'Clears every saved panel layout for all workspaces, plus saved view settings. Your projects and media are not touched.',
       onSelect: onResetLayout,
     },
   ];

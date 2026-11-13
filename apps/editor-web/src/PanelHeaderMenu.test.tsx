@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   DockviewApi,
@@ -147,7 +150,7 @@ describe('Dockview panel header menu', () => {
     expect(current.trigger.getAttribute('aria-label')).toBe('More actions for Inspector');
   });
 
-  it('runs only Dockview-supported group actions and the app layout reset', async () => {
+  it('runs only Dockview-supported group actions and the workspace reset', async () => {
     const current = await mountMenu();
     let items = await openMenu(current);
 
@@ -158,10 +161,13 @@ describe('Dockview panel header menu', () => {
       'Move group to left of Media',
       'Move group to right of Media',
       'Move group to bottom of Media',
-      'Reset layout',
+      'Reset workspace',
     ]);
     expect(items.find((item) => itemLabel(item) === 'Float group')?.title).toBe(
       'Moves the whole panel group into a floating window.',
+    );
+    expect(items.find((item) => itemLabel(item) === 'Reset workspace')?.title).toBe(
+      'Clears every saved panel layout for all workspaces, plus saved view settings. Your projects and media are not touched.',
     );
     await select(items, 'Close panel');
     expect(current.closePanel).toHaveBeenCalledOnce();
@@ -188,7 +194,7 @@ describe('Dockview panel header menu', () => {
     }
 
     items = await openMenu(current);
-    await select(items, 'Reset layout');
+    await select(items, 'Reset workspace');
     expect(current.resetLayout).toHaveBeenCalledOnce();
   });
 
@@ -207,8 +213,21 @@ describe('Dockview panel header menu', () => {
     const current = await mountMenu({ throughPanelContext: true });
     const items = await openMenu(current);
 
-    await select(items, 'Reset layout');
+    await select(items, 'Reset workspace');
     expect(current.resetLayout).toHaveBeenCalledOnce();
+  });
+
+  it('stacks the popover above the Dockview overlay band it is portaled over', () => {
+    // jsdom's URL is not a file URL, so build the path from this module's file location.
+    const appCss = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), 'app.css'),
+      'utf8',
+    );
+    const rule = /\.action-overflow-popover\s*\{[^}]*?z-index:\s*(\d+);/.exec(appCss);
+
+    expect(rule, 'the popover rule sets a z-index').toBeTruthy();
+    // Dockview's overlay variable defaults to 999 and floating groups stack above it.
+    expect(Number(rule?.[1])).toBeGreaterThan(999);
   });
 
   it('disables actions the current group cannot perform', async () => {
