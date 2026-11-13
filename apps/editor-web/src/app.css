@@ -3144,13 +3144,16 @@ label {
 }
 .timeline-clip--audio,
 .timeline-clip--voice {
-  /* Audio sits one surface step apart from video — by value, never by hue. */
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 42%, rgb(0 0 0 / 18%)),
-    var(--joy-bg-control);
   border-color: var(--joy-border);
   border-top-color: rgb(255 255 255 / 10%);
   border-bottom-color: rgb(0 0 0 / 55%);
+}
+/* Audio sits one surface step apart from video — by value, never by hue. Audio clips
+   take the T-D11 type tint, so only voice keeps this background. */
+.timeline-clip--voice {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 42%, rgb(0 0 0 / 18%)),
+    var(--joy-bg-control);
 }
 .timeline-clip--comp {
   background:
@@ -3158,10 +3161,9 @@ label {
     var(--joy-bg-active);
   --clip-rail: var(--joy-accent);
 }
-.timeline-clip--text,
+/* Text and effect take the T-D11 type tint, so they are not listed here. */
 .timeline-clip--caption,
 .timeline-clip--motion,
-.timeline-clip--effect,
 .timeline-clip--filter,
 .timeline-clip--adjust,
 .timeline-clip--scene3d {
@@ -3301,7 +3303,7 @@ label {
     0 2px 4px rgb(0 0 0 / 38%),
     0 6px 14px rgb(0 0 0 / 34%);
 }
-.timeline-clip--audio:hover,
+/* Audio hover is set by the T-D11 hover rule below; only voice keeps its own. */
 .timeline-clip--voice:hover {
   background:
     linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 42%, rgb(0 0 0 / 26%)),
