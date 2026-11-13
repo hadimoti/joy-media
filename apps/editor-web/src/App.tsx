@@ -4115,7 +4115,10 @@ function EditorWorkspace({
           // fresh server attempt. Failure is best-effort because the asset may
           // already have been removed by the Worker/control-plane cleanup.
           await mediaControlPlaneClient
-            .deleteAsset(controlPlaneProject.controlPlaneProjectId, retryEntry.stagedAssetId)
+            .deleteInternalAsset(
+              controlPlaneProject.controlPlaneProjectId,
+              retryEntry.stagedAssetId,
+            )
             .catch(() => undefined);
         }
         const estimate = await navigator.storage?.estimate?.();
@@ -4910,6 +4913,7 @@ function EditorWorkspace({
             id: stagedExportAssetId,
             kind: 'video',
             displayName: `${exportFilename}.stage`,
+            internal: true,
             sha256: stagedSha256,
             bytes: stagedBlob.size,
             descriptor: {
@@ -5098,7 +5102,7 @@ function EditorWorkspace({
         lastExportRef.current = { entryId, url: pendingExportUrl };
         if (stagedExportAssetId !== undefined) {
           await mediaControlPlaneClient
-            .deleteAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
+            .deleteInternalAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
             .catch(() => undefined);
           stagedExportAssetId = undefined;
         }
@@ -5212,7 +5216,7 @@ function EditorWorkspace({
             // temporary asset on failure/cancellation so retries cannot leave
             // orphaned media or collide with a previous attempt.
             await mediaControlPlaneClient
-              .deleteAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
+              .deleteInternalAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
               .catch(() => undefined);
             stagedExportAssetId = undefined;
           }

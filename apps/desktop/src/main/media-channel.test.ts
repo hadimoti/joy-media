@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { ProviderUnavailableError } from '@joy-media/provider-sdk';
 import { join } from 'node:path';
+import { createAssetLibrary } from '../store/asset-library.js';
 import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import type { DispatchJob } from '../jobs/job-dispatch.js';
@@ -23,13 +24,14 @@ afterEach(() => {
 });
 
 function setup(
-  library?: AssetLibraryPort,
+  library?: AssetLibraryPort | ((db: LocalDatabase) => AssetLibraryPort),
   whisper?: {
     endpoint?: string;
     modelId?: string;
   },
 ) {
   const db = new LocalDatabase({ filePath: ':memory:', now: () => 'T0' });
+  const assetLibrary = typeof library === 'function' ? library(db) : library;
   let ids = 0;
   const orchestrator = createJobOrchestrator({
     store: db.jobDispatch,
@@ -45,7 +47,7 @@ function setup(
     projectDocuments: db.projectDocuments,
     assets: db.localAssets,
     originals: createLocalOriginalWriter({ directory: originalsDir, assets: db.localAssets }),
-    ...(library === undefined ? {} : { library }),
+    ...(assetLibrary === undefined ? {} : { library: assetLibrary }),
     ...(whisper === undefined
       ? {}
       : {
@@ -97,7 +99,8 @@ describe('publicJobError', () => {
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {
     expect(new Set(MEDIA_CHANNELS).size).toBe(MEDIA_CHANNELS.length);
-    expect(MEDIA_CHANNELS).toHaveLength(19);
+    expect(MEDIA_CHANNELS).toHaveLength(20);
+    expect(MEDIA_CHANNELS).toContain('desktop.media.asset.remove-internal');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-chunk');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-finish');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-abort');
@@ -365,6 +368,8 @@ describe('desktop.media channels', () => {
     const library: AssetLibraryPort = {
       addAsset: async () => ({ ok: true }),
       removeEntry,
+      removeInternalAsset: async () => ({ removed: false }),
+      removeInternalEntries: async () => undefined,
     };
     const { handlers } = setup(library);
     const id = `joylib-${'a'.repeat(64)}`;
@@ -391,6 +396,8 @@ describe('desktop.media channels', () => {
     const library: AssetLibraryPort = {
       addAsset: async () => ({ ok: true }),
       removeEntry,
+      removeInternalAsset: async () => ({ removed: false }),
+      removeInternalEntries: async () => undefined,
     };
     const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { handlers } = setup(library);
@@ -869,6 +876,10 @@ describe('desktop.media channels', () => {
       async removeEntry() {
         return { removed: false };
       },
+      async removeInternalAsset() {
+        return { removed: false };
+      },
+      async removeInternalEntries() {},
     });
     const bytes = Buffer.from('original-bytes');
     const sha256 = createHash('sha256').update(bytes).digest('hex');
@@ -884,5 +895,90 @@ describe('desktop.media channels', () => {
     ).toEqual({ ok: false, error: 'The asset library could not be updated: disk full' });
     expect(addedId).toBe('asset-2');
     expect(db.localAssets.storedPath('asset-2')).toBeDefined();
+  });
+
+  it('keeps internal registrations private and removes them by registration id', async () => {
+    const libraryDirectory = mkdtempSync(join(tmpdir(), 'joy-media-export-library-'));
+    tempDirs.push(libraryDirectory);
+    const { db, handlers } = setup((database) =>
+      createAssetLibrary({
+        directory: () => libraryDirectory,
+        registrations: database.localAssets,
+      }),
+    );
+    const removeInternalAsset = handlers['desktop.media.asset.remove-internal'];
+    const sharedBytes = Buffer.from('user media and staged export share these bytes');
+    const privateBytes = Buffer.from('private staged export bytes');
+
+    const registerAndUpload = async (
+      id: string,
+      bytes: Buffer,
+      displayName: string,
+      internal = false,
+    ) => {
+      const registration = {
+        id,
+        kind: 'video',
+        displayName,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        bytes: bytes.length,
+        descriptor: { mimeType: 'video/mp4' },
+        ...(internal ? { internal: true } : {}),
+      };
+      expect(handlers['desktop.media.asset.register'](registration)).toEqual({
+        ok: true,
+        data: { id },
+      });
+      expect(db.localAssets.get(id)?.internal).toBe(internal || undefined);
+      await expect(
+        handlers['desktop.media.asset.upload-original']({
+          assetId: id,
+          bytes: new Uint8Array(bytes),
+        }),
+      ).resolves.toEqual({ ok: true, data: { assetId: id } });
+      return registration;
+    };
+
+    const user = await registerAndUpload('user-video-1', sharedBytes, 'my-video.mp4');
+    const sharedStage = await registerAndUpload(
+      'stage-attempt-2',
+      sharedBytes,
+      'my-video.mp4.stage',
+      true,
+    );
+    const privateStage = await registerAndUpload(
+      'stage-attempt-3',
+      privateBytes,
+      'private-export.mp4.stage',
+      true,
+    );
+    const privateContentId = `joylib-${privateStage.sha256}`;
+    await expect(removeInternalAsset({ assetId: privateContentId })).resolves.toEqual({
+      ok: true,
+      data: { removed: false },
+    });
+    await expect(removeInternalAsset({ assetId: sharedStage.id })).resolves.toEqual({
+      ok: true,
+      data: { removed: false },
+    });
+    await expect(removeInternalAsset({ assetId: privateStage.id })).resolves.toEqual({
+      ok: true,
+      data: { removed: true },
+    });
+
+    const catalog = JSON.parse(readFileSync(join(libraryDirectory, 'catalog.json'), 'utf8')) as {
+      counts: unknown;
+      assets: Array<Record<string, unknown>>;
+    };
+    expect(catalog.counts).toEqual({ total: 1, audio: 0, image: 0, video: 1 });
+    expect(catalog.assets).toHaveLength(1);
+    expect(catalog.assets[0]).toMatchObject({
+      id: `joylib-${user.sha256}`,
+      displayName: 'my-video.mp4',
+    });
+    expect(catalog.assets[0]?.internal).not.toBe(true);
+    expect(catalog.assets.some((asset) => String(asset['displayName']).endsWith('.stage'))).toBe(
+      false,
+    );
   });
 });
