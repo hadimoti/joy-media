@@ -1,9 +1,11 @@
 import type {
   AnimationCurveV1,
   JoyProjectV1,
+  PropertyAnimationV2,
   SpatialPathV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
+import { calculateMediaFitTransform, type MediaFitTransform } from './media-fit-transform.js';
 import { readClipObjectIdsMap } from './sticker-bindings.js';
 
 export type CanvasReframeMode = 'fit' | 'fill' | 'keep';
@@ -35,35 +37,46 @@ export function reframeProjectClips(
   if (mode === 'keep') return project;
   const composition = project.compositions[project.rootCompositionId];
   if (composition === undefined) return project;
-  const scale = canvasReframeScale(
+  const reframe = canvasReframeTransform(
     { width: composition.width, height: composition.height },
     target,
     mode,
   );
-  if (scale === undefined) return project;
+  if (reframe === undefined) return project;
 
-  const clipIds = new Set(
-    composition.tracks.flatMap((track) => track.clips.map((clip) => clip.id)),
-  );
-  const objectIds = new Set(
-    Object.entries(readClipObjectIdsMap(project))
-      .filter(([clipId]) => clipIds.has(clipId))
-      .flatMap(([, objectIds]) => objectIds),
-  );
+  const objectIds = collectCanvasReframeObjectIds(project);
   if (objectIds.size === 0) return project;
 
   const visualObjects = { ...project.visualObjects };
+  const skippedObjectIds = collectCanvasReframeSkippedObjectIds(project, objectIds);
+  let changed = false;
   for (const objectId of objectIds) {
     const object = visualObjects[objectId];
     if (object === undefined) continue;
-    visualObjects[objectId] = scaleVisualObject(
-      object,
-      { width: composition.width, height: composition.height },
-      target,
-      scale,
-    );
+    if (skippedObjectIds.has(objectId)) continue;
+    visualObjects[objectId] = scaleVisualObject(object, reframe);
+    changed = true;
   }
-  return { ...project, visualObjects };
+  const propertyAnimations = scaleProjectPropertyAnimations(
+    project,
+    objectIds,
+    skippedObjectIds,
+    reframe,
+  );
+  if (propertyAnimations !== project.propertyAnimations) changed = true;
+  return changed
+    ? {
+        ...project,
+        visualObjects,
+        ...(propertyAnimations === undefined ? {} : { propertyAnimations }),
+      }
+    : project;
+}
+
+/** Number of parentless clip/camera roots skipped because their transforms are not safely remappable. */
+export function canvasReframeSkippedObjectCount(project: JoyProjectV1): number {
+  const objectIds = collectCanvasReframeObjectIds(project);
+  return collectCanvasReframeSkippedObjectIds(project, objectIds).size;
 }
 
 export function canvasReframeScale(
@@ -71,26 +84,34 @@ export function canvasReframeScale(
   target: CanvasSize,
   mode: Exclude<CanvasReframeMode, 'keep'>,
 ): number | undefined {
+  return canvasReframeTransform(source, target, mode)?.scaleX;
+}
+
+function canvasReframeTransform(
+  source: CanvasSize,
+  target: CanvasSize,
+  mode: Exclude<CanvasReframeMode, 'keep'>,
+): MediaFitTransform | undefined {
   if (
     ![source.width, source.height, target.width, target.height].every(
       (value) => Number.isFinite(value) && value > 0,
     )
   )
     return undefined;
-  const widthScale = target.width / source.width;
-  const heightScale = target.height / source.height;
-  return mode === 'fit' ? Math.min(widthScale, heightScale) : Math.max(widthScale, heightScale);
+  return calculateMediaFitTransform({
+    sourceWidth: source.width,
+    sourceHeight: source.height,
+    frameWidth: target.width,
+    frameHeight: target.height,
+    mode,
+  });
 }
 
-function scaleVisualObject(
-  object: VisualObjectV1,
-  source: CanvasSize,
-  target: CanvasSize,
-  scale: number,
-): VisualObjectV1 {
+function scaleVisualObject(object: VisualObjectV1, reframe: MediaFitTransform): VisualObjectV1 {
   const transform = object.transform;
-  const mapX = (value: number) => target.width / 2 + (value - source.width / 2) * scale;
-  const mapY = (value: number) => target.height / 2 + (value - source.height / 2) * scale;
+  const scale = reframe.scaleX;
+  const mapX = (value: number) => reframe.x + value * scale;
+  const mapY = (value: number) => reframe.y + value * scale;
   const animations = object.animations;
   const nextAnimations =
     animations === undefined
@@ -100,28 +121,6 @@ function scaleVisualObject(
             property,
             curve === undefined ? curve : scaleAnimation(curve, property, mapX, mapY, scale),
           ]),
-        );
-  const expressions = object.expressions;
-  const nextExpressions =
-    expressions === undefined
-      ? undefined
-      : Object.fromEntries(
-          Object.entries(expressions).map(([property, expression]) => {
-            if (expression === undefined) return [property, expression];
-            if (property === 'x')
-              return [
-                property,
-                `((${expression}) - ${source.width / 2}) * ${scale} + ${target.width / 2}`,
-              ];
-            if (property === 'y')
-              return [
-                property,
-                `((${expression}) - ${source.height / 2}) * ${scale} + ${target.height / 2}`,
-              ];
-            if (property === 'scaleX' || property === 'scaleY')
-              return [property, `((${expression}) * ${scale})`];
-            return [property, expression];
-          }),
         );
   const spatialPath = object.spatialPath;
 
@@ -135,11 +134,177 @@ function scaleVisualObject(
       scaleY: transform.scaleY * scale,
     },
     ...(nextAnimations === undefined ? {} : { animations: nextAnimations }),
-    ...(nextExpressions === undefined ? {} : { expressions: nextExpressions }),
     ...(spatialPath === undefined
       ? {}
       : { spatialPath: scaleSpatialPath(spatialPath, mapX, mapY, scale) }),
   };
+}
+
+function collectCanvasReframeObjectIds(project: JoyProjectV1): Set<string> {
+  const composition = project.compositions[project.rootCompositionId];
+  if (composition === undefined) return new Set();
+  const clipIds = new Set(
+    composition.tracks.flatMap((track) => track.clips.map((clip) => clip.id)),
+  );
+  const boundObjectIds = Object.entries(readClipObjectIdsMap(project))
+    .filter(([clipId]) => clipIds.has(clipId))
+    .flatMap(([, objectIds]) => objectIds);
+  const roots = new Set<string>();
+
+  // Transforms are parent-local: remap each safe parentless root once, then let descendants inherit it.
+  for (const objectId of boundObjectIds) {
+    const rootId = findParentlessRoot(objectId, project.visualObjects);
+    if (rootId !== undefined) roots.add(rootId);
+  }
+  if (composition.activeCameraId !== undefined) {
+    const cameraRoot = findParentlessRoot(composition.activeCameraId, project.visualObjects);
+    if (cameraRoot !== undefined) roots.add(cameraRoot);
+  }
+  return roots;
+}
+
+function findParentlessRoot(
+  objectId: string,
+  objects: JoyProjectV1['visualObjects'],
+): string | undefined {
+  let current: VisualObjectV1 | undefined = objects[objectId];
+  const visited = new Set<string>();
+  while (current !== undefined) {
+    if (current.parentId === undefined) return current.id;
+    if (visited.has(current.id)) return undefined;
+    visited.add(current.id);
+    current = objects[current.parentId];
+  }
+  return undefined;
+}
+
+function isTransformExpressionDriven(object: VisualObjectV1): boolean {
+  return (
+    object.expressions?.x !== undefined ||
+    object.expressions?.y !== undefined ||
+    object.expressions?.scaleX !== undefined ||
+    object.expressions?.scaleY !== undefined
+  );
+}
+
+function collectCanvasReframeSkippedObjectIds(
+  project: JoyProjectV1,
+  objectIds: ReadonlySet<string>,
+): Set<string> {
+  const skipped = new Set<string>();
+  for (const objectId of objectIds) {
+    const object = project.visualObjects[objectId];
+    if (object !== undefined && isTransformExpressionDriven(object)) skipped.add(objectId);
+  }
+  for (const animation of Object.values(project.propertyAnimations ?? {})) {
+    const { ownerKind, ownerId } = animation.binding;
+    if (
+      ownerKind === 'visual-object' &&
+      objectIds.has(ownerId) &&
+      !isSafelyRemappablePropertyAnimation(animation)
+    )
+      skipped.add(ownerId);
+  }
+  return skipped;
+}
+
+function isSafelyRemappablePropertyAnimation(animation: PropertyAnimationV2): boolean {
+  const { propertyId } = animation.binding;
+  if (
+    propertyId === 'x' ||
+    propertyId === 'y' ||
+    propertyId === 'scaleX' ||
+    propertyId === 'scaleY'
+  )
+    return animation.value.kind === 'scalar';
+  if (propertyId === 'visual.transform.position' || propertyId === 'visual.transform.scale')
+    return animation.value.kind === 'vector';
+  return true;
+}
+
+function scaleProjectPropertyAnimations(
+  project: JoyProjectV1,
+  objectIds: ReadonlySet<string>,
+  skippedObjectIds: ReadonlySet<string>,
+  reframe: MediaFitTransform,
+): JoyProjectV1['propertyAnimations'] {
+  const current = project.propertyAnimations;
+  if (current === undefined) return current;
+  const scale = reframe.scaleX;
+  const mapX = (value: number) => reframe.x + value * scale;
+  const mapY = (value: number) => reframe.y + value * scale;
+  let changed = false;
+  const next: Record<string, PropertyAnimationV2> = { ...current };
+  for (const [key, animation] of Object.entries(current)) {
+    const { ownerKind, ownerId, propertyId } = animation.binding;
+    if (ownerKind !== 'visual-object' || !objectIds.has(ownerId) || skippedObjectIds.has(ownerId))
+      continue;
+    const nextAnimation = scalePropertyAnimation(animation, propertyId, mapX, mapY, scale);
+    if (nextAnimation === animation) continue;
+    next[key] = nextAnimation;
+    changed = true;
+  }
+  return changed ? next : current;
+}
+
+function scalePropertyAnimation(
+  animation: PropertyAnimationV2,
+  propertyId: string,
+  mapX: (value: number) => number,
+  mapY: (value: number) => number,
+  scale: number,
+): PropertyAnimationV2 {
+  const value = animation.value;
+  if (
+    (propertyId === 'x' ||
+      propertyId === 'y' ||
+      propertyId === 'scaleX' ||
+      propertyId === 'scaleY') &&
+    value.kind === 'scalar'
+  ) {
+    return {
+      ...animation,
+      value: {
+        ...value,
+        curve: scaleAnimation(value.curve, propertyId, mapX, mapY, scale),
+      },
+    };
+  }
+  if (propertyId === 'visual.transform.position' && value.kind === 'vector') {
+    return {
+      ...animation,
+      value: {
+        ...value,
+        curve: {
+          ...value.curve,
+          ...(value.curve.x === undefined
+            ? {}
+            : { x: scaleAnimation(value.curve.x, 'x', mapX, mapY, scale) }),
+          ...(value.curve.y === undefined
+            ? {}
+            : { y: scaleAnimation(value.curve.y, 'y', mapX, mapY, scale) }),
+        },
+      },
+    };
+  }
+  if (propertyId === 'visual.transform.scale' && value.kind === 'vector') {
+    return {
+      ...animation,
+      value: {
+        ...value,
+        curve: {
+          ...value.curve,
+          ...(value.curve.scaleX === undefined
+            ? {}
+            : { scaleX: scaleAnimation(value.curve.scaleX, 'scaleX', mapX, mapY, scale) }),
+          ...(value.curve.scaleY === undefined
+            ? {}
+            : { scaleY: scaleAnimation(value.curve.scaleY, 'scaleY', mapX, mapY, scale) }),
+        },
+      },
+    };
+  }
+  return animation;
 }
 
 function scaleAnimation(

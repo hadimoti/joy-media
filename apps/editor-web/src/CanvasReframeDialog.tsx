@@ -6,6 +6,7 @@ export interface CanvasReframeDialogProps {
   readonly defaultMode: CanvasReframeMode;
   readonly source: CanvasSize;
   readonly target: CanvasSize;
+  readonly skippedObjectCount: number;
   readonly onApply: (mode: CanvasReframeMode) => void;
   readonly onCancel: () => void;
 }
@@ -24,6 +25,7 @@ export function CanvasReframeDialog({
   defaultMode,
   source,
   target,
+  skippedObjectCount,
   onApply,
   onCancel,
 }: CanvasReframeDialogProps) {
@@ -81,6 +83,13 @@ export function CanvasReframeDialog({
         <p className="app-dialog-message">
           Hand-set transforms scale by the same rule around the canvas centre.
         </p>
+        {skippedObjectCount > 0 && (
+          <p className="app-dialog-message">
+            Fit and Fill will leave {skippedObjectCount} object
+            {skippedObjectCount === 1 ? '' : 's'} alone because expressions or unsupported animation
+            prevent safe remapping.
+          </p>
+        )}
         <div className="app-dialog-actions">
           <button type="button" className="app-dialog-button" onClick={onCancel}>
             Cancel
