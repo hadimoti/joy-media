@@ -87,6 +87,41 @@ describe('missing media host', () => {
     expect((await host.list()).map((entry) => entry.assetId)).toEqual(['asset-used']);
   });
 
+  it('waits for the sample media copy: a sample asset is never listed as missing, even briefly (T-R01)', async () => {
+    const bytes = encode('sample intro');
+    const record = await recordFor('asset-intro', bytes);
+    const timeline = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-1', 0, SECOND_US, { assetId: 'asset-intro' }),
+    ]);
+    const session = fakeSession(timeline, { 'asset-intro': record });
+    const cache = memoryCache([]);
+    let finishCopy: () => void = () => undefined;
+    const copy = new Promise<void>((resolve) => {
+      finishCopy = resolve;
+    });
+    const host = createMissingMediaHost(session, async () => cache, copy);
+
+    const listing = host.list().then(() => 'listed');
+    const early = await Promise.race([
+      listing,
+      new Promise((resolve) => setTimeout(() => resolve('waiting'), 0)),
+    ]);
+    expect(early).toBe('waiting');
+
+    // The copy writes the original and settles; only then does the list run.
+    await cache.put(
+      {
+        assetId: 'asset-intro',
+        sha256: record.sha256!,
+        bytes: bytes.byteLength,
+        mimeType: 'video/mp4',
+      },
+      new Blob([bytes]),
+    );
+    finishCopy();
+    expect(await host.list()).toEqual([]);
+  });
+
   it('relinks an exact match: the cache gains the original and the entry leaves the list', async () => {
     const bytes = encode('exact clip');
     const record = await recordFor('asset-1', bytes);

@@ -238,7 +238,7 @@ Four numbers, each changeable in the Joy Code settings, each with a default:
 | Budget                    | Default    | Bound       | Why                                                                                                                                     |
 | ------------------------- | ---------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | Frames per check          | **12**     | 1 to 16     | 16 is the transport's hard per-batch limit (`multimodal-transport.ts:12`); 12 leaves room for a second batch if the first is not enough |
-| Frames per round          | **16**     | 12 to 48    | four rounds of a 12-frame check, or one round plus a re-check                                                                           |
+| Frames per run            | **16**     | 12 to 48    | total across all checks and fix rounds in one run                                                                                       |
 | Fix rounds                | **3**      | 1 to 3      | the master plan's "at most 3 rounds"                                                                                                    |
 | Long edge of a sent frame | **512 px** | 256 to 1024 | enough to judge a title's sharpness, small enough to send                                                                               |
 
@@ -246,7 +246,9 @@ Four numbers, each changeable in the Joy Code settings, each with a default:
 
 **Layer 1 respects no frame budget.** It measures the file, not frames it sends, so it costs nothing and runs even with no model connected.
 
-**The budget is spent by the round, not by the check.** A round that checks, fixes, re-samples and re-checks spends frames from the same budget. That is why the number is per round and not per check.
+**The run total spans every fix round.** Frames per check is the per-check/per-batch limit; frames per run caps the total across all checks and fix rounds in one run. Frames per check cannot exceed frames per run.
+
+**Erratum (T-B05).** The earlier “per round” wording was wrong: section 5 gives each fix round its own run, so the 12–48 setting is a run total across fix rounds. The 16-frame limit cited in section 14 is the per-check/per-batch transport cap (`multimodal-transport.ts:12`).
 
 **Layer 1 has its own time budget, and it is not the agent's.** The agent run budget caps wall time at 60 seconds (`run-budget.ts:7`) and throws on any value above the maximum (`:77-83`). Layer 1 is a **Worker job**, not an agent run, so it has no 60-second cap; it has its own timeout and a **Cancel** button. **No new agent budget version is needed**, because Layer 1 never runs inside an agent run.
 
@@ -342,6 +344,8 @@ Published here so B02, B04, B07 and B08 write the same shape. **B02 owns this ty
 
 **This is the file-collision table.** Seven cards touch five shared files. Without this, two helpers edit the same file and one merge loses.
 
+**T-B05 hand-off to T-B04:** this saved-settings notice is not consent. Live per-round consent must reuse `AgentObservationConsent`.
+
 | Shared file                                                                                           | B02 (GB)            | B04 (GB)                           | B05 (MC)                             | B06 (GB)                            | B07 (MC)                           | B08 (CX)                | Owner                         |
 | ----------------------------------------------------------------------------------------------------- | ------------------- | ---------------------------------- | ------------------------------------ | ----------------------------------- | ---------------------------------- | ----------------------- | ----------------------------- |
 | **The report JSON type** (new file, `packages/qc-core` or `apps/editor-web/src/qc/`)                  | **writes it first** | reads                              | reads                                | reads                               | reads                              | reads                   | **B02**                       |
@@ -400,7 +404,7 @@ Every claim in the review was checked against the code before anything was chang
 | d   | `requireApprovalFor` is at `:343`/`:362`, not `:122`                              | confirmed: `:122` is the block decision                                                                                                    | Context corrected                                                                            |
 | e   | "Local-only is a one-line change" is wrong; the agent path is off                 | confirmed: `AgentPanel.tsx:568` sets `isEditReady = false`; `approval.ts:78-81` judges by `estimatedCost`                                  | Context corrected; Layer 1 made a host action so it still runs in local-only (section 5.1)   |
 | f   | `media_qc_run.range` has no `domain`; an export is not an `assetId`               | confirmed: `observation-consent.ts:5-12`                                                                                                   | The `media_qc_run` tool is **withdrawn**; the target is `timeline` or `file` (section 3, 11) |
-| g   | Frames per check cannot be 48                                                     | confirmed: `MAX_MULTIMODAL_EVIDENCE_PER_BATCH = 16` (`multimodal-transport.ts:12`), enforced at `observation-review-controller.ts:760-771` | Budget is 12 per check, 16 per round, hard bound 16 (section 8)                              |
+| g   | Frames per check cannot be 48                                                     | confirmed: `MAX_MULTIMODAL_EVIDENCE_PER_BATCH = 16` (`multimodal-transport.ts:12`), enforced at `observation-review-controller.ts:760-771` | 16 is the per-check/per-batch cap; 12–48 is the per-run total across fix rounds (section 8)  |
 | h   | The filmstrip is metadata-only                                                    | confirmed: `AgentEvidenceFilmstrip.tsx:12-20`                                                                                              | Context corrected                                                                            |
 | i   | `dispatchCompound` is on the editor session, not in `agent-tools`                 | confirmed: `apps/editor-web/src/agent-command-bus.ts:32`                                                                                   | Section 7 names the file T-B06 needs; the collision table gives B06 ownership                |
 | j   | "Inside the project" vs "the existing save path"; no project folder in v1.1.1     | confirmed: `project-package.ts`, `browser-text-download.ts:28`                                                                             | Section 10 gives the report two homes                                                        |

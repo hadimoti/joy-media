@@ -526,6 +526,10 @@ export function MonitorViewport({
   return (
     <div
       ref={controller.viewportRef}
+      tabIndex={0}
+      role="group"
+      aria-label="Monitor picture: Tab selects elements, arrows move, Alt+arrows scale, [ ] rotate, Esc leaves"
+      data-monitor-stage=""
       className={`monitor-canvas-wrap${dragOver ? ' drag-over' : ''}`}
       data-editor-pointer-dnd-target="monitor"
       data-monitor-zoom={controller.view.zoom}

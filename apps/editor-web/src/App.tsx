@@ -294,6 +294,7 @@ import {
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
+import { fetchSampleBlob, registerSampleMedia } from './sample-media-cache.js';
 import type { NewProjectSpec } from './new-project-format.js';
 import {
   duplicateProject as duplicateProjectLifecycle,
@@ -425,7 +426,6 @@ import {
   loadEditorUiPreferences,
   saveEditorUiPreferences,
   updateEditorUiPreferences,
-  DEFAULT_EDITOR_UI_PREFERENCES,
   EDITOR_UI_PREFERENCES_KEY,
 } from './ui-preferences.js';
 import type { EditorUiPreferencesV2 } from './ui-preferences.js';
@@ -436,6 +436,7 @@ import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
   persistWorkspacePresetLayout,
+  resetWorkspaceTarget,
   workspacePresetLayoutKey,
 } from './workspace-presets.js';
 import {
@@ -577,14 +578,23 @@ import {
   stickerImageCache,
 } from './editor-runtime-singletons.js';
 import { MonitorPanel } from './monitor/index.js';
+import { useMonitorTransportControls } from './monitor/useMonitorTransportControls.js';
+import { monitorFps } from './monitor/monitor-timecode.js';
+import { MONITOR_FULLSCREEN_EVENT } from './monitor/monitor-transport-model.js';
 
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
 // One missing-media host per editor session, so the panel's list and operations share state.
 const missingMediaHosts = new WeakMap<EditorSession, MissingMediaHost>();
+// The sample media copy of each sample session (T-R01); the missing-media list waits for it.
+const sampleMediaCopies = new WeakMap<EditorSession, Promise<unknown>>();
 function missingMediaHostFor(session: EditorSession): MissingMediaHost {
   let host = missingMediaHosts.get(session);
   if (host === undefined) {
-    host = createMissingMediaHost(session, () => originalAssetCachePromise);
+    host = createMissingMediaHost(
+      session,
+      () => originalAssetCachePromise,
+      sampleMediaCopies.get(session),
+    );
     missingMediaHosts.set(session, host);
   }
   return host;
@@ -1374,6 +1384,8 @@ function EditorWorkspace({
   const replacementAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const previewGainNodeRef = useRef<GainNode | null>(null);
   const previewPanNodeRef = useRef<StereoPannerNode | null>(null);
+  // Tap for the Monitor's level meter (T-M10); it only reads, never changes the output.
+  const previewMeterAnalyserRef = useRef<AnalyserNode | null>(null);
   const replacementGainNodeRef = useRef<GainNode | null>(null);
   const replacementPanNodeRef = useRef<StereoPannerNode | null>(null);
   const previewAudioDisposeTimerRef = useRef<number | undefined>(undefined);
@@ -1408,6 +1420,13 @@ function EditorWorkspace({
         .connect(replacementPanNodeRef.current)
         .connect(audioContext.destination);
     }
+    if (previewMeterAnalyserRef.current === null) {
+      const meter = audioContext.createAnalyser();
+      meter.fftSize = 2048;
+      previewPanNodeRef.current?.connect(meter);
+      replacementPanNodeRef.current?.connect(meter);
+      previewMeterAnalyserRef.current = meter;
+    }
   }, []);
   const disposePreviewAudioGraph = useCallback(() => {
     previewAudioSourceRef.current?.disconnect();
@@ -1416,6 +1435,7 @@ function EditorWorkspace({
     replacementGainNodeRef.current?.disconnect();
     previewPanNodeRef.current?.disconnect();
     replacementPanNodeRef.current?.disconnect();
+    previewMeterAnalyserRef.current = null;
     const audioContext = audioContextRef.current;
     audioContextRef.current = null;
     previewAudioSourceRef.current = null;
@@ -1470,6 +1490,19 @@ function EditorWorkspace({
     if (entry === undefined) throw new Error(`unknown project "${projectId}"`);
     const seeds = seedsForCatalogEntry(entry);
     sessionRef.current = new EditorSession(storage, seeds.timeline, seeds.visual, {}, writer);
+    // A sample project's media is copied into this profile's original cache on first open, so it
+    // shows as present and exports (T-R01). Only the cache is written; a failure does not stop the
+    // editor. The missing-media list waits for this copy, so no sample entry shows even briefly.
+    const sampleAssetIds = [
+      ...Object.keys(seeds.visual.assets),
+      ...Object.keys((seeds.timeline as { assets?: Record<string, unknown> }).assets ?? {}),
+    ];
+    sampleMediaCopies.set(
+      sessionRef.current,
+      originalAssetCachePromise
+        .then((cache) => registerSampleMedia(sampleAssetIds, { cache, fetchFile: fetchSampleBlob }))
+        .catch(() => undefined),
+    );
   }
   const session = sessionRef.current;
   const rootComposition =
@@ -2793,6 +2826,23 @@ function EditorWorkspace({
         setState((active) => ({ ...active, playing: false }));
       });
   }, [ensurePreviewAudioGraph, session, syncMediaToPlayhead]);
+  // Monitor transport (T-M10): one frame step, J K L, in and out, loop, timecode.
+  const monitorRootComposition =
+    session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+  const monitorTransport = useMonitorTransportControls({
+    playheadUs: state.playheadUs,
+    playing: state.playing,
+    durationUs:
+      monitorRootComposition === undefined
+        ? 0
+        : timelineEffectiveDurationUs(monitorRootComposition),
+    fps: monitorFps(monitorRootComposition?.frameRate),
+    seek,
+    togglePlayback,
+  });
+  // Key and palette handlers read the latest controls without re-subscribing.
+  const monitorTransportRef = useRef(monitorTransport);
+  monitorTransportRef.current = monitorTransport;
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
       const prepared = prepareTimelinePresentation(
@@ -3661,13 +3711,18 @@ function EditorWorkspace({
       }
     }
     storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
-    workspacePresetRef.current = DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset;
-    setWorkspacePreset(DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset);
+    // The older view-mode key would otherwise bring the previous mode back on the next launch.
+    storage.removeItem('joy-media.view-mode.v1');
+    // The same mode and preset as the defaults the preferences were reset to, so the layout and the saved
+    // preferences agree (T-D12 round 2).
+    const target = resetWorkspaceTarget();
+    workspacePresetRef.current = target.preset;
+    setWorkspacePreset(target.preset);
     setEnhanceTool('effects');
-    setViewMode(DEFAULT_EDITOR_UI_PREFERENCES.viewMode);
-    viewModeRef.current = DEFAULT_EDITOR_UI_PREFERENCES.viewMode;
+    setViewMode(target.mode);
+    viewModeRef.current = target.mode;
     const api = dockviewApiRef.current;
-    if (api !== null) applyDockLayout(api, 'vertical', 'edit');
+    if (api !== null) applyDockLayout(api, target.mode, target.preset);
   }, [applyDockLayout, storage]);
 
   const switchEditorView = useCallback(() => {
@@ -3764,6 +3819,39 @@ function EditorWorkspace({
           break;
         case 'shortcuts.toggle':
           setKeyboardShortcutsOpen((open) => !open);
+          break;
+        case 'playhead.frameBack':
+          monitorTransportRef.current.stepFrame(-1);
+          break;
+        case 'playhead.frameForward':
+          monitorTransportRef.current.stepFrame(1);
+          break;
+        case 'jkl.reverse':
+          monitorTransportRef.current.pressJkl('j');
+          break;
+        case 'jkl.stop':
+          monitorTransportRef.current.pressJkl('k');
+          break;
+        case 'jkl.forward':
+          monitorTransportRef.current.pressJkl('l');
+          break;
+        case 'playback.loop':
+          monitorTransportRef.current.toggleLoop();
+          break;
+        case 'range.in':
+          monitorTransportRef.current.setInPoint();
+          break;
+        case 'range.out':
+          monitorTransportRef.current.setOutPoint();
+          break;
+        case 'range.clear':
+          monitorTransportRef.current.clearMarks();
+          break;
+        case 'range.playInOut':
+          monitorTransportRef.current.playInToOut();
+          break;
+        case 'monitor.fullscreen':
+          window.dispatchEvent(new Event(MONITOR_FULLSCREEN_EVENT));
           break;
         case 'clip.split': {
           if (composition === undefined || selection === undefined) return;
@@ -7521,6 +7609,8 @@ function EditorWorkspace({
               onTimelineAutoFitChange: setTimelineAutoFit,
               activeTimelineCompositionId,
               onActiveTimelineCompositionChange: setActiveTimelineCompositionId,
+              monitorTransport,
+              readPreviewMeterAnalyser: () => previewMeterAnalyserRef.current,
             }}
           >
             <DockviewReact

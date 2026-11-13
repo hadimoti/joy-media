@@ -49,7 +49,8 @@ const statePath =
   process.env.JOY_MEDIA_WORKER_STATE_PATH?.trim() || join(joyMediaHome, 'worker-state.json');
 // No remote default: the desktop app supplies the loopback job API address (PLAN-v4 D19).
 const apiUrl = process.env.JOY_MEDIA_API_URL?.trim() || '';
-const loopbackApi = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/?$/.exec(apiUrl);
+// No path, not even a trailing slash: the Local service is http://127.0.0.1:<port> (T-F24).
+const loopbackApi = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})$/.exec(apiUrl);
 if (apiUrl.length === 0)
   throw new Error(
     'JOY_MEDIA_API_URL is required: set it to http://127.0.0.1:<port> from the JOY Media desktop app',

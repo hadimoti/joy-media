@@ -10,6 +10,7 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "tsc -b",
     "test": "vitest run",
+    "test:monitor": "vitest run apps/editor-web/src/monitor apps/editor-web/src/preview-quality.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:audit": "playwright test tests/e2e --project=desktop-primary --project=desktop-compact --project=desktop-minimum --project=desktop-1280 --project=desktop-1440 --project=desktop-1581 --project=desktop-1920",
