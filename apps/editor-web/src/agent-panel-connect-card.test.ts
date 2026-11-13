@@ -38,10 +38,12 @@ describe('Joy Code not-connected card wiring', () => {
 
   it('keeps the Recipes Run buttons visible but disabled until a model is connected', () => {
     // The gate decides disabled, hover text and the connect click (T-J02).
-    expect(panelSource).toContain('const gate = runControlGate({');
-    expect(panelSource).toContain('disabled={gate.disabled}');
-    expect(panelSource).toContain('title={gate.title}');
+    expect(panelSource).toContain('<RecipeRunControls');
+    expect(panelSource).toContain('ready={isRecipeRunnerReady}');
+    expect(panelSource).toContain('noModel={capability === undefined}');
     expect(panelSource).not.toContain('{isRecipeRunnerReady && (');
+    // The recipe row no longer carries a click handler on the card itself (T-J02 review).
+    expect(panelSource).not.toMatch(/joy-code-recipe \$\{entry\.available[^>]*onClick=/s);
   });
 
   it('adds the "Run recipe" message only from the run start, never before the run', () => {

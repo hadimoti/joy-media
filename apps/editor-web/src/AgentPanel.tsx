@@ -61,7 +61,8 @@ import {
 } from './icons.js';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
 import { JoyCodeReadinessSlot } from './joy-code-connect-model-card.js';
-import { createRunStartAnnouncer, runControlGate } from './joy-code-run-gate.js';
+import { createRunStartAnnouncer } from './joy-code-run-gate.js';
+import { RecipeRunControls } from './joy-code-run-controls.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import {
@@ -3568,19 +3569,10 @@ export function AgentPanel({
               {creativeSkills.map((entry) => {
                 const missing = [...entry.missingCapabilities, ...entry.missingOperations];
                 const running = recipeRunningId === entry.skill.id;
-                const gate = runControlGate({
-                  ready: isRecipeRunnerReady,
-                  noModel: capability === undefined,
-                  readinessText: recipeReadinessText,
-                  blocked: !entry.available || recipeRunningId !== undefined || liveAgentBusy,
-                });
                 return (
                   <li
                     key={entry.skill.id}
                     className={`joy-code-recipe ${entry.available ? '' : 'is-unavailable'}`}
-                    onClick={
-                      gate.opensConnect && onOpenSettings !== undefined ? onOpenSettings : undefined
-                    }
                   >
                     <div className="joy-code-recipe-copy">
                       <strong>{entry.skill.title}</strong>
@@ -3589,16 +3581,16 @@ export function AgentPanel({
                         <span className="joy-code-recipe-missing">Needs: {missing.join(', ')}</span>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      className="joy-code-recipe-run"
-                      disabled={gate.disabled}
-                      title={gate.title}
-                      aria-label={`Run ${entry.skill.title}`}
-                      onClick={() => void runRecipe(entry.skill.id)}
-                    >
-                      {running ? 'Running…' : 'Run'}
-                    </button>
+                    <RecipeRunControls
+                      title={entry.skill.title}
+                      ready={isRecipeRunnerReady}
+                      noModel={capability === undefined}
+                      readinessText={recipeReadinessText}
+                      blocked={!entry.available || recipeRunningId !== undefined || liveAgentBusy}
+                      running={running}
+                      onRun={() => void runRecipe(entry.skill.id)}
+                      {...(onOpenSettings === undefined ? {} : { onConnect: onOpenSettings })}
+                    />
                   </li>
                 );
               })}

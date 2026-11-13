@@ -9119,6 +9119,17 @@ label {
 }
 
 /* Joy Code's one calm card: optional, one sentence, one gold action. */
+/* The connect step as a keyboard-reachable control (T-J02): a gold button, same text role as the card. */
+.joy-code-connect-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--joy-type-xs);
+  cursor: pointer;
+  user-select: none;
+}
 .joy-code-connect-card {
   display: flex;
   align-items: center;

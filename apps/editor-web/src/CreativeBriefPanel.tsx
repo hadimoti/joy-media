@@ -26,6 +26,7 @@ import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import { CONNECT_MODEL_FIRST_TITLE } from './joy-code-run-gate.js';
+import { JoyCodeConnectButton } from './joy-code-run-controls.js';
 import {
   loadCreativeBrief,
   removeCreativeBrief,
@@ -342,11 +343,10 @@ export function CreativeBriefPanel({
 
       {/* Request Input */}
       {optedIn && (
-        <div
-          className="creative-brief-panel-input"
-          aria-label="Brief request input"
-          onClick={noModelConnected && onConnectModel ? onConnectModel : undefined}
-        >
+        <div className="creative-brief-panel-input" aria-label="Brief request input">
+          {noModelConnected && onConnectModel !== undefined && (
+            <JoyCodeConnectButton onConnect={onConnectModel} />
+          )}
           <textarea
             className="creative-brief-panel-textarea"
             value={displayedRequest}
