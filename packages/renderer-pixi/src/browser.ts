@@ -1001,7 +1001,8 @@ function updateTransitionLayer(
     container.glHandle.setToTexture(to.texture);
     container.glHandle.setProgress(node.progress);
     container.glHandle.setRatio(node.width / Math.max(1, node.height));
-    if (node.params !== undefined) container.glHandle.setParams(node.params);
+    // Always set params, even when none are stored, so cleared vector overrides return to defaults.
+    container.glHandle.setParams(node.params ?? {});
   } else {
     // Unknown shader — soft crossfade fallback in CPU-ish style via sprite alpha.
     container.sprite.alpha = 1 - node.progress;

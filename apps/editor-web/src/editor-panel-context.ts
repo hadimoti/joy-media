@@ -55,6 +55,14 @@ export interface GuardedBrowserStorage extends ProjectWriterStorage {
 }
 
 /**
+ * An action a toast offers, such as Undo. The toast runs it and closes itself.
+ */
+export interface ToastAction {
+  readonly label: string;
+  readonly run: () => void;
+}
+
+/**
  * Dockview panels receive this typed, writer-gated surface instead of importing
  * the application root. Keeping it in a leaf module prevents panel-to-App
  * cycles that inflate production chunks and makes the ownership boundary
@@ -146,7 +154,11 @@ export interface EditorPanelContextValue {
   readonly pluginHost: ReturnType<typeof createEditorPluginHost>;
   readonly bumpProjectRevision: () => void;
   readonly bumpPluginRevision: () => void;
-  readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
+  readonly showToast: (
+    message: string,
+    kind?: 'info' | 'success' | 'error',
+    action?: ToastAction,
+  ) => void;
   readonly motionStudioOpen: boolean;
   readonly openMotionStudio: (sceneId: string) => void;
   readonly closeMotionStudio: () => void;

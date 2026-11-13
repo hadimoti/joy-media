@@ -56,14 +56,16 @@ describe('Color workspace sections', () => {
     expect(markup).toContain('Add LUT intensity keyframe at playhead');
   });
 
-  it('names the real scope source and exposes IRE guides only where meaningful', () => {
+  it('names the real scope source and labels each scope axis', () => {
     const waveform = renderToStaticMarkup(<ScopeCanvas scope="waveform" />);
     const vectorscope = renderToStaticMarkup(<ScopeCanvas scope="vectorscope" />);
 
     expect(waveform).toContain('Waveform scope analyzing final Program output');
-    expect(waveform).toContain('100');
-    expect(waveform).toContain('0 IRE');
+    expect(waveform).toContain('Vertical axis: level, 0 to 100 per cent.');
+    expect(waveform).toContain('Horizontal axis: image columns.');
     expect(vectorscope).toContain('Vectorscope scope analyzing final Program output');
-    expect(vectorscope).not.toContain('0 IRE');
+    expect(vectorscope).toContain('hue marks');
+    // The level axis belongs to the waveform and the parade, not the vectorscope.
+    expect(vectorscope).not.toContain('level, 0 to 100 per cent');
   });
 });

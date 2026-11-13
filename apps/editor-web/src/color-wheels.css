@@ -1,0 +1,117 @@
+/* The colour wheels (T-K02).
+   The panel keeps its own rules: the wheels are drawn as cards, each with a
+   puck, a master slider, a readable number row and its own reset. */
+
+.cw-section {
+  gap: 0.6rem;
+}
+
+.cw-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.cw-card {
+  display: grid;
+  gap: 0.35rem;
+  justify-items: stretch;
+  padding: 0.45rem;
+  border: 1px solid var(--joy-border, #3a3b40);
+  border-radius: var(--radius-md, 0.35rem);
+  background: color-mix(in srgb, var(--joy-bg-elevated, #1c1d21) 92%, var(--joy-bg, #151619));
+  color: var(--joy-text, #d4d5db);
+  font-size: var(--joy-type-2xs, 0.68rem);
+}
+
+.cw-card.is-dragging {
+  border-color: #e4b42e;
+}
+
+.cw-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+.cw-title {
+  color: #e6e7ea;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+
+.cw-hint {
+  color: var(--joy-text-muted, #9c9ea7);
+  font-size: 0.64rem;
+}
+
+.cw-face {
+  display: block;
+  margin: 0.15rem auto;
+  border-radius: 50%;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.cw-face:active {
+  cursor: grabbing;
+}
+
+.cw-face:focus-visible {
+  outline: 2px solid #e4b42e;
+  outline-offset: 2px;
+}
+
+.cw-hue {
+  margin: 0;
+  color: var(--joy-text-muted, #9c9ea7);
+  font-size: 0.62rem;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.cw-master {
+  inline-size: 100%;
+  accent-color: #e4b42e;
+}
+
+.cw-numbers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.15rem 0.4rem;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid var(--joy-border, #3a3b40);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: var(--joy-bg, #151619);
+  font-variant-numeric: tabular-nums;
+}
+
+.cw-numbers > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem;
+}
+
+.cw-number-label {
+  color: var(--joy-text-muted, #9c9ea7);
+  font-size: 0.62rem;
+}
+
+.cw-numbers output {
+  color: #e4b42e;
+  font-size: 0.66rem;
+}
+
+.cw-reset {
+  justify-self: start;
+  font-size: 0.64rem;
+}
+
+.cw-note {
+  margin: 0;
+  color: var(--joy-text-faint, #8f919a);
+  font-size: 0.64rem;
+  line-height: 1.35;
+}

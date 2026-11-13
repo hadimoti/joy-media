@@ -1,5 +1,7 @@
 // License: MIT
 // Author: rectalogic
+// Changed for JOY Media (T-V08): the redundant `in` parameter qualifiers were dropped (`in` is the
+// default), because the Pixi filter compiles transitions with `#define in varying`.
 // ported by gre from https://gist.github.com/rectalogic/b86b90161503a0023231
 
 // Converted from https://github.com/rectalogic/rendermix-basic-effects/blob/master/assets/com/rendermix/CrossZoom/CrossZoom.frag
@@ -10,11 +12,11 @@ uniform float strength; // = 0.4
 
 const float PI = 3.141592653589793;
 
-float Linear_ease(in float begin, in float change, in float duration, in float time) {
+float Linear_ease(float begin, float change, float duration, float time) {
     return change * time / duration + begin;
 }
 
-float Exponential_easeInOut(in float begin, in float change, in float duration, in float time) {
+float Exponential_easeInOut(float begin, float change, float duration, float time) {
     if (time == 0.0)
         return begin;
     else if (time == duration)
@@ -25,7 +27,7 @@ float Exponential_easeInOut(in float begin, in float change, in float duration, 
     return change / 2.0 * (-pow(2.0, -10.0 * (time - 1.0)) + 2.0) + begin;
 }
 
-float Sinusoidal_easeInOut(in float begin, in float change, in float duration, in float time) {
+float Sinusoidal_easeInOut(float begin, float change, float duration, float time) {
     return -change / 2.0 * (cos(PI * time / duration) - 1.0) + begin;
 }
 
@@ -33,7 +35,7 @@ float rand (vec2 co) {
   return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
 }
 
-vec4 crossFade(in vec2 uv, in float dissolve) {
+vec4 crossFade(vec2 uv, float dissolve) {
     return mix(getFromColor(uv), getToColor(uv), dissolve);
 }
 

@@ -19,6 +19,7 @@ import {
   type DecodedPreviewFrame,
   type EditorRuntimeState,
   type GuardedBrowserStorage,
+  type ToastAction,
 } from './editor-panel-context.js';
 export { EditorPanelContext };
 export type { AnimationGraphFocusRequest };
@@ -1102,7 +1103,12 @@ function EditorWorkspace({
     agentConnectionStatus?.capability === 'tool-loop' ||
     agentConnectionStatus?.capability === 'plan-only';
   const [toasts, setToasts] = useState<
-    readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
+    readonly {
+      id: string;
+      message: string;
+      kind: 'info' | 'success' | 'error';
+      action?: ToastAction;
+    }[]
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [viewMode, setViewMode] = useState<EditorViewMode>(
@@ -1150,15 +1156,21 @@ function EditorWorkspace({
       exportUrlRetentionRef.current?.dispose();
     };
   }, []);
-  const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setToasts((prev) => [...prev, { id, message, kind }]);
-    const timer = window.setTimeout(() => {
-      toastTimersRef.current.delete(id);
-      setToasts((prev) => prev.filter((toast) => toast.id !== id));
-    }, 4000);
-    toastTimersRef.current.set(id, timer);
-  }, []);
+  const showToast = useCallback(
+    (message: string, kind: 'info' | 'success' | 'error' = 'info', action?: ToastAction) => {
+      const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setToasts((prev) => [
+        ...prev,
+        { id, message, kind, ...(action === undefined ? {} : { action }) },
+      ]);
+      const timer = window.setTimeout(() => {
+        toastTimersRef.current.delete(id);
+        setToasts((prev) => prev.filter((toast) => toast.id !== id));
+      }, 4000);
+      toastTimersRef.current.set(id, timer);
+    },
+    [],
+  );
   useEffect(() => {
     if (projectPackageNotice === undefined) return;
     showToast(
@@ -7325,6 +7337,18 @@ function EditorWorkspace({
               {toasts.map((toast) => (
                 <div key={toast.id} className={`toast toast-${toast.kind ?? 'info'}`} role="alert">
                   <span className="toast-message">{toast.message}</span>
+                  {toast.action !== undefined && (
+                    <button
+                      type="button"
+                      className="toast-action"
+                      onClick={() => {
+                        toast.action?.run();
+                        setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+                      }}
+                    >
+                      {toast.action.label}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="toast-close"
