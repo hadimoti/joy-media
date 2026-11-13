@@ -53,7 +53,7 @@ foreach ($video in $videos) {
   Invoke-Ffmpeg -Arguments @(
     '-f', 'lavfi', '-i', $video.source,
     '-f', 'lavfi', '-i', 'sine=frequency=330:sample_rate=48000:duration=30',
-    '-t', '30', '-ac', '2', '-c:v', 'libx264', '-preset', 'slow', '-profile:v', 'main', '-pix_fmt', 'yuv420p',
+    '-t', '30', '-ac', '1', '-c:v', 'libx264', '-preset', 'slow', '-profile:v', 'main', '-pix_fmt', 'yuv420p',
     '-b:v', '90k', '-maxrate', '110k', '-bufsize', '220k',
     '-c:a', 'aac', '-b:a', '32k', '-movflags', '+faststart',
     $path
