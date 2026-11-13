@@ -134,13 +134,14 @@ export {
   isAuthMethodPermitted,
   isCustomProviderId,
   isLoopbackHostname,
-  isPrivateOrInternalHost,
   isSignInProvider,
   normalizeBaseUrl,
   offeredAuthMethods,
   permittedAuthMethods,
   signInProviders,
 } from './registry.js';
+// The one internal-address rule, used by the endpoint policy and by the desktop and CLI pinned transports.
+export { isPrivateOrInternalHost } from './internal-address.js';
 export type { OAuthClient, OAuthClientProviderId } from './oauth-clients.js';
 export { getOAuthClient } from './oauth-clients.js';
 export { SIGN_IN_WAIT_MS } from './sign-in-wait.js';

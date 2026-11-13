@@ -6,6 +6,8 @@
  * CLI and the editor can all import it. Only the main-process broker reads a credential.
  */
 
+import { isPrivateOrInternalHost } from './internal-address.js';
+
 /**
  * The providers offered for API-key sign-in, and ChatGPT for sign-in only (`signInOnly`). Each one has fixed origins
  * (PLAN-v4 §5, §6d).
@@ -633,112 +635,6 @@ export function evaluateEndpoint(
     return refuse('BASE_URL_REFUSED', 'The base URL is not one of the regions of this provider.');
   }
   return allowedVerdict('registry', url);
-}
-
-/** A host that is never a public endpoint: local names, private and link-local addresses, and cloud metadata. */
-export function isPrivateOrInternalHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
-  if (host === 'localhost' || host.endsWith('.localhost')) return true;
-  if (host === 'metadata' || host === 'metadata.google.internal') return true;
-  if (host.endsWith('.internal') || host.endsWith('.local')) return true;
-  return host.includes(':') ? isPrivateIpv6(host) : isPrivateIpv4(host);
-}
-
-function isPrivateIpv4(host: string): boolean {
-  const parts = host.split('.');
-  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return false;
-  const numbers = parts.map(Number);
-  if (numbers.some((part) => part > 255)) return false;
-  const [first = -1, second = -1] = numbers;
-  return (
-    first === 0 ||
-    first === 10 ||
-    first === 127 ||
-    (first === 100 && second >= 64 && second <= 127) ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168) ||
-    (first === 198 && (second === 18 || second === 19)) ||
-    first >= 224
-  );
-}
-
-function isPrivateIpv6(host: string): boolean {
-  if (host === '::' || host === '::1') return true;
-  // Unique-local fc00::/7, link-local fe80::/10 and the deprecated site-local fec0::/10 are never public.
-  if (/^f[cd]/.test(host) || /^fe[89a-f]/.test(host)) return true;
-  // Multicast (ff00::/8) is never a public endpoint.
-  if (/^ff/.test(host)) return true;
-  // IPv4-mapped in the dotted form, ::ffff:127.0.0.1, is judged by its IPv4 address.
-  const dotted = host.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (dotted?.[1] !== undefined) return isPrivateIpv4(dotted[1]);
-  const mapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (mapped?.[1] !== undefined && mapped[2] !== undefined) {
-    const high = Number.parseInt(mapped[1], 16);
-    const low = Number.parseInt(mapped[2], 16);
-    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
-  }
-  return isPrivateEmbeddedIpv4(host);
-}
-
-/** The eight 16-bit groups of an IPv6 address written as text, or undefined when the text is not one. */
-function ipv6Groups(text: string): number[] | undefined {
-  const sides = text.split('::');
-  if (sides.length > 2) return undefined;
-  const parse = (side: string, endsAddress: boolean): number[] | undefined => {
-    if (side === '') return [];
-    const pieces = side.split(':');
-    const groups: number[] = [];
-    for (const [index, piece] of pieces.entries()) {
-      const dotted =
-        endsAddress && index === pieces.length - 1
-          ? /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(piece)
-          : null;
-      if (dotted !== null) {
-        const octets = dotted.slice(1).map(Number);
-        if (octets.some((octet) => octet > 255)) return undefined;
-        const [a = 0, b = 0, c = 0, d = 0] = octets;
-        groups.push(a * 256 + b, c * 256 + d);
-      } else if (/^[0-9a-f]{1,4}$/i.test(piece)) {
-        groups.push(Number.parseInt(piece, 16));
-      } else {
-        return undefined;
-      }
-    }
-    return groups;
-  };
-  if (sides.length === 1) {
-    const whole = parse(text, true);
-    return whole?.length === 8 ? whole : undefined;
-  }
-  const head = parse(sides[0] ?? '', false);
-  const tail = parse(sides[1] ?? '', true);
-  if (head === undefined || tail === undefined) return undefined;
-  const missing = 8 - head.length - tail.length;
-  return missing < 1 ? undefined : [...head, ...new Array<number>(missing).fill(0), ...tail];
-}
-
-/**
- * An IPv6 address that carries an IPv4 address (S8 item 4). The mapped form, in any spelling, the translated form
- * ::ffff:0:a.b.c.d, and the NAT64 well-known prefix 64:ff9b::/96 are judged by the IPv4 address they carry: a DNS64
- * network returns that prefix for a public IPv4-only server. The IPv4-compatible ::/96, the NAT64 local-use prefix
- * 64:ff9b:1::/48 and 6to4 2002::/16 are refused whatever IPv4 address they carry.
- */
-function isPrivateEmbeddedIpv4(host: string): boolean {
-  const groups = ipv6Groups(host);
-  if (groups === undefined) return false;
-  const leading = (count: number): boolean => groups.slice(0, count).every((group) => group === 0);
-  const embeddedPrivate = (): boolean => {
-    const [high = 0, low = 0] = groups.slice(6);
-    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
-  };
-  if (leading(5) && groups[5] === 0xffff) return embeddedPrivate();
-  if (leading(4) && groups[4] === 0xffff && groups[5] === 0) return embeddedPrivate();
-  const nat64 = groups[0] === 0x64 && groups[1] === 0xff9b;
-  if (nat64 && groups[2] === 1) return true;
-  if (nat64 && groups.slice(2, 6).every((group) => group === 0)) return embeddedPrivate();
-  if (leading(6)) return true;
-  return groups[0] === 0x2002;
 }
 
 function allowedVerdict(kind: 'registry' | 'loopback' | 'public', url: URL): EndpointVerdict {
