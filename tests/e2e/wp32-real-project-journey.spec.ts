@@ -257,6 +257,8 @@ test.describe('WP-32 real-project workflow acceptance', () => {
             .locator(`.timeline-clip[aria-label^="${clipNameWithoutExtension(names.audio)},"]`)
             .click();
           await openPanel(page, 'Audio');
+          // The Review button appears only after a preset is chosen (T-D15): choose Voice Polish first.
+          await page.locator('.audio-workflow-choice', { hasText: 'Voice Polish' }).click();
           await page.getByRole('button', { name: 'Review Voice Polish changes' }).click();
           const browserRun = page.getByRole('button', { name: 'Apply changes' });
           await expect(browserRun).toBeEnabled();

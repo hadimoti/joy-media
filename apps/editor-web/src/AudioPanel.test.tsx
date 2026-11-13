@@ -70,20 +70,22 @@ describe('AudioPanel Enhance workspace', () => {
 
     expect(markup.indexOf('Enhance target')).toBeLessThan(markup.indexOf('Choose an enhancement'));
     expect(markup).toContain('Voice Polish');
-    expect(markup).toContain('Processing plan');
-    expect(markup).toContain('3/3 ready');
-    expect(markup).toContain('aria-label="Review Voice Polish changes"');
-    expect(markup).toContain('title="Review Voice Polish changes"');
+    // Before a choice there is no processing plan and no review button (T-D15).
+    expect(markup).not.toContain('Processing plan');
+    expect(markup).not.toContain('3/3 ready');
+    expect(markup).not.toContain('aria-label="Review Voice Polish changes"');
     expect(markup).toContain('audio-enhance-heading-icon');
     expect(markup).toContain('audio-enhance-runtime-button');
     expect(markup).toMatch(/audio-enhance-runtime-button[^>]*><svg/);
-    expect(markup).toContain('icon-button-labeled audio-enhance-primary');
+    expect(markup).not.toContain('icon-button-labeled audio-enhance-primary');
     expect(markup).toContain('audio-workflow-card-icon');
     expect(markup).toContain('audio-workflow-step-icon');
-    expect(markup).toContain('Browser DSP ready');
-    expect(markup).toContain('<strong>Browser</strong>DSP');
+    // The engine status is in an info popover, closed until it is opened (T-D15).
+    expect(markup).toContain('aria-label="Engine status"');
+    expect(markup).not.toContain('Browser DSP ready');
+    expect(markup).not.toContain('Local Worker disconnected');
     expect(markup).not.toContain('<strong>0G</strong>RAM');
-    expect(markup).toContain('Local device disconnected');
+    expect(markup).not.toContain('Local device disconnected');
     expect(markup).not.toContain('Worker');
     expect(markup).toContain('Timeline');
     expect(markup).toContain('disabled=""');
