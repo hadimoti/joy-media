@@ -12897,7 +12897,6 @@ label {
   color: var(--joy-text-primary);
 }
 .color-target-bar,
-.color-utility-row,
 .scope-source,
 .curve-tabs {
   display: flex;
@@ -12906,7 +12905,6 @@ label {
   flex-wrap: wrap;
 }
 .color-target-bar button,
-.color-utility-row button,
 .scope-source button,
 .curve-tabs button {
   border: 1px solid #44454b;
@@ -12931,6 +12929,39 @@ label {
   display: grid;
   gap: 0.45rem;
   min-height: 0;
+}
+/* T-K05: the shared fieldset around the colour sections drew a light frame
+   around the whole sub-tab. The sections keep their own focus rings on single
+   controls, so the container itself never takes an outline. */
+.color-controls {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+}
+.color-controls:focus,
+.color-controls:focus-visible,
+.color-section:focus,
+.color-section:focus-visible {
+  outline: none;
+}
+.color-header-button {
+  border: 1px solid #44454b;
+  border-radius: 0.3rem;
+  padding: 0.24rem 0.45rem;
+  background: #202125;
+  color: #b8bac3;
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+.color-header-button:hover:not(:disabled) {
+  border-color: #5c5d64;
+  color: #e6e7ea;
+}
+.color-header-button[aria-pressed='true'] {
+  border-color: #dba925;
+  background: #3a321e;
+  color: #f0bd2d;
 }
 .color-section h3 {
   margin: 0.2rem 0;
@@ -13107,8 +13138,8 @@ label {
 }
 .looks-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.35rem;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 0.4rem;
 }
 .looks-grid button,
 .looks-grid .look-option {
@@ -13121,8 +13152,24 @@ label {
   color: #b8bac3;
   font-size: 0.62rem;
 }
+.look-card {
+  align-content: start;
+  text-align: left;
+}
+.look-card-label {
+  font-weight: 600;
+  color: #d4d5db;
+}
+.look-card-note {
+  color: #8f919a;
+  font-size: 0.57rem;
+  line-height: 1.25;
+}
+.looks-grid .is-active .look-card-label {
+  color: #f0bd2d;
+}
 .look-thumb {
-  height: 2rem;
+  height: 2.4rem;
   border-radius: 0.2rem;
   background: linear-gradient(135deg, #3e6898, #dfa92a);
 }
@@ -13149,8 +13196,7 @@ label {
 .scope-canvas {
   display: block;
   width: 100%;
-  height: auto;
-  min-height: 3rem;
+  height: 11rem;
   border: 1px solid #3c3d42;
   border-radius: 0.25rem;
 }
@@ -13158,28 +13204,67 @@ label {
   position: relative;
   min-width: 0;
 }
-.scope-ire-scale {
-  position: absolute;
-  inset: 0.25rem 0.35rem 0.25rem auto;
+/* T-K05: the floating scopes window (T-K05 §2). It follows the colourist
+   across the sub-tabs, so it is a window of its own rather than a panel
+   section. */
+.scope-window {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid #3c3d42;
+  border-radius: 0.4rem;
+  background: #1a1b1e;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 55%);
+  overflow: hidden;
+}
+.scope-window-header {
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  color: rgb(224 226 232 / 62%);
-  font-size: 0.55rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  pointer-events: none;
-  text-shadow: 0 1px 2px #000;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.45rem;
+  border-bottom: 1px solid #2f3035;
+  background: #202125;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
-.color-mini-scope {
-  margin-top: auto;
+.scope-window-title {
+  font-size: 0.7rem;
+  color: #e6e7ea;
 }
-.color-mini-scope .scope-canvas {
-  opacity: 0.9;
+.scope-window-hint {
+  flex: 1;
+  font-size: 0.58rem;
+  color: #8f919a;
 }
-.color-utility-row {
-  border-top: 1px solid #37383d;
-  padding-top: 0.35rem;
+.scope-window-body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.35rem;
+  padding: 0.45rem;
+  min-height: 0;
+}
+.scope-window-canvas {
+  height: 100%;
+  min-height: 0;
+}
+.scope-window-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 0.9rem;
+  height: 0.9rem;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(
+    135deg,
+    transparent 0 55%,
+    #6e6f76 55% 65%,
+    transparent 65% 78%,
+    #6e6f76 78% 88%,
+    transparent 88%
+  );
 }
 .export-preset-select {
   max-width: 9rem;
@@ -14813,6 +14898,19 @@ label {
 .toast-message {
   flex: 1;
   color: var(--joy-text);
+}
+.toast-action {
+  flex-shrink: 0;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--joy-accent);
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.toast-action:hover {
+  border-color: var(--joy-accent);
 }
 .toast-close {
   flex-shrink: 0;
