@@ -140,6 +140,46 @@ export const SETTINGS_BUDGET = {
   hint: 'In "Work on its own", JOY Media asks for your approval when one step of a run may cost more than this. It is not a limit on what a whole run may spend. Prices are estimates from the provider. JOY Media itself charges nothing.',
 } as const;
 
+/**
+ * The quality check: how many pictures a check may send, how many a run may send, and how many fix
+ * rounds it may make. The numbers are limits on what is sent to a model, not a price.
+ */
+export const SETTINGS_QUALITY_CHECK = {
+  title: 'Quality check',
+  /** `{frameCount}` and `{fixRoundCount}` use the right singular or plural form. */
+  tag: '{frameCount} a check, {fixRoundCount}',
+  intro:
+    'These settings are saved for a future quality check. They set how many pictures a check may send to a model and how many fix rounds a run may use.',
+  framesPerCheckLabel: 'Frames per check',
+  framesPerCheckHint: 'Saved limit for pictures in one future check. Stays between 1 and 16.',
+  framesPerRunLabel: 'Frames per run',
+  framesPerRunHint:
+    'Saved limit for all pictures in one future run, across every fix round. Stays between 12 and 48.',
+  fixRoundsLabel: 'Fix rounds',
+  fixRoundsHint:
+    'Saved limit for how many times a future run may fix what it finds and check again. Stays between 1 and 3.',
+  neverRemoteLabel: 'Never send frames to a remote model',
+  neverRemoteHint:
+    'Saved for the quality check. Once the quality check exists it will keep pictures on this PC.',
+} as const;
+
+/**
+ * The notice that summarizes saved picture settings and the connected provider and model.
+ */
+export const SETTINGS_FRAME_PRIVACY_NOTICE = {
+  title: 'Quality check privacy notice',
+  /** `{perCheck}`, `{perRun}`, `{provider}` and `{model}` are filled in. */
+  withModel:
+    'For a future quality check, the saved limits are {perCheck} pictures per check and {perRun} across the run, with {provider}, model {model}.',
+  noModel: 'No model is connected. These settings are saved for a future quality check.',
+  neverRemote:
+    'Saved for the quality check. Once the quality check exists it will keep pictures on this PC.',
+  localOnly:
+    'Local-only mode is saved for the quality check. Once it exists, pictures will stay on this PC.',
+  approvalUnavailable:
+    'Picture approval is not available yet. This notice only shows saved settings.',
+} as const;
+
 /** Where the settings and the keys are kept. */
 export const SETTINGS_STORAGE = {
   savedNote: 'Saved on this computer',
@@ -288,7 +328,22 @@ export const SETTINGS_MODELS = {
   filterClaude: 'Claude',
   filterGpt: 'GPT',
   browserOnly: 'Live model discovery requires Joy Media Desktop.',
+  /** The line on a saved connection card, from the generation flags of its provider (T-C07). */
+  canMakeBoth: 'Can make: pictures and videos',
+  canMakePictures: 'Can make: pictures',
+  canMakeVideos: 'Can make: videos',
 } as const;
+
+/**
+ * The line that says what a provider can make in JOY Media (T-C07). Returns nothing when it can make neither, so a card
+ * with no generation shows no line at all.
+ */
+export function canMakeLabel(pictures: boolean, videos: boolean): string | undefined {
+  if (pictures && videos) return SETTINGS_MODELS.canMakeBoth;
+  if (pictures) return SETTINGS_MODELS.canMakePictures;
+  if (videos) return SETTINGS_MODELS.canMakeVideos;
+  return undefined;
+}
 
 /** The desktop-only agent slots shown at the top of the models page. */
 export const SETTINGS_AGENT_SLOTS = {
@@ -375,6 +430,8 @@ export const SETTINGS_PROVIDER_SIGN_IN = {
   modelIdLabel: 'Model ID',
   modelIdAriaLabel: '{provider} Model ID',
   saveApiKey: 'Save API key',
+  /** On the ChatGPT card: the sign-in cannot make pictures, so the user is pointed to MiniMax or a key (T-C07). */
+  chatGptCannotMakePictures: 'ChatGPT sign-in cannot make pictures. Use MiniMax or an API key.',
 } as const;
 
 /**
@@ -478,4 +535,29 @@ export function removeProfileLabel(profile: string): string {
 /** Fills `{items}` in the message that says what is still missing. */
 export function missingItemsMessage(items: string): string {
   return SETTINGS_MESSAGES.missingItems.replace('{items}', items);
+}
+
+function countLabel(count: number, singular: string): string {
+  return `${count} ${count === 1 ? singular : `${singular}s`}`;
+}
+
+/** Fills the quality-check tag with singular or plural counts. */
+export function qualityCheckTag(perCheck: number, rounds: number): string {
+  return SETTINGS_QUALITY_CHECK.tag
+    .replace('{frameCount}', () => countLabel(perCheck, 'frame'))
+    .replace('{fixRoundCount}', () => countLabel(rounds, 'fix round'));
+}
+
+/** Fills saved limits, provider and model into the future quality-check notice. */
+export function framePrivacyNoticeWithModel(
+  perCheck: number,
+  perRun: number,
+  provider: string,
+  model: string,
+): string {
+  return SETTINGS_FRAME_PRIVACY_NOTICE.withModel
+    .replace('{perCheck}', () => String(perCheck))
+    .replace('{perRun}', () => String(perRun))
+    .replace('{provider}', () => provider)
+    .replace('{model}', () => model);
 }

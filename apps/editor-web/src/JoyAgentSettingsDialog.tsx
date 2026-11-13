@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentExecutionMode, ToolCapability } from '@joy-media/agent-tools';
 import { ALL_TOOL_CAPABILITIES } from '@joy-media/agent-tools';
-import type { AgentPolicyPreferences } from './agent-policy-settings.js';
+import {
+  clampQualityCheckBudget,
+  QUALITY_CHECK_BUDGET_BOUNDS,
+  type AgentPolicyPreferences,
+  type QualityCheckBudgetKey,
+} from './agent-policy-settings.js';
+import {
+  QualityCheckPrivacyNotice,
+  qualityCheckPrivacyNoticeInput,
+} from './QualityCheckPrivacyNotice.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type {
   ByokSessionStatus,
@@ -34,6 +43,7 @@ import { sessionProviderFor } from './joy-agent/provider-call.js';
 import {
   evaluateEndpoint,
   findRegistryProvider,
+  generationSupport,
   PROVIDER_REGISTRY,
   signInProviders,
   type ProviderRegionId,
@@ -63,10 +73,12 @@ import { ProviderSignInPanel } from './ProviderSignInPanel.js';
 import {
   allowedToolsTag,
   budgetTag,
+  canMakeLabel,
   connectionFailedMessage,
   mediaCheckComplete,
   missingItemsMessage,
   modelsReadyTag,
+  qualityCheckTag,
   removeProfileLabel,
   SETTINGS_BUDGET,
   SETTINGS_DIALOG,
@@ -77,6 +89,7 @@ import {
   SETTINGS_MODELS,
   SETTINGS_MODES,
   SETTINGS_PAGES,
+  SETTINGS_QUALITY_CHECK,
   SETTINGS_STORAGE,
   SETTINGS_TOOLS,
   type SettingsPageId,
@@ -254,6 +267,9 @@ export function JoyAgentSettingsDialog({
   const profileReadRef = useRef(0);
 
   const [activeTab, setActiveTab] = useState<JoyAgentSettingsTab>(initialTab);
+  const [qualityCheckBudgetDrafts, setQualityCheckBudgetDrafts] = useState<
+    Partial<Record<QualityCheckBudgetKey, string>>
+  >({});
 
   // Accordion state (keys: section IDs)
   const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({
@@ -262,6 +278,7 @@ export function JoyAgentSettingsDialog({
     'models-probe': true,
     'exec-mode': true,
     'exec-budget': false,
+    'exec-quality': false,
     'exec-privacy': false,
     'exp-previews': true,
     'perms-timeline': true,
@@ -299,6 +316,24 @@ export function JoyAgentSettingsDialog({
 
   const toggleAccordion = (id: string) => {
     setOpenAccordions((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const setQualityCheckBudgetDraft = (key: QualityCheckBudgetKey, value: string) => {
+    setQualityCheckBudgetDrafts((current) => ({ ...current, [key]: value }));
+  };
+
+  const commitQualityCheckBudget = (key: QualityCheckBudgetKey, value: string) => {
+    const qualityCheck = {
+      ...policy.qualityCheck,
+      [key]: clampQualityCheckBudget(key, Number(value)),
+    };
+    qualityCheck.framesPerCheck = Math.min(qualityCheck.framesPerCheck, qualityCheck.framesPerRun);
+    onPolicyChange({ ...policy, qualityCheck });
+    setQualityCheckBudgetDrafts((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
   };
 
   // No provider is preselected, and OpenRouter is never a default (PLAN-v4 §6d-1 rule 3). A new connection
@@ -1162,6 +1197,11 @@ export function JoyAgentSettingsDialog({
                     <div className="joy-settings-vault-profiles-grid">
                       {profiles.map((prof) => {
                         const disabledLegacy = prof.state === 'disabled-legacy';
+                        // What this card's provider can make in JOY Media; nothing when it can make neither (T-C07).
+                        const canMake = canMakeLabel(
+                          generationSupport(prof.provider, 'image').supported,
+                          generationSupport(prof.provider, 'video').supported,
+                        );
                         return (
                           <div
                             key={prof.id}
@@ -1171,6 +1211,9 @@ export function JoyAgentSettingsDialog({
                             <div className="joy-settings-provider-meta">
                               <strong>{profileLabel(prof)}</strong>
                               <span>{displayModelId(prof.modelId)}</span>
+                              {canMake !== undefined && (
+                                <span className="joy-settings-can-make">{canMake}</span>
+                              )}
                               {disabledLegacy && (
                                 <span className="joy-settings-legacy-status">
                                   {SETTINGS_MODELS.legacyProfile}
@@ -1851,6 +1894,175 @@ export function JoyAgentSettingsDialog({
                         </label>
                         <span className="joy-settings-hint-muted">{SETTINGS_BUDGET.hint}</span>
                       </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Quality check: the picture budgets, the switch that keeps pictures here, and the card that says where they go (T-B05) */}
+                <div
+                  className={`agent-settings-section joy-accordion-item ${openAccordions['exec-quality'] ? 'is-open' : ''}`}
+                >
+                  <button
+                    type="button"
+                    className="button-secondary joy-accordion-trigger"
+                    onClick={() => toggleAccordion('exec-quality')}
+                    aria-expanded={openAccordions['exec-quality']}
+                  >
+                    <div className="joy-accordion-trigger-title">
+                      <span className="joy-accordion-icon">
+                        <FlaskIcon />
+                      </span>
+                      <span>{SETTINGS_QUALITY_CHECK.title}</span>
+                    </div>
+                    <div className="joy-accordion-trigger-meta">
+                      <span className="joy-accordion-tag">
+                        {qualityCheckTag(
+                          policy.qualityCheck.framesPerCheck,
+                          policy.qualityCheck.fixRounds,
+                        )}
+                      </span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
+                    </div>
+                  </button>
+
+                  {openAccordions['exec-quality'] && (
+                    <div className="joy-accordion-content">
+                      <span className="joy-settings-hint-muted">
+                        {SETTINGS_QUALITY_CHECK.intro}
+                      </span>
+                      <div className="joy-settings-form-grid">
+                        <div className="joy-settings-field">
+                          <label>
+                            <span>{SETTINGS_QUALITY_CHECK.framesPerCheckLabel}</span>
+                            <input
+                              type="number"
+                              min={QUALITY_CHECK_BUDGET_BOUNDS.framesPerCheck.min}
+                              max={QUALITY_CHECK_BUDGET_BOUNDS.framesPerCheck.max}
+                              step="1"
+                              value={
+                                qualityCheckBudgetDrafts.framesPerCheck ??
+                                String(policy.qualityCheck.framesPerCheck)
+                              }
+                              onFocus={(e) =>
+                                setQualityCheckBudgetDraft('framesPerCheck', e.currentTarget.value)
+                              }
+                              onChange={(e) =>
+                                setQualityCheckBudgetDraft('framesPerCheck', e.currentTarget.value)
+                              }
+                              onBlur={(e) =>
+                                commitQualityCheckBudget('framesPerCheck', e.currentTarget.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                            />
+                          </label>
+                          <span className="joy-settings-hint-muted">
+                            {SETTINGS_QUALITY_CHECK.framesPerCheckHint}
+                          </span>
+                        </div>
+
+                        <div className="joy-settings-field">
+                          <label>
+                            <span>{SETTINGS_QUALITY_CHECK.framesPerRunLabel}</span>
+                            <input
+                              type="number"
+                              min={QUALITY_CHECK_BUDGET_BOUNDS.framesPerRun.min}
+                              max={QUALITY_CHECK_BUDGET_BOUNDS.framesPerRun.max}
+                              step="1"
+                              value={
+                                qualityCheckBudgetDrafts.framesPerRun ??
+                                String(policy.qualityCheck.framesPerRun)
+                              }
+                              onFocus={(e) =>
+                                setQualityCheckBudgetDraft('framesPerRun', e.currentTarget.value)
+                              }
+                              onChange={(e) =>
+                                setQualityCheckBudgetDraft('framesPerRun', e.currentTarget.value)
+                              }
+                              onBlur={(e) =>
+                                commitQualityCheckBudget('framesPerRun', e.currentTarget.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                            />
+                          </label>
+                          <span className="joy-settings-hint-muted">
+                            {SETTINGS_QUALITY_CHECK.framesPerRunHint}
+                          </span>
+                        </div>
+
+                        <div className="joy-settings-field">
+                          <label>
+                            <span>{SETTINGS_QUALITY_CHECK.fixRoundsLabel}</span>
+                            <input
+                              type="number"
+                              min={QUALITY_CHECK_BUDGET_BOUNDS.fixRounds.min}
+                              max={QUALITY_CHECK_BUDGET_BOUNDS.fixRounds.max}
+                              step="1"
+                              value={
+                                qualityCheckBudgetDrafts.fixRounds ??
+                                String(policy.qualityCheck.fixRounds)
+                              }
+                              onFocus={(e) =>
+                                setQualityCheckBudgetDraft('fixRounds', e.currentTarget.value)
+                              }
+                              onChange={(e) =>
+                                setQualityCheckBudgetDraft('fixRounds', e.currentTarget.value)
+                              }
+                              onBlur={(e) =>
+                                commitQualityCheckBudget('fixRounds', e.currentTarget.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                            />
+                          </label>
+                          <span className="joy-settings-hint-muted">
+                            {SETTINGS_QUALITY_CHECK.fixRoundsHint}
+                          </span>
+                        </div>
+
+                        <div className="joy-settings-field-full joy-settings-field">
+                          <label className="joy-settings-cap-item">
+                            <input
+                              type="checkbox"
+                              checked={policy.qualityCheck.neverSendFramesToRemoteModel}
+                              onChange={(e) =>
+                                onPolicyChange({
+                                  ...policy,
+                                  qualityCheck: {
+                                    ...policy.qualityCheck,
+                                    neverSendFramesToRemoteModel: e.target.checked,
+                                  },
+                                })
+                              }
+                            />
+                            <span>{SETTINGS_QUALITY_CHECK.neverRemoteLabel}</span>
+                          </label>
+                          <span className="joy-settings-hint-muted">
+                            {SETTINGS_QUALITY_CHECK.neverRemoteHint}
+                          </span>
+                        </div>
+                      </div>
+                      <QualityCheckPrivacyNotice
+                        {...qualityCheckPrivacyNoticeInput(policy, {
+                          provider: connectionStatus?.provider,
+                          modelId: connectionStatus?.modelId,
+                        })}
+                      />
                     </div>
                   )}
                 </div>

@@ -65,6 +65,7 @@ import { useMonitorViewOptions } from './MonitorViewMenu.js';
 import { createMonitorPerformanceTracker, recordMonitorFrame } from './monitor-performance.js';
 import { monitorZoomLabel } from './monitor-view.js';
 import {
+  MONITOR_KEY_SCOPE,
   MonitorViewport,
   monitorFrameRect,
   useDevicePixelRatio,
@@ -72,6 +73,8 @@ import {
   useSpaceHold,
   type MonitorViewportSelection,
 } from './MonitorViewport.js';
+import { nextElementClipId } from './monitor-keyboard.js';
+import { scopedKeyTable } from '../keyboard-shortcuts.js';
 import { MonitorSelectionOverlay } from './MonitorSelectionOverlay.js';
 import { MonitorTransformBox } from './MonitorTransformBox.js';
 import { boxContainsPoint } from './monitor-hit-test.js';
@@ -103,6 +106,12 @@ import {
   DroppedImportProgress,
   type DroppedImportProgressState,
 } from '../DroppedImportProgress.js';
+import {
+  registerEditorPointerDndRoot,
+  type EditorPointerDragPayload,
+  type EditorPointerDropTarget,
+  type EditorPointerMediaAsset,
+} from '../editor-pointer-dnd.js';
 
 /**
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
@@ -112,12 +121,14 @@ import {
 export function MonitorPanel({
   agentPreviewSurfaceVisible = true,
   onFilesDrop,
+  onAssetDrop,
   droppedImportProgress,
   onCancelDroppedImport,
   formatMenu,
 }: {
   readonly agentPreviewSurfaceVisible?: boolean;
   readonly onFilesDrop?: (files: readonly File[]) => void;
+  readonly onAssetDrop?: (asset: EditorPointerMediaAsset) => void;
   readonly droppedImportProgress?: DroppedImportProgressState;
   readonly onCancelDroppedImport?: () => void;
   /** The App-owned Format popup; the monitor bar's read-out opens the same popover. */
@@ -135,6 +146,7 @@ export function MonitorPanel({
       context={context}
       agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
       onFilesDrop={onFilesDrop}
+      onAssetDrop={onAssetDrop}
       droppedImportProgress={droppedImportProgress}
       onCancelDroppedImport={onCancelDroppedImport}
       formatMenu={formatMenu}
@@ -146,6 +158,7 @@ function MonitorPanelContent({
   context,
   agentPreviewSurfaceVisible,
   onFilesDrop,
+  onAssetDrop,
   droppedImportProgress,
   onCancelDroppedImport,
   formatMenu,
@@ -153,6 +166,7 @@ function MonitorPanelContent({
   readonly context: EditorPanelContextValue;
   readonly agentPreviewSurfaceVisible: boolean;
   readonly onFilesDrop?: ((files: readonly File[]) => void) | undefined;
+  readonly onAssetDrop?: ((asset: EditorPointerMediaAsset) => void) | undefined;
   readonly droppedImportProgress?: DroppedImportProgressState | undefined;
   readonly onCancelDroppedImport?: (() => void) | undefined;
   readonly formatMenu: PopupControl;
@@ -426,6 +440,51 @@ function MonitorPanelContent({
       },
     };
   }, [clearSelection, selectClips, toggleSelection, transformController]);
+  // Announced to screen readers (polite) when Tab changes the selected element (T-M12).
+  const [keyAnnouncement, setKeyAnnouncement] = useState('');
+  // Keyboard-only editing of the picture (T-M12): with focus on the picture (its
+  // stage), Tab and Shift+Tab select the next and previous element and, at the first or last
+  // element, let focus leave the picture. Esc leaves it.
+  useEffect(() => {
+    const onStage = (target: EventTarget | null) =>
+      target instanceof HTMLElement && target.hasAttribute('data-monitor-stage');
+    const visibleIds = () =>
+      readMonitorElementsRef
+        .current()
+        .filter((element) => element.hidden !== true)
+        .map((element) => element.clipId);
+    const stepFor = (backwards: boolean) =>
+      nextElementClipId(visibleIds(), selectedIdsRef.current, backwards);
+    const removeTab = scopedKeyTable.register({
+      scope: MONITOR_KEY_SCOPE,
+      // No step (the first or last element) means no match: the browser's Tab moves focus out.
+      match: (event) =>
+        event.key === 'Tab' &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        onStage(event.target ?? null) &&
+        stepFor(event.shiftKey) !== undefined,
+      run: (event) => {
+        const ids = visibleIds();
+        const next = stepFor(event.shiftKey);
+        if (next === undefined) return;
+        selectClips([next]);
+        setKeyAnnouncement(`Element ${ids.indexOf(next) + 1} of ${ids.length} selected`);
+      },
+    });
+    const removeEscape = scopedKeyTable.register({
+      scope: MONITOR_KEY_SCOPE,
+      match: (event) => event.key === 'Escape' && onStage(event.target ?? null),
+      run: (event) => {
+        if (event.target instanceof HTMLElement) event.target.blur();
+      },
+    });
+    return () => {
+      removeTab();
+      removeEscape();
+    };
+  }, [selectClips]);
   const monitorResourceTokenRef = useRef(
     `monitor:${crypto.randomUUID?.() ?? Date.now().toString(36)}`,
   );
@@ -777,6 +836,30 @@ function MonitorPanelContent({
     setMonitorDragOver(false);
   }, []);
 
+  const applyMonitorEffect = useCallback(
+    (effectId: string) => {
+      const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
+      if (!objectId || !isSingleVideoClipSelected(timelineProject, state.selectedIds)) {
+        showToast('Select one video clip before dropping an effect.', 'info');
+        return;
+      }
+      const descriptor = effectRegistry.getEffect(effectId);
+      if (!descriptor) return;
+      const defaults: Record<string, unknown> = {};
+      for (const p of descriptor.params) defaults[p.key] = p.defaultValue;
+      dispatchProject({
+        label: `Effect: ${effectId}`,
+        commands: [
+          {
+            type: 'effect.add',
+            payload: { objectId, effectId, params: defaults },
+          },
+        ],
+      } as unknown as VisualObjectTransaction);
+    },
+    [dispatchProject, timelineProject, visualProject, state.selectedIds, showToast],
+  );
+
   const handleMonitorEffectDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
@@ -790,35 +873,60 @@ function MonitorPanelContent({
       if (!raw) return;
       try {
         const payload = JSON.parse(raw) as { kind: string; effectId: string; source: string };
-        const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
-        if (!objectId || !isSingleVideoClipSelected(timelineProject, state.selectedIds)) {
-          showToast('Select one video clip before dropping an effect.', 'info');
-          return;
-        }
-        const descriptor = effectRegistry.getEffect(payload.effectId);
-        if (!descriptor) return;
-        const defaults: Record<string, unknown> = {};
-        for (const p of descriptor.params) {
-          defaults[p.key] = p.defaultValue;
-        }
-        dispatchProject({
-          label: `Effect: ${payload.effectId}`,
-          commands: [
-            {
-              type: 'effect.add',
-              payload: { objectId, effectId: payload.effectId, params: defaults },
-            },
-          ],
-        } as unknown as VisualObjectTransaction);
+        applyMonitorEffect(payload.effectId);
       } catch {
         /* ignore malformed */
       }
     },
-    [dispatchProject, onFilesDrop, timelineProject, visualProject, state.selectedIds, showToast],
+    [applyMonitorEffect, onFilesDrop],
   );
 
+  const handlePointerDndMove = useCallback(
+    (
+      payload: EditorPointerDragPayload,
+      target: EditorPointerDropTarget | undefined,
+      event: globalThis.PointerEvent | undefined,
+    ) => {
+      setMonitorDragOver(
+        event !== undefined &&
+          target?.kind === 'monitor' &&
+          (payload.kind === 'media' || payload.kind === 'effect'),
+      );
+    },
+    [],
+  );
+
+  const handlePointerDndDrop = useCallback(
+    (payload: EditorPointerDragPayload, target: EditorPointerDropTarget) => {
+      setMonitorDragOver(false);
+      if (target.kind !== 'monitor') return;
+      if (payload.kind === 'media') {
+        if (onAssetDrop === undefined) {
+          showToast('The Monitor cannot add media in this workspace.', 'info');
+          return;
+        }
+        onAssetDrop(payload.asset);
+      } else if (payload.kind === 'effect') {
+        applyMonitorEffect(payload.effectId);
+      }
+    },
+    [applyMonitorEffect, onAssetDrop, showToast],
+  );
+
+  useEffect(() => {
+    const root = panelRef.current;
+    if (root === null) return;
+    return registerEditorPointerDndRoot(root, {
+      onMove: handlePointerDndMove,
+      onDrop: handlePointerDndDrop,
+    });
+  }, [handlePointerDndDrop, handlePointerDndMove]);
+
   return (
-    <article className="monitor-panel" ref={panelRef}>
+    <article className="monitor-panel" ref={panelRef} data-editor-pointer-dnd-root="">
+      <p className="sr-only" role="status" aria-live="polite" data-monitor-announcement>
+        {keyAnnouncement}
+      </p>
       {error !== undefined && <p className="monitor-error">{error}</p>}
       {droppedImportProgress !== undefined && onCancelDroppedImport !== undefined && (
         <DroppedImportProgress progress={droppedImportProgress} onCancel={onCancelDroppedImport} />

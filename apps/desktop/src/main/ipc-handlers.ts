@@ -755,7 +755,47 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       }
       try {
         const raw = fs.readFileSync(catalogPath, 'utf8');
-        const catalog = JSON.parse(raw);
+        const catalog: unknown = JSON.parse(raw);
+        if (
+          typeof catalog === 'object' &&
+          catalog !== null &&
+          !Array.isArray(catalog) &&
+          Array.isArray((catalog as Record<string, unknown>)['assets'])
+        ) {
+          const record = catalog as Record<string, unknown> & { assets: unknown[] };
+          const assets = record.assets.filter(
+            (entry) =>
+              !(
+                typeof entry === 'object' &&
+                entry !== null &&
+                !Array.isArray(entry) &&
+                (entry as Record<string, unknown>)['internal'] === true
+              ),
+          );
+          if (assets.length !== record.assets.length) {
+            const kindCount = (kind: string): number =>
+              assets.filter(
+                (entry) =>
+                  typeof entry === 'object' &&
+                  entry !== null &&
+                  !Array.isArray(entry) &&
+                  (entry as Record<string, unknown>)['kind'] === kind,
+              ).length;
+            return {
+              ok: true,
+              data: {
+                ...record,
+                assets,
+                counts: {
+                  total: assets.length,
+                  audio: kindCount('audio'),
+                  image: kindCount('image'),
+                  video: kindCount('video'),
+                },
+              },
+            };
+          }
+        }
         return { ok: true, data: catalog };
       } catch (err: unknown) {
         return {

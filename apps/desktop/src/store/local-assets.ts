@@ -13,6 +13,8 @@ export interface LocalAssetRegistration {
   readonly sha256: string;
   readonly bytes: number;
   readonly descriptor?: Readonly<Record<string, unknown>>;
+  /** Internal export sources are hidden from the Media catalog and cleaned by their registration ID. */
+  readonly internal?: boolean;
 }
 
 export interface LocalAsset extends LocalAssetRegistration {
@@ -31,6 +33,7 @@ interface LocalAssetRow {
   readonly bytes: number;
   readonly stored_path: string | null;
   readonly descriptor_json: string | null;
+  readonly internal: number;
 }
 
 export function ensureLocalAssetSchema(db: DatabaseSync): void {
@@ -42,7 +45,8 @@ export function ensureLocalAssetSchema(db: DatabaseSync): void {
        sha256 TEXT NOT NULL,
        bytes INTEGER NOT NULL,
        stored_path TEXT,
-       created_at TEXT NOT NULL
+       created_at TEXT NOT NULL,
+       internal INTEGER NOT NULL DEFAULT 0
      )`,
   );
   const columns = db.prepare('PRAGMA table_info(local_assets)').all() as {
@@ -50,6 +54,9 @@ export function ensureLocalAssetSchema(db: DatabaseSync): void {
   }[];
   if (!columns.some((column) => column.name === 'descriptor_json')) {
     db.exec('ALTER TABLE local_assets ADD COLUMN descriptor_json TEXT');
+  }
+  if (!columns.some((column) => column.name === 'internal')) {
+    db.exec('ALTER TABLE local_assets ADD COLUMN internal INTEGER NOT NULL DEFAULT 0');
   }
 }
 
@@ -63,13 +70,16 @@ export class SqliteLocalAssetStore {
   register(asset: LocalAssetRegistration): LocalAssetRegistrationResult {
     const existing = this.get(asset.id);
     if (existing !== undefined) {
-      const same = existing.sha256 === asset.sha256 && existing.bytes === asset.bytes;
+      const same =
+        existing.sha256 === asset.sha256 &&
+        existing.bytes === asset.bytes &&
+        (existing.internal === true) === (asset.internal === true);
       return same ? { kind: 'registered' } : { kind: 'conflict' };
     }
     this.db
       .prepare(
-        `INSERT INTO local_assets (asset_id, kind, display_name, sha256, bytes, stored_path, created_at, descriptor_json)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+        `INSERT INTO local_assets (asset_id, kind, display_name, sha256, bytes, stored_path, created_at, descriptor_json, internal)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
       )
       .run(
         asset.id,
@@ -79,6 +89,7 @@ export class SqliteLocalAssetStore {
         asset.bytes,
         this.now(),
         asset.descriptor === undefined ? null : JSON.stringify(asset.descriptor),
+        asset.internal === true ? 1 : 0,
       );
     return { kind: 'registered' };
   }
@@ -86,7 +97,7 @@ export class SqliteLocalAssetStore {
   get(assetId: string): LocalAsset | undefined {
     const row = this.db
       .prepare(
-        `SELECT asset_id, kind, display_name, sha256, bytes, stored_path, descriptor_json
+        `SELECT asset_id, kind, display_name, sha256, bytes, stored_path, descriptor_json, internal
            FROM local_assets WHERE asset_id = ?`,
       )
       .get(assetId) as LocalAssetRow | undefined;
@@ -100,6 +111,7 @@ export class SqliteLocalAssetStore {
       ...(row.descriptor_json === null
         ? {}
         : { descriptor: JSON.parse(row.descriptor_json) as Readonly<Record<string, unknown>> }),
+      ...(row.internal === 1 ? { internal: true } : {}),
       ...(row.stored_path === null ? {} : { storedPath: row.stored_path }),
     };
   }

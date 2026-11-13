@@ -1,13 +1,15 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { dockLayoutKey, verticalDockLayout } from './dock-layout.js';
+import { DEFAULT_VIEW_MODE, dockLayoutKey, verticalDockLayout } from './dock-layout.js';
 import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
   persistWorkspacePresetLayout,
+  resetWorkspaceStorage,
   workspacePresetLayoutKey,
   workspacePresetLayout,
 } from './workspace-presets.js';
+import { DEFAULT_EDITOR_UI_PREFERENCES, EDITOR_UI_PREFERENCES_KEY } from './ui-preferences.js';
 import { PANEL_IDS } from './workspace.js';
 
 function leafIds(layout: unknown): string[] {
@@ -175,9 +177,134 @@ describe('first-run layout', () => {
     expect(storage.getItem(dockLayoutKey('vertical'))).toBeNull();
     expect(leafIds(plan.layout)).not.toContain('agent-col');
   });
+
+  it('gives a fresh profile the preview-first Edit layout (T-D12)', () => {
+    const storage = memoryStorage();
+
+    const plan = planWorkspaceLayout(storage, 'edit', DEFAULT_VIEW_MODE);
+
+    expect(DEFAULT_VIEW_MODE).toBe('widescreen');
+    expect(plan.restored).toBe(false);
+    expect(plan.key).toBe(dockLayoutKey('widescreen'));
+    // The widescreen seed puts the monitor in the top row, centre of the screen.
+    expect(leafIds(plan.layout)).toContain('monitor-row');
+    expect(leafIds(plan.layout)).not.toContain('agent-col');
+  });
+
+  it('restores a stored layout from the old default exactly as it was saved (T-D12)', () => {
+    // A layout saved before this change: the old vertical default, Joy Code in its column.
+    const oldLayout = JSON.stringify(verticalDockLayout());
+    const storage = memoryStorage({ [dockLayoutKey('vertical')]: oldLayout });
+
+    const plan = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(plan.restored).toBe(true);
+    // The old vertical seed's monitor column is 500 wide, beside a 1000-wide tool area: kept as saved.
+    const root = (plan.layout as { grid: { root: { data: { size: number; data: unknown }[] } } })
+      .grid.root;
+    expect(root.data[1]?.size).toBe(500);
+    expect(leafIds(plan.layout)).toContain('monitor-col');
+    expect(leafIds(plan.layout)).toContain('agent-col');
+    // The stored bytes are not rewritten by the restore.
+    expect(storage.getItem(dockLayoutKey('vertical'))).toBe(oldLayout);
+  });
+
+  it('the preview-first Edit layout puts the monitor top-centre and large (T-D12 round 2)', () => {
+    const layout = planWorkspaceLayout(memoryStorage(), 'edit', 'widescreen').layout as {
+      grid: { root: { data: { size: number; data: { id?: string } & unknown }[] } };
+    };
+    const [topRow, bottomRow] = layout.grid.root.data as unknown as [
+      { size: number; data: { size: number; data: { id: string } }[] },
+      { size: number },
+    ];
+    // The top row is 550 of 1000: the picture is the first thing on screen.
+    expect(topRow.size).toBe(550);
+    expect(bottomRow.size).toBe(450);
+    // Browser, monitor, context across the top; the monitor is the middle and the largest.
+    const row = topRow.data as unknown as { size: number; data: { id: string } }[];
+    expect(row.map((cell) => cell.data.id)).toEqual(['browser', 'monitor-row', 'context']);
+    expect(row[1]!.size).toBeGreaterThan(row[0]!.size);
+    expect(row[1]!.size).toBeGreaterThan(row[2]!.size);
+  });
+
+  it('a stored widescreen layout also loads unchanged (T-D12)', () => {
+    const savedWidescreen = JSON.stringify(firstRunWorkspaceLayout('edit', 'widescreen'));
+    const storage = memoryStorage({ [dockLayoutKey('widescreen')]: savedWidescreen });
+
+    const plan = planWorkspaceLayout(storage, 'edit', 'widescreen');
+
+    expect(plan.restored).toBe(true);
+    expect(storage.getItem(dockLayoutKey('widescreen'))).toBe(savedWidescreen);
+  });
 });
 
 describe('workspace preset layout persistence', () => {
+  it('loads a pre-panel-menu saved-layout fixture unchanged and restores the saved group state', () => {
+    const key = workspacePresetLayoutKey('vertical', 'edit');
+    const preMenuFixture = JSON.stringify(verticalDockLayout());
+    const storage = memoryStorage({ [key]: preMenuFixture });
+
+    const loadedBeforeMenu = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(loadedBeforeMenu.restored).toBe(true);
+    expect(storage.getItem(key)).toBe(preMenuFixture);
+
+    const movedGroupLayout = {
+      ...(loadedBeforeMenu.layout as Record<string, unknown>),
+      activeGroup: 'context',
+    };
+    persistWorkspacePresetLayout(storage, 'edit', 'vertical', movedGroupLayout);
+
+    const afterRestart = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(afterRestart.restored).toBe(true);
+    expect(afterRestart.layout).toMatchObject({
+      activeGroup: 'context',
+      joyLayoutVersion: 2,
+    });
+    expect(leafIds(afterRestart.layout)).toEqual(leafIds(loadedBeforeMenu.layout));
+  });
+
+  it('keeps a deliberately closed panel absent when its saved layout is restored', async () => {
+    const layout = structuredClone(verticalDockLayout()) as {
+      panels: Record<string, unknown>;
+      grid: { root: Record<string, unknown> };
+    };
+    delete layout.panels.jobs;
+    const removeClosedPanel = (node: unknown): void => {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        node.forEach(removeClosedPanel);
+        return;
+      }
+      const record = node as Record<string, unknown>;
+      if (record.data !== null && typeof record.data === 'object') {
+        const data = record.data as Record<string, unknown>;
+        const views = data.views;
+        if (Array.isArray(views)) {
+          const remainingViews = views.filter((id) => id !== 'jobs');
+          data.views = remainingViews;
+          if (data.activeView === 'jobs') data.activeView = remainingViews[0];
+        }
+      }
+      Object.values(record).forEach(removeClosedPanel);
+    };
+    removeClosedPanel(layout.grid.root);
+
+    const storage = memoryStorage();
+    const key = persistWorkspacePresetLayout(storage, 'edit', 'vertical', layout);
+    const afterRestart = planWorkspaceLayout(storage, 'edit', 'vertical');
+    const appSource = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
+
+    expect(afterRestart.restored).toBe(true);
+    expect(key).toBe(workspacePresetLayoutKey('vertical', 'edit'));
+    expect(leafViews(afterRestart.layout, 'context')).not.toContain('jobs');
+    expect(
+      Object.keys((afterRestart.layout as { panels: Record<string, unknown> }).panels),
+    ).not.toContain('jobs');
+    expect(appSource).toMatch(/if\s*\(!restoredSavedLayout\)\s*ensureDockPanels\(api\)/);
+  });
+
   it('keeps each preset and view mode in its own storage slot', () => {
     const storage = memoryStorage();
     const editVertical = '{"layoutMarker":"saved edit vertical"}';
@@ -292,5 +419,29 @@ describe('workspace preset layout persistence', () => {
     expect(appSource.slice(layoutListenerStart, layoutListenerEnd)).toMatch(
       /persistWorkspacePresetLayout\(\s*storage,\s*workspacePresetRef\.current,\s*viewModeRef\.current,\s*event\.api\.toJSON\(\),?\s*\)/,
     );
+  });
+
+  it('resets every saved workspace layout and legacy preference key', () => {
+    const modes = ['vertical', 'widescreen'] as const;
+    const presets = ['edit', 'enhance', 'audio-captions', 'automate', 'custom'] as const;
+    const initial: Record<string, string> = {
+      [EDITOR_UI_PREFERENCES_KEY]: 'custom preferences',
+      'joy-media.view-mode.v1': 'widescreen',
+      'joy-media.unrelated.v1': 'preserve me',
+    };
+    for (const mode of modes) {
+      for (const preset of presets) {
+        initial[workspacePresetLayoutKey(mode, preset)] = `${mode}:${preset}`;
+      }
+    }
+    const storage = memoryStorage(initial);
+
+    const target = resetWorkspaceStorage(storage);
+
+    expect(target).toEqual({
+      mode: DEFAULT_EDITOR_UI_PREFERENCES.viewMode,
+      preset: DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset,
+    });
+    expect(storage.entries()).toEqual([['joy-media.unrelated.v1', 'preserve me']]);
   });
 });

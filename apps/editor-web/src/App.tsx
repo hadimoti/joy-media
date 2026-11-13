@@ -13,6 +13,7 @@ import {
 import { DockviewReact } from 'dockview';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
 import { PanelTab } from './PanelTab.js';
+import { PanelHeaderActions } from './PanelHeaderMenu.js';
 import {
   EditorPanelContext,
   type AnimationGraphFocusRequest,
@@ -261,6 +262,10 @@ import { createMissingMediaHost, type MissingMediaHost } from './missing-media-h
 import type { ProjectWriterHandle } from './project-writer.js';
 import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js';
 import { prepareTimelinePresentation } from './timeline-presentation.js';
+import {
+  applyTimelineMediaPlacement,
+  type TimelineMediaPlacement,
+} from './timeline-media-placement.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import type { DroppedImportProgressState } from './DroppedImportProgress.js';
 import {
@@ -290,6 +295,7 @@ import {
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
+import { fetchSampleBlob, registerSampleMedia } from './sample-media-cache.js';
 import type { NewProjectSpec } from './new-project-format.js';
 import {
   duplicateProject as duplicateProjectLifecycle,
@@ -421,8 +427,6 @@ import {
   loadEditorUiPreferences,
   saveEditorUiPreferences,
   updateEditorUiPreferences,
-  DEFAULT_EDITOR_UI_PREFERENCES,
-  EDITOR_UI_PREFERENCES_KEY,
 } from './ui-preferences.js';
 import type { EditorUiPreferencesV2 } from './ui-preferences.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
@@ -432,7 +436,7 @@ import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
   persistWorkspacePresetLayout,
-  workspacePresetLayoutKey,
+  resetWorkspaceStorage,
 } from './workspace-presets.js';
 import {
   DOCK_LAYOUT_KEY,
@@ -440,7 +444,6 @@ import {
   DOCK_PANEL_MINIMUM_WIDTH,
   SUPERSEDED_DOCK_LAYOUT_KEYS,
   type EditorViewMode,
-  dockLayoutKey,
   migrateLegacyDockLayout,
   saveViewMode,
 } from './dock-layout.js';
@@ -573,14 +576,31 @@ import {
   stickerImageCache,
 } from './editor-runtime-singletons.js';
 import { MonitorPanel } from './monitor/index.js';
+import { useMonitorTransportControls } from './monitor/useMonitorTransportControls.js';
+import { monitorFps } from './monitor/monitor-timecode.js';
+import { MONITOR_FULLSCREEN_EVENT } from './monitor/monitor-transport-model.js';
+import {
+  exportLacksVisualSource,
+  missingExportClipIds,
+  missingExportClips,
+  transitionsWithoutMissingClips,
+  type MissingExportClip,
+} from './export-missing-media.js';
+import { MissingExportDialog } from './MissingExportDialog.js';
 
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
 // One missing-media host per editor session, so the panel's list and operations share state.
 const missingMediaHosts = new WeakMap<EditorSession, MissingMediaHost>();
+// The sample media copy of each sample session (T-R01); the missing-media list waits for it.
+const sampleMediaCopies = new WeakMap<EditorSession, Promise<unknown>>();
 function missingMediaHostFor(session: EditorSession): MissingMediaHost {
   let host = missingMediaHosts.get(session);
   if (host === undefined) {
-    host = createMissingMediaHost(session, () => originalAssetCachePromise);
+    host = createMissingMediaHost(
+      session,
+      () => originalAssetCachePromise,
+      sampleMediaCopies.get(session),
+    );
     missingMediaHosts.set(session, host);
   }
   return host;
@@ -1081,6 +1101,17 @@ function EditorWorkspace({
   );
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [assetLibrarySettingsOpen, setAssetLibrarySettingsOpen] = useState(false);
+  // Set while the owner decides what to do about clips whose files are missing (T-R04).
+  const [missingExportPrompt, setMissingExportPrompt] = useState<
+    | {
+        readonly clips: readonly MissingExportClip[];
+        readonly fps: number;
+        readonly retryEntry: ProjectExportProcessEntry | undefined;
+      }
+    | undefined
+  >(undefined);
+  // Raised by the export dialog's Relink; the Assets panel opens its Review dialog and clears it.
+  const [missingReviewRequested, setMissingReviewRequested] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   useEffect(() => {
     if (!isDesktopHost()) return;
@@ -1370,6 +1401,8 @@ function EditorWorkspace({
   const replacementAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const previewGainNodeRef = useRef<GainNode | null>(null);
   const previewPanNodeRef = useRef<StereoPannerNode | null>(null);
+  // Tap for the Monitor's level meter (T-M10); it only reads, never changes the output.
+  const previewMeterAnalyserRef = useRef<AnalyserNode | null>(null);
   const replacementGainNodeRef = useRef<GainNode | null>(null);
   const replacementPanNodeRef = useRef<StereoPannerNode | null>(null);
   const previewAudioDisposeTimerRef = useRef<number | undefined>(undefined);
@@ -1404,6 +1437,13 @@ function EditorWorkspace({
         .connect(replacementPanNodeRef.current)
         .connect(audioContext.destination);
     }
+    if (previewMeterAnalyserRef.current === null) {
+      const meter = audioContext.createAnalyser();
+      meter.fftSize = 2048;
+      previewPanNodeRef.current?.connect(meter);
+      replacementPanNodeRef.current?.connect(meter);
+      previewMeterAnalyserRef.current = meter;
+    }
   }, []);
   const disposePreviewAudioGraph = useCallback(() => {
     previewAudioSourceRef.current?.disconnect();
@@ -1412,6 +1452,7 @@ function EditorWorkspace({
     replacementGainNodeRef.current?.disconnect();
     previewPanNodeRef.current?.disconnect();
     replacementPanNodeRef.current?.disconnect();
+    previewMeterAnalyserRef.current = null;
     const audioContext = audioContextRef.current;
     audioContextRef.current = null;
     previewAudioSourceRef.current = null;
@@ -1466,6 +1507,19 @@ function EditorWorkspace({
     if (entry === undefined) throw new Error(`unknown project "${projectId}"`);
     const seeds = seedsForCatalogEntry(entry);
     sessionRef.current = new EditorSession(storage, seeds.timeline, seeds.visual, {}, writer);
+    // A sample project's media is copied into this profile's original cache on first open, so it
+    // shows as present and exports (T-R01). Only the cache is written; a failure does not stop the
+    // editor. The missing-media list waits for this copy, so no sample entry shows even briefly.
+    const sampleAssetIds = [
+      ...Object.keys(seeds.visual.assets),
+      ...Object.keys((seeds.timeline as { assets?: Record<string, unknown> }).assets ?? {}),
+    ];
+    sampleMediaCopies.set(
+      sessionRef.current,
+      originalAssetCachePromise
+        .then((cache) => registerSampleMedia(sampleAssetIds, { cache, fetchFile: fetchSampleBlob }))
+        .catch(() => undefined),
+    );
   }
   const session = sessionRef.current;
   const rootComposition =
@@ -2789,6 +2843,23 @@ function EditorWorkspace({
         setState((active) => ({ ...active, playing: false }));
       });
   }, [ensurePreviewAudioGraph, session, syncMediaToPlayhead]);
+  // Monitor transport (T-M10): one frame step, J K L, in and out, loop, timecode.
+  const monitorRootComposition =
+    session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+  const monitorTransport = useMonitorTransportControls({
+    playheadUs: state.playheadUs,
+    playing: state.playing,
+    durationUs:
+      monitorRootComposition === undefined
+        ? 0
+        : timelineEffectiveDurationUs(monitorRootComposition),
+    fps: monitorFps(monitorRootComposition?.frameRate),
+    seek,
+    togglePlayback,
+  });
+  // Key and palette handlers read the latest controls without re-subscribing.
+  const monitorTransportRef = useRef(monitorTransport);
+  monitorTransportRef.current = monitorTransport;
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
       const prepared = prepareTimelinePresentation(
@@ -2829,6 +2900,16 @@ function EditorWorkspace({
       setRevision((revision) => revision + 1);
     },
     [resyncTimelineMedia, session],
+  );
+  const dispatchMediaPlacement = useCallback(
+    (placements: readonly TimelineMediaPlacement[], transaction: CommandTransaction) => {
+      const nextAudio = applyTimelineMediaPlacement(session, audioState, transaction, placements);
+      invalidateAgentPreviewAfterEdit(session);
+      setAudioStateRaw(nextAudio);
+      resyncTimelineMedia();
+      setRevision((revision) => revision + 1);
+    },
+    [audioState, resyncTimelineMedia, session],
   );
   const dispatchGraph = useCallback(
     (transaction: GraphTransaction) => {
@@ -3586,12 +3667,14 @@ function EditorWorkspace({
       // A saved layout always wins; the first-run layout (Joy Code collapsed)
       // applies only when nothing is saved for this workspace yet.
       const plan = planWorkspaceLayout(storage, preset, mode);
+      let restoredSavedLayout = plan.restored;
       try {
         api.fromJSON(plan.layout as never, { reuseExistingPanels: false });
       } catch (error) {
         if (plan.restored) {
           // A saved layout the editor cannot read: drop it and use the default.
           storage.removeItem(plan.key);
+          restoredSavedLayout = false;
           try {
             api.fromJSON(firstRunWorkspaceLayout(preset, mode) as never, {
               reuseExistingPanels: false,
@@ -3603,7 +3686,9 @@ function EditorWorkspace({
           console.warn('default dock layout rejected, falling back to a stack', error);
         }
       }
-      ensureDockPanels(api);
+      // A missing panel in a saved layout can be an intentional Close panel
+      // action. Repair the first-run seed, but keep saved closures durable.
+      if (!restoredSavedLayout) ensureDockPanels(api);
       api.getPanel('monitor')?.api.setActive();
       persistWorkspacePresetLayout(storage, preset, mode, api.toJSON());
     },
@@ -3640,20 +3725,14 @@ function EditorWorkspace({
   );
 
   const resetWorkspace = useCallback(() => {
-    for (const mode of ['vertical', 'widescreen'] as const) {
-      storage.removeItem(dockLayoutKey(mode));
-      for (const preset of ['enhance', 'audio-captions', 'automate', 'custom'] as const) {
-        storage.removeItem(workspacePresetLayoutKey(mode, preset));
-      }
-    }
-    storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
-    workspacePresetRef.current = DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset;
-    setWorkspacePreset(DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset);
+    const target = resetWorkspaceStorage(storage);
+    workspacePresetRef.current = target.preset;
+    setWorkspacePreset(target.preset);
     setEnhanceTool('effects');
-    setViewMode(DEFAULT_EDITOR_UI_PREFERENCES.viewMode);
-    viewModeRef.current = DEFAULT_EDITOR_UI_PREFERENCES.viewMode;
+    setViewMode(target.mode);
+    viewModeRef.current = target.mode;
     const api = dockviewApiRef.current;
-    if (api !== null) applyDockLayout(api, 'vertical', 'edit');
+    if (api !== null) applyDockLayout(api, target.mode, target.preset);
   }, [applyDockLayout, storage]);
 
   const switchEditorView = useCallback(() => {
@@ -3750,6 +3829,39 @@ function EditorWorkspace({
           break;
         case 'shortcuts.toggle':
           setKeyboardShortcutsOpen((open) => !open);
+          break;
+        case 'playhead.frameBack':
+          monitorTransportRef.current.stepFrame(-1);
+          break;
+        case 'playhead.frameForward':
+          monitorTransportRef.current.stepFrame(1);
+          break;
+        case 'jkl.reverse':
+          monitorTransportRef.current.pressJkl('j');
+          break;
+        case 'jkl.stop':
+          monitorTransportRef.current.pressJkl('k');
+          break;
+        case 'jkl.forward':
+          monitorTransportRef.current.pressJkl('l');
+          break;
+        case 'playback.loop':
+          monitorTransportRef.current.toggleLoop();
+          break;
+        case 'range.in':
+          monitorTransportRef.current.setInPoint();
+          break;
+        case 'range.out':
+          monitorTransportRef.current.setOutPoint();
+          break;
+        case 'range.clear':
+          monitorTransportRef.current.clearMarks();
+          break;
+        case 'range.playInOut':
+          monitorTransportRef.current.playInToOut();
+          break;
+        case 'monitor.fullscreen':
+          window.dispatchEvent(new Event(MONITOR_FULLSCREEN_EVENT));
           break;
         case 'clip.split': {
           if (composition === undefined || selection === undefined) return;
@@ -3922,7 +4034,10 @@ function EditorWorkspace({
   );
 
   const handleExport = useCallback(
-    async (retryEntry?: ProjectExportProcessEntry) => {
+    async (
+      retryEntry?: ProjectExportProcessEntry,
+      options?: { readonly allowMissing?: boolean },
+    ) => {
       if (exportInFlightRef.current) return;
       const retryPreset = retryEntry?.presetId;
       if (retryPreset !== undefined && !isExportPresetId(retryPreset)) {
@@ -3931,7 +4046,8 @@ function EditorWorkspace({
       }
       const activeExportPreset = retryPreset ?? exportPreset;
       const exportTimelineProject = structuredClone(session.timelineProject);
-      const exportVisualProject = structuredClone(session.visualProject);
+      // A let: the missing-clip check below may replace the transitions on this private copy.
+      let exportVisualProject = structuredClone(session.visualProject);
       const exportAudioState = structuredClone(audioState);
       const compositionV1 = exportVisualProject.compositions[exportVisualProject.rootCompositionId];
       const exportSettings = resolveExportSettings(activeExportPreset, {
@@ -3976,7 +4092,49 @@ function EditorWorkspace({
         }, 8_000);
         return;
       }
+      // T-R04: claim the export before the first await, so a second click cannot start another
+      // one. A clip whose file is missing is listed first: the owner relinks, exports with those
+      // clips drawn black and silent, or cancels.
       exportInFlightRef.current = true;
+      let missingClips: readonly MissingExportClip[];
+      try {
+        missingClips = missingExportClips(
+          exportTimelineProject,
+          await missingMediaHostFor(session).list(),
+        );
+      } catch (error) {
+        exportInFlightRef.current = false;
+        const message = error instanceof Error ? error.message : String(error);
+        window.clearTimeout(exportToastTimerRef.current);
+        setExportStatus(`Export failed: ${message}`);
+        setExportProgress(undefined);
+        exportToastTimerRef.current = window.setTimeout(() => {
+          setExportStatus(undefined);
+        }, 8_000);
+        return;
+      }
+      if (missingClips.length > 0 && options?.allowMissing !== true) {
+        exportInFlightRef.current = false;
+        setMissingExportPrompt({
+          clips: missingClips,
+          fps: monitorFps(
+            exportTimelineProject.compositions[exportTimelineProject.rootCompositionId]?.frameRate,
+          ),
+          retryEntry,
+        });
+        return;
+      }
+      const missingExportIds = missingExportClipIds(missingClips);
+      // T-R04: a transition with a missing side is dropped, so the present clip plays as a cut.
+      if (missingExportIds.size > 0 && exportVisualProject.transitions !== undefined) {
+        exportVisualProject = {
+          ...exportVisualProject,
+          transitions: transitionsWithoutMissingClips(
+            exportVisualProject.transitions,
+            missingExportIds,
+          ),
+        };
+      }
       const abortController = new AbortController();
       exportAbortRef.current = abortController;
       setExporting(true);
@@ -4027,7 +4185,10 @@ function EditorWorkspace({
           // fresh server attempt. Failure is best-effort because the asset may
           // already have been removed by the Worker/control-plane cleanup.
           await mediaControlPlaneClient
-            .deleteAsset(controlPlaneProject.controlPlaneProjectId, retryEntry.stagedAssetId)
+            .deleteInternalAsset(
+              controlPlaneProject.controlPlaneProjectId,
+              retryEntry.stagedAssetId,
+            )
             .catch(() => undefined);
         }
         const estimate = await navigator.storage?.estimate?.();
@@ -4043,8 +4204,12 @@ function EditorWorkspace({
         const compositionTimeline =
           exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
         const allTimelineClips = flattenRootTimelineVideoClips(exportTimelineProject);
+        // Missing clips keep their place in the duration (they render black) but have no source.
+        const sourcedTimelineClips = allTimelineClips.filter(
+          (clip) => !missingExportIds.has(clip.id),
+        );
         const exportElementKinds = readTimelineElementKindMap(exportVisualProject);
-        const playableTimelineClips = allTimelineClips.filter((clip) => {
+        const playableTimelineClips = sourcedTimelineClips.filter((clip) => {
           const kind = timelineElementKindForClip(clip, exportElementKinds);
           const assetKind = exportVisualProject.assets[clip.assetId]?.kind;
           return isExportVisualTimelineClip(kind, assetKind);
@@ -4129,17 +4294,19 @@ function EditorWorkspace({
         );
         const exportClips = [...clipsByBoundary, ...transitionPartnerClips].filter(
           (clip, index, clips) =>
-            clips.findIndex((candidate) => candidate.id === clip.id) === index,
+            clips.findIndex((candidate) => candidate.id === clip.id) === index &&
+            !missingExportIds.has(clip.id),
         );
         const hasHtmlScenes = Object.values(exportVisualProject.visualObjects).some(
           (object) => object.kind === 'html-scene',
         );
-        if (exportClips.length === 0 && !hasHtmlScenes)
+        // All used clips missing and accepted ("Export anyway") is valid: black and silent.
+        if (exportLacksVisualSource(exportClips.length, hasHtmlScenes, missingExportIds.size))
           throw new Error('No playable visual clips are available for export');
         // Audio lanes use video leaves in the timeline model, but have no visual
         // boundary. Keep their mix inputs independent of visual preparation.
         const audioMixClips = selectExportAudioClips(
-          allTimelineClips,
+          sourcedTimelineClips,
           exportVisualProject.assets,
           exportAudioState.clips,
         );
@@ -4822,6 +4989,7 @@ function EditorWorkspace({
             id: stagedExportAssetId,
             kind: 'video',
             displayName: `${exportFilename}.stage`,
+            internal: true,
             sha256: stagedSha256,
             bytes: stagedBlob.size,
             descriptor: {
@@ -5010,7 +5178,7 @@ function EditorWorkspace({
         lastExportRef.current = { entryId, url: pendingExportUrl };
         if (stagedExportAssetId !== undefined) {
           await mediaControlPlaneClient
-            .deleteAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
+            .deleteInternalAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
             .catch(() => undefined);
           stagedExportAssetId = undefined;
         }
@@ -5124,7 +5292,7 @@ function EditorWorkspace({
             // temporary asset on failure/cancellation so retries cannot leave
             // orphaned media or collide with a previous attempt.
             await mediaControlPlaneClient
-              .deleteAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
+              .deleteInternalAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
               .catch(() => undefined);
             stagedExportAssetId = undefined;
           }
@@ -5642,59 +5810,6 @@ function EditorWorkspace({
           state.playheadUs,
           new Set(),
           () => clipId,
-        ),
-      );
-    };
-    const bindMediaClip = (
-      asset: {
-        readonly id: string;
-        readonly kind: 'video' | 'audio' | 'image';
-        readonly displayName?: string;
-        readonly sha256?: string;
-        readonly bytes?: number;
-        readonly descriptor?: {
-          readonly mimeType?: string;
-          readonly durationUs?: number;
-          readonly width?: number;
-          readonly height?: number;
-          readonly animation?: AnimationDescriptorV1;
-        };
-      },
-      clipId: string,
-    ) => {
-      const controllerId = `media-controller-${clipId}`;
-      if (context.visualProject.visualObjects[controllerId] !== undefined) return;
-      context.replaceVisualProject(
-        bindClipToObject(
-          {
-            ...projectWithImportedAsset(context.visualProject, {
-              id: asset.id,
-              kind: asset.kind,
-              displayName: asset.displayName ?? asset.id,
-              ...(asset.sha256 === undefined ? {} : { sha256: asset.sha256 }),
-              ...(asset.bytes === undefined ? {} : { bytes: asset.bytes }),
-              ...(asset.descriptor === undefined ? {} : { descriptor: asset.descriptor }),
-            }),
-            visualObjects: {
-              ...context.visualProject.visualObjects,
-              [controllerId]: {
-                id: controllerId,
-                kind: 'null',
-                assetId: asset.id,
-                transform: {
-                  x: 0,
-                  y: 0,
-                  scaleX: 1,
-                  scaleY: 1,
-                  rotationDeg: 0,
-                  opacity: 1,
-                  crop: { left: 0, top: 0, right: 0, bottom: 0 },
-                },
-              },
-            },
-          },
-          clipId,
-          controllerId,
         ),
       );
     };
@@ -6631,7 +6746,7 @@ function EditorWorkspace({
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
           )}
           onImportFiles={handleDroppedFiles}
-          onMediaPlaced={(asset, clipId) => bindMediaClip(asset, clipId)}
+          onMediaPlacement={context.dispatchMediaPlacement}
           onTogglePlayback={context.togglePlayback}
           onSeek={(timeUs) => context.seek(timelineViewRootTime(activeTimelineView, timeUs))}
           onSelectClips={context.selectClips}
@@ -6813,6 +6928,8 @@ function EditorWorkspace({
               resyncTimelineMedia();
               setRevision((current) => current + 1);
             },
+            reviewRequested: missingReviewRequested,
+            onReviewRequestHandled: () => setMissingReviewRequested(false),
           }}
         />,
       );
@@ -6882,6 +6999,7 @@ function EditorWorkspace({
       return (
         <MonitorPanel
           agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
+          onAssetDrop={(asset) => addAssetToTimeline(asset)}
           onFilesDrop={(files) =>
             handleDroppedFiles(files, { surface: 'monitor', timeUs: activeTimelinePlayheadUs })
           }
@@ -7497,7 +7615,9 @@ function EditorWorkspace({
                 })),
               selectClips,
               clearSelection: () => setState((current) => ({ ...current, selectedIds: [] })),
+              resetWorkspace,
               dispatchTimeline,
+              dispatchMediaPlacement,
               dispatchTimelineAndProjectAudio,
               updateVisualProperty,
               dispatchProject,
@@ -7558,12 +7678,15 @@ function EditorWorkspace({
               onTimelineAutoFitChange: setTimelineAutoFit,
               activeTimelineCompositionId,
               onActiveTimelineCompositionChange: setActiveTimelineCompositionId,
+              monitorTransport,
+              readPreviewMeterAnalyser: () => previewMeterAnalyserRef.current,
             }}
           >
             <DockviewReact
               className="workspace"
               components={dockviewComponents}
               defaultTabComponent={PanelTab}
+              rightHeaderActionsComponent={PanelHeaderActions}
               onReady={onReady}
             />
           </EditorPanelContext.Provider>
@@ -7658,6 +7781,24 @@ function EditorWorkspace({
                 }
               }}
               onNotice={showToast}
+            />
+          )}
+          {missingExportPrompt !== undefined && (
+            <MissingExportDialog
+              clips={missingExportPrompt.clips}
+              fps={missingExportPrompt.fps}
+              onRelink={() => {
+                setMissingExportPrompt(undefined);
+                // Opens the Review dialog directly, and shows the banner even if it was hidden.
+                setMissingReviewRequested(true);
+                activatePanel('media');
+              }}
+              onExportAnyway={() => {
+                const retryEntry = missingExportPrompt.retryEntry;
+                setMissingExportPrompt(undefined);
+                void handleExport(retryEntry, { allowMissing: true });
+              }}
+              onCancel={() => setMissingExportPrompt(undefined)}
             />
           )}
           {assetLibrarySettingsOpen && (

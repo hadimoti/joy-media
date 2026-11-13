@@ -10,12 +10,8 @@
 
 import { useState, useMemo, useCallback, useContext, useEffect, useRef } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
-import {
-  effectRegistry,
-  registerBuiltins,
-  type EffectDescriptor,
-  type EffectDragPayload,
-} from '@joy-media/visual-effects';
+import { effectRegistry, registerBuiltins, type EffectDescriptor } from '@joy-media/visual-effects';
+import { beginEditorPointerDrag } from './editor-pointer-dnd.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { BoltIcon, LayersIcon, PlusIcon, StarFilledIcon, StarIcon, WarningIcon } from './icons.js';
@@ -209,16 +205,6 @@ export function EffectsPanel({
     [canApplyEffects, objectId, onDispatch, showToast],
   );
 
-  const handleDragStart = useCallback((effectId: string, event: React.DragEvent) => {
-    const payload: EffectDragPayload = {
-      kind: 'joy/effect',
-      effectId,
-      source: 'effects-panel',
-    };
-    event.dataTransfer.setData('application/x-joy-effect', JSON.stringify(payload));
-    event.dataTransfer.effectAllowed = 'copy';
-  }, []);
-
   const handleCreateRecipe = useCallback(() => {
     if (storage === undefined) {
       showToast('Effect recipes require an active editor session.', 'error');
@@ -367,7 +353,6 @@ export function EffectsPanel({
                       linked={linkedId === desc.id}
                       onAdd={() => handleAdd(desc.id)}
                       onToggleFavorite={() => toggleFavorite(desc.id)}
-                      onDragStart={(e) => handleDragStart(desc.id, e)}
                     />
                   ))
                 )}
@@ -402,7 +387,6 @@ function EffectCard({
   linked,
   onAdd,
   onToggleFavorite,
-  onDragStart,
 }: {
   readonly descriptor: EffectDescriptor;
   readonly isFavorite: boolean;
@@ -410,7 +394,6 @@ function EffectCard({
   readonly linked: boolean;
   readonly onAdd: () => void;
   readonly onToggleFavorite: () => void;
-  readonly onDragStart: (event: React.DragEvent) => void;
 }) {
   const unavailableReasonId = `effect-unavailable-${descriptor.id}`;
   const unavailableReason = canApply
@@ -420,6 +403,7 @@ function EffectCard({
   return (
     <div
       className={`effect-card${canApply ? '' : ' is-unavailable'}${linked ? ' is-linked' : ''}`}
+      data-effect-id={descriptor.id}
       role="group"
       tabIndex={0}
       aria-label={`${descriptor.label} effect`}
@@ -430,8 +414,12 @@ function EffectCard({
         : {
             'aria-describedby': unavailableReasonId,
           })}
-      draggable={true}
-      onDragStart={onDragStart}
+      onPointerDown={(event) => {
+        beginEditorPointerDrag(event.nativeEvent, event.currentTarget, {
+          kind: 'effect',
+          effectId: descriptor.id,
+        });
+      }}
       onDoubleClick={canApply ? onAdd : undefined}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -439,7 +427,7 @@ function EffectCard({
         event.preventDefault();
         onAdd();
       }}
-      title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost})${unavailableReason === undefined ? '' : ` ${unavailableReason}`}`}
+      title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost}). Drag onto a timeline clip or the Monitor.${unavailableReason === undefined ? '' : ` ${unavailableReason}`}`}
     >
       {unavailableReason !== undefined && (
         <span id={unavailableReasonId} className="sr-only">

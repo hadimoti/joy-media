@@ -210,6 +210,8 @@ function makeHarness(
           : { ok: false as const, error: options.libraryError };
       },
       removeEntry: async () => ({ removed: true }),
+      removeInternalAsset: async () => ({ removed: false }),
+      removeInternalEntries: async () => undefined,
     },
     readChunks: async function* (handle) {
       readHandles.push(handle);

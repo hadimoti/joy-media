@@ -329,6 +329,7 @@ export class BrowserControlPlaneClient {
       sha256: asset.sha256,
       bytes: asset.bytes,
       descriptor: asset.descriptor,
+      ...(asset.internal === true ? { internal: true } : {}),
     });
     const registered: BrowserAsset = {
       id: asset.id,
@@ -400,6 +401,29 @@ export class BrowserControlPlaneClient {
       removed = registeredAssets.delete(assetId);
     }
     return { id: assetId, removed, cloudObjectsPurged: 0, cloudObjectPurgeFailures: 0 };
+  }
+
+  async deleteInternalAsset(
+    _projectId: string,
+    assetId: string,
+  ): Promise<{
+    readonly id: string;
+    readonly removed: boolean;
+    readonly cloudObjectsPurged: number;
+    readonly cloudObjectPurgeFailures: number;
+  }> {
+    const result = await call<{ readonly removed: boolean }>(
+      this.bridge,
+      'desktop.media.asset.remove-internal',
+      { assetId },
+    );
+    registeredAssets.delete(assetId);
+    return {
+      id: assetId,
+      removed: result.removed,
+      cloudObjectsPurged: 0,
+      cloudObjectPurgeFailures: 0,
+    };
   }
 
   async uploadAssetOriginal(

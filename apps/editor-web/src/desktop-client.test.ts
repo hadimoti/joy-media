@@ -64,7 +64,7 @@ describe('retryDesktopWorker', () => {
     const status = {
       connection: 'starting' as const,
       capabilities: [],
-      lastError: 'Worker exited with code 137',
+      lastError: 'Local service exited with code 137',
     };
     const invoke = vi.fn().mockResolvedValue(status);
     window.joyDesktop = { channels: ['desktop.worker-retry'], invoke };

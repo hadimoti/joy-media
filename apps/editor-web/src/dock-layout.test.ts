@@ -503,8 +503,10 @@ describe('Joy Code collapsed layout', () => {
 });
 
 describe('view modes', () => {
-  it('defaults view mode to vertical and persists widescreen', () => {
+  it('defaults view mode to widescreen (preview-first) and persists the choice', () => {
     const storage = memoryStorage();
+    expect(loadViewMode(storage)).toBe('widescreen');
+    saveViewMode(storage, 'vertical');
     expect(loadViewMode(storage)).toBe('vertical');
     saveViewMode(storage, 'widescreen');
     expect(loadViewMode(storage)).toBe('widescreen');

@@ -20,8 +20,24 @@ async function viewportState(page) {
   }));
 }
 
+// Scoped to the Monitor transport: the Timeline panel also shows a Pause button.
 async function isPlaying(page) {
-  return page.getByRole('button', { name: 'Pause', exact: true }).isVisible();
+  return page
+    .locator('.monitor-transport')
+    .getByRole('button', { name: 'Pause', exact: true })
+    .isVisible();
+}
+
+/** Sets the Monitor zoom to 200% from the scale drawer (Ctrl+= steps are not 200% from Fit). */
+async function zoomTo200(page) {
+  const fit = page.getByRole('button', { name: 'Zoom Fit', exact: true });
+  if (!(await fit.isVisible().catch(() => false)))
+    await page.locator('button[aria-label^="Preview scale ("]').first().click();
+  await page.getByRole('button', { name: 'Zoom 200%', exact: true }).click();
+  const zoom = await page
+    .locator(VIEWPORT)
+    .evaluate((element) => Number(element.getAttribute('data-monitor-zoom')));
+  if (Math.abs(zoom - 2) > 1e-6) throw new Error(`the Monitor zoom is ${zoom}, not 2 (At 200%)`);
 }
 
 async function centreOfViewport(page) {
@@ -35,8 +51,7 @@ export async function holdSpaceDragPans(page) {
   if (await isPlaying(page)) await page.keyboard.press(' ');
   const centre = await centreOfViewport(page);
   await page.mouse.move(centre.x, centre.y);
-  await page.keyboard.press('Control+=');
-  await page.keyboard.press('Control+=');
+  await zoomTo200(page);
   const before = await viewportState(page);
   await page.keyboard.down(' ');
   await page.waitForTimeout(400);

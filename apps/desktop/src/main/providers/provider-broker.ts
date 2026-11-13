@@ -8,9 +8,11 @@ import { lookup } from 'node:dns/promises';
 import {
   type DirectProviderErrorCode,
   type DirectProviderProbeReport,
+  type GenerationKind,
   type SecretStore,
   evaluateEndpoint,
   findRegistryProvider,
+  generationSupport,
   normalizeBaseUrl,
 } from '@joy-media/provider-sdk';
 import {
@@ -62,6 +64,26 @@ import {
   type KimiTokenRecord,
 } from '../oauth/kimi.js';
 import { OAuthFlowError } from '../oauth/errors.js';
+import { prepareMiniMaxImage, readMiniMaxImage } from './generation/minimax-image.js';
+import { replyFailure } from './generation/minimax-reply.js';
+import { MINIMAX_GENERATION_SETTINGS } from './generation/minimax-settings.js';
+import {
+  prepareVideoCancel,
+  prepareVideoCreate,
+  prepareVideoFile,
+  prepareVideoQuery,
+  readVideoCreate,
+  readVideoFile,
+  readVideoStatus,
+  type VideoStatus,
+} from './generation/minimax-video.js';
+import {
+  isSafePathId,
+  promptProblem,
+  type GenerationErrorCode,
+  type GenerationOutcome,
+  type GenerationRoute,
+} from './generation/types.js';
 
 export { endpointBindingDigest };
 
@@ -113,7 +135,13 @@ export type BrokerErrorCode =
   | 'PLAN_LIMIT_REACHED'
   | 'RESPONSE_INCOMPLETE'
   | 'RESPONSE_INTERRUPTED'
-  | 'MODEL_CHOICE_REQUIRED';
+  | 'MODEL_CHOICE_REQUIRED'
+  | 'GENERATION_NOT_SUPPORTED'
+  | 'GENERATION_NOT_ALLOWED'
+  | 'GENERATION_QUOTA'
+  | 'GENERATION_BAD_PROMPT'
+  | 'GENERATION_REJECTED'
+  | 'GENERATION_RESPONSE_INVALID';
 
 export interface BrokerFailure {
   readonly ok: false;
@@ -160,6 +188,42 @@ export interface ProviderDraft {
 
 export type ProviderFetch = (url: string, init: RequestInit) => Promise<Response>;
 
+/** A picture or video request for a saved profile. The prompt is text; no key or URL is part of it. */
+export interface GenerationRequest {
+  readonly profileId: string;
+  readonly prompt: string;
+  /** The base URL the user saw. It must equal the saved profile's, as for chat. */
+  readonly baseUrl?: string | undefined;
+  readonly signal?: AbortSignal | undefined;
+}
+
+/** A video task, named with the route that started it: the later calls must use the same route. */
+export interface VideoTaskRequest {
+  readonly profileId: string;
+  readonly taskId: string;
+  readonly route: GenerationRoute;
+  readonly baseUrl?: string | undefined;
+  readonly signal?: AbortSignal | undefined;
+}
+
+export interface GeneratedImage {
+  readonly base64: string;
+  readonly mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
+  /** The model that made the picture, as the route named it. */
+  readonly model: string;
+  readonly route: GenerationRoute;
+}
+
+export interface StartedVideo {
+  readonly taskId: string;
+  readonly route: GenerationRoute;
+}
+
+export interface VideoTaskStatus {
+  readonly status: VideoStatus;
+  readonly fileId?: string | undefined;
+}
+
 export interface ProviderBrokerDeps {
   readonly store: ProviderBrokerStore;
   readonly secrets: SecretStore;
@@ -193,6 +257,33 @@ export interface ProviderBroker {
   listModels(
     source: { readonly profileId: string } | { readonly draft: ProviderDraft },
   ): Promise<BrokerResult<readonly ModelEntry[]>>;
+  /** One picture. The current MiniMax route is tried first; the legacy route only when the current one is missing. */
+  generateImage(request: GenerationRequest): Promise<BrokerResult<GeneratedImage>>;
+  /** Starts a video task and returns the route that took it. */
+  startVideo(request: GenerationRequest): Promise<BrokerResult<StartedVideo>>;
+  /** The status of a video task, on the route that started it. */
+  videoStatus(request: VideoTaskRequest): Promise<BrokerResult<VideoTaskStatus>>;
+  /**
+   * Cancels a queued video task. The legacy route has no cancel call, so it reports `cancelled: false` and sends nothing.
+   */
+  cancelVideo(
+    request: VideoTaskRequest,
+  ): Promise<BrokerResult<{ readonly cancelled: boolean; readonly message?: string | undefined }>>;
+  /**
+   * The download link of a finished video file. The link is valid for one hour and sits on a host outside the registry, so
+   * the caller fetches it only through a vetted host; this build never does.
+   */
+  videoFileLink(request: {
+    readonly profileId: string;
+    readonly fileId: string;
+    readonly baseUrl?: string | undefined;
+  }): Promise<BrokerResult<{ readonly downloadUrl: string }>>;
+}
+
+/** A generation reply as the transport returns it: its status and its text, whatever the status. */
+interface GenerationReply {
+  readonly status: number;
+  readonly text: string;
 }
 
 interface Endpoint {
@@ -306,6 +397,48 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     },
   });
   const chatGptCatalog = createChatGptCatalog();
+
+  /**
+   * The endpoint of a generation call. The kind must be offered before any token is refreshed or any request is made, so
+   * a ChatGPT sign-in is refused without a network call.
+   */
+  async function generationEndpoint(
+    profileId: string,
+    kind: GenerationKind,
+    baseUrl: string | undefined,
+  ): Promise<Endpoint> {
+    const profile = deps.store.getProfile(profileId);
+    if (profile === undefined)
+      throw new BrokerError('PROFILE_NOT_FOUND', 'Unknown provider profile');
+    const support = generationSupport(profile.provider, kind);
+    if (!support.supported) throw new BrokerError('GENERATION_NOT_SUPPORTED', support.reason);
+    return resolveProfile(profileId, baseUrl);
+  }
+
+  /** One generation request through the chat transport: the same pins and redirect rule, and a reply that holds the key is refused. */
+  async function generationReply(
+    endpoint: Endpoint,
+    call: PreparedCall,
+    signal: AbortSignal | undefined,
+  ): Promise<GenerationReply> {
+    const reply = await sendGeneration(deps.fetch, call, completeMs, screenedOf(endpoint), signal);
+    assertNoCredential(reply.text, endpoint);
+    return reply;
+  }
+
+  /** Sends the current route, and the legacy route only when the current one is missing on this account. */
+  async function onRoute(
+    endpoint: Endpoint,
+    prepare: (route: GenerationRoute) => PreparedCall,
+    signal: AbortSignal | undefined,
+  ): Promise<{ readonly route: GenerationRoute; readonly text: string }> {
+    const first = await generationReply(endpoint, prepare('current'), signal);
+    if (replyFailure(first.status, first.text)?.code !== 'ROUTE_MISSING') {
+      return { route: 'current', text: checkedText(first) };
+    }
+    const legacy = await generationReply(endpoint, prepare('legacy'), signal);
+    return { route: 'legacy', text: checkedText(legacy) };
+  }
 
   /**
    * The record to send with, refreshed first when it is close to expiry. A record that cannot be read means the
@@ -682,7 +815,169 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         return failureOf(error);
       }
     },
+
+    async generateImage(request) {
+      try {
+        const endpoint = await generationEndpoint(request.profileId, 'image', request.baseUrl);
+        checkPromptOrThrow(request.prompt, MINIMAX_GENERATION_SETTINGS.image.maxPromptCharacters);
+        const input = {
+          baseUrl: endpoint.baseUrl,
+          apiKey: requireKey(endpoint),
+          prompt: request.prompt,
+        };
+        const { route, text } = await onRoute(
+          endpoint,
+          (picked) => prepareMiniMaxImage(picked, input),
+          request.signal,
+        );
+        const image = unwrapOutcome(readMiniMaxImage(text));
+        const settings = MINIMAX_GENERATION_SETTINGS.image;
+        return {
+          ok: true,
+          data: {
+            base64: image.base64,
+            mimeType: image.mimeType,
+            model: route === 'current' ? settings.model : settings.legacyModel,
+            route,
+          },
+        };
+      } catch (error) {
+        return failureOf(error);
+      }
+    },
+
+    async startVideo(request) {
+      try {
+        const endpoint = await generationEndpoint(request.profileId, 'video', request.baseUrl);
+        checkPromptOrThrow(request.prompt, MINIMAX_GENERATION_SETTINGS.video.maxPromptCharacters);
+        const input = {
+          baseUrl: endpoint.baseUrl,
+          apiKey: requireKey(endpoint),
+          prompt: request.prompt,
+        };
+        const { route, text } = await onRoute(
+          endpoint,
+          (picked) => prepareVideoCreate(picked, input),
+          request.signal,
+        );
+        const created = unwrapOutcome(readVideoCreate(text));
+        return { ok: true, data: { taskId: created.taskId, route } };
+      } catch (error) {
+        return failureOf(error);
+      }
+    },
+
+    async videoStatus(request) {
+      try {
+        const endpoint = await generationEndpoint(request.profileId, 'video', request.baseUrl);
+        requireSafeId(request.taskId, 'The task id is not valid.');
+        const reply = await generationReply(
+          endpoint,
+          prepareVideoQuery(request.route, {
+            baseUrl: endpoint.baseUrl,
+            apiKey: requireKey(endpoint),
+            taskId: request.taskId,
+          }),
+          request.signal,
+        );
+        return { ok: true, data: unwrapOutcome(readVideoStatus(checkedText(reply))) };
+      } catch (error) {
+        return failureOf(error);
+      }
+    },
+
+    async cancelVideo(request) {
+      try {
+        const endpoint = await generationEndpoint(request.profileId, 'video', request.baseUrl);
+        requireSafeId(request.taskId, 'The task id is not valid.');
+        if (request.route === 'legacy') {
+          return {
+            ok: true,
+            data: {
+              cancelled: false,
+              message: 'The legacy route has no cancel call. Let the task finish.',
+            },
+          };
+        }
+        const reply = await generationReply(
+          endpoint,
+          prepareVideoCancel({
+            baseUrl: endpoint.baseUrl,
+            apiKey: requireKey(endpoint),
+            taskId: request.taskId,
+          }),
+          request.signal,
+        );
+        checkedText(reply);
+        return { ok: true, data: { cancelled: true } };
+      } catch (error) {
+        return failureOf(error);
+      }
+    },
+
+    async videoFileLink(request) {
+      try {
+        const endpoint = await generationEndpoint(request.profileId, 'video', request.baseUrl);
+        requireSafeId(request.fileId, 'The file id is not valid.');
+        const reply = await generationReply(
+          endpoint,
+          prepareVideoFile({
+            baseUrl: endpoint.baseUrl,
+            apiKey: requireKey(endpoint),
+            fileId: request.fileId,
+          }),
+          undefined,
+        );
+        const link = unwrapOutcome(readVideoFile(checkedText(reply)));
+        return { ok: true, data: { downloadUrl: link.downloadUrl } };
+      } catch (error) {
+        return failureOf(error);
+      }
+    },
   };
+}
+
+/** Throws the typed error for a prompt the route refuses. */
+function checkPromptOrThrow(prompt: string, maxCharacters: number): void {
+  const problem = promptProblem(prompt, maxCharacters);
+  if (problem !== undefined) throw new BrokerError('GENERATION_BAD_PROMPT', problem);
+}
+
+/** Throws the request error for an id that would not be safe in a URL path. */
+function requireSafeId(value: string, message: string): void {
+  if (!isSafePathId(value)) throw new BrokerError('REQUEST_INVALID', message);
+}
+
+/** The value of a generation outcome, or the typed error it names. */
+function unwrapOutcome<T>(outcome: GenerationOutcome<T>): T {
+  if (outcome.ok) return outcome.data;
+  throw generationFailure(outcome.code, outcome.message);
+}
+
+/** The reply's text, or the typed error its status or `base_resp` names. */
+function checkedText(reply: GenerationReply): string {
+  const failure = replyFailure(reply.status, reply.text);
+  if (failure !== undefined) throw generationFailure(failure.code, failure.message);
+  return reply.text;
+}
+
+/** The broker error of a generation failure. A refused key keeps the sign-in error every other call uses. */
+function generationFailure(code: GenerationErrorCode, message: string): BrokerError {
+  switch (code) {
+    case 'AUTH':
+      return new BrokerError('AUTH_FAILED', message);
+    case 'NOT_ALLOWED':
+      return new BrokerError('GENERATION_NOT_ALLOWED', message);
+    case 'QUOTA':
+      return new BrokerError('GENERATION_QUOTA', message);
+    case 'BAD_PROMPT':
+      return new BrokerError('GENERATION_BAD_PROMPT', message);
+    case 'RESPONSE_INVALID':
+      return new BrokerError('GENERATION_RESPONSE_INVALID', message);
+    case 'REJECTED':
+    case 'ROUTE_MISSING':
+      return new BrokerError('GENERATION_REJECTED', message);
+  }
 }
 
 function makeEndpoint(
@@ -1158,17 +1453,18 @@ async function isPlanLimitReply(response: Response): Promise<boolean> {
 }
 
 /**
- * Sends one request and returns the reply text. Redirects are never followed; a credential is
- * never placed in an error message; the reply is read up to MAX_RESPONSE_BYTES.
+ * The shared path of send and sendGeneration: one request with a deadline and the caller's abort, redirects refused,
+ * and every failure to reach the provider mapped to a typed error that never carries the credential. `handle` reads
+ * the reply once it has arrived.
  */
-async function send(
+async function exchange<T>(
   fetchImpl: ProviderFetch,
   call: PreparedCall,
   timeoutMs: number,
   secrets: readonly string[],
-  signal?: AbortSignal,
-  planLimits = false,
-): Promise<string> {
+  signal: AbortSignal | undefined,
+  handle: (response: Response) => Promise<T>,
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const abortFromCaller = (): void => controller.abort();
@@ -1189,6 +1485,32 @@ async function send(
         `The provider redirected${named === '' ? '' : ` to ${named}`}. Redirects are not followed.`,
       );
     }
+    return await handle(response);
+  } catch (error) {
+    if (error instanceof BrokerError) throw error;
+    if (signal?.aborted) throw new BrokerError('NETWORK_ERROR', 'The request was cancelled.');
+    if (isAbortError(error))
+      throw new BrokerError('TIMEOUT', 'The provider did not answer in time.');
+    throw new BrokerError('NETWORK_ERROR', 'The provider could not be reached.');
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abortFromCaller);
+  }
+}
+
+/**
+ * Sends one request and returns the reply text. Redirects are never followed; a credential is
+ * never placed in an error message; the reply is read up to MAX_RESPONSE_BYTES.
+ */
+async function send(
+  fetchImpl: ProviderFetch,
+  call: PreparedCall,
+  timeoutMs: number,
+  secrets: readonly string[],
+  signal?: AbortSignal,
+  planLimits = false,
+): Promise<string> {
+  return exchange(fetchImpl, call, timeoutMs, secrets, signal, async (response) => {
     if (planLimits && !response.ok && (await isPlanLimitReply(response))) {
       throw new BrokerError('PLAN_LIMIT_REACHED', PLAN_LIMIT_MESSAGE);
     }
@@ -1208,16 +1530,25 @@ async function send(
       );
     }
     return await readBounded(response, MAX_RESPONSE_BYTES);
-  } catch (error) {
-    if (error instanceof BrokerError) throw error;
-    if (signal?.aborted) throw new BrokerError('NETWORK_ERROR', 'The request was cancelled.');
-    if (isAbortError(error))
-      throw new BrokerError('TIMEOUT', 'The provider did not answer in time.');
-    throw new BrokerError('NETWORK_ERROR', 'The provider could not be reached.');
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener('abort', abortFromCaller);
-  }
+  });
+}
+
+/**
+ * One generation request. Unlike send, it returns the status rather than judging it: a generation reply names its own
+ * failure by status and by `base_resp`, and a missing route is a reason to try the legacy one. The timeout, abort and
+ * redirect rules are the same as send's.
+ */
+async function sendGeneration(
+  fetchImpl: ProviderFetch,
+  call: PreparedCall,
+  timeoutMs: number,
+  secrets: readonly string[],
+  signal?: AbortSignal,
+): Promise<GenerationReply> {
+  return exchange(fetchImpl, call, timeoutMs, secrets, signal, async (response) => ({
+    status: response.status,
+    text: await readBounded(response, MAX_RESPONSE_BYTES),
+  }));
 }
 
 /**

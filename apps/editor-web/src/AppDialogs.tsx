@@ -12,7 +12,7 @@ import './AppDialogs.css';
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), input:not([disabled]), select, textarea, a[href]';
 
-interface ModalKeyOptions {
+export interface ModalKeyOptions {
   readonly dialogRef: RefObject<HTMLElement | null>;
   readonly primaryRef: RefObject<HTMLElement | null>;
   /** Element that takes focus when the dialog opens. */
@@ -26,7 +26,7 @@ interface ModalKeyOptions {
  * Escape cancels, and Enter confirms. Enter on a focused Cancel button keeps the button's own action. The listener is
  * in the capture phase, so the editor's keyboard shortcuts never see keys pressed while a dialog is open.
  */
-function useModalKeys({
+export function useModalKeys({
   dialogRef,
   primaryRef,
   initialFocusRef,

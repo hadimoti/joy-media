@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { ExportPresetId } from '@joy-media/project-schema';
 import type { PopupControl } from '../popup-manager.js';
 import { POPUP_IDS } from '../popup-ids.js';
@@ -22,6 +22,8 @@ import {
 } from '../icons.js';
 import type { MonitorPerformanceStats } from './monitor-performance.js';
 import { MonitorViewMenu } from './MonitorViewMenu.js';
+import { MonitorTimeControls } from './MonitorTimeControls.js';
+import { MONITOR_FULLSCREEN_EVENT } from './monitor-transport-model.js';
 import type { MonitorViewOptions } from './monitor-view-options.js';
 import { MONITOR_ZOOM_PRESETS, formatZoomPercent, parseZoomPercent } from './monitor-view-state.js';
 
@@ -99,6 +101,14 @@ export function MonitorTransport({
     setTypedZoom(formatZoomPercent(parsed));
     onZoomSet(parsed);
   };
+  // F (and the palette) asks for the full-screen preview through a window event.
+  const toggleFullscreenRef = useRef(toggleFullscreen);
+  toggleFullscreenRef.current = toggleFullscreen;
+  useEffect(() => {
+    const onRequest = () => toggleFullscreenRef.current();
+    window.addEventListener(MONITOR_FULLSCREEN_EVENT, onRequest);
+    return () => window.removeEventListener(MONITOR_FULLSCREEN_EVENT, onRequest);
+  }, []);
   return (
     <div className="monitor-transport" ref={zoomDrawer.rootRef}>
       {zoomDrawer.open && (
@@ -174,6 +184,7 @@ export function MonitorTransport({
               className="monitor-transport-btn"
               aria-pressed={fullscreen}
               aria-label="Fullscreen preview"
+              title="Fullscreen preview (F, Esc leaves)"
               data-guide="Full"
               onClick={() => {
                 toggleFullscreen();
@@ -214,6 +225,7 @@ export function MonitorTransport({
         >
           <SkipForwardIcon />
         </button>
+        <MonitorTimeControls />
       </div>
       <div className="monitor-transport-end">
         <label className="monitor-preview-control">
@@ -255,6 +267,7 @@ export function MonitorTransport({
         <button
           type="button"
           className="monitor-transport-btn"
+          title={`Preview scale ${zoomLabel}: Ctrl+plus and Ctrl+minus zoom, Ctrl+0 fits`}
           aria-label={`Preview scale (${zoomLabel})`}
           aria-expanded={zoomDrawer.open}
           aria-controls="monitor-zoom-drawer"

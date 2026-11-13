@@ -931,6 +931,51 @@ describe('IPC dispatch', () => {
   });
 });
 
+describe('asset library catalog', () => {
+  it('does not return internal export rows in the Media catalog', async () => {
+    const d = deps();
+    const userRow = {
+      id: `joylib-${'a'.repeat(64)}`,
+      kind: 'image',
+      displayName: 'cover.png',
+      sha256: 'a'.repeat(64),
+      bytes: 12,
+    };
+    const internalRow = {
+      id: `joylib-${'b'.repeat(64)}`,
+      kind: 'video',
+      displayName: 'render.mp4.stage',
+      sha256: 'b'.repeat(64),
+      bytes: 34,
+      internal: true,
+      internalAssetIds: ['stage-attempt-3'],
+    };
+    const catalog = {
+      version: 1,
+      counts: { total: 2, audio: 0, image: 1, video: 1 },
+      assets: [userRow, internalRow],
+    };
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify(catalog) as never);
+    d.localDatabase.getAssetLibraryDirectory = () => 'C:\\test-assets\\library';
+
+    try {
+      const result = await createIpcHandlers(d)['desktop.asset-library.get-catalog'](undefined);
+      expect(result).toEqual({
+        ok: true,
+        data: {
+          version: 1,
+          counts: { total: 1, audio: 0, image: 1, video: 0 },
+          assets: [userRow],
+        },
+      });
+    } finally {
+      vi.restoreAllMocks();
+      d.localDatabase.close();
+    }
+  });
+});
+
 describe('legacy provider profiles (v1.1.0)', () => {
   const renderer = 'joy-media-app://renderer';
 

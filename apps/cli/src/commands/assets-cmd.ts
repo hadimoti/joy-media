@@ -21,6 +21,34 @@ export function resolveAssetLibraryDirectory(override?: string, homeDirectory = 
   return override || process.env.JOY_MEDIA_ASSET_LIBRARY || join(homeDirectory, 'joy-media-assets');
 }
 
+/**
+ * Returns a checker: true when the catalog lists the asset and its file is on disk (T-R04, the
+ * render's missing-media check). An unsafe or missing entry counts as missing. A library with no
+ * catalog has no files. The catalog is read on the first call only, so a project that uses no
+ * file assets never reads it, and a corrupt catalog cannot stop such a render.
+ */
+export function createAssetLibraryFileCheck(
+  libraryDirectory: string,
+): (assetId: string) => boolean {
+  let entries: ReadonlyMap<string, AssetEntry> | undefined;
+  const loadEntries = (): ReadonlyMap<string, AssetEntry> => {
+    const catalog = readCatalog(libraryDirectory);
+    return new Map(
+      (catalog?.assets ?? []).filter(isAssetEntry).map((entry) => [entry.id, entry] as const),
+    );
+  };
+  return (assetId) => {
+    entries ??= loadEntries();
+    const entry = entries.get(assetId);
+    if (entry === undefined) return false;
+    try {
+      return existsSync(getAbsoluteAssetPath(libraryDirectory, entry));
+    } catch {
+      return false;
+    }
+  };
+}
+
 function reportError(code: string, message: string, json: boolean): void {
   if (json) console.log(JSON.stringify({ code, error: message }));
   else console.error(message);

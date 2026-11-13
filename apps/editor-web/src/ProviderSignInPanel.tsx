@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   findRegistryProvider,
   SIGN_IN_WAIT_MS,
+  generationSupport,
   signInProviders,
   type ProviderRegion,
   type ProviderRegionId,
@@ -97,7 +98,12 @@ export function ProviderSignInPanel({
     } catch (error) {
       // The main process ends the sign-in no earlier than the same wait after this click, so a failure after the
       // whole wait is the timeout: it gets the start-again message (T-J03).
-      const timedOut = Date.now() - startedAt >= SIGN_IN_WAIT_MS;
+      // A later failure (for example the model list after a sign-in that finished just before the limit) keeps its own
+      // message: only the timeout errors of the flows count, and only after the whole wait.
+      const failureText = error instanceof Error ? error.message : '';
+      const timedOut =
+        Date.now() - startedAt >= SIGN_IN_WAIT_MS &&
+        /timed out|not finished in time/i.test(failureText);
       setSignInStatus({
         provider: target,
         message:
@@ -185,6 +191,9 @@ function ProviderRouteAccordion({
   const [apiKeyMessage, setApiKeyMessage] = useState<string | undefined>(undefined);
   const apiKeyRef = useRef<HTMLInputElement>(null);
   const selectedRegion = regions.find((region) => region.id === apiKeyRegionId) ?? regions[0];
+  // Only the ChatGPT sign-in card says this: the sign-in cannot make pictures (T-C07).
+  const cannotMakePictures =
+    provider.signInOnly === true && !generationSupport(provider.id, 'image').supported;
 
   const toggle = (): void => {
     if (open && apiKeyRef.current !== null) apiKeyRef.current.value = '';
@@ -248,6 +257,11 @@ function ProviderRouteAccordion({
 
       {open && (
         <div id={'joy-provider-routes-' + provider.id} className="joy-accordion-content">
+          {cannotMakePictures && (
+            <p className="joy-provider-capability-note">
+              {SETTINGS_PROVIDER_SIGN_IN.chatGptCannotMakePictures}
+            </p>
+          )}
           <section
             className="joy-provider-route"
             aria-label={SETTINGS_PROVIDER_SIGN_IN.oauthRouteLabel.replace(
