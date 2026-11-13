@@ -27,9 +27,6 @@ export function formatSignInCountdown(ms: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-/** Only xAI's sign-in shows the risk notice (owner decision 2026-11-05). ChatGPT and Kimi show none. */
-const RISK_NOTICE_PROVIDERS: ReadonlySet<RegistryProviderId> = new Set<RegistryProviderId>(['xai']);
-
 /** D23 sign-in provider order follows the existing settings panel order. */
 const ORDER: readonly RegistryProviderId[] = ['chatgpt', 'kimi', 'xai'];
 
@@ -298,11 +295,7 @@ function ProviderRouteAccordion({
                 </button>
               </div>
             )}
-            {RISK_NOTICE_PROVIDERS.has(provider.id) && (
-              <p className="joy-provider-risk-notice">
-                {SETTINGS_PROVIDER_SIGN_IN.oauthRiskNotice}
-              </p>
-            )}
+            <p className="joy-provider-risk-notice">{SETTINGS_PROVIDER_SIGN_IN.oauthRiskNotice}</p>
             {signInMessage !== undefined && <p role="status">{signInMessage}</p>}
           </section>
 
@@ -317,7 +310,14 @@ function ProviderRouteAccordion({
               {SETTINGS_PROVIDER_SIGN_IN.apiKeyRouteTitle}
             </h4>
             {selectedRegion === undefined ? (
-              <p>{SETTINGS_PROVIDER_SIGN_IN.noApiKeyEndpoint}</p>
+              <>
+                <p>{SETTINGS_PROVIDER_SIGN_IN.noApiKeyEndpoint}</p>
+                {provider.id === 'chatgpt' && (
+                  <p className="joy-provider-capability-note">
+                    {SETTINGS_PROVIDER_SIGN_IN.chatGptApiKeyBilling}
+                  </p>
+                )}
+              </>
             ) : (
               <div className="joy-settings-form-grid">
                 {regions.length > 1 && (

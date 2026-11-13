@@ -432,6 +432,8 @@ export const SETTINGS_PROVIDER_SIGN_IN = {
   saveApiKey: 'Save API key',
   /** On the ChatGPT card: the sign-in cannot make pictures, so the user is pointed to MiniMax or a key (T-C07). */
   chatGptCannotMakePictures: 'ChatGPT sign-in cannot make pictures. Use MiniMax or an API key.',
+  /** On the ChatGPT card: an OpenAI API key is a separate purchase from the ChatGPT plan (T-F09). */
+  chatGptApiKeyBilling: 'An OpenAI API key is billed separately from ChatGPT.',
 } as const;
 
 /**
