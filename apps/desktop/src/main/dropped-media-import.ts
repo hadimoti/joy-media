@@ -193,9 +193,7 @@ function sameFileVersion(left: BigIntStats, right: BigIntStats): boolean {
 
 function sameFileMetadata(left: BigIntStats, right: BigIntStats): boolean {
   return (
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
+    left.size === right.size && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs
   );
 }
 

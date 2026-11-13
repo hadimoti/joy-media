@@ -365,8 +365,7 @@ describe('dropped media import', () => {
     const bytes = new TextEncoder().encode('first stream bytes');
     const secondReadBytes = new TextEncoder().encode('different second read');
     const harness = makeHarness({
-      sourceBytesForStream: (_file, streamNumber) =>
-        streamNumber === 1 ? bytes : secondReadBytes,
+      sourceBytesForStream: (_file, streamNumber) => (streamNumber === 1 ? bytes : secondReadBytes),
     });
     harness.files.set(path, { kind: 'file', bytes });
     const batch = await harness.service.prepareDroppedPaths([{ path, name: 'clip.mp4' }]);
