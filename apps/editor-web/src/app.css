@@ -14546,6 +14546,73 @@ label {
 .transitions-panel .transition-card-label {
   font-size: var(--joy-type-2xs);
 }
+/* T-V08: names may take two lines; the labelled category rail and its grouped grid. */
+.transitions-panel .transition-card-label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.transition-category-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.14rem;
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.2rem;
+  border-bottom: 1px solid var(--joy-border-subtle);
+}
+.transition-category-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--joy-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--joy-text-muted);
+  font-size: 0.62rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+.transition-category-chip:hover,
+.transition-category-chip:focus-visible {
+  border-color: color-mix(in srgb, var(--joy-accent) 52%, var(--joy-border));
+  color: var(--joy-text);
+  outline: none;
+}
+.transition-category-chip.is-active {
+  border-color: color-mix(in srgb, var(--joy-accent) 65%, var(--joy-border));
+  color: var(--joy-accent);
+  background: color-mix(in srgb, var(--joy-accent) 11%, transparent);
+}
+.transition-category-count {
+  color: var(--joy-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.transition-category-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.transition-category-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.transition-category-heading {
+  margin: 0;
+  font-size: var(--joy-type-2xs);
+  font-weight: 600;
+  color: var(--joy-text-muted);
+  text-transform: none;
+}
 @container (min-width: 360px) {
   .transitions-panel .transition-type-picker {
     grid-template-columns: repeat(3, minmax(0, 1fr));

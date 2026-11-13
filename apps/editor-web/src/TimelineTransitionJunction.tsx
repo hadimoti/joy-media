@@ -1,5 +1,6 @@
 import type { TransitionV1 } from '@joy-media/project-schema';
 import { timeToPixel, type TimelineViewport } from '@joy-media/timeline-engine';
+import { getTransitionShader } from '@joy-media/transition-shaders';
 import { TransitionUiIcon } from './icons.js';
 
 /** A transition is rendered over a cut, never as a fake full-width track clip. */
@@ -17,10 +18,13 @@ export function TimelineTransitionJunction({
   const rawWidthPx = transition.durationUs * (viewport.pixelsPerSecond / 1_000_000);
   const widthPx = Math.max(22, Math.min(96, rawWidthPx));
   const leftPx = timeToPixel(boundaryUs, { ...viewport, originUs: 0 }) - widthPx / 2;
-  const label = transition.type
-    .replace(/^gl:/, '')
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (character) => character.toUpperCase());
+  // The catalogue name, read through the old-id mapping; unknown ids fall back to a tidied id.
+  const label =
+    getTransitionShader(transition.type)?.label ??
+    transition.type
+      .replace(/^(gl|joy):/, '')
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, (character) => character.toUpperCase());
   return (
     <button
       type="button"

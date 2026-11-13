@@ -432,9 +432,9 @@ export interface ColorGradeV1 {
 }
 
 /**
- * Clip-junction transition. `type` is a registry id:
- * legacy `dissolve` | `wipe` | `slide`, or curated `gl:*` shader ids
- * from `@joy-media/transition-shaders`.
+ * Clip-junction transition. `type` is a registry id from `@joy-media/transition-shaders`
+ * (`gl:*` and `joy:*`). The removed ids `dissolve` | `wipe` | `slide` are still accepted and
+ * open as `gl:fade` | `gl:wipeLeft` | `gl:Directional`.
  */
 export interface TransitionV1 {
   readonly id: string;
@@ -443,7 +443,10 @@ export interface TransitionV1 {
   readonly rightClipId: string;
   readonly type: string;
   readonly durationUs: TimeUs;
-  /** Optional numeric overrides for gl-transition uniforms. */
+  /**
+   * Optional numeric overrides for gl-transition uniforms. A vector uniform is stored one number
+   * per component: `direction.x`, `direction.y`, or `bgcolor.r` … `bgcolor.a`.
+   */
   readonly params?: Readonly<Record<string, number>>;
 }
 
