@@ -184,6 +184,7 @@ export function MonitorTransport({
               className="monitor-transport-btn"
               aria-pressed={fullscreen}
               aria-label="Fullscreen preview"
+              title="Fullscreen preview (F, Esc leaves)"
               data-guide="Full"
               onClick={() => {
                 toggleFullscreen();
