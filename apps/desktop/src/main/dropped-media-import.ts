@@ -412,8 +412,8 @@ export function createDroppedMediaImportService(
       const inputs = allInputs.slice(0, MAX_DROPPED_ITEMS);
       const tickets: DroppedMediaTicket[] = [];
       const skippedNames: string[] = [];
-      let skippedFolderLimitFiles = 0;
-      let skippedBatchLimitFiles = 0;
+      let skippedFolderLimitEntries = 0;
+      let skippedBatchLimitEntries = 0;
       let skippedBatchLimitRoots = 0;
       const skippedRootLimitItems = Math.max(0, allInputs.length - inputs.length);
       let batchEntryCount = 0;
@@ -447,17 +447,15 @@ export function createDroppedMediaImportService(
             for await (const entry of directory) {
               folderEntryCount += 1;
               batchEntryCount += 1;
-              if (
-                folderEntryCount > MAX_DROPPED_FOLDER_ENTRIES ||
-                batchEntryCount > MAX_DROPPED_BATCH_ENTRIES
-              ) {
-                // Drain only Dirent metadata after a cap so the result can report the exact count;
-                // no paths are resolved and no tickets are minted for these entries.
-                if (entry.isFile()) {
-                  if (folderEntryCount > MAX_DROPPED_FOLDER_ENTRIES) skippedFolderLimitFiles += 1;
-                  else skippedBatchLimitFiles += 1;
-                }
-                continue;
+              if (folderEntryCount > MAX_DROPPED_FOLDER_ENTRIES) {
+                // This is the first observed entry beyond the cap; stop instead of draining the directory.
+                skippedFolderLimitEntries += 1;
+                break;
+              }
+              if (batchEntryCount > MAX_DROPPED_BATCH_ENTRIES) {
+                // This is a lower bound; do not enumerate the rest of an over-limit directory.
+                skippedBatchLimitEntries += 1;
+                break;
               }
               if (!entry.isFile()) continue;
               const childPath = path.join(resolved.path, entry.name);
@@ -485,14 +483,14 @@ export function createDroppedMediaImportService(
           `${skippedNames.length} ${skippedNames.length === 1 ? 'file was' : 'files were'} skipped: ${skippedNames.join(', ')}`,
         );
       }
-      if (skippedFolderLimitFiles > 0) {
+      if (skippedFolderLimitEntries > 0) {
         skippedMessages.push(
-          `${skippedFolderLimitFiles} ${skippedFolderLimitFiles === 1 ? 'file was' : 'files were'} skipped because the dropped folder exceeded the ${MAX_DROPPED_FOLDER_ENTRIES}-entry limit.`,
+          `At least ${skippedFolderLimitEntries} more ${skippedFolderLimitEntries === 1 ? 'entry was' : 'entries were'} skipped because the dropped folder exceeded the ${MAX_DROPPED_FOLDER_ENTRIES}-entry limit.`,
         );
       }
-      if (skippedBatchLimitFiles > 0) {
+      if (skippedBatchLimitEntries > 0) {
         skippedMessages.push(
-          `${skippedBatchLimitFiles} ${skippedBatchLimitFiles === 1 ? 'file was' : 'files were'} skipped because the ${MAX_DROPPED_BATCH_ENTRIES}-entry drop limit was reached.`,
+          `At least ${skippedBatchLimitEntries} more ${skippedBatchLimitEntries === 1 ? 'entry was' : 'entries were'} skipped because the ${MAX_DROPPED_BATCH_ENTRIES}-entry drop limit was reached.`,
         );
       }
       if (skippedBatchLimitRoots > 0) {

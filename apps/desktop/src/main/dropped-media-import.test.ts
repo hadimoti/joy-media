@@ -38,6 +38,7 @@ function makeHarness(
     readonly libraryError?: string;
     readonly fileSystem?: TestFileSystem;
     readonly afterOpen?: (filePath: string, files: Map<string, FakeFileInfo>) => void;
+    readonly beforeOpen?: (filePath: string, files: Map<string, FakeFileInfo>) => void;
     readonly afterStream?: (file: FakeFileInfo, streamNumber: number) => void;
     readonly duringStream?: (file: FakeFileInfo, streamNumber: number) => void;
     readonly sourceBytesForStream?: (
@@ -53,6 +54,7 @@ function makeHarness(
   const readPaths: string[] = [];
   const readHandles: FileHandle[] = [];
   const openedPaths: string[] = [];
+  const directoryYieldCounts = new Map<string, number>();
   const pathByHandle = new WeakMap<object, string>();
   const fileByHandle = new WeakMap<object, FakeFileInfo>();
   const inodeByFile = new WeakMap<FakeFileInfo, bigint>();
@@ -85,6 +87,7 @@ function makeHarness(
   const fileSystem = options.fileSystem ?? {
     open: async (filePath: string, _flags: 'r') => {
       openedPaths.push(filePath);
+      options.beforeOpen?.(filePath, files);
       const found = files.get(filePath);
       if (found === undefined) throw new Error('test file does not exist');
       const handle = {
@@ -105,6 +108,7 @@ function makeHarness(
             if (!candidate.startsWith(prefix)) continue;
             const name = candidate.slice(prefix.length);
             if (name.includes('\\')) continue;
+            directoryYieldCounts.set(directory, (directoryYieldCounts.get(directory) ?? 0) + 1);
             yield {
               name,
               isFile: () => files.get(prefix + name)?.kind === 'file',
@@ -233,6 +237,7 @@ function makeHarness(
     readPaths,
     readHandles,
     openedPaths,
+    directoryYieldCounts,
     storedAssetIds,
     storedAssetBytes,
     abortedAssetIds,
@@ -347,10 +352,10 @@ describe('dropped media import', () => {
     expect(result.skippedMessage).toBeUndefined();
   });
 
-  it('caps folder expansion and reports files skipped by that cap', async () => {
+  it('caps folder enumeration and reports a lower bound without draining the directory', async () => {
     const harness = makeHarness();
     harness.files.set('C:\\drop\\folder', { kind: 'directory' });
-    for (let index = 0; index < 2_001; index += 1) {
+    for (let index = 0; index < 3_000; index += 1) {
       const name = `clip-${index}.mp4`;
       harness.files.set(`C:\\drop\\folder\\${name}`, {
         kind: 'file',
@@ -363,12 +368,13 @@ describe('dropped media import', () => {
     ]);
 
     expect(result.tickets).toHaveLength(2_000);
+    expect(harness.directoryYieldCounts.get('C:\\drop\\folder')).toBeLessThanOrEqual(2_001);
     expect(result.skippedMessage).toBe(
-      '1 file was skipped because the dropped folder exceeded the 2000-entry limit.',
+      'At least 1 more entry was skipped because the dropped folder exceeded the 2000-entry limit.',
     );
   });
 
-  it('caps all expanded folders at 5,000 entries for one drop', async () => {
+  it('stops all expanded folders at the 5,000-entry drop cap', async () => {
     const harness = makeHarness();
     for (let folder = 0; folder < 3; folder += 1) {
       const folderPath = `C:\\drop\\folder-${folder}`;
@@ -389,8 +395,11 @@ describe('dropped media import', () => {
     ]);
 
     expect(result.tickets).toHaveLength(4_997);
+    expect(
+      [...harness.directoryYieldCounts.values()].reduce((total, count) => total + count, 0),
+    ).toBeLessThanOrEqual(5_001);
     expect(result.skippedMessage).toBe(
-      '1003 files were skipped because the 5000-entry drop limit was reached.',
+      'At least 1 more entry was skipped because the 5000-entry drop limit was reached.',
     );
   });
 
@@ -527,7 +536,42 @@ describe('dropped media import', () => {
 
     expect(result).toEqual({ ok: false, error: 'The selected media file changed during import' });
     expect(harness.readHandles).toHaveLength(1);
+    expect(harness.originals.beginOriginalUpload).toHaveBeenCalledTimes(1);
+    // This spy records temporary staged bytes before the post-stream identity check aborts the upload.
+    expect(harness.originals.appendOriginalChunk).toHaveBeenCalled();
+    expect(harness.originals.abortOriginalUpload).toHaveBeenCalledTimes(1);
+    expect(harness.originals.finishOriginalUpload).not.toHaveBeenCalled();
+    expect(harness.originals.commitOriginalUpload).not.toHaveBeenCalled();
+    expect(harness.libraryAddedAssetIds).toEqual([]);
+    expect(harness.storedAssetIds).toEqual([]);
+    expect(harness.assets.size).toBe(0);
+    expect(harness.partial.size).toBe(0);
+  });
+
+  it('refuses a same-size target replacement between validation and opening before staging', async () => {
+    const path = 'C:\\drop\\clip.mp4';
+    const harness = makeHarness({
+      beforeOpen: (openedPath, files) => {
+        expect(openedPath).toBe(path);
+        files.set(path, { kind: 'file', bytes: new Uint8Array([4, 5, 6]) });
+      },
+    });
+    harness.files.set(path, { kind: 'file', bytes: new Uint8Array([1, 2, 3]) });
+    const batch = await harness.service.prepareDroppedPaths([{ path, name: 'clip.mp4' }]);
+
+    const result = await harness.service.importTicket(batch.tickets[0]!.id);
+
+    expect(result).toEqual({ ok: false, error: 'The selected media file changed during import' });
+    expect(harness.readHandles).toHaveLength(0);
+    // These spies record creation and writes for the temporary staged original; neither may start.
+    expect(harness.originals.beginOriginalUpload).not.toHaveBeenCalled();
     expect(harness.originals.appendOriginalChunk).not.toHaveBeenCalled();
+    expect(harness.originals.finishOriginalUpload).not.toHaveBeenCalled();
+    expect(harness.originals.commitOriginalUpload).not.toHaveBeenCalled();
+    expect(harness.libraryAddedAssetIds).toEqual([]);
+    expect(harness.storedAssetIds).toEqual([]);
+    expect(harness.assets.size).toBe(0);
+    expect(harness.partial.size).toBe(0);
   });
 
   it('aborts the staged copy when the opened file changes during streaming', async () => {
