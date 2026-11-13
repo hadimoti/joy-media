@@ -6,11 +6,16 @@ import { listBuiltinEffects } from '../../../packages/visual-effects/src/index.j
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SECOND_SOURCE_EFFECT_IDS,
+  PREVIEW_DIFF_HEIGHT,
+  PREVIEW_DIFF_WIDTH,
   PREVIEW_MANIFEST_PATH,
+  PREVIEW_MIN_MEAN_DIFF_FROM_BEFORE,
   PREVIEW_SIZE_BUDGETS,
   PREVIEW_SOURCES_DIR,
   SECOND_SOURCE_PHOTO,
+  checkEffectStillMetrics,
   computeExpectedPreviewHashes,
+  measureStillVsBefore,
   safeTransitionFileId,
   transitionStripProgresses,
   verifyPreviewManifest,
@@ -39,7 +44,7 @@ describe('preview manifest and generated WebP assets', () => {
       transitions,
       secondSourceEffectIds: DEFAULT_SECOND_SOURCE_EFFECT_IDS,
     });
-    const errors = verifyPreviewManifest(manifest, expected, REPO_ROOT);
+    const errors = verifyPreviewManifest(manifest, expected, REPO_ROOT, { verifyPixels: true });
     expect(errors).toEqual([]);
   });
 
@@ -73,7 +78,9 @@ describe('preview manifest and generated WebP assets', () => {
       effects: mutatedEffects,
       transitions,
     });
-    const defaultErrors = verifyPreviewManifest(manifest, expectedFromChangedDefault, REPO_ROOT);
+    const defaultErrors = verifyPreviewManifest(manifest, expectedFromChangedDefault, REPO_ROOT, {
+      verifyPixels: false,
+    });
     expect(defaultErrors).toContainEqual(
       expect.stringContaining(`effect "${effects[0]!.id}": stale inputHash`),
     );
@@ -84,7 +91,9 @@ describe('preview manifest and generated WebP assets', () => {
       transitions,
       effectShaderDigestOverride: 'modified-shader-implementation',
     });
-    const shaderErrors = verifyPreviewManifest(manifest, expectedFromChangedShader, REPO_ROOT);
+    const shaderErrors = verifyPreviewManifest(manifest, expectedFromChangedShader, REPO_ROOT, {
+      verifyPixels: false,
+    });
     expect(shaderErrors.length).toBeGreaterThanOrEqual(effects.length);
   });
 
@@ -97,10 +106,39 @@ describe('preview manifest and generated WebP assets', () => {
       effects,
       transitions: mutatedTransitions,
     });
-    const errors = verifyPreviewManifest(manifest, expected, REPO_ROOT);
+    const errors = verifyPreviewManifest(manifest, expected, REPO_ROOT, { verifyPixels: false });
     expect(errors).toContainEqual(
       expect.stringContaining(`transition "${transitions[0]!.id}": stale inputHash`),
     );
+  });
+
+  it('fails pixel gate with item id when a still is blank or too close to Before', () => {
+    const byteCount = PREVIEW_DIFF_WIDTH * PREVIEW_DIFF_HEIGHT * 3;
+    const beforeBuf = Buffer.alloc(byteCount);
+    for (let i = 0; i < byteCount; i++) {
+      beforeBuf[i] = (i * 17) % 256;
+    }
+
+    const blankBuf = Buffer.alloc(byteCount, 24);
+    const blankMetrics = measureStillVsBefore(beforeBuf, blankBuf);
+    const blankError = checkEffectStillMetrics('pixelate', blankMetrics);
+    expect(blankError).toContain('pixelate');
+    expect(blankError).toContain('blank');
+
+    const identicalError = checkEffectStillMetrics(
+      'edge-detect',
+      measureStillVsBefore(beforeBuf, beforeBuf),
+    );
+    expect(identicalError).toContain('edge-detect');
+    expect(identicalError).toContain(`meanAbsDiff=0.00 < ${PREVIEW_MIN_MEAN_DIFF_FROM_BEFORE}`);
+
+    const shiftedBuf = Buffer.from(beforeBuf);
+    for (let i = 0; i < byteCount; i++) {
+      shiftedBuf[i] = Math.min(255, beforeBuf[i]! + 25);
+    }
+    expect(
+      checkEffectStillMetrics('sepia', measureStillVsBefore(beforeBuf, shiftedBuf)),
+    ).toBeNull();
   });
 
   it('supports switching selected effects onto the second-source photo and maps filesystem-safe IDs', () => {

@@ -30,16 +30,16 @@
       "outputPath": "apps/editor-web/public/effects/preview/brightness-contrast.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "6dcba1062ee28fc7bf33bc546a533da088d42f2753942ef070d8f54e8f71689e",
-      "inputHash": "1332a15d70d9bc1bcba7c3d96e068bce7e793abccb7351e48b1c67eff734207e",
+      "bytes": 9182,
+      "outputSha256": "391f845b5b1912970fe0955f5511b750d6658e338e3a58a2e1497376cf962951",
+      "inputHash": "b437d45389f73141983afad2f8db4e452defa435c9e1c84847b9e17ea3dd1792",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
-          "brightness": 0,
-          "contrast": 0
+          "brightness": 0.18,
+          "contrast": 0.32
         },
         "builderVersion": "t-v02-v1",
         "secondSource": false
@@ -50,16 +50,16 @@
       "outputPath": "apps/editor-web/public/effects/preview/hue-saturation.webp",
       "width": 320,
       "height": 240,
-      "bytes": 8866,
-      "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
-      "inputHash": "91819f3dfaa5896122c27558ea6c6a182d3ae22f22dbe5fbe116b83e2409b060",
+      "bytes": 8722,
+      "outputSha256": "d6a31cea899aa884a7c1f06210af2c8aa3ac867115ee9e851615c0967aedbaff",
+      "inputHash": "b1591e4bbeb14a9e0951e6a3fe4df3adae29026b7663f0ea0dfa81ab9d4e0900",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
-          "hue": 0,
-          "saturation": 0
+          "hue": 0.28,
+          "saturation": 0.45
         },
         "builderVersion": "t-v02-v1",
         "secondSource": false
@@ -70,15 +70,15 @@
       "outputPath": "apps/editor-web/public/effects/preview/vibrance.webp",
       "width": 320,
       "height": 240,
-      "bytes": 9258,
-      "outputSha256": "281d206f746fa38c64f70fe9a2a994242c56b94be0388c0cdb5f5148329761cf",
-      "inputHash": "d8f7ff3d4a5fbe34ff1662bd91cd0d4997842751ae83f5f1a41c3b1140472640",
+      "bytes": 9224,
+      "outputSha256": "46ed6fcc5cbe2a9c332ea44b24ae77d8843bfe0dfddc5b837194a9c8896a09d8",
+      "inputHash": "386d493a6559dd7fddefd973c14e2b00c6b13fc56fcffc005023e9cf7baae038",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
-          "amount": 0
+          "amount": 0.85
         },
         "builderVersion": "t-v02-v1",
         "secondSource": false
@@ -91,11 +91,11 @@
       "height": 240,
       "bytes": 8810,
       "outputSha256": "828a80fcfc2a529425d3ff6514154a9b35866903bad1c5fd9037f0657c5e1bbb",
-      "inputHash": "a482d5633deb8b8632c5b6db34cedff547291d9f0f34bbb1552fb30c49c8345a",
+      "inputHash": "3b0e7f2503452ab2e8773d388bae46a01fa8518f8fae30effad169ffc82bfe71",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amount": 0.35
         },
@@ -108,13 +108,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/sepia.webp",
       "width": 320,
       "height": 240,
-      "bytes": 5768,
-      "outputSha256": "f0b7aff3bc8b71fd251200f4c013afce5a1884df9834eeb9950362fc0818c094",
-      "inputHash": "7f8d89f81472f36bd189f7b24dba9222002cfcf12ffe4507ffa6339aa0addca5",
+      "bytes": 8302,
+      "outputSha256": "f63ca37cff74934bfefc0157f2d566c8b403d2d2512daf9872be6ba22d27e49f",
+      "inputHash": "9dddf2a4bbc13df9efa85b206a74b72dd48d0a42975dd4f7d6d19af9344b2452",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amount": 0.5
         },
@@ -129,11 +129,11 @@
       "height": 240,
       "bytes": 2906,
       "outputSha256": "795f577f2e779d538ce0d25f7147b0323c2de7d56cfa29c5f1a85c572a7c12fd",
-      "inputHash": "0ac3ccbfa2ba5276c70559cb1c7982b625b35fc0fc3ea63fd4bd3c3cdd2791f4",
+      "inputHash": "c5f156c77eb94b1c9614416a9fe891a7b8c65cdfca13a0689b718c14125f3378",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amount": 4
         },
@@ -148,11 +148,11 @@
       "height": 240,
       "bytes": 2736,
       "outputSha256": "b7cc085314277b7d8e11dbaf0c577914a3a4870cfa18fadc3ab8a05a3ebfad9f",
-      "inputHash": "70220571af8aea2a9a78caf49d85198a002b13d807d12787ea9fb8f4a342db06",
+      "inputHash": "095a8d16fca2e25b7ba819114851a3cc36c64f99921856e0e4caf6ed36964dcd",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amount": 0.4,
           "threshold": 0.6
@@ -168,11 +168,11 @@
       "height": 240,
       "bytes": 2218,
       "outputSha256": "76c30c2ccfef84b96454b587d187252a67eccb46dbe9c17970a0635a9d52e86b",
-      "inputHash": "f9797e3e11980be0566108aa3a66535f7bc3ec64dec5a0f2178ce3b8a2102610",
+      "inputHash": "6c5e128fc94c7205d59b0bdbac498a56b803f51533059248c913f8ae2b72f134",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "distance": 8,
           "opacity": 0.5
@@ -188,11 +188,11 @@
       "height": 240,
       "bytes": 3078,
       "outputSha256": "05a23eb4236befeab13a9109c204240a16317a9c8410ecdf23c951fd16b2699c",
-      "inputHash": "de6f07edf0d11181f8453b4cefc49dcd019bd675b8947784e29b3555e3d28fe3",
+      "inputHash": "b19e0a0bae62e381bd953946b8bc72cc4af16d0d41fbecf2a9b6ecb4917a4e31",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amount": 0.4
         },
@@ -207,11 +207,11 @@
       "height": 240,
       "bytes": 29676,
       "outputSha256": "7b030c006e9b629243ee4b24f3b20720acbc3a55a979dbc8e512462bf373aaef",
-      "inputHash": "e9f8f5a250335994bb77fb0e93fbdaac8eefc5b43e1e683e04ae799389eb4481",
+      "inputHash": "16facb5cc546ab7b071d7125002b97eec0c82c1d4efbee8a55a3d49eef7398f9",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amount": 0.2
         },
@@ -226,11 +226,11 @@
       "height": 240,
       "bytes": 9688,
       "outputSha256": "b4738ebb184a4a6e65556eea81d9d0d2d96e5c275142c4f7246798379ba7cea0",
-      "inputHash": "b2920038777cd60d6a0d9a4f08f8255c2970fb7776b8742f2d75227edac9dd55",
+      "inputHash": "19a79fd1bbddf8e5ecc204bc0dcc342cd5883cc31d8e40112043720b5ae35dad",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "levels": 8
         },
@@ -243,13 +243,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/pixelate.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "f2bff0913d4f968b05f61919f41f29be57cf0adacca7047dc6bd6d7957e546ed",
+      "bytes": 1458,
+      "outputSha256": "32f37d78508ccb18ffbf047aefa1260be5422ee7a608c4d3f9faff845d990ffa",
+      "inputHash": "4508a3d1ec8de0b53033e9b02b89fe13ed91a8e5415d9b37bbf34c7cc1820b01",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "blockSize": 8
         },
@@ -262,13 +262,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/color-overlay.webp",
       "width": 320,
       "height": 240,
-      "bytes": 8866,
-      "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
-      "inputHash": "6bc34943b0a34d4ee9cfee1e08417638ae077e7da24c73bb8d5e399cac06a3bd",
+      "bytes": 7184,
+      "outputSha256": "aa801bc1a1cb1e5ea6a1832408041bae1851560e24dc0b5206a07b6cfd602e5f",
+      "inputHash": "a3fdbd6c70a93eae4ff943eb936f31092caec468bccc1f1a144e34e1d71a0f5e",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "b": 0,
           "g": 0,
@@ -284,17 +284,17 @@
       "outputPath": "apps/editor-web/public/effects/preview/curves.webp",
       "width": 320,
       "height": 240,
-      "bytes": 8866,
-      "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
-      "inputHash": "d7827b73b8a2dbf559371bfc6cd49522f467469b3e13abef11dfe00ca70c6794",
+      "bytes": 9264,
+      "outputSha256": "c86922c804673076ca24efea067404aa2c7c26181154aa2d2d2bcb3121c71c57",
+      "inputHash": "9c527321444e180b9c373102f277f664aae76fb32b63b5e3a6c38de7c5deace9",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
-          "highlights": 0,
-          "midtones": 0,
-          "shadows": 0
+          "highlights": 0.24,
+          "midtones": 0.2,
+          "shadows": -0.22
         },
         "builderVersion": "t-v02-v1",
         "secondSource": false
@@ -307,11 +307,11 @@
       "height": 240,
       "bytes": 5876,
       "outputSha256": "97548e7d41d9f4bdc5a53c509583b4f5211a92bdce0d0eee2a10a0cbc86acba3",
-      "inputHash": "fbda5fe6022444362573409a479e811672ccb7c4fc973cc845c452b18d51de49",
+      "inputHash": "0c2846c3ac60744d6a4476355f4affd268b917398b97647b7bd5cdcd8bc7a4de",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amount": 6
         },
@@ -324,13 +324,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/radial-blur.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "2113c5acae66b9ba99f97805e47f4b6c25c5cb0047eac5f9a6bf90ff57f8c30d",
+      "bytes": 6526,
+      "outputSha256": "271eef49ff92fd1f3b1cc3a3a970886b944b23762ff238c943256c2647e9fb73",
+      "inputHash": "19a6ad0ccbd6569a57136499388b25ebe905c37c1be23f583bc406d7b7c1b275",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amount": 5
         },
@@ -343,13 +343,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/tilt-shift.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "7d248bd1e380b15d4281ced8bad317bd85219a5ffd307eefbb8abee0e19b56ad",
+      "bytes": 8366,
+      "outputSha256": "c399977a2ce3765571ccb3f80d476ab7bac0493feb338ec782d4493eb931d874",
+      "inputHash": "05dbfd26b327830eb6552e25aa225f8541a0f5854a801ff1382804e107eee619",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amount": 8,
           "focusHeight": 0.3,
@@ -364,15 +364,15 @@
       "outputPath": "apps/editor-web/public/effects/preview/bulge.webp",
       "width": 320,
       "height": 240,
-      "bytes": 8866,
-      "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
-      "inputHash": "09d8ec7711a915f26faa4e43f21df915e90b93ef9c7031e7e232d8cb4734d2cf",
+      "bytes": 9662,
+      "outputSha256": "04ae514e85b54f4feb4d9782c4e1d5a3c5990c3102eb5a81015e1e51cc20224f",
+      "inputHash": "bfe69db1681ab6cf31512eea7f11c91cb4f95f371a59eae005d261d8f17b235a",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
-          "amount": 0,
+          "amount": 0.65,
           "radius": 0.4
         },
         "builderVersion": "t-v02-v1",
@@ -384,15 +384,15 @@
       "outputPath": "apps/editor-web/public/effects/preview/twist.webp",
       "width": 320,
       "height": 240,
-      "bytes": 8866,
-      "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
-      "inputHash": "160223e4511d5e5046a942329c49da378e5962e7ee251395a472726e3b22a687",
+      "bytes": 10158,
+      "outputSha256": "81435a39b952cbc9d51d0953227cd25b6a9ae520ccd62e82adeb9e9496924abc",
+      "inputHash": "3d62d7f5730a86c897350b1a6d33dd5b797e652fcb6c83b33fa3d74dbc40a599",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
-          "angle": 0,
+          "angle": 1.35,
           "radius": 0.5
         },
         "builderVersion": "t-v02-v1",
@@ -404,13 +404,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/ripple.webp",
       "width": 320,
       "height": 240,
-      "bytes": 8866,
-      "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
-      "inputHash": "da1579b76f0c63cecea408ea19adbcbdbf3fdf73892ed800de254f694a184276",
+      "bytes": 9800,
+      "outputSha256": "3ade24e21c35135f80400eb60dac34ad96a6efeeceb87f4fa063344a3022d5a2",
+      "inputHash": "1e2ec9b34ed05ee545a864031c02a9621fb4a64d4ee331b0887d946c14e51aaf",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amplitude": 0.02,
           "frequency": 10
@@ -424,13 +424,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/crt.webp",
       "width": 320,
       "height": 240,
-      "bytes": 8866,
-      "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
-      "inputHash": "f5d06ed5c23d9ee753ea4aa3168c782cf7d79a75e9fe3b7a9c797fba5dc5c8d3",
+      "bytes": 22878,
+      "outputSha256": "6889c92f21f7fd7b96c6c68bc7958870e233ab2bd87ee5e7ad3fd83466467fa2",
+      "inputHash": "9e94e1f8adc6923b22689a93e37763c4f8685ac7857f3fa54343ae69ac26139a",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "noise": 0.08,
           "scanlines": 0.5
@@ -444,13 +444,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/edge-detect.webp",
       "width": 320,
       "height": 240,
-      "bytes": 8866,
-      "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
-      "inputHash": "18a30b00574fa43883edfc428a3daa7ff7f4a029ecfb1a9333a1a9b20cfbedd9",
+      "bytes": 13378,
+      "outputSha256": "6a12b42166a68906697251d20a93a812303a49ff84c7c7273ef39b33648c17ce",
+      "inputHash": "b7385aa4a3344f1e7b449f4631c9735526e1d22669b21ebbadf0bdbe98f04c50",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "threshold": 0.3
         },
@@ -463,13 +463,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/emboss.webp",
       "width": 320,
       "height": 240,
-      "bytes": 8866,
-      "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
-      "inputHash": "6a02a3fccc7f335fcd6aff0c98e0dc4c9f4555e24c743dfb91b80ab2bdb7f990",
+      "bytes": 8862,
+      "outputSha256": "2cbded27bdfea1e814797ec26064c7b64a64c56949438307a6a6eccbc1246312",
+      "inputHash": "d19351ddfbdea2ca9cc3257e705d9e5840c3bd93e300dc397afcf391adff76a7",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "strength": 1
         },
@@ -482,13 +482,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/mosaic.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "d288b56a64c425b2958bd6f371c1cbf44be1743a97fdfbd0751feb057c78fbf6",
+      "bytes": 978,
+      "outputSha256": "40073fe7a2501c2bfe15c3dc8a8335385602f5aa05e0e0d9a7ba04e340c395d2",
+      "inputHash": "bffbbfcab8ed95d0506409e6b224b661a7d03c9a4dc40d928852477c6b2024f7",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "blockSize": 16
         },
@@ -501,13 +501,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/unsharp-mask.webp",
       "width": 320,
       "height": 240,
-      "bytes": 8866,
-      "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
-      "inputHash": "02317f0eb3d0c160df85b6ab533f633d0e3cca66b3af442d5ec75b6a2a902289",
+      "bytes": 11712,
+      "outputSha256": "b63f40b9ef142431898d627d8d852766a69b6a5accf9db4fb8cacd4c6006c839",
+      "inputHash": "3da565959eb3c18616baeef97f76c30045619f7f187b30e180d8df37a8f837e3",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "amount": 0.5,
           "radius": 1,
@@ -524,11 +524,11 @@
       "height": 240,
       "bytes": 7186,
       "outputSha256": "daa26375a33d566ca982354d41e19f1b643edcd665885bc0e61e6c0305e87ec6",
-      "inputHash": "62deab0b29485655f928c42b85ed09e75481489c6de14b34b9782c3ac5b778ad",
+      "inputHash": "1f07ed6daf60720507d5abbc8c0dce5591fa923e8292bad0a741d9111140b418",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "contrast": 0.2,
           "invert": 0,
@@ -544,13 +544,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/bayer-dither.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "736017bf81919a044fe3f4d0fa74348e4bce89847a3a77db4f2c4ee819620484",
+      "bytes": 21840,
+      "outputSha256": "93a062c9f029ca5e1922e90716b6fde76947c45ca69d23099ade088c01da8aa6",
+      "inputHash": "86efe077a7ae0ebe554113f6b55280aeca3bf9a32d50ae6b2b809d4fa3ba7bf0",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "cellSize": 2,
           "colorMode": 0,
@@ -567,13 +567,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/halftone.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "7eb271cd7ac60736a62a9c3fb4cb150fb22b1cd50c6d45cbb2ff086fe78e2ddd",
+      "bytes": 20416,
+      "outputSha256": "18056367e6d8a58f5ee07154b274c1713033911675675dfe5bee724b79d67355",
+      "inputHash": "002662a05322ff1e84258a944bdade61c4d6d4ea6ed1cab2354c8aaf763835af",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "angle": 22.5,
           "cellSize": 10,
@@ -591,13 +591,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/contour-map.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "402dc432311dd2e76a0f1bf2b38a3a5c772fd2f8a27990a31548c765b9e12cb6",
+      "bytes": 13614,
+      "outputSha256": "66448e1e18e9a0877314b55da5696ac96be56719928ad7da1931fa254e87ad8e",
+      "inputHash": "919cbd79dcf685625b8fdc0bd31964eafe0896fbcf6025f2177214294443d85a",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "detail": 1,
           "edgeBoost": 0.75,
@@ -614,13 +614,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/glyph-matrix.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "9728e103aa4efba7afa3aac401a4d2001b47f31d14c32bc38446c98380560b9b",
+      "bytes": 17674,
+      "outputSha256": "208a98910fe9e12193dd19bd5fc3fa5b3451925c9d46dd8a6fa1f490e8115d19",
+      "inputHash": "0e55108c7aff150d87bb09c45652f1dcc0d8d9f941d607ec9a5a1d43e0d4cd9d",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "cellHeight": 14,
           "cellWidth": 10,
@@ -643,13 +643,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/scatter-mosaic.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "a46df958bdffbde550ffe70b02ae0caa6f3f1fabb2fa70ab16e29f56b0110217",
+      "bytes": 2346,
+      "outputSha256": "365c90d5de910e38b15e10ba3f1a65f72adcb94c55ff0e9df6922f7ca52600f4",
+      "inputHash": "e29597181d34ebacb2b26322876144626fb0ebf92e2e34aefd29177daeb9b86a",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "cellSize": 12,
           "colorMode": 1,
@@ -666,13 +666,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/tone-geometry.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "4213aa6f3c4d9e6b8ff0d2928f3f6aa047af241cf290359710e22783a4793b1d",
+      "bytes": 11862,
+      "outputSha256": "7822db3e9bf58504a773363000e6bc60cae6061185b6aca3c92553271f239bc7",
+      "inputHash": "a774caadf54e03df3ee4405af5979b94034224b3fc001fd36f967b8b10846f23",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "angle": 0,
           "cellSize": 14,
@@ -690,13 +690,13 @@
       "outputPath": "apps/editor-web/public/effects/preview/pixel-sort.webp",
       "width": 320,
       "height": 240,
-      "bytes": 198,
-      "outputSha256": "90a3e83f54c28b88fb8921eff8c3b170ccbb79effee4f41236d5fdbaafdbe61d",
-      "inputHash": "23ed1e64b188de88e48f8b2c5a12373c2457ab5bed6a0fd9157e8294349ef3d4",
+      "bytes": 14422,
+      "outputSha256": "e1db8fb47d807bf0b59a4d05b2258a0d5a645a170ec02a4daa7f97a1a3a361ce",
+      "inputHash": "40c1b4b522ee27a2e5d1ac5811764d4ad65a7d071c50c8079486427052a0baf3",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "649095ed019b8b3f41ecc0942fff7abdc4a1ea09a26291c34f0eac67b614fc8d",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
         "defaultValues": {
           "colorMode": 1,
           "direction": 1,
@@ -1653,10 +1653,10 @@
   ],
   "summary": {
     "stillsCount": 34,
-    "stillsTotalBytes": 187102,
+    "stillsTotalBytes": 338870,
     "transitionsCount": 38,
     "transitionsTotalBytes": 1534006,
     "maxTransitionBytes": 143846,
-    "totalBytes": 1721108
+    "totalBytes": 1872876
   }
 }

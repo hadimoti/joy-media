@@ -17,6 +17,8 @@ import {
   EFFECT_STILL_SPEC,
   PREVIEW_CROP,
   PREVIEW_MANIFEST_PATH,
+  PREVIEW_MIN_MEAN_DIFF_FROM_BEFORE,
+  PREVIEW_MIN_STDDEV,
   PREVIEW_SIZE_BUDGETS,
   PREVIEW_SOURCES_DIR,
   SECOND_SOURCE_PHOTO,
@@ -24,6 +26,7 @@ import {
   TRANSITION_PIC2_SOURCE,
   TRANSITION_STRIP_SPEC,
   computeExpectedPreviewHashes,
+  inspectEffectStillsMetrics,
   sha256Hex,
   transitionStripProgresses,
   verifyPreviewManifest,
@@ -445,8 +448,17 @@ async function main() {
   try {
     const context = await browser.newContext({ viewport: { width: 640, height: 480 } });
     const page = await context.newPage();
+    const browserErrors = [];
     page.on('pageerror', (err) => {
+      browserErrors.push(`pageerror: ${err.message}`);
       console.error('[harness pageerror]', err);
+    });
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') {
+        const text = msg.text();
+        browserErrors.push(`console.error: ${text}`);
+        console.error('[harness console.error]', text);
+      }
     });
     await page.goto(`${baseUrl}/__joy_preview_harness.html`, { waitUntil: 'networkidle' });
     await page.waitForFunction("typeof globalThis.__joyRenderEffect === 'function'");
@@ -550,7 +562,7 @@ async function main() {
       transitionEntries.push(...previousManifest.transitions);
     }
 
-    if (!filterPattern && only === 'all') {
+    if (!filterPattern && (only === 'all' || only === 'effects')) {
       const stillsTotalBytes =
         beforeEntry.bytes + effectEntries.reduce((sum, entry) => sum + entry.bytes, 0);
       const transitionsTotalBytes = transitionEntries.reduce((sum, entry) => sum + entry.bytes, 0);
@@ -576,7 +588,23 @@ async function main() {
         },
       };
 
-      const errors = verifyPreviewManifest(manifest, expected, REPO_ROOT);
+      const metricsByEffect = inspectEffectStillsMetrics(manifest, REPO_ROOT);
+      console.log(
+        `Effect 64x48 RGB metrics (minMeanAbsDiff=${PREVIEW_MIN_MEAN_DIFF_FROM_BEFORE}, minStddev=${PREVIEW_MIN_STDDEV}):`,
+      );
+      for (const entry of effectEntries) {
+        const metrics = metricsByEffect.get(entry.id);
+        if (metrics) {
+          console.log(
+            `  ${entry.id.padEnd(22)} meanAbsDiff=${metrics.meanAbsDiff.toFixed(2).padStart(6)} stddev=${metrics.stddev.toFixed(2).padStart(6)} bytes=${entry.bytes}`,
+          );
+        }
+      }
+
+      const errors = [
+        ...browserErrors,
+        ...verifyPreviewManifest(manifest, expected, REPO_ROOT, { verifyPixels: true }),
+      ];
       writeFileSync(existingManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
       console.log('Preview build summary:', JSON.stringify(manifest.summary));
       console.log(

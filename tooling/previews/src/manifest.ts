@@ -1,6 +1,26 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+export const PREVIEW_DIFF_WIDTH = 64;
+export const PREVIEW_DIFF_HEIGHT = 48;
+export const PREVIEW_MIN_MEAN_DIFF_FROM_BEFORE = 1.5;
+export const PREVIEW_MIN_STDDEV = 2.0;
+
+/**
+ * Showcase preview parameter overrides for effects whose neutral builtin defaults are 0
+ * so the preview thumbnail clearly shows the effect while clip defaults stay neutral.
+ */
+export const PREVIEW_PARAM_OVERRIDES: Readonly<Record<string, Readonly<Record<string, unknown>>>> =
+  {
+    'brightness-contrast': { brightness: 0.18, contrast: 0.32 },
+    'hue-saturation': { hue: 0.28, saturation: 0.45 },
+    vibrance: { amount: 0.85 },
+    curves: { shadows: -0.22, midtones: 0.2, highlights: 0.24 },
+    bulge: { amount: 0.65, radius: 0.48 },
+    twist: { angle: 1.35, radius: 0.55 },
+  };
 
 /** Bump whenever cropping, framing, encoding, or strip layout changes. */
 export const BUILDER_VERSION = 't-v02-v1';
@@ -182,6 +202,112 @@ export function extractEffectDefaults(descriptor: EffectDescriptorInput): Record
   return canonicalizeValue(defaults) as Record<string, unknown>;
 }
 
+/** Resolves effective preview parameters, applying showcase overrides only when builtin defaults are 0. */
+export function resolveEffectPreviewParams(
+  descriptor: EffectDescriptorInput,
+): Record<string, unknown> {
+  const defaults = extractEffectDefaults(descriptor);
+  const overrides = PREVIEW_PARAM_OVERRIDES[descriptor.id];
+  if (!overrides) return defaults;
+  const merged: Record<string, unknown> = { ...defaults };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (typeof merged[key] === 'number' && merged[key] === 0) {
+      merged[key] = value;
+    }
+  }
+  return canonicalizeValue(merged) as Record<string, unknown>;
+}
+
+export interface StillPixelMetrics {
+  readonly meanAbsDiff: number;
+  readonly stddev: number;
+}
+
+/** Downsamples a WebP image to raw 64x48 RGB24 bytes via ffmpeg area resampling. */
+export function downsampleWebpTo64x48Rgb(absWebpPath: string): Buffer {
+  const expectedLength = PREVIEW_DIFF_WIDTH * PREVIEW_DIFF_HEIGHT * 3;
+  const rgb = execFileSync(
+    'ffmpeg',
+    [
+      '-v',
+      'error',
+      '-i',
+      absWebpPath,
+      '-vf',
+      `scale=${PREVIEW_DIFF_WIDTH}:${PREVIEW_DIFF_HEIGHT}:flags=area`,
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'rgb24',
+      '-',
+    ],
+    { maxBuffer: 1024 * 1024 },
+  );
+  if (rgb.length !== expectedLength) {
+    throw new Error(
+      `Expected ${expectedLength} RGB24 bytes from ${absWebpPath}, got ${rgb.length}`,
+    );
+  }
+  return rgb;
+}
+
+/** Computes mean absolute pixel difference vs Before and spread over 64x48 RGB24 buffers. */
+export function measureStillVsBefore(beforeRgb: Buffer, effectRgb: Buffer): StillPixelMetrics {
+  if (beforeRgb.length === 0 || beforeRgb.length !== effectRgb.length) {
+    throw new RangeError(`RGB buffer length mismatch (${beforeRgb.length} vs ${effectRgb.length})`);
+  }
+  const channelCount = effectRgb.length;
+  let sumDiff = 0;
+  let sumVal = 0;
+  let sumSq = 0;
+  for (let i = 0; i < channelCount; i++) {
+    const e = effectRgb[i]!;
+    const b = beforeRgb[i]!;
+    sumDiff += Math.abs(e - b);
+    sumVal += e;
+    sumSq += e * e;
+  }
+  const mean = sumVal / channelCount;
+  const variance = Math.max(0, sumSq / channelCount - mean * mean);
+  return {
+    meanAbsDiff: sumDiff / channelCount,
+    stddev: Math.sqrt(variance),
+  };
+}
+
+/** Returns an error string naming the item id when a still is blank or too close to Before. */
+export function checkEffectStillMetrics(
+  effectId: string,
+  metrics: StillPixelMetrics,
+  minMeanDiff = PREVIEW_MIN_MEAN_DIFF_FROM_BEFORE,
+  minStddev = PREVIEW_MIN_STDDEV,
+): string | null {
+  if (metrics.stddev < minStddev) {
+    return `effect "${effectId}": preview still is blank/uniform (64x48 stddev=${metrics.stddev.toFixed(2)} < ${minStddev})`;
+  }
+  if (metrics.meanAbsDiff < minMeanDiff) {
+    return `effect "${effectId}": preview still is too close to before (64x48 meanAbsDiff=${metrics.meanAbsDiff.toFixed(2)} < ${minMeanDiff})`;
+  }
+  return null;
+}
+
+/** Measures every effect preview still against Before over a 64x48 RGB downsample. */
+export function inspectEffectStillsMetrics(
+  manifest: PreviewManifest,
+  repoRoot: string,
+): Map<string, StillPixelMetrics> {
+  const beforeAbs = resolve(repoRoot, manifest.before.outputPath);
+  const results = new Map<string, StillPixelMetrics>();
+  if (!existsSync(beforeAbs)) return results;
+  const beforeRgb = downsampleWebpTo64x48Rgb(beforeAbs);
+  for (const entry of manifest.effects) {
+    const absPath = resolve(repoRoot, entry.outputPath);
+    if (!existsSync(absPath)) continue;
+    results.set(entry.id, measureStillVsBefore(beforeRgb, downsampleWebpTo64x48Rgb(absPath)));
+  }
+  return results;
+}
+
 interface EffectShaderFiles {
   readonly effectsPixi: string;
   readonly creativeEffects: string;
@@ -306,7 +432,8 @@ export function computeExpectedPreviewHashes(options: {
     if (useSecond && secondSourceSha.length === 0) {
       throw new Error(`Missing second source photo at ${secondSourcePath} for "${effect.id}"`);
     }
-    const defaults = extractEffectDefaults(effect);
+    const builtinDefaults = extractEffectDefaults(effect);
+    const defaults = resolveEffectPreviewParams(effect);
     const inputs: PreviewEntryInputs = {
       sourcePicture: useSecond ? SECOND_SOURCE_PHOTO : DEFAULT_EFFECT_SOURCE,
       sourceSha256: useSecond ? secondSourceSha : defaultSourceSha,
@@ -318,6 +445,7 @@ export function computeExpectedPreviewHashes(options: {
     const inputHash = computeInputHash({
       id: effect.id,
       ...inputs,
+      builtinDefaults,
       crop: useSecond ? 'center-4:3' : PREVIEW_CROP,
       stillSpec: EFFECT_STILL_SPEC,
     });
@@ -373,12 +501,14 @@ export function computeExpectedPreviewHashes(options: {
   };
 }
 
-/** Verifies manifest completeness, file presence, output hashes, input hashes, and byte budgets. */
+/** Verifies manifest completeness, file presence, output hashes, input hashes, byte budgets, and 64x48 pixel diff gate. */
 export function verifyPreviewManifest(
   manifest: PreviewManifest,
   expected: ExpectedPreviewHashes,
   repoRoot: string,
+  options: { readonly verifyPixels?: boolean } = {},
 ): readonly string[] {
+  const verifyPixels = options.verifyPixels ?? true;
   const errors: string[] = [];
 
   if (manifest.builderVersion !== BUILDER_VERSION) {
@@ -487,6 +617,29 @@ export function verifyPreviewManifest(
     errors.push(
       `total preview set ${totalBytes} bytes must be < ${PREVIEW_SIZE_BUDGETS.maxTotalBytes}`,
     );
+  }
+
+  if (verifyPixels) {
+    const beforeAbsPath = resolve(repoRoot, manifest.before.outputPath);
+    if (existsSync(beforeAbsPath)) {
+      const beforeRgb = downsampleWebpTo64x48Rgb(beforeAbsPath);
+      const beforeSpread = measureStillVsBefore(beforeRgb, beforeRgb);
+      if (beforeSpread.stddev < PREVIEW_MIN_STDDEV) {
+        errors.push(
+          `before: preview still is blank/uniform (64x48 stddev=${beforeSpread.stddev.toFixed(2)} < ${PREVIEW_MIN_STDDEV})`,
+        );
+      }
+      for (const actual of manifest.effects) {
+        const effectAbsPath = resolve(repoRoot, actual.outputPath);
+        if (!existsSync(effectAbsPath)) continue;
+        const effectRgb = downsampleWebpTo64x48Rgb(effectAbsPath);
+        const metrics = measureStillVsBefore(beforeRgb, effectRgb);
+        const pixelError = checkEffectStillMetrics(actual.id, metrics);
+        if (pixelError !== null) {
+          errors.push(pixelError);
+        }
+      }
+    }
   }
 
   return errors;
