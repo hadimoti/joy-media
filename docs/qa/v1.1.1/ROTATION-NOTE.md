@@ -17,6 +17,8 @@ the export alike, and the Monitor's selection box has a rotate handle.
   from the one exported with an earlier version.
 - Nothing is changed in the project file. To get the old look back, set the
   element's Rotation to 0 in the Inspector (or remove its rotation keyframes).
+- Flipping an element by dragging a handle past the opposite side is not in
+  v1.1.1: the box stops at its smallest size (scale 0.01) instead of flipping.
 
 **Short version for the release notes.** "Rotation now works: an element's
 Rotation value is drawn in the Monitor and in exports. Projects that had a

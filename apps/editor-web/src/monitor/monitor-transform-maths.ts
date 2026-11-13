@@ -45,6 +45,14 @@ export const NUDGE_SHIFT_PIXELS = 10;
 
 const EPSILON = 1e-9;
 
+/**
+ * The smallest scale a handle drag can reach. v1.1.1 has no flip: the project
+ * (`validateJoyProjectV1`) and the render frame (`validateRenderFrameIR`)
+ * accept positive scales only, so a handle dragged past the opposite side
+ * stops the box at this size instead of turning it inside out.
+ */
+export const MIN_SCALE = 0.01;
+
 /** The drawn (world) values of one element: what the renderer draws with. */
 export interface DrawnTransform {
   readonly x: number;
@@ -182,7 +190,7 @@ export function isCornerHandle(handle: MonitorScaleHandle): boolean {
 
 /**
  * Where the rotate handle sits: `offset` canvas pixels beyond the middle of the
- * top edge, away from the centre (so it follows the box when turned or flipped).
+ * top edge, away from the centre (so it follows the box when turned).
  */
 export function rotateHandlePoint(geometry: TransformBoxGeometry, offset: number): NodePoint {
   const top = handlePoint(geometry, 'n');
@@ -212,8 +220,9 @@ export interface ScaleModifiers {
  * Drag a scale handle from `start` to `now` (canvas pixels). The opposite
  * handle (or the centre with Alt) stays where it is; the handle follows the
  * pointer along the box's own axes, so a turned box scales along its turned
- * sides. Shift keeps the proportions. Dragging past the fixed point flips the
- * element (a negative scale). An axis with no size (a zero scale or an empty
+ * sides. Shift keeps the proportions. There is no flip in v1.1.1: dragging
+ * towards or past the fixed point stops each scale at `MIN_SCALE` (a scale
+ * already below it cannot shrink further). An axis with no size (a zero scale or an empty
  * box) cannot be dragged: it keeps its value, except that Shift carries the
  * other axis's ratio over to keep the proportions (a zero scale stays zero).
  * Nothing ever turns into NaN.
@@ -250,6 +259,18 @@ export function scaleTransform(
       ky = k;
     }
   }
+  // No flip: each scale stops at its smallest allowed value. With Shift both
+  // axes stop together, so the proportions stay.
+  const floorX = smallestRatio(transform.scaleX);
+  const floorY = smallestRatio(transform.scaleY);
+  if (modifiers.shift) {
+    const k = Math.max(kx, floorX, floorY);
+    kx = k;
+    ky = k;
+  } else {
+    kx = Math.max(kx, floorX);
+    ky = Math.max(ky, floorY);
+  }
   // The fixed point keeps its place: A' = F - R(k * fixedOffset), and the
   // translate keeps the origin at the same place inside the box.
   const nextOrigin = sub(
@@ -264,6 +285,15 @@ export function scaleTransform(
     y: nextOrigin.y - ky * (origin.y - transform.y),
   };
   return finite(next) ? next : transform;
+}
+
+/**
+ * The smallest ratio a positive scale can be multiplied by: down to
+ * `MIN_SCALE`, or not below where it already is when it is smaller. A zero
+ * (or invalid) scale is not limited: a ratio cannot change it into a valid one.
+ */
+function smallestRatio(scale: number): number {
+  return scale > 0 ? Math.min(MIN_SCALE, scale) / scale : Number.NEGATIVE_INFINITY;
 }
 
 /** The angle, in degrees, of `point` seen from `center` (clockwise on screen). */

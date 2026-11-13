@@ -41,6 +41,7 @@ import type {
 } from '@joy-media/render-ir';
 import type { ParsedCubeLut } from './lut.js';
 import {
+  cropNodeBox,
   flattenRenderNodes,
   isRotated,
   nodeBoundsFromBox,
@@ -135,6 +136,8 @@ interface LayerContainer extends Container {
   videoTexture?: Texture | undefined;
   /** Optional plate rendered behind a text visual. */
   textBackground?: Graphics | undefined;
+  /** Local-pixel mask for a node's saved crop, absent for zero crop. */
+  cropMask?: Graphics | undefined;
   /** Persistent GPU texture for a transition node. */
   transitionTexture?: Texture | undefined;
   /** The flattened node this layer last drew (for `nodeBounds`). */
@@ -521,6 +524,39 @@ export async function createBrowserPixiRenderer(
     return { x: 0, y: 0, width: node.width, height: node.height };
   };
 
+  const syncCropMask = (layer: LayerContainer, node: VisualRenderNode): void => {
+    const fullBox = layerLocalBox(layer, node);
+    const croppedBox = cropNodeBox(fullBox, node.transform.crop);
+    const hasCrop =
+      croppedBox.x !== fullBox.x ||
+      croppedBox.y !== fullBox.y ||
+      croppedBox.width !== fullBox.width ||
+      croppedBox.height !== fullBox.height;
+
+    if (!hasCrop) {
+      if (layer.cropMask !== undefined) {
+        const previous = layer.cropMask;
+        layer.mask = null;
+        layer.removeChild(previous);
+        previous.destroy();
+        layer.cropMask = undefined;
+      }
+      return;
+    }
+
+    const mask = layer.cropMask ?? new Graphics();
+    mask
+      .clear()
+      .rect(croppedBox.x, croppedBox.y, croppedBox.width, croppedBox.height)
+      .fill({ color: 0xffffff });
+    if (layer.cropMask === undefined) {
+      mask.label = `crop-mask:${node.id}`;
+      layer.cropMask = mask;
+      layer.addChild(mask);
+    }
+    layer.mask = mask;
+  };
+
   const updateLayerTransform = (layer: LayerContainer, node: VisualRenderNode): void => {
     const { translateX, translateY, scaleX, scaleY } = node.transform;
     layer.node = node;
@@ -528,7 +564,10 @@ export async function createBrowserPixiRenderer(
       // Turn about the origin: Pixi draws position + R * S * (p - pivot), so
       // putting the pivot at the origin and moving the position by the scaled
       // pivot keeps the unrotated placement translate + S * p (T-M15).
-      const pivot = nodePivot(node.transform, layerLocalBox(layer, node));
+      const pivot = nodePivot(
+        node.transform,
+        cropNodeBox(layerLocalBox(layer, node), node.transform.crop),
+      );
       layer.pivot.set(pivot.x, pivot.y);
       layer.position.set(translateX + pivot.x * scaleX, translateY + pivot.y * scaleY);
       layer.rotation = (nodeRotationDeg(node.transform) * Math.PI) / 180;
@@ -584,6 +623,7 @@ export async function createBrowserPixiRenderer(
     container.kind = node.kind;
     if (node.kind === 'text') syncTextBackground(container, node);
     updateLayerTransform(container, node);
+    syncCropMask(container, node);
     syncLayerEffects(container, node);
     return container;
   };
@@ -591,6 +631,12 @@ export async function createBrowserPixiRenderer(
   const replaceVisual = (layer: LayerContainer, visual: Graphics | Sprite | Text): void => {
     clearTextBackground(layer);
     layer.visual.destroy();
+    layer.mask = null;
+    if (layer.cropMask !== undefined) {
+      layer.removeChild(layer.cropMask);
+      layer.cropMask.destroy();
+    }
+    layer.cropMask = undefined;
     layer.removeChildren();
     layer.addChild(visual);
     layer.visual = visual;
@@ -652,6 +698,7 @@ export async function createBrowserPixiRenderer(
         if (node.kind === 'text') syncTextBackground(existing, node);
         else clearTextBackground(existing);
         updateLayerTransform(existing, node);
+        syncCropMask(existing, node);
         syncLayerEffects(existing, node);
         reused += 1;
       }
