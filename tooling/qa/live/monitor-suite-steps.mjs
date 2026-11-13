@@ -15,9 +15,11 @@
  * M10. Not merged: M06 (smart guides and snapping), M07 (in-place text, crop and
  * mask handles, right-click menu).
  *
- * Cases that compare the document need `ctx.readTransform(clipId)` and
- * `ctx.clips`. `run.mjs` does not supply them yet, so D-M03 fails with a clear
- * message until a runner gives them.
+ * Cases in MONITOR_MEDIA_IDS need a clip on the timeline (Play is disabled on an
+ * empty timeline). `run.mjs` imports the `--media` fixture before them and
+ * reports `BLOCKED-on-fixture` when no fixture was given. D-M03 also needs a
+ * picture, a video, a text and a shape clip plus `ctx.readTransform`, which one
+ * fixture cannot give, so it reports `BLOCKED-on-fixture` until a runner supplies them.
  */
 import { join } from 'node:path';
 import { screenshot } from './steps.mjs';
@@ -47,7 +49,7 @@ async function openZoomDrawer(page) {
 
 /**
  * Screenshots of the Monitor at Fit, 100%, 200% and 400%. `phase` is 'before'
- * or 'after'. Leaves the zoom at 400% (the last stop); the next call starts from there.
+ * or 'after'. Ends by resetting the zoom to Zoom Fit, so the next case starts there.
  */
 export async function zoomShots(page, dir, phase) {
   const shots = [];
@@ -67,8 +69,13 @@ export async function zoomShots(page, dir, phase) {
     await page.waitForTimeout(250);
     shots.push(await screenshot(page, join(dir, `${phase}-${stop.slug}.png`)).catch(() => null));
   }
+  await openZoomDrawer(page);
+  await page.getByRole('button', { name: 'Zoom Fit', exact: true }).click();
   return shots;
 }
+
+/** Cases that need a clip on the timeline; the rest run on an empty project. */
+export const MONITOR_MEDIA_IDS = Object.freeze(new Set(['D-M02', 'D-M03', 'D-M10']));
 
 function blocked(id, why) {
   return async () => {
@@ -161,7 +168,11 @@ export async function transportFrames(page) {
   await page.locator(VIEWPORT).click({ position: { x: 4, y: 4 } });
   await page.keyboard.press('l');
   await page.waitForTimeout(400);
-  const playing = await page.getByRole('button', { name: 'Pause', exact: true }).isVisible();
+  // Scoped to the Monitor transport: the Timeline panel also shows a Pause button.
+  const playing = await page
+    .locator('.monitor-transport')
+    .getByRole('button', { name: 'Pause', exact: true })
+    .isVisible();
   await page.keyboard.press('k');
   await page.waitForTimeout(200);
   const stopped = await readTime();
@@ -172,7 +183,13 @@ export async function transportFrames(page) {
 export const MONITOR_SUITE_CASES = {
   'D-M01': wheelZoom,
   'D-M02': async (page) => `${await holdSpaceDragPans(page)}; ${await tapSpacePlays(page)}`,
-  'D-M03': (page, ctx) => dragEveryHandle(page, ctx.clips, ctx.readTransform),
+  'D-M03': (page, ctx) => {
+    if (!ctx.clips || typeof ctx.readTransform !== 'function')
+      throw new Error(
+        'BLOCKED-on-fixture D-M03: needs a picture, video, text and shape clip and readTransform(clipId); one --media fixture gives one clip and run.mjs has no reader',
+      );
+    return dragEveryHandle(page, ctx.clips, ctx.readTransform);
+  },
   'D-M04': blocked('D-M04', 'snapping and the live readout are T-M06, not merged here'),
   'D-M05': blocked('D-M05', 'in-place text is T-M07, not merged here'),
   'D-M06': blocked('D-M06', 'crop and mask handles are T-M07, not merged here'),
