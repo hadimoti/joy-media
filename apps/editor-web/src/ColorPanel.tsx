@@ -979,18 +979,22 @@ export function HslSection({
 }
 
 /**
- * One line per built-in look, describing what it actually does to the picture
- * (`applyBuiltInLook` in the renderer). The Looks view used to show a row of
- * bare swatches and leave the rest of the panel empty; the notes give the
- * colourist something to choose by.
+ * One line per built-in look, describing what it actually does to the picture.
+ * Every line is pinned to the renderer's `applyBuiltInLook`
+ * (`packages/renderer-pixi/src/color-grade-math.ts`) by
+ * `color-look-notes.test.ts`, so the words cannot drift away from the maths.
  */
-const LOOK_NOTES = {
-  none: 'No look. The grade stays exactly as you set it.',
-  'clean-contrast': 'More contrast around the mid grey. Colours keep their hue.',
-  'soft-film': 'Lifted blacks and a soft roll-off, like a film print.',
-  'warm-cinema': 'Warm highlights over cooler shadows. A cinematic bias.',
-  'cool-fade': 'Cool highlights and a slightly faded, airy look.',
-  monochrome: 'The picture in grey, keeping the grade’s own contrast.',
+export const LOOK_NOTES = {
+  none: 'No look: the picture is left exactly as the grade made it.',
+  'clean-contrast':
+    'Every channel is stretched 1.22× about the mid grey: more contrast, stronger colours, grey stays grey.',
+  'soft-film':
+    'Lifts the blacks to about 3 %, rolls the highlights off below white and warms the picture: red is raised, blue is pulled down.',
+  'warm-cinema':
+    'Adds red to the shadows and takes blue out of the highlights: warm shadows, cool highlights.',
+  'cool-fade':
+    'Lifts the shadows and adds the most blue there, leaving the highlights nearly alone: a cool, faded look.',
+  monochrome: 'Turns the picture into grey, keeping the grade’s own light and contrast.',
 } as const;
 
 export function LooksSection({
