@@ -3,6 +3,8 @@ import { createServer } from 'node:http';
 
 const MAX_REQUEST_BYTES = 20 * 1024 * 1024;
 const DEFAULT_MODEL = 'joy-stub-model';
+const TOOL_ARGUMENT_FRAGMENT_CODE_POINTS = 8;
+const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 function parseArguments(argv) {
   const parsed = { port: 43123, scriptPath: undefined, logPath: undefined, model: undefined };
@@ -171,26 +173,41 @@ function streamChunk(model, index, delta, finishReason = null) {
   };
 }
 
-async function sendStreamingResponse(response, model, scripted, index) {
+function argumentFragments(text) {
+  const characters = Array.from(text);
+  const fragments = [];
+  for (let start = 0; start < characters.length; start += TOOL_ARGUMENT_FRAGMENT_CODE_POINTS) {
+    fragments.push(characters.slice(start, start + TOOL_ARGUMENT_FRAGMENT_CODE_POINTS).join(''));
+  }
+  return fragments;
+}
+
+async function sendStreamingResponse(response, model, scripted, index, openStreams) {
   response.writeHead(200, {
     ...corsHeaders(),
     'content-type': 'text/event-stream; charset=utf-8',
     connection: 'keep-alive',
   });
   let closed = false;
+  openStreams.add(response);
   response.once('close', () => {
     closed = true;
+    openStreams.delete(response);
   });
 
   const delay = () =>
     scripted.delay_ms === 0
       ? Promise.resolve()
-      : new Promise((resolveDelay) => setTimeout(resolveDelay, scripted.delay_ms));
+      : new Promise((resolveDelay) => {
+          const timer = setTimeout(resolveDelay, scripted.delay_ms);
+          // A pending delay must not keep the process alive once the server has closed.
+          timer.unref();
+        });
   const emit = async (value) => {
-    if (closed) return false;
+    if (closed || response.writableEnded) return false;
     response.write(`data: ${JSON.stringify(value)}\n\n`);
     await delay();
-    return !closed;
+    return !closed && !response.writableEnded;
   };
 
   if (!(await emit(streamChunk(model, index, { role: 'assistant' })))) return;
@@ -200,17 +217,22 @@ async function sendStreamingResponse(response, model, scripted, index) {
   )
     return;
   for (const [toolIndex, call] of scripted.tool_calls.entries()) {
-    const delta = {
+    // As in the OpenAI stream, the first delta carries the id and name; the arguments follow in fragments.
+    const opening = {
       tool_calls: [
         {
           index: toolIndex,
           id: call.id,
           type: 'function',
-          function: call.function,
+          function: { name: call.function.name, arguments: '' },
         },
       ],
     };
-    if (!(await emit(streamChunk(model, index, delta)))) return;
+    if (!(await emit(streamChunk(model, index, opening)))) return;
+    for (const fragment of argumentFragments(call.function.arguments)) {
+      const delta = { tool_calls: [{ index: toolIndex, function: { arguments: fragment } }] };
+      if (!(await emit(streamChunk(model, index, delta)))) return;
+    }
   }
   if (
     !(await emit(
@@ -219,7 +241,7 @@ async function sendStreamingResponse(response, model, scripted, index) {
   ) {
     return;
   }
-  if (!closed) response.end('data: [DONE]\n\n');
+  if (!closed && !response.writableEnded) response.end('data: [DONE]\n\n');
 }
 
 async function main() {
@@ -227,14 +249,26 @@ async function main() {
   const rawScript = JSON.parse(await readFile(options.scriptPath, 'utf8'));
   const script = parseResponseScript(rawScript);
   const model = options.model ?? script.model;
+  let logWriteWarned = false;
   const logEvent = async (event) => {
-    await appendFile(
-      options.logPath,
-      `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`,
-      'utf8',
-    );
+    try {
+      await appendFile(
+        options.logPath,
+        `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`,
+        'utf8',
+      );
+    } catch (error) {
+      // The request log is diagnostic only: report the first failure and keep serving.
+      if (!logWriteWarned) {
+        logWriteWarned = true;
+        const code = error instanceof Error && 'code' in error ? String(error.code) : 'unknown';
+        process.stderr.write(`stub-model request log write failed: ${code}\n`);
+      }
+    }
   };
   let nextResponse = 0;
+  const openStreams = new Set();
+  let stopping = false;
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
@@ -242,6 +276,17 @@ async function main() {
     if (request.method === 'OPTIONS') {
       response.writeHead(204, corsHeaders());
       response.end();
+      return;
+    }
+
+    if (request.method === 'POST' && path === '/__shutdown') {
+      if (!LOOPBACK_ADDRESSES.has(request.socket.remoteAddress ?? '')) {
+        sendJson(response, 403, { error: { message: 'Forbidden.', code: 'forbidden' } });
+        return;
+      }
+      sendJson(response, 202, { status: 'stopping' });
+      // Stop only once the acknowledgement has been flushed to the caller.
+      response.once('finish', shutdown);
       return;
     }
 
@@ -292,7 +337,7 @@ async function main() {
       const scripted = script.responses[nextResponse];
       nextResponse += 1;
       if (body.stream === true) {
-        await sendStreamingResponse(response, model, scripted, index);
+        await sendStreamingResponse(response, model, scripted, index, openStreams);
       } else {
         sendJson(response, 200, completionResponse(model, scripted, index));
       }
@@ -302,6 +347,18 @@ async function main() {
     sendJson(response, 404, { error: { message: 'Not found.', code: 'not_found' } });
   });
 
+  // Ends open SSE streams so server.close() does not wait on them. Streams end without the
+  // DONE sentinel, so a client can tell that the reply was cut short.
+  const shutdown = () => {
+    if (stopping) return;
+    stopping = true;
+    for (const response of openStreams) {
+      if (!response.writableEnded) response.end();
+    }
+    server.close(() => process.exit(0));
+    server.closeIdleConnections();
+  };
+
   server.listen(options.port, '127.0.0.1', () => {
     const address = server.address();
     if (address === null || typeof address === 'string')
@@ -310,9 +367,8 @@ async function main() {
       `${JSON.stringify({ type: 'ready', baseUrl: `http://127.0.0.1:${address.port}/v1`, model })}\n`,
     );
   });
-  const stop = () => server.close(() => process.exit(0));
-  process.once('SIGINT', stop);
-  process.once('SIGTERM', stop);
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
 }
 
 main().catch((error) => {
