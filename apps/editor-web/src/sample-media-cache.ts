@@ -44,6 +44,8 @@ export async function registerSampleMedia(
     if ((await options.cache.get(sample.assetId)) !== undefined) continue;
     const file = await options.fetchFile(`${baseUrl}/${encodeURIComponent(sample.fileName)}`);
     const sha256 = await sha256OfBlob(file);
+    // The check above came before the fetch: a relink made meanwhile wins, so the copy is not written over it.
+    if ((await options.cache.get(sample.assetId)) !== undefined) continue;
     await options.cache.put(
       { assetId: sample.assetId, sha256, bytes: file.size, mimeType: sample.mimeType },
       file,

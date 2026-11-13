@@ -71,6 +71,30 @@ describe('sample media on first open (T-R01)', () => {
     expect(puts.map((put) => put.descriptor.assetId)).toEqual(['asset-outro']);
   });
 
+  it('does not overwrite a relink that lands while the sample file is fetched (T-R01)', async () => {
+    const { cache, puts } = memoryCache();
+    const relinked = new Blob(['the original the user relinked']);
+    const fetchFile = vi.fn(async () => {
+      // The user relinks the intro while the copy's fetch is still running.
+      await cache.put(
+        {
+          assetId: 'asset-intro',
+          sha256: 'b'.repeat(64),
+          bytes: relinked.size,
+          mimeType: 'video/mp4',
+        },
+        relinked,
+      );
+      return new Blob(['sample bytes']);
+    });
+
+    const copied = await registerSampleMedia(['asset-intro'], { cache, fetchFile });
+
+    expect(copied).toEqual([]);
+    expect(await cache.get('asset-intro')).toBe(relinked);
+    expect(puts.map((put) => put.file)).toEqual([relinked]);
+  });
+
   it('a project with no sample assets copies nothing', async () => {
     const { cache, puts } = memoryCache();
     const { fetchFile } = fakeFetch();
