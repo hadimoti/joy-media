@@ -83,7 +83,8 @@ describe('AudioPanel Enhance workspace', () => {
     expect(markup).toContain('Browser DSP ready');
     expect(markup).toContain('<strong>Browser</strong>DSP');
     expect(markup).not.toContain('<strong>0G</strong>RAM');
-    expect(markup).toContain('Local Worker disconnected');
+    expect(markup).toContain('Local device disconnected');
+    expect(markup).not.toContain('Worker');
     expect(markup).toContain('Timeline');
     expect(markup).toContain('disabled=""');
     expect(markup).toContain('audio-workflow-icon');
