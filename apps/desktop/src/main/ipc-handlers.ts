@@ -90,6 +90,11 @@ export interface IpcHandlerDeps {
     provider: SignInProvider,
     context?: ProviderSignInContext,
   ) => Promise<SignInResult>;
+  /** Cancels or reopens the running sign-in of a provider (T-J03). Absent means both are refused. */
+  readonly signInAttempts?: {
+    readonly cancel: (provider: string) => boolean;
+    readonly reopen: (provider: string) => Promise<boolean>;
+  };
   /** Revokes a ChatGPT refresh token. Credentials stay in the main process. */
   readonly providerSignOut?: (record: ChatGptTokenRecord) => Promise<void>;
   readonly handleWindowControl?: (
@@ -451,6 +456,23 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       clearAgentSlotsForProfile(deps.localDatabase, id);
       return { ok: true };
     },
+    'desktop.provider-profile.sign-in-cancel': async (payload): Promise<IpcResult> => {
+      const provider = asSignInProviderPayload(payload);
+      if (provider === undefined) return { ok: false, error: 'Invalid sign-in request' };
+      if (deps.signInAttempts === undefined) {
+        return { ok: false, error: 'Sign-in is not available in this build' };
+      }
+      // The attempt's own listener closes and frees its port; the sign-in then fails as cancelled.
+      return { ok: true, data: { cancelled: deps.signInAttempts.cancel(provider) } };
+    },
+    'desktop.provider-profile.sign-in-reopen': async (payload): Promise<IpcResult> => {
+      const provider = asSignInProviderPayload(payload);
+      if (provider === undefined) return { ok: false, error: 'Invalid sign-in request' };
+      if (deps.signInAttempts === undefined) {
+        return { ok: false, error: 'Sign-in is not available in this build' };
+      }
+      return { ok: true, data: { reopened: await deps.signInAttempts.reopen(provider) } };
+    },
     'desktop.provider-profile.sign-out': async (payload): Promise<IpcResult> => {
       const id = asProfileId(payload);
       if (id === undefined) return { ok: false, error: 'Invalid profile id' };
@@ -738,6 +760,13 @@ function asJobId(value: unknown): string | undefined {
 }
 
 /** The provider to sign in to, and the saved profile to update, when there is one. */
+/** The provider a cancel or reopen names: a sign-in provider and nothing else. */
+function asSignInProviderPayload(value: unknown): SignInProvider | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const provider = (value as Record<string, unknown>)['provider'];
+  return typeof provider === 'string' && isSignInProvider(provider) ? provider : undefined;
+}
+
 function asSignInRequest(
   value: unknown,
 ): { readonly provider: SignInProvider; readonly id?: string } | undefined {

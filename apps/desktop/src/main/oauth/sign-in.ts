@@ -51,6 +51,15 @@ export interface SignInResult {
   readonly secret: string;
 }
 
+/**
+ * Per-attempt options (T-J03). The signal cancels this attempt; openExternal, when given, opens the sign-in page
+ * for this attempt instead of the one in the dependencies, so the attempt can remember the page.
+ */
+export interface ProviderSignInCall {
+  readonly signal?: AbortSignal;
+  readonly openExternal?: (url: string) => void | Promise<void>;
+}
+
 /** Main-process-only identity used to reauthorize an existing ChatGPT profile. */
 export interface ProviderSignInContext {
   readonly savedChatGptAccount?: {
@@ -79,8 +88,12 @@ export interface ProviderSignInDeps {
  */
 export function createProviderSignIn(
   deps: ProviderSignInDeps,
-): (provider: SignInProvider, context?: ProviderSignInContext) => Promise<SignInResult> {
-  return async (provider, context) => {
+): (
+  provider: SignInProvider,
+  context?: ProviderSignInContext,
+  call?: ProviderSignInCall,
+) => Promise<SignInResult> {
+  return async (provider, context, call) => {
     // D20: only a provider whose registry row permits a subscription sign-in may be signed in to (PLAN-v4 §6d-1 rule 5).
     // Every other provider, OpenRouter included, is set up with an API key instead.
     if (!signInProviders().includes(provider)) {
@@ -93,9 +106,11 @@ export function createProviderSignIn(
       const clientId = configuredOAuthClientId('xai');
       const record = await signInWithXai({
         ...(clientId === undefined ? {} : { clientId }),
-        openExternal: deps.openExternal,
+        openExternal: call?.openExternal ?? deps.openExternal,
         fetch: deps.fetch,
         now: deps.now,
+
+        ...(call?.signal === undefined ? {} : { signal: call.signal }),
       });
       const modelId = await firstXaiModel(record, deps.fetch);
       return {
@@ -109,9 +124,11 @@ export function createProviderSignIn(
       const clientId = configuredOAuthClientId('kimi');
       const record = await signInWithKimiCode({
         ...(clientId === undefined ? {} : { clientId }),
-        openExternal: deps.openExternal,
+        openExternal: call?.openExternal ?? deps.openExternal,
         fetch: deps.fetch,
         now: deps.now,
+
+        ...(call?.signal === undefined ? {} : { signal: call.signal }),
       });
       const modelId = await firstKimiCodeModel(record, deps.fetch);
       return {
@@ -130,9 +147,11 @@ export function createProviderSignIn(
     const record = await signInWithChatGpt({
       issuedClientId: context?.savedChatGptAccount?.clientId ?? configuredOAuthClientId('chatgpt'),
       extAgentHostId: deps.installId(),
-      openExternal: deps.openExternal,
+      openExternal: call?.openExternal ?? deps.openExternal,
       fetch: deps.fetch,
       now: deps.now,
+
+      ...(call?.signal === undefined ? {} : { signal: call.signal }),
       ...(deps.chatGptPort === undefined ? {} : { port: deps.chatGptPort }),
     });
     const choice = await chatGptModelChoice(record, deps.fetch);
