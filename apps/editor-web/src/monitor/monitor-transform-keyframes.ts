@@ -64,6 +64,23 @@ export function gestureKeyframe(
   };
 }
 
+/**
+ * A rotation key's value made continuous with the key before it (or, before
+ * the first key, the key after it): whole turns are added or taken away so
+ * the key is within half a turn of that neighbour, and the interpolation
+ * between them takes the short way round. 359 then 1 is written as 361, and
+ * 1 then 359 as -1; values may go past 360 or below 0, which draws the same.
+ */
+export function continuousRotation(curve: AnimationCurveV1, timeUs: number, value: number): number {
+  const keys = [...curve.keyframes].sort((a, b) => a.timeUs - b.timeUs);
+  const neighbour =
+    keys.filter((keyframe) => keyframe.timeUs < timeUs).at(-1) ??
+    keys.find((keyframe) => keyframe.timeUs > timeUs);
+  if (neighbour === undefined || !Number.isFinite(neighbour.value)) return value;
+  const turns = Math.round((neighbour.value - value) / 360);
+  return turns === 0 ? value : value + turns * 360;
+}
+
 function withAnchor(
   transform: VisualObjectTransformV1,
   patch: TransformPatch,
@@ -101,9 +118,12 @@ export function applyTransformPatch(
       continue;
     }
     if (curve.keyframes.length === 0 || sampleCurve(curve, at) === value) continue;
+    // A rotation key is unwrapped against its neighbour so the curve turns the short way.
+    const written = channel === 'rotationDeg' ? continuousRotation(curve, at, value) : value;
+    if (sampleCurve(curve, at) === written) continue;
     animations = {
       ...animations,
-      [channel]: setKeyframe(curve, gestureKeyframe(curve, at, value)),
+      [channel]: setKeyframe(curve, gestureKeyframe(curve, at, written)),
     };
   }
   transform = withAnchor(transform, patch);

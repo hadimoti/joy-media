@@ -13,6 +13,7 @@ import { INITIAL_EDITOR_PROJECT } from '../editor-project.js';
 import { EditorSession } from '../editor-session.js';
 import {
   applyTransformPatch,
+  continuousRotation,
   gestureKeyframe,
   keyframeTime,
   localValuesAt,
@@ -128,6 +129,46 @@ describe('writing a gesture into an object', () => {
       value: 0,
       interpolation: 'hold',
     });
+  });
+
+  it('a rotation key wraps around the short way: 359 then 1, and the other direction (review fix)', () => {
+    const rotation = (value: number): AnimationCurveV1 => ({
+      keyframes: [{ timeUs: 0, value, interpolation: 'linear' }],
+    });
+    // 359 then 1: written as 361, so halfway the picture is at 360 (0), not 180.
+    const up = applyTransformPatch(
+      shape({ rotationDeg: rotation(359) }),
+      patch({ rotationDeg: 1 }),
+      1_000_000,
+    );
+    expect(up.animations!.rotationDeg!.keyframes.map((key) => key.value)).toEqual([359, 361]);
+    expect(resolveObjectTransform(up, HALF).rotationDeg).toBeCloseTo(360, 9);
+    // 1 then 359 (the negative direction): written as -1, halfway at 0.
+    const down = applyTransformPatch(
+      shape({ rotationDeg: rotation(1) }),
+      patch({ rotationDeg: 359 }),
+      1_000_000,
+    );
+    expect(down.animations!.rotationDeg!.keyframes.map((key) => key.value)).toEqual([1, -1]);
+    expect(resolveObjectTransform(down, HALF).rotationDeg).toBeCloseTo(0, 9);
+    // Past several turns the key still lands within half a turn of its neighbour.
+    expect(continuousRotation(rotation(725), 1_000_000, 10)).toBe(730);
+    expect(continuousRotation(rotation(-350), 1_000_000, 0)).toBe(-360);
+    // Before the first key the neighbour is the key after it.
+    const later: AnimationCurveV1 = {
+      keyframes: [{ timeUs: 1_000_000, value: 2, interpolation: 'linear' }],
+    };
+    expect(continuousRotation(later, 0, 358)).toBe(-2);
+    // A near value and a curve without keys are left as they are.
+    expect(continuousRotation(rotation(359), 1_000_000, 300)).toBe(300);
+    expect(continuousRotation({ keyframes: [] }, 0, 359)).toBe(359);
+    // Other channels are never unwrapped.
+    const x = applyTransformPatch(
+      shape({ x: { keyframes: [{ timeUs: 0, value: 359, interpolation: 'linear' }] } }),
+      patch({ x: 1 }),
+      1_000_000,
+    );
+    expect(x.animations!.x!.keyframes.map((key) => key.value)).toEqual([359, 1]);
   });
 
   it('without a playhead every value is static (the drawn values while typing)', () => {
