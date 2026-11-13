@@ -59,8 +59,11 @@ function randomId(): string {
 export function createMissingMediaHost(
   session: MissingMediaSession,
   cache: () => Promise<RelinkCache>,
+  /** Settles when the session's sample media copy has finished (T-R01); the list waits for it. */
+  sampleMediaCopy?: Promise<unknown>,
 ): MissingMediaHost {
   const list = async (): Promise<readonly MissingMediaEntry[]> => {
+    await sampleMediaCopy;
     const referenced = referencedAssetIds(session.timelineProject);
     const assets = Object.fromEntries(
       Object.entries(session.visualProject.assets).filter(([assetId]) => referenced.has(assetId)),

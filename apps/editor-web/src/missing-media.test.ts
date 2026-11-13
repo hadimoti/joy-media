@@ -63,6 +63,31 @@ describe('deriveMissingMedia', () => {
     const assets = { 'lut-1': await recordOf('lut-1', encode('l'), 'lut') };
     expect(await deriveMissingMedia(assets, cacheWith([]))).toEqual([]);
   });
+
+  it('never flags a virtual asset (text, caption, motion, effect, filter, adjustment, overlay, HTML scene)', async () => {
+    // A virtual asset is recorded as kind `other` with no file behind it, so with an empty cache it
+    // must still not be missing media (T-R01).
+    const virtual = {
+      'showcase-text-asset': { id: 'showcase-text-asset', kind: 'other', displayName: 'Text' },
+      'showcase-caption-asset': { id: 'showcase-caption-asset', kind: 'other', displayName: 'CC' },
+      'joy-adjustment-layer': { id: 'joy-adjustment-layer', kind: 'other', displayName: 'Adjust' },
+      'html-scene:joy.firstparty.holo-badge': {
+        id: 'html-scene:joy.firstparty.holo-badge',
+        kind: 'other',
+        displayName: 'Holo badge',
+      },
+    } as const;
+    expect(await deriveMissingMedia(virtual, cacheWith([]))).toEqual([]);
+  });
+
+  it('still flags a real file that is not cached, next to the virtual ones', async () => {
+    const assets = {
+      'asset-intro': await recordOf('asset-intro', encode('intro'), 'video'),
+      'showcase-text-asset': { id: 'showcase-text-asset', kind: 'other', displayName: 'Text' },
+    } as const;
+    const missing = await deriveMissingMedia(assets, cacheWith([]));
+    expect(missing.map((entry) => entry.assetId)).toEqual(['asset-intro']);
+  });
 });
 
 describe('matchReplacementFiles', () => {
