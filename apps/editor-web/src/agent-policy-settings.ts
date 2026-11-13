@@ -28,11 +28,20 @@ export interface AgentPolicyPreferences {
   readonly livePreview: boolean;
 }
 
+/**
+ * The cost limit a fresh install starts with, in US dollars per run.
+ *
+ * Ten dollars per run was far too high for a first run, so the default is
+ * half a dollar. Only the default changes: a limit the owner saved is kept
+ * as it is.
+ */
+export const DEFAULT_MAX_COST_PER_RUN_USD = 0.5;
+
 export const DEFAULT_AGENT_POLICY: AgentPolicyPreferences = {
   version: 2,
   executionMode: 'preview-and-approve',
   allowedCapabilities: ALL_TOOL_CAPABILITIES,
-  maxCostPerRunUsd: 10,
+  maxCostPerRunUsd: DEFAULT_MAX_COST_PER_RUN_USD,
   privacyMode: 'ask-before-remote',
   workerPreference: 'browser-worker',
   mediaProvider: 'Approved provider',
