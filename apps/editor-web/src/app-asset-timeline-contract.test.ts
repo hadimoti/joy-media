@@ -21,20 +21,23 @@ describe('App asset timeline integrity contract', () => {
   });
 
   it('fits a bound media clip against the composition that received it', () => {
-    const bindStart = appSource.indexOf('const bindMediaClip = (');
-    const bindEnd = appSource.indexOf('const selectedTimelineEntry =', bindStart);
-    const binder = appSource.slice(bindStart, bindEnd);
-
-    expect(binder).toContain('compositionId: string,');
-    expect(binder).toContain('context.timelineProject.compositions[compositionId]');
-    expect(binder).not.toContain('context.activeTimelineCompositionId');
-    expect(appSource).toContain('onMediaPlaced={(asset, clipId, compositionId) =>');
-    expect(appSource).toContain('bindMediaClip(asset, clipId, compositionId)');
-    expect(timelinePanelSource).toContain('clipId,\n        composition.id,');
-    expect(timelinePanelSource).toContain(
-      'onMediaPlaced?.(asset, clipIds[index]!, compositionRef.current.id)',
+    const placementSource = readFileSync(
+      new URL('./timeline-media-placement.ts', import.meta.url),
+      'utf8',
     );
-    expect(timelinePanelSource).toContain('onMediaPlaced?.(timelineAsset, clipId, composition.id)');
+    const projectSource = readFileSync(new URL('./media-project.ts', import.meta.url), 'utf8');
+
+    // The panel sends the frame of the composition that received the clip with every placement.
+    expect(timelinePanelSource).toContain(
+      'const frame = { width: composition.width, height: composition.height };',
+    );
+    expect(timelinePanelSource).toContain(
+      'placements.map((placement) => ({ ...placement, frame }))',
+    );
+    // The placement carries it to the binder, which fits new media to that frame only.
+    expect(placementSource).toContain('placement.frame');
+    expect(projectSource).toContain('frame?: { readonly width: number; readonly height: number }');
+    expect(projectSource).toContain("mode: 'fit'");
   });
 
   it('uses one drop handler and keeps Media drops off the timeline', () => {
