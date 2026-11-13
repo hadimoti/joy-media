@@ -160,22 +160,33 @@ describe('ProviderSignInPanel', () => {
     }
   });
 
-  it('shows the risk notice only under the xAI sign-in button', async () => {
+  it('shows the risk notice under the sign-in button of every OAuth route (T-F09)', async () => {
     installDesktopBridge();
     await mount();
 
     for (const provider of ['ChatGPT', 'Kimi', 'xAI']) await openAccordion(provider);
 
-    const xaiButton = route('xAI', 'OAuth').querySelector('button');
-    expect(xaiButton?.nextElementSibling?.tagName).toBe('P');
-    expect(xaiButton?.nextElementSibling?.textContent).toBe(RISK_NOTICE);
-    expect(route('ChatGPT', 'OAuth').textContent).not.toContain(RISK_NOTICE);
-    expect(route('Kimi', 'OAuth').textContent).not.toContain(RISK_NOTICE);
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) {
+      const signInButton = route(provider, 'OAuth').querySelector('button');
+      expect(signInButton?.nextElementSibling?.tagName).toBe('P');
+      expect(signInButton?.nextElementSibling?.textContent).toBe(RISK_NOTICE);
+    }
     expect(
       [...container.querySelectorAll('p')].filter(
         (paragraph) => paragraph.textContent === RISK_NOTICE,
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(3);
+  });
+
+  it('says on the ChatGPT card that an OpenAI API key is billed separately (T-F09)', async () => {
+    installDesktopBridge();
+    await mount();
+
+    await openAccordion('ChatGPT');
+
+    expect(route('ChatGPT', 'API-key').textContent).toContain(
+      'An OpenAI API key is billed separately from ChatGPT.',
+    );
   });
 
   it('says on the ChatGPT card that the sign-in cannot make pictures, and on no other card', async () => {
