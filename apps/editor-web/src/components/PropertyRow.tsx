@@ -112,7 +112,7 @@ export function PropertyRow({
         {onReset !== undefined && (
           <button
             type="button"
-            className="property-row-action"
+            className="property-row-action property-row-reset"
             aria-label={`Reset ${label}`}
             title={`Reset ${label}`}
             disabled={disabled}

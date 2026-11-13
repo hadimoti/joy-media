@@ -138,6 +138,7 @@ export function TimelineEmptyState({
     <div
       ref={dropRef}
       className={`timeline-empty-state ${dragActive ? 'drag-active' : ''}`}
+      data-editor-pointer-dnd-target="timeline-empty"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

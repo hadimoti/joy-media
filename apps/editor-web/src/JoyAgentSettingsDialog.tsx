@@ -43,6 +43,7 @@ import { sessionProviderFor } from './joy-agent/provider-call.js';
 import {
   evaluateEndpoint,
   findRegistryProvider,
+  generationSupport,
   PROVIDER_REGISTRY,
   signInProviders,
   type ProviderRegionId,
@@ -72,6 +73,7 @@ import { ProviderSignInPanel } from './ProviderSignInPanel.js';
 import {
   allowedToolsTag,
   budgetTag,
+  canMakeLabel,
   connectionFailedMessage,
   mediaCheckComplete,
   missingItemsMessage,
@@ -1195,6 +1197,11 @@ export function JoyAgentSettingsDialog({
                     <div className="joy-settings-vault-profiles-grid">
                       {profiles.map((prof) => {
                         const disabledLegacy = prof.state === 'disabled-legacy';
+                        // What this card's provider can make in JOY Media; nothing when it can make neither (T-C07).
+                        const canMake = canMakeLabel(
+                          generationSupport(prof.provider, 'image').supported,
+                          generationSupport(prof.provider, 'video').supported,
+                        );
                         return (
                           <div
                             key={prof.id}
@@ -1204,6 +1211,9 @@ export function JoyAgentSettingsDialog({
                             <div className="joy-settings-provider-meta">
                               <strong>{profileLabel(prof)}</strong>
                               <span>{displayModelId(prof.modelId)}</span>
+                              {canMake !== undefined && (
+                                <span className="joy-settings-can-make">{canMake}</span>
+                              )}
                               {disabledLegacy && (
                                 <span className="joy-settings-legacy-status">
                                   {SETTINGS_MODELS.legacyProfile}

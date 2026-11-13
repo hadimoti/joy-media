@@ -3011,6 +3011,19 @@ label {
   display: none;
   flex: none;
 }
+#root .workspace .panel-header-action-overflow-menu {
+  display: inline-flex;
+  align-items: center;
+}
+#root .workspace .panel-header-action-overflow-menu .action-overflow-trigger {
+  width: 2rem;
+  min-width: 2rem;
+  height: 2.25rem;
+  padding: 0;
+}
+#root .workspace .panel-header-action-overflow-menu .action-overflow-trigger-label {
+  display: none;
+}
 .action-overflow-trigger {
   font-size: 1.2rem;
   line-height: 1;
@@ -3021,12 +3034,20 @@ label {
   white-space: nowrap;
 }
 .action-overflow-popover {
-  position: absolute;
-  top: calc(100% + 0.25rem);
-  right: 0;
-  z-index: 30;
+  position: fixed;
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  /* Portaled to body, so it must clear Dockview's overlay band (--dv-overlay-z-index 999; floating
+     groups stack up from it by 2 each) and stay below the dialog layer (AppDialogs, 1100). */
+  z-index: 1050;
   display: grid;
-  min-width: 12rem;
+  box-sizing: border-box;
+  min-width: min(12rem, calc(100vw - 1rem));
+  max-width: calc(100vw - 1rem);
+  max-height: calc(100vh - 1rem);
+  overflow-y: auto;
   padding: 0.25rem;
   border: 1px solid var(--joy-border-strong);
   border-radius: var(--radius-md);
@@ -7436,6 +7457,35 @@ label {
   border: 1px solid #2e2e32;
   border-radius: 0.35rem;
   background: #1f1f21;
+}
+.asset-card,
+.effect-card,
+.transitions-panel .transition-card {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+.editor-pointer-dnd-source-active {
+  cursor: grabbing !important;
+  opacity: 0.62;
+}
+.editor-pointer-dnd-hint {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-raised);
+  color: var(--joy-text);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 35%);
+  font-size: var(--joy-type-xs);
+  white-space: nowrap;
+}
+[data-editor-pointer-dnd-over='true'] {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: -2px;
 }
 .asset-card-media {
   display: grid;
@@ -14160,6 +14210,75 @@ label {
   gap: var(--space-2);
 }
 
+/* Inspector Visual rows (T-D08): X and Y share one row, Scale has a link toggle,
+   opacity is one percentage with a slider, and Reset appears on hover or focus. */
+.inspector-transform-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+}
+.inspector-transform-pair-linked {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+.inspector-transform-pair .property-control-input {
+  width: 100%;
+}
+.inspector-transform-pair .inspector-prop-row {
+  flex-wrap: wrap;
+}
+.inspector-transform-pair .property-control-slider {
+  flex: 1 1 6rem;
+  width: auto;
+}
+.inspector-unit {
+  color: var(--joy-text-faint);
+  font-size: var(--joy-type-xs);
+}
+.inspector-link-toggle {
+  display: grid;
+  align-self: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--joy-text-faint);
+  cursor: pointer;
+}
+.inspector-link-toggle svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+.inspector-link-toggle:hover:not(:disabled),
+.inspector-link-toggle:focus-visible {
+  border-color: var(--joy-border-strong);
+  color: var(--joy-text);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 60%, transparent);
+}
+.inspector-link-toggle[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--joy-accent) 60%, transparent);
+  color: var(--joy-accent);
+}
+.inspector-link-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* Reset stays in the tab order but is visible only on hover or while the row has focus. */
+.inspector-transform-property .property-row-reset {
+  opacity: 0;
+  pointer-events: none;
+}
+.inspector-transform-property:hover .property-row-reset,
+.inspector-transform-property:focus-within .property-row-reset,
+.inspector-transform-property .property-row-reset:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* Inspector / Mask — compact local-first segmentation controls. */
 .mask-inspector {
   display: grid;
@@ -18901,6 +19020,21 @@ label {
 .timeline-transition-junction svg {
   width: 0.8rem;
   height: 0.8rem;
+}
+.timeline-transition-junction.timeline-transition-junction--empty {
+  z-index: 6;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--joy-text);
+  opacity: 0;
+}
+.timeline-transition-junction.timeline-transition-junction--empty:hover,
+.timeline-transition-junction.timeline-transition-junction--empty[data-editor-pointer-dnd-over='true'] {
+  border-color: var(--joy-accent);
+  background: var(--joy-bg-raised);
+  box-shadow: 0 2px 7px rgb(0 0 0 / 55%);
+  opacity: 1;
 }
 
 /* Adjustment-layer library: one clear target, one primary action. */

@@ -1,4 +1,4 @@
-import type { EditorViewMode, ViewModeStorage } from './dock-layout.js';
+import { VIEW_MODE_KEY, type EditorViewMode, type ViewModeStorage } from './dock-layout.js';
 import {
   collapseJoyCodeGroup,
   dockLayoutKey,
@@ -7,7 +7,7 @@ import {
   seedDockLayout,
 } from './dock-layout.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
-import { DEFAULT_EDITOR_UI_PREFERENCES } from './ui-preferences.js';
+import { DEFAULT_EDITOR_UI_PREFERENCES, EDITOR_UI_PREFERENCES_KEY } from './ui-preferences.js';
 
 export interface WorkspacePresetSpec {
   readonly id: WorkspacePresetId;
@@ -54,6 +54,21 @@ export function resetWorkspaceTarget(): {
     mode: DEFAULT_EDITOR_UI_PREFERENCES.viewMode,
     preset: DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset,
   };
+}
+
+/** Clears every saved workspace layout and UI preference before Reset Workspace applies its defaults. */
+export function resetWorkspaceStorage(storage: ViewModeStorage): {
+  readonly mode: EditorViewMode;
+  readonly preset: WorkspacePresetId;
+} {
+  for (const mode of ['vertical', 'widescreen'] as const) {
+    for (const preset of WORKSPACE_PRESETS) {
+      storage.removeItem(workspacePresetLayoutKey(mode, preset.id));
+    }
+  }
+  storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
+  storage.removeItem(VIEW_MODE_KEY);
+  return resetWorkspaceTarget();
 }
 
 /** Persists one dock layout under the owning preset's key for that view mode. */
