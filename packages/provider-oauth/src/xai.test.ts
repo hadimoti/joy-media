@@ -137,6 +137,100 @@ describe('xAI device OAuth', () => {
     expect(XAI_OAUTH_INFERENCE_BASE_URL).toBe('https://api.x.ai/v1');
   });
 
+  it('cancels a pending device-code request without opening the approval page', async () => {
+    const controller = new AbortController();
+    let deviceSignal: AbortSignal | undefined;
+    let releaseDevice: (response: Response) => void = () => undefined;
+    const deviceResponse = new Promise<Response>((resolve) => {
+      releaseDevice = resolve;
+    });
+    const fetch: FetchLike = async (url, init) => {
+      if (url === XAI_OAUTH_DISCOVERY_URL) return discovery();
+      if (url === DEVICE_ENDPOINT) {
+        deviceSignal = init.signal ?? undefined;
+        return deviceResponse;
+      }
+      if (url === TOKEN_ENDPOINT) {
+        return json({
+          access_token: 'test-access-token',
+          refresh_token: 'test-refresh-token',
+          expires_in: 3600,
+          scope: XAI_OAUTH_SCOPE,
+        });
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const openExternal = vi.fn();
+    const pending = signInWithXai({
+      clientId: CLIENT_ID,
+      openExternal,
+      fetch,
+      now: () => NOW,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(deviceSignal).toBeDefined());
+
+    controller.abort();
+    releaseDevice(deviceReply());
+
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(deviceSignal?.aborted).toBe(true);
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending discovery request without opening the approval page', async () => {
+    const controller = new AbortController();
+    let discoverySignal: AbortSignal | undefined;
+    let releaseDiscovery: (response: Response) => void = () => undefined;
+    const discoveryResponse = new Promise<Response>((resolve) => {
+      releaseDiscovery = resolve;
+    });
+    const fetch: FetchLike = async (url, init) => {
+      if (url === XAI_OAUTH_DISCOVERY_URL) {
+        discoverySignal = init.signal ?? undefined;
+        return discoveryResponse;
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const openExternal = vi.fn();
+    const pending = signInWithXai({
+      clientId: CLIENT_ID,
+      openExternal,
+      fetch,
+      now: () => NOW,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(discoverySignal).toBeDefined());
+
+    controller.abort();
+    releaseDiscovery(discovery());
+
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(discoverySignal?.aborted).toBe(true);
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('does not open the approval page when cancelled after receiving the device code', async () => {
+    const controller = new AbortController();
+    let nowCalls = 0;
+    const now = (): number => {
+      nowCalls += 1;
+      if (nowCalls === 3) controller.abort();
+      return NOW;
+    };
+    const fetch: FetchLike = async (url) => {
+      if (url === XAI_OAUTH_DISCOVERY_URL) return discovery();
+      if (url === DEVICE_ENDPOINT) return deviceReply();
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const openExternal = vi.fn();
+
+    await expect(
+      signInWithXai({ clientId: CLIENT_ID, openExternal, fetch, now, signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['http://auth.x.ai/oauth2/device/code', TOKEN_ENDPOINT],
     ['https://auth.x.ai.attacker.example/device', TOKEN_ENDPOINT],
@@ -232,6 +326,45 @@ describe('xAI device OAuth', () => {
     expect(polls).toBe(2);
   });
 
+  it('aborts an in-flight device-token poll when cancelled', async () => {
+    const controller = new AbortController();
+    let pollSignal: AbortSignal | undefined;
+    let releasePoll: (response: Response) => void = () => undefined;
+    const pollResponse = new Promise<Response>((resolve) => {
+      releasePoll = resolve;
+    });
+    const fetch: FetchLike = async (url, init) => {
+      if (url === XAI_OAUTH_DISCOVERY_URL) return discovery();
+      if (url === DEVICE_ENDPOINT) return deviceReply();
+      if (url === TOKEN_ENDPOINT) {
+        pollSignal = init.signal ?? undefined;
+        return pollResponse;
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const pending = signInWithXai({
+      clientId: CLIENT_ID,
+      openExternal: () => undefined,
+      fetch,
+      now: () => NOW,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(pollSignal).toBeDefined());
+
+    controller.abort();
+    releasePoll(
+      json({
+        access_token: 'test-access-token',
+        refresh_token: 'test-refresh-token',
+        expires_in: 3600,
+        scope: XAI_OAUTH_SCOPE,
+      }),
+    );
+
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(pollSignal?.aborted).toBe(true);
+  });
+
   it('slows the poll interval after slow_down', async () => {
     vi.useFakeTimers({ now: NOW });
     let polls = 0;
@@ -286,6 +419,89 @@ describe('xAI device OAuth', () => {
     await expect(
       signInWithXai({ clientId: CLIENT_ID, openExternal: () => undefined, fetch, now: () => NOW }),
     ).rejects.toMatchObject({ code: 'TIMEOUT', message: 'xAI device authorization timed out.' });
+  });
+
+  it('stops polling at the three-minute limit even when the server allows fifteen minutes', async () => {
+    vi.useFakeTimers({ now: NOW });
+    let tokenPolls = 0;
+    const fetch: FetchLike = async (url) => {
+      if (url === XAI_OAUTH_DISCOVERY_URL) return discovery();
+      if (url === DEVICE_ENDPOINT) {
+        return json({
+          device_code: 'test-device-code',
+          user_code: 'TEST-CODE',
+          verification_uri_complete: 'https://accounts.x.ai/oauth2/device?user_code=TEST-CODE',
+          expires_in: 900,
+          interval: 1,
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        tokenPolls += 1;
+        return json({ error: 'authorization_pending' }, 400);
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const outcome = signInWithXai({
+      clientId: CLIENT_ID,
+      openExternal: () => undefined,
+      fetch,
+      now: Date.now,
+      pollIntervalMs: 60_000,
+    }).catch((error: unknown) => error);
+
+    // Polls at 0, 60 and 120 seconds; the limit is reached at 180 seconds.
+    await vi.advanceTimersByTimeAsync(179_999);
+    expect(tokenPolls).toBe(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await outcome).toMatchObject({
+      code: 'TIMEOUT',
+      message: 'xAI device authorization timed out.',
+    });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(tokenPolls).toBe(3);
+  });
+
+  it('ignores an approval that arrives after the three-minute limit', async () => {
+    vi.useFakeTimers({ now: NOW });
+    let tokenPolls = 0;
+    const fetch: FetchLike = async (url) => {
+      if (url === XAI_OAUTH_DISCOVERY_URL) return discovery();
+      if (url === DEVICE_ENDPOINT) {
+        return json({
+          device_code: 'test-device-code',
+          user_code: 'TEST-CODE',
+          verification_uri_complete: 'https://accounts.x.ai/oauth2/device?user_code=TEST-CODE',
+          expires_in: 900,
+          interval: 1,
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        tokenPolls += 1;
+        if (tokenPolls === 1) return json({ error: 'authorization_pending' }, 400);
+        // The second poll is sent at 170 seconds. Its reply lands at 185 seconds, after the limit, and ignores the
+        // request's own abort, so the flow has to refuse it on the clock alone.
+        await new Promise((resolve) => setTimeout(resolve, 15_000));
+        return json({
+          access_token: 'test-access-token',
+          refresh_token: 'test-refresh-token',
+          expires_in: 3600,
+        });
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const outcome = signInWithXai({
+      clientId: CLIENT_ID,
+      openExternal: () => undefined,
+      fetch,
+      now: Date.now,
+      pollIntervalMs: 170_000,
+    }).catch((error: unknown) => error);
+
+    await vi.advanceTimersByTimeAsync(170_000);
+    expect(tokenPolls).toBe(2);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await outcome).toMatchObject({ code: 'TIMEOUT' });
+    expect(tokenPolls).toBe(2);
   });
 
   it('turns access_denied into a fixed, credential-safe error', async () => {

@@ -120,6 +120,84 @@ describe('Kimi Code device OAuth', () => {
     expect(KIMI_CODE_BASE_URL).toBe('https://api.kimi.ai/coding/v1');
   });
 
+  it('cancels a pending device-code request without opening the approval page', async () => {
+    const controller = new AbortController();
+    const now = Date.UTC(2026, 9, 30);
+    let deviceSignal: AbortSignal | undefined;
+    let releaseDevice: (response: Response) => void = () => undefined;
+    const deviceResponse = new Promise<Response>((resolve) => {
+      releaseDevice = resolve;
+    });
+    const fetch: FetchLike = async (url, init) => {
+      if (url === `${KIMI_CODE_OAUTH_HOST}/api/oauth/device_authorization`) {
+        deviceSignal = init.signal ?? undefined;
+        return deviceResponse;
+      }
+      if (url === `${KIMI_CODE_OAUTH_HOST}/api/oauth/token`) {
+        return json({
+          access_token: 'kimi-access-secret',
+          refresh_token: 'kimi-refresh-secret',
+          expires_in: 3600,
+          scope: 'kimi-code',
+        });
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const openExternal = vi.fn();
+    const pending = signInWithKimiCode({
+      openExternal,
+      fetch,
+      now: () => now,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(deviceSignal).toBeDefined());
+
+    controller.abort();
+    releaseDevice(
+      json({
+        user_code: 'KIMI-USER-CODE',
+        device_code: 'private-device-code',
+        verification_uri_complete:
+          'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+        expires_in: 120,
+        interval: 1,
+      }),
+    );
+
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(deviceSignal?.aborted).toBe(true);
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('does not open the approval page when cancelled after receiving the device code', async () => {
+    const controller = new AbortController();
+    let nowCalls = 0;
+    const now = (): number => {
+      nowCalls += 1;
+      if (nowCalls === 3) controller.abort();
+      return Date.UTC(2026, 9, 30);
+    };
+    const fetch: FetchLike = async (url) => {
+      if (url === `${KIMI_CODE_OAUTH_HOST}/api/oauth/device_authorization`) {
+        return json({
+          user_code: 'KIMI-USER-CODE',
+          device_code: 'private-device-code',
+          verification_uri_complete:
+            'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+          expires_in: 120,
+          interval: 1,
+        });
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const openExternal = vi.fn();
+
+    await expect(
+      signInWithKimiCode({ openExternal, fetch, now, signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
   it('polls immediately after opening the approval page, then waits between pending replies', async () => {
     const now = Date.UTC(2026, 9, 30);
     vi.useFakeTimers({ now });
@@ -166,6 +244,52 @@ describe('Kimi Code device OAuth', () => {
     expect(tokenPolls).toBe(2);
   });
 
+  it('aborts an in-flight device-token poll when cancelled', async () => {
+    const controller = new AbortController();
+    let pollSignal: AbortSignal | undefined;
+    let releasePoll: (response: Response) => void = () => undefined;
+    const pollResponse = new Promise<Response>((resolve) => {
+      releasePoll = resolve;
+    });
+    const fetch: FetchLike = async (url, init) => {
+      if (url === `${KIMI_CODE_OAUTH_HOST}/api/oauth/device_authorization`) {
+        return json({
+          user_code: 'KIMI-USER-CODE',
+          device_code: 'private-device-code',
+          verification_uri_complete:
+            'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+          expires_in: 120,
+          interval: 1,
+        });
+      }
+      if (url === `${KIMI_CODE_OAUTH_HOST}/api/oauth/token`) {
+        pollSignal = init.signal ?? undefined;
+        return pollResponse;
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const pending = signInWithKimiCode({
+      openExternal: () => undefined,
+      fetch,
+      now: () => Date.UTC(2026, 9, 30),
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(pollSignal).toBeDefined());
+
+    controller.abort();
+    releasePoll(
+      json({
+        access_token: 'kimi-access-secret',
+        refresh_token: 'kimi-refresh-secret',
+        expires_in: 3600,
+        scope: 'kimi-code',
+      }),
+    );
+
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(pollSignal?.aborted).toBe(true);
+  });
+
   it('refuses a device authorization URL outside the Kimi Code approval page', async () => {
     const fetch: FetchLike = async () =>
       json({
@@ -210,6 +334,90 @@ describe('Kimi Code device OAuth', () => {
       message: 'Kimi device authorization timed out.',
     });
     expect(requests).toEqual([`${KIMI_CODE_OAUTH_HOST}/api/oauth/device_authorization`]);
+  });
+
+  it('stops polling at the three-minute limit even when the server allows fifteen minutes', async () => {
+    const now = Date.UTC(2026, 9, 30);
+    vi.useFakeTimers({ now });
+    let tokenPolls = 0;
+    const fetch: FetchLike = async (url) => {
+      if (url === `${KIMI_CODE_OAUTH_HOST}/api/oauth/device_authorization`) {
+        return json({
+          user_code: 'KIMI-USER-CODE',
+          device_code: 'private-device-code',
+          verification_uri_complete:
+            'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+          expires_in: 900,
+          interval: 1,
+        });
+      }
+      if (url === `${KIMI_CODE_OAUTH_HOST}/api/oauth/token`) {
+        tokenPolls += 1;
+        return json({ error: 'authorization_pending' }, 400);
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const outcome = signInWithKimiCode({
+      openExternal: () => undefined,
+      fetch,
+      now: Date.now,
+      pollIntervalMs: 60_000,
+    }).catch((error: unknown) => error);
+
+    // Polls at 0, 60 and 120 seconds; the limit is reached at 180 seconds.
+    await vi.advanceTimersByTimeAsync(179_999);
+    expect(tokenPolls).toBe(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await outcome).toMatchObject({
+      code: 'TIMEOUT',
+      message: 'Kimi device authorization timed out.',
+    });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(tokenPolls).toBe(3);
+  });
+
+  it('ignores an approval that arrives after the three-minute limit', async () => {
+    const now = Date.UTC(2026, 9, 30);
+    vi.useFakeTimers({ now });
+    let tokenPolls = 0;
+    const fetch: FetchLike = async (url) => {
+      if (url === `${KIMI_CODE_OAUTH_HOST}/api/oauth/device_authorization`) {
+        return json({
+          user_code: 'KIMI-USER-CODE',
+          device_code: 'private-device-code',
+          verification_uri_complete:
+            'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+          expires_in: 900,
+          interval: 1,
+        });
+      }
+      if (url === `${KIMI_CODE_OAUTH_HOST}/api/oauth/token`) {
+        tokenPolls += 1;
+        if (tokenPolls === 1) return json({ error: 'authorization_pending' }, 400);
+        // The second poll is sent at 170 seconds. Its reply lands at 185 seconds, after the limit, and ignores the
+        // request's own abort, so the flow has to refuse it on the clock alone.
+        await new Promise((resolve) => setTimeout(resolve, 15_000));
+        return json({
+          access_token: 'kimi-access-secret',
+          refresh_token: 'kimi-refresh-secret',
+          expires_in: 3600,
+          scope: 'kimi-code',
+        });
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const outcome = signInWithKimiCode({
+      openExternal: () => undefined,
+      fetch,
+      now: Date.now,
+      pollIntervalMs: 170_000,
+    }).catch((error: unknown) => error);
+
+    await vi.advanceTimersByTimeAsync(170_000);
+    expect(tokenPolls).toBe(2);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await outcome).toMatchObject({ code: 'TIMEOUT' });
+    expect(tokenPolls).toBe(2);
   });
 
   it('turns provider denial into a fixed, credential-safe sign-in error', async () => {

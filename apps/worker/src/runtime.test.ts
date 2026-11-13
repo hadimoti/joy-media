@@ -233,7 +233,8 @@ describe('Worker runtime', () => {
         result: {
           kind: 'asset.thumbnail',
           assetId: 'asset-intro',
-          descriptor: { mimeType: 'image/jpeg', width: 640, height: 360 },
+          // asset-intro.mp4 is 1080x1920 (9:16, regenerated in T-R01), so scale=640:-2 gives 640x1138.
+          descriptor: { mimeType: 'image/jpeg', width: 640, height: 1138 },
         },
       });
       if (result.state !== 'completed') throw new Error('real thumbnail was unexpectedly canceled');

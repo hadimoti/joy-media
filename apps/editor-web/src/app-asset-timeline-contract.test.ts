@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const appSource = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
+const timelinePanelSource = readFileSync(new URL('./TimelinePanel.tsx', import.meta.url), 'utf8');
 
 describe('App asset timeline integrity contract', () => {
   it('preserves the imported asset identity and verified bytes metadata', () => {
@@ -17,6 +18,26 @@ describe('App asset timeline integrity contract', () => {
     expect(callback).toContain('sha256: asset.sha256,');
     expect(callback).toContain('bytes: asset.bytes,');
     expect(callback).toContain('id: asset.assetId,');
+  });
+
+  it('fits a bound media clip against the composition that received it', () => {
+    const placementSource = readFileSync(
+      new URL('./timeline-media-placement.ts', import.meta.url),
+      'utf8',
+    );
+    const projectSource = readFileSync(new URL('./media-project.ts', import.meta.url), 'utf8');
+
+    // The panel sends the frame of the composition that received the clip with every placement.
+    expect(timelinePanelSource).toContain(
+      'const frame = { width: composition.width, height: composition.height };',
+    );
+    expect(timelinePanelSource).toContain(
+      'placements.map((placement) => ({ ...placement, frame }))',
+    );
+    // The placement carries it to the binder, which fits new media to that frame only.
+    expect(placementSource).toContain('placement.frame');
+    expect(projectSource).toContain('frame?: { readonly width: number; readonly height: number }');
+    expect(projectSource).toContain("mode: 'fit'");
   });
 
   it('uses one drop handler and keeps Media drops off the timeline', () => {

@@ -212,6 +212,19 @@ export async function signInDesktopProviderProfile(request: {
   return data as DesktopProviderProfile;
 }
 
+/** Cancels the running sign-in of a provider: its callback listener closes and the port is freed (T-J03). */
+export async function cancelDesktopSignIn(provider: RegistryProviderId): Promise<void> {
+  await requireBridge().invoke('desktop.provider-profile.sign-in-cancel', { provider });
+}
+
+/** Opens the sign-in page of the running sign-in of a provider again (T-J03). */
+export async function reopenDesktopSignIn(provider: RegistryProviderId): Promise<boolean> {
+  const data = await requireBridge().invoke('desktop.provider-profile.sign-in-reopen', {
+    provider,
+  });
+  return (data as { reopened?: boolean } | undefined)?.reopened === true;
+}
+
 /** Revokes a saved ChatGPT authorization and removes its local profile on success. */
 export async function signOutDesktopProviderProfile(id: string): Promise<void> {
   await requireBridge().invoke('desktop.provider-profile.sign-out', { id });

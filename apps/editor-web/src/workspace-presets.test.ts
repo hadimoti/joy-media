@@ -5,11 +5,11 @@ import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
   persistWorkspacePresetLayout,
-  resetWorkspaceTarget,
+  resetWorkspaceStorage,
   workspacePresetLayoutKey,
   workspacePresetLayout,
 } from './workspace-presets.js';
-import { DEFAULT_EDITOR_UI_PREFERENCES } from './ui-preferences.js';
+import { DEFAULT_EDITOR_UI_PREFERENCES, EDITOR_UI_PREFERENCES_KEY } from './ui-preferences.js';
 import { PANEL_IDS } from './workspace.js';
 
 function leafIds(layout: unknown): string[] {
@@ -227,22 +227,6 @@ describe('first-run layout', () => {
     expect(row[1]!.size).toBeGreaterThan(row[2]!.size);
   });
 
-  it('Reset Workspace applies the mode and preset the preferences are reset to (T-D12 round 2)', async () => {
-    expect(resetWorkspaceTarget()).toEqual({
-      mode: DEFAULT_EDITOR_UI_PREFERENCES.viewMode,
-      preset: DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset,
-    });
-    const appSource = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
-    const start = appSource.indexOf('const resetWorkspace = useCallback');
-    const end = appSource.indexOf('const switchEditorView = useCallback', start);
-    expect(start).toBeGreaterThanOrEqual(0);
-    const block = appSource.slice(start, end);
-    expect(block).toContain('applyDockLayout(api, target.mode, target.preset)');
-    expect(block).not.toContain("applyDockLayout(api, 'vertical'");
-    // The older view-mode key must be cleared too, or a saved 'vertical' comes back on the next launch.
-    expect(block).toContain("storage.removeItem('joy-media.view-mode.v1')");
-  });
-
   it('a stored widescreen layout also loads unchanged (T-D12)', () => {
     const savedWidescreen = JSON.stringify(firstRunWorkspaceLayout('edit', 'widescreen'));
     const storage = memoryStorage({ [dockLayoutKey('widescreen')]: savedWidescreen });
@@ -255,6 +239,72 @@ describe('first-run layout', () => {
 });
 
 describe('workspace preset layout persistence', () => {
+  it('loads a pre-panel-menu saved-layout fixture unchanged and restores the saved group state', () => {
+    const key = workspacePresetLayoutKey('vertical', 'edit');
+    const preMenuFixture = JSON.stringify(verticalDockLayout());
+    const storage = memoryStorage({ [key]: preMenuFixture });
+
+    const loadedBeforeMenu = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(loadedBeforeMenu.restored).toBe(true);
+    expect(storage.getItem(key)).toBe(preMenuFixture);
+
+    const movedGroupLayout = {
+      ...(loadedBeforeMenu.layout as Record<string, unknown>),
+      activeGroup: 'context',
+    };
+    persistWorkspacePresetLayout(storage, 'edit', 'vertical', movedGroupLayout);
+
+    const afterRestart = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(afterRestart.restored).toBe(true);
+    expect(afterRestart.layout).toMatchObject({
+      activeGroup: 'context',
+      joyLayoutVersion: 2,
+    });
+    expect(leafIds(afterRestart.layout)).toEqual(leafIds(loadedBeforeMenu.layout));
+  });
+
+  it('keeps a deliberately closed panel absent when its saved layout is restored', async () => {
+    const layout = structuredClone(verticalDockLayout()) as {
+      panels: Record<string, unknown>;
+      grid: { root: Record<string, unknown> };
+    };
+    delete layout.panels.jobs;
+    const removeClosedPanel = (node: unknown): void => {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        node.forEach(removeClosedPanel);
+        return;
+      }
+      const record = node as Record<string, unknown>;
+      if (record.data !== null && typeof record.data === 'object') {
+        const data = record.data as Record<string, unknown>;
+        const views = data.views;
+        if (Array.isArray(views)) {
+          const remainingViews = views.filter((id) => id !== 'jobs');
+          data.views = remainingViews;
+          if (data.activeView === 'jobs') data.activeView = remainingViews[0];
+        }
+      }
+      Object.values(record).forEach(removeClosedPanel);
+    };
+    removeClosedPanel(layout.grid.root);
+
+    const storage = memoryStorage();
+    const key = persistWorkspacePresetLayout(storage, 'edit', 'vertical', layout);
+    const afterRestart = planWorkspaceLayout(storage, 'edit', 'vertical');
+    const appSource = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
+
+    expect(afterRestart.restored).toBe(true);
+    expect(key).toBe(workspacePresetLayoutKey('vertical', 'edit'));
+    expect(leafViews(afterRestart.layout, 'context')).not.toContain('jobs');
+    expect(
+      Object.keys((afterRestart.layout as { panels: Record<string, unknown> }).panels),
+    ).not.toContain('jobs');
+    expect(appSource).toMatch(/if\s*\(!restoredSavedLayout\)\s*ensureDockPanels\(api\)/);
+  });
+
   it('keeps each preset and view mode in its own storage slot', () => {
     const storage = memoryStorage();
     const editVertical = '{"layoutMarker":"saved edit vertical"}';
@@ -369,5 +419,29 @@ describe('workspace preset layout persistence', () => {
     expect(appSource.slice(layoutListenerStart, layoutListenerEnd)).toMatch(
       /persistWorkspacePresetLayout\(\s*storage,\s*workspacePresetRef\.current,\s*viewModeRef\.current,\s*event\.api\.toJSON\(\),?\s*\)/,
     );
+  });
+
+  it('resets every saved workspace layout and legacy preference key', () => {
+    const modes = ['vertical', 'widescreen'] as const;
+    const presets = ['edit', 'enhance', 'audio-captions', 'automate', 'custom'] as const;
+    const initial: Record<string, string> = {
+      [EDITOR_UI_PREFERENCES_KEY]: 'custom preferences',
+      'joy-media.view-mode.v1': 'widescreen',
+      'joy-media.unrelated.v1': 'preserve me',
+    };
+    for (const mode of modes) {
+      for (const preset of presets) {
+        initial[workspacePresetLayoutKey(mode, preset)] = `${mode}:${preset}`;
+      }
+    }
+    const storage = memoryStorage(initial);
+
+    const target = resetWorkspaceStorage(storage);
+
+    expect(target).toEqual({
+      mode: DEFAULT_EDITOR_UI_PREFERENCES.viewMode,
+      preset: DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset,
+    });
+    expect(storage.entries()).toEqual([['joy-media.unrelated.v1', 'preserve me']]);
   });
 });

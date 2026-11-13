@@ -6,11 +6,12 @@
  * property the Inspector offers instead of a bare "Select a clip" sentence.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   audioClipPropertyBinding,
   canonicalBindingKey,
   type AnimatablePropertyV1,
+  type ClipV1,
   type JoyProjectV1,
   type PropertyBindingV2,
   type TimeRemapV2,
@@ -64,6 +65,14 @@ import {
 } from './monitor/monitor-transform-preview.js';
 import type { TransformPatches } from './monitor/monitor-transform-drag.js';
 import type { LocalTransform } from './monitor/monitor-transform-maths.js';
+import { calculateMediaFitTransform, type MediaFitTransformInput } from './media-fit-transform.js';
+import {
+  linkedScalePair,
+  opacityFromPercent,
+  opacityToPercent,
+  type ScaleAxis,
+  type ScalePair,
+} from './inspector-visual-rows.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'visual', label: 'Visual', ariaLabel: 'Visual (Transform)' },
@@ -250,6 +259,71 @@ const LIVE_PREVIEW_KEYS: ReadonlySet<string> = new Set([
   'rotationDeg',
 ]);
 
+type MediaFitSelection = Omit<MediaFitTransformInput, 'mode'> & {
+  readonly disabledReason?: string;
+};
+
+function mediaFitSelection(
+  project: JoyProjectV1 | undefined,
+  object: VisualObjectV1 | undefined,
+  selectedClipId: string | undefined,
+): MediaFitSelection | undefined {
+  if (project === undefined || object === undefined) return undefined;
+  if (selectedClipId === undefined) return undefined;
+
+  let composition: JoyProjectV1['compositions'][string] | undefined;
+  let selectedClip: ClipV1 | undefined;
+  for (const candidate of Object.values(project.compositions)) {
+    const clip = candidate.tracks
+      .flatMap((track) => track.clips)
+      .find((item) => item.id === selectedClipId);
+    if (clip !== undefined) {
+      composition = candidate;
+      selectedClip = clip;
+      break;
+    }
+  }
+  if (composition === undefined) return undefined;
+
+  const assetId =
+    object.assetId ?? (selectedClip?.kind === 'video' ? selectedClip.assetId : undefined);
+  const asset = assetId === undefined ? undefined : project.assets[assetId];
+  const sourceWidth = asset?.descriptor?.width;
+  const sourceHeight = asset?.descriptor?.height;
+  if (
+    (asset?.kind !== 'video' && asset?.kind !== 'image') ||
+    sourceWidth === undefined ||
+    sourceHeight === undefined ||
+    ![sourceWidth, sourceHeight, composition.width, composition.height].every(
+      (value) => Number.isFinite(value) && value > 0,
+    )
+  )
+    return undefined;
+
+  const animatedTransform = (['x', 'y', 'scaleX', 'scaleY', 'rotationDeg'] as const).some(
+    (key) => object.animations?.[key] !== undefined || object.expressions?.[key] !== undefined,
+  );
+  const disabledReason =
+    object.parentId !== undefined
+      ? 'Fit and Fill are unavailable for parented media.'
+      : composition.activeCameraId !== undefined
+        ? 'Fit and Fill are unavailable while this composition has an active camera.'
+        : animatedTransform
+          ? 'Fit and Fill are unavailable for animated or expression-driven transforms.'
+          : undefined;
+
+  return {
+    sourceWidth,
+    sourceHeight,
+    frameWidth: composition.width,
+    frameHeight: composition.height,
+    rotationDeg: object.transform.rotationDeg,
+    crop: object.transform.crop,
+    anchor: { x: object.transform.anchorX ?? 0.5, y: object.transform.anchorY ?? 0.5 },
+    ...(disabledReason === undefined ? {} : { disabledReason }),
+  };
+}
+
 /** A typed value the Monitor can draw: finite, and a scale above zero (no flip in v1.1.1). */
 function drawableLiveValue(key: string, value: number): boolean {
   if (!Number.isFinite(value)) return false;
@@ -273,16 +347,36 @@ function round(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
-function formatPercent(value: number): string {
-  return `${Math.round(value * 100)}%`;
-}
-
 function formatDuration(durationUs: number | undefined): string {
   if (durationUs === undefined || !Number.isFinite(durationUs) || durationUs < 0) return '—';
   const seconds = durationUs / 1_000_000;
   if (seconds < 60) return `${seconds.toFixed(2)}s`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${(seconds % 60).toFixed(2).padStart(5, '0')}`;
+}
+
+/**
+ * The Visual tab's linked-scale state for one selection (T-D08). Present only
+ * while the link is on and both axes are plain values.
+ */
+interface LinkedScaleBinding {
+  /** The pair a value on this axis produces, or undefined when it cannot be stored. */
+  readonly pairFor: (axis: ScaleAxis, next: number) => ScalePair | undefined;
+  /** Writes both axes in one transaction, so one undo step restores both. */
+  readonly commitPair: (pair: ScalePair) => void;
+}
+
+function LinkChainIcon() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none">
+      <path
+        d="M6.75 9.25 9.25 6.75M7.25 4.75l1-1a2.5 2.5 0 0 1 3.54 3.54l-1 1M8.75 11.25l-1 1a2.5 2.5 0 0 1-3.54-3.54l1-1"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
 interface TransformPropertyRowProps {
@@ -292,6 +386,8 @@ interface TransformPropertyRowProps {
     readonly min?: number | undefined;
     readonly max?: number | undefined;
   };
+  /** Present on a scale row while the X/Y link is on (T-D08). */
+  readonly linkedScale?: LinkedScaleBinding | undefined;
   readonly target: VisualObjectV1;
   readonly resolvedValue: number;
   /** The object's own (local) values at the playhead, without any live preview. */
@@ -322,6 +418,7 @@ interface TransformPropertyRowProps {
  */
 function TransformPropertyRow({
   property,
+  linkedScale,
   target,
   resolvedValue,
   previewBase,
@@ -355,9 +452,22 @@ function TransformPropertyRow({
     setPreviewValue(sourceValue);
   }, [sourceValue]);
 
-  const commitValue = (next: number) => {
+  // One axis written on its own: a keyframe when the channel is animated, else the static value.
+  const writeValue = (next: number) => {
     if (animated) onReplaceChannel(property.key, setKeyframe(curve, onKeyframePayload(next)));
     else onSetStatic(target.id, property.key, next);
+  };
+  // A typed or slid scale value moves both axes while the link is on (T-D08).
+  // Reset always writes its own axis only.
+  const scaleAxis: ScaleAxis | undefined =
+    property.key === 'scaleX' || property.key === 'scaleY' ? property.key : undefined;
+  const commitValue = (next: number) => {
+    const pair =
+      scaleAxis !== undefined && linkedScale !== undefined
+        ? linkedScale.pairFor(scaleAxis, next)
+        : undefined;
+    if (pair !== undefined && linkedScale !== undefined) linkedScale.commitPair(pair);
+    else writeValue(next);
   };
   // Typing a transform value previews it in the Monitor too (T-M05a review):
   // the value goes into the same live store a Monitor drag uses, so the picture
@@ -372,9 +482,16 @@ function TransformPropertyRow({
       clearRowPreview(publishedRef, store);
       return;
     }
-    const patches: TransformPatches = new Map([
-      [target.id, { ...previewBase, [property.key]: next }],
-    ]);
+    // A linked scale previews the partner axis too, so the picture and box follow both.
+    const pair =
+      scaleAxis !== undefined && linkedScale !== undefined
+        ? linkedScale.pairFor(scaleAxis, next)
+        : undefined;
+    const local: LocalTransform =
+      pair !== undefined
+        ? { ...previewBase, scaleX: pair.scaleX, scaleY: pair.scaleY }
+        : { ...previewBase, [property.key]: next };
+    const patches: TransformPatches = new Map([[target.id, local]]);
     publishedRef.current = patches;
     store.set(patches);
   };
@@ -408,16 +525,27 @@ function TransformPropertyRow({
   };
   const disabled = idle || hasExpression;
   const modified = Math.abs(previewValue - (DEFAULTS[property.key] ?? 0)) > 0.0005;
+  // Opacity is stored 0 to 1 but typed and slid as a percentage (T-D08). The
+  // adapter converts on the way in; the interaction still records stored values.
+  const isOpacity = property.key === 'opacity';
+  const percentAdapter = {
+    ...adapter,
+    preview: (percent: number) => {
+      const stored = opacityFromPercent(percent);
+      if (stored !== undefined) adapter.preview(stored);
+    },
+  };
+  const shown = isOpacity ? opacityToPercent(previewValue) : round(previewValue);
 
   return (
     <div className={`inspector-transform-property${modified ? ' modified' : ''}`}>
       <PropertyRow
         label={property.label}
         controlId={`insp-${property.key}`}
-        value={property.key === 'opacity' ? formatPercent(previewValue) : round(previewValue)}
+        value={isOpacity ? undefined : round(previewValue)}
         disabled={disabled}
         error={diagnostic}
-        onReset={() => commitValue(DEFAULTS[property.key] ?? 0)}
+        onReset={() => writeValue(DEFAULTS[property.key] ?? 0)}
         onToggleAnimation={() => onToggleKeyframe(property.key, previewValue)}
         animationState={keyed ? 'keyed' : animated ? 'between' : 'none'}
         {...(animated && onOpenAnimationGraph !== undefined
@@ -428,14 +556,26 @@ function TransformPropertyRow({
         <div className="inspector-prop-row">
           <NumericPropertyControl
             id={`insp-${property.key}`}
-            value={round(previewValue)}
-            adapter={adapter}
+            value={shown}
+            adapter={isOpacity ? percentAdapter : adapter}
             ariaLabel={property.label}
-            min={property.min}
-            max={property.max}
-            step={property.key === 'opacity' ? 0.01 : 1}
+            min={isOpacity ? 0 : property.min}
+            max={isOpacity ? 100 : property.max}
+            step={1}
             disabled={disabled}
           />
+          {isOpacity && <span className="inspector-unit">%</span>}
+          {isOpacity && (
+            <SliderPropertyControl
+              value={shown}
+              adapter={percentAdapter}
+              ariaLabel={`${property.label} slider`}
+              min={0}
+              max={100}
+              step={1}
+              disabled={disabled}
+            />
+          )}
           {expressionButton}
         </div>
       </PropertyRow>
@@ -486,6 +626,8 @@ export function InspectorPanel({
   const [commitError, setCommitError] = useState<string | undefined>(undefined);
   const [interpolation, setInterpolation] = useState<KeyframeInterpolationV1>('linear');
   const [transformOpen, setTransformOpen] = useState(true);
+  // The Scale X/Y link is a per-session preference, not a document value (T-D08).
+  const [scaleLinkOn, setScaleLinkOn] = useState(false);
   const [effectsOpen, setEffectsOpen] = useState(true);
   const [audioOpen, setAudioOpen] = useState(true);
   const [speedOpen, setSpeedOpen] = useState(true);
@@ -501,6 +643,10 @@ export function InspectorPanel({
   const isAdjustmentLayer = adjustmentLayer !== undefined;
 
   const timeUs = Math.max(0, Math.round(playheadUs));
+  const mediaFit = useMemo(
+    () => mediaFitSelection(project, idle ? undefined : target, selectedClipId),
+    [project, idle, target, selectedClipId],
+  );
   const title =
     selectedName ??
     (object !== undefined
@@ -600,6 +746,40 @@ export function InspectorPanel({
       ? documentTransform
       : { ...documentTransform, ...monitorDragValues };
 
+  // Linked scale needs both axes to be plain values. A keyframed or expression-driven
+  // axis has its own source, so the link is offered only when neither has one.
+  const scaleLinkAvailable =
+    !idle &&
+    target.animations?.scaleX === undefined &&
+    target.animations?.scaleY === undefined &&
+    target.expressions?.scaleX === undefined &&
+    target.expressions?.scaleY === undefined;
+  const scaleLinked = scaleLinkOn && scaleLinkAvailable;
+  const linkedScale: LinkedScaleBinding | undefined = scaleLinked
+    ? {
+        pairFor: (axis, next) =>
+          linkedScalePair(
+            { scaleX: documentTransform.scaleX, scaleY: documentTransform.scaleY },
+            axis,
+            next,
+          ),
+        commitPair: (pair) =>
+          onDispatch({
+            label: 'Set scale',
+            commands: [
+              {
+                type: 'object.setTransformProperty',
+                payload: { objectId: target.id, key: 'scaleX', value: pair.scaleX },
+              },
+              {
+                type: 'object.setTransformProperty',
+                payload: { objectId: target.id, key: 'scaleY', value: pair.scaleY },
+              },
+            ],
+          }),
+      }
+    : undefined;
+
   const replaceChannel = (
     property: AnimatablePropertyV1,
     curve: ReturnType<typeof setKeyframe> | undefined,
@@ -674,6 +854,113 @@ export function InspectorPanel({
     }
   };
 
+  const applyMediaFit = (mode: 'fit' | 'fill') => {
+    if (idle || mediaFit === undefined || mediaFit.disabledReason !== undefined) return;
+    const transform = calculateMediaFitTransform({ ...mediaFit, mode });
+    if (transform === undefined) return;
+    onDispatch({
+      label: mode === 'fit' ? 'Fit to frame' : 'Fill frame',
+      commands: [
+        {
+          type: 'object.setTransformProperty',
+          payload: { objectId: target.id, key: 'x', value: transform.x },
+        },
+        {
+          type: 'object.setTransformProperty',
+          payload: { objectId: target.id, key: 'y', value: transform.y },
+        },
+        {
+          type: 'object.setTransformProperty',
+          payload: { objectId: target.id, key: 'scaleX', value: transform.scaleX },
+        },
+        {
+          type: 'object.setTransformProperty',
+          payload: { objectId: target.id, key: 'scaleY', value: transform.scaleY },
+        },
+      ],
+    });
+  };
+
+  // One Visual-tab transform row (T-D08). The Visual tab places these in pairs.
+  const renderTransformRow = (key: Exclude<AnimatablePropertyV1, 'positionZ'>) => {
+    const property = NUMERIC_PROPERTIES.find((candidate) => candidate.key === key);
+    if (property === undefined) return null;
+    const expressionSource = target.expressions?.[key];
+    const hasExpression = expressionSource !== undefined;
+    const channelDiagnostic = diagnostics.find((d) => d.property === key);
+    return (
+      <TransformPropertyRow
+        key={key}
+        property={{ key, label: property.label, min: property.min, max: property.max }}
+        linkedScale={key === 'scaleX' || key === 'scaleY' ? linkedScale : undefined}
+        target={target}
+        resolvedValue={resolved[key]}
+        previewBase={{
+          x: documentTransform.x,
+          y: documentTransform.y,
+          scaleX: documentTransform.scaleX,
+          scaleY: documentTransform.scaleY,
+          rotationDeg: documentTransform.rotationDeg,
+        }}
+        timeUs={timeUs}
+        idle={idle}
+        hasExpression={hasExpression}
+        monitorLive={monitorDragValues !== undefined && key in monitorDragValues}
+        diagnostic={channelDiagnostic?.message}
+        onSetStatic={onSetStatic}
+        onReplaceChannel={replaceChannel}
+        onKeyframePayload={keyframePayload}
+        onToggleKeyframe={toggleKeyframe}
+        expressionButton={
+          <button
+            type="button"
+            className={hasExpression ? 'fx fx-on' : 'fx'}
+            disabled={idle}
+            aria-label={`${hasExpression ? 'Edit' : 'Add'} ${property.label} expression`}
+            title="Expression"
+            onClick={() => {
+              setDraftSource(target.expressions?.[key] ?? '');
+              setCommitError(undefined);
+              setEditingExpression(editingExpression === key ? undefined : key);
+            }}
+          >
+            ƒx
+          </button>
+        }
+        onOpenAnimationGraph={onOpenAnimationGraph}
+      >
+        {editingExpression === key && (
+          <div className="inspector-expression-editor" style={{ gridColumn: '1 / -1' }}>
+            <input
+              type="text"
+              className="inspector-expression-input"
+              value={draftSource}
+              autoFocus
+              placeholder="e.g. sin(time) * 10"
+              onChange={(event) => setDraftSource(event.currentTarget.value)}
+              onBlur={() => commitExpression(key, draftSource)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitExpression(key, draftSource);
+                if (event.key === 'Escape') {
+                  setEditingExpression(undefined);
+                  setCommitError(undefined);
+                }
+              }}
+            />
+            {commitError !== undefined && (
+              <p className="inspector-expression-error">{commitError}</p>
+            )}
+          </div>
+        )}
+        {channelDiagnostic !== undefined && (
+          <p className="inspector-expression-error" style={{ gridColumn: '1 / -1' }}>
+            {channelDiagnostic.message}
+          </p>
+        )}
+      </TransformPropertyRow>
+    );
+  };
+
   return (
     <PanelShell
       title="Inspector"
@@ -728,6 +1015,38 @@ export function InspectorPanel({
           </button>
           {transformOpen && (
             <>
+              {mediaFit !== undefined && (
+                <div
+                  className="inspector-media-fit-actions"
+                  role="group"
+                  aria-label="Media framing"
+                >
+                  <button
+                    type="button"
+                    className="inspector-animation-action"
+                    aria-label="Fit clip to frame"
+                    title={
+                      mediaFit.disabledReason ?? 'Fits the current transform to the composition.'
+                    }
+                    disabled={mediaFit.disabledReason !== undefined}
+                    onClick={() => applyMediaFit('fit')}
+                  >
+                    Fit
+                  </button>
+                  <button
+                    type="button"
+                    className="inspector-animation-action"
+                    aria-label="Fill frame with clip"
+                    title={
+                      mediaFit.disabledReason ?? 'Fills the composition with the current transform.'
+                    }
+                    disabled={mediaFit.disabledReason !== undefined}
+                    onClick={() => applyMediaFit('fill')}
+                  >
+                    Fill
+                  </button>
+                </div>
+              )}
               <div
                 className="preset-icon-group inspector-kf-row"
                 role="group"
@@ -760,82 +1079,37 @@ export function InspectorPanel({
                   </button>
                 ))}
               </div>
-              {NUMERIC_PROPERTIES.map((property) => {
-                const key = property.key as Exclude<AnimatablePropertyV1, 'positionZ'>;
-                const expressionSource = target.expressions?.[key];
-                const hasExpression = expressionSource !== undefined;
-                const channelDiagnostic = diagnostics.find((d) => d.property === key);
-                return (
-                  <TransformPropertyRow
-                    key={key}
-                    property={{ key, label: property.label, min: property.min, max: property.max }}
-                    target={target}
-                    resolvedValue={resolved[key]}
-                    previewBase={{
-                      x: documentTransform.x,
-                      y: documentTransform.y,
-                      scaleX: documentTransform.scaleX,
-                      scaleY: documentTransform.scaleY,
-                      rotationDeg: documentTransform.rotationDeg,
-                    }}
-                    timeUs={timeUs}
-                    idle={idle}
-                    hasExpression={hasExpression}
-                    monitorLive={monitorDragValues !== undefined && key in monitorDragValues}
-                    diagnostic={channelDiagnostic?.message}
-                    onSetStatic={onSetStatic}
-                    onReplaceChannel={replaceChannel}
-                    onKeyframePayload={keyframePayload}
-                    onToggleKeyframe={toggleKeyframe}
-                    expressionButton={
-                      <button
-                        type="button"
-                        className={hasExpression ? 'fx fx-on' : 'fx'}
-                        disabled={idle}
-                        aria-label={`${hasExpression ? 'Edit' : 'Add'} ${property.label} expression`}
-                        title="Expression"
-                        onClick={() => {
-                          setDraftSource(target.expressions?.[key] ?? '');
-                          setCommitError(undefined);
-                          setEditingExpression(editingExpression === key ? undefined : key);
-                        }}
-                      >
-                        ƒx
-                      </button>
-                    }
-                    onOpenAnimationGraph={onOpenAnimationGraph}
-                  >
-                    {editingExpression === key && (
-                      <div className="inspector-expression-editor" style={{ gridColumn: '1 / -1' }}>
-                        <input
-                          type="text"
-                          className="inspector-expression-input"
-                          value={draftSource}
-                          autoFocus
-                          placeholder="e.g. sin(time) * 10"
-                          onChange={(event) => setDraftSource(event.currentTarget.value)}
-                          onBlur={() => commitExpression(key, draftSource)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') commitExpression(key, draftSource);
-                            if (event.key === 'Escape') {
-                              setEditingExpression(undefined);
-                              setCommitError(undefined);
-                            }
-                          }}
-                        />
-                        {commitError !== undefined && (
-                          <p className="inspector-expression-error">{commitError}</p>
-                        )}
-                      </div>
-                    )}
-                    {channelDiagnostic !== undefined && (
-                      <p className="inspector-expression-error" style={{ gridColumn: '1 / -1' }}>
-                        {channelDiagnostic.message}
-                      </p>
-                    )}
-                  </TransformPropertyRow>
-                );
-              })}
+              <div className="inspector-transform-pair" role="group" aria-label="Position">
+                {renderTransformRow('x')}
+                {renderTransformRow('y')}
+              </div>
+              <div
+                className="inspector-transform-pair inspector-transform-pair-linked"
+                role="group"
+                aria-label="Scale"
+              >
+                {renderTransformRow('scaleX')}
+                <button
+                  type="button"
+                  className={`inspector-link-toggle${scaleLinked ? ' is-on' : ''}`}
+                  aria-pressed={scaleLinked}
+                  aria-label="Link Scale X and Scale Y"
+                  title={
+                    !scaleLinkAvailable
+                      ? 'Scale is keyframed or has an expression; it cannot be linked'
+                      : scaleLinked
+                        ? 'Unlink Scale X and Scale Y'
+                        : 'Link Scale X and Scale Y to keep their proportions'
+                  }
+                  disabled={idle || !scaleLinkAvailable}
+                  onClick={() => setScaleLinkOn((on) => !on)}
+                >
+                  <LinkChainIcon />
+                </button>
+                {renderTransformRow('scaleY')}
+              </div>
+              {renderTransformRow('rotationDeg')}
+              {renderTransformRow('opacity')}
             </>
           )}
         </section>
@@ -1179,6 +1453,7 @@ export function EffectsSection({
                 key={effect.id}
                 className="inspector-effect-item"
                 data-effect-instance-id={effect.id}
+                data-effect-id={effect.effectId}
                 onDragOver={(event) => {
                   if (draggedEffectId !== null && draggedEffectId !== effect.id) {
                     event.preventDefault();

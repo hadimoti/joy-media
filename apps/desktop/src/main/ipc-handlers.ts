@@ -27,7 +27,13 @@ import { resolveSlotRequest } from './agent-slot-request.js';
 import { AgentRequestRegistry } from './agent-requests.js';
 import { OAuthFlowError } from './oauth/errors.js';
 import { decodeTokenRecord, type ChatGptTokenRecord } from './oauth/chatgpt.js';
-import type { ProviderSignInContext, SignInProvider, SignInResult } from './oauth/sign-in.js';
+import type {
+  ProviderSignInCall,
+  ProviderSignInContext,
+  SignInProvider,
+  SignInResult,
+} from './oauth/sign-in.js';
+import type { SignInAttemptContext, SignInAttempts } from './oauth/sign-in-attempts.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import {
   isAgentSlotConfigured,
@@ -89,7 +95,12 @@ export interface IpcHandlerDeps {
   readonly providerSignIn?: (
     provider: SignInProvider,
     context?: ProviderSignInContext,
+    call?: ProviderSignInCall,
   ) => Promise<SignInResult>;
+  /** Opens the authorization page for a sign-in attempt. */
+  readonly openExternal?: (url: string) => void | Promise<void>;
+  /** Cancels or reopens the running sign-in of a provider (T-J03). Absent means both are refused. */
+  readonly signInAttempts?: Pick<SignInAttempts, 'start' | 'cancel' | 'reopen'>;
   /** Revokes a ChatGPT refresh token. Credentials stay in the main process. */
   readonly providerSignOut?: (record: ChatGptTokenRecord) => Promise<void>;
   readonly handleWindowControl?: (
@@ -105,7 +116,15 @@ export interface IpcResult {
   readonly error?: string;
 }
 
-export type IpcHandler = (payload: unknown) => Promise<IpcResult> | IpcResult;
+interface IpcHandlerContext {
+  readonly signal?: AbortSignal;
+  readonly onProfileSaved?: () => void;
+}
+
+export type IpcHandler = (
+  payload: unknown,
+  context?: IpcHandlerContext,
+) => Promise<IpcResult> | IpcResult;
 
 /** Builds the channel -> handler dispatch table. Never exposed directly to the renderer. */
 export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcHandler> {
@@ -135,111 +154,155 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.provider-profile.sign-in': async (payload): Promise<IpcResult> => {
       const request = asSignInRequest(payload);
       if (request === undefined) return { ok: false, error: 'Invalid sign-in request' };
-      if (deps.providerSignIn === undefined) {
+      const providerSignIn = deps.providerSignIn;
+      if (providerSignIn === undefined) {
         return { ok: false, error: 'Sign-in is not available in this build' };
       }
-      let savedChatGptRecord: ChatGptTokenRecord | undefined;
-      // The model list the profile already holds, so signing in again does not drop it.
-      let existingCachedModels: readonly string[] | undefined;
-      // A sign-in can only update a profile of the same provider, so it never changes what a profile is.
-      if (request.id !== undefined) {
-        const existing = deps.localDatabase.getProviderProfile(request.id);
-        if (existing === undefined || existing.provider !== request.provider) {
-          return { ok: false, error: 'That profile cannot be signed in again' };
-        }
-        existingCachedModels = existing.cachedModels;
-        if (request.provider === 'chatgpt') {
-          try {
-            const stored = await deps.secretStore.get(existing.secretHandleId);
-            savedChatGptRecord = stored === null ? undefined : decodeTokenRecord(stored);
-          } catch {
-            return { ok: false, error: 'The saved ChatGPT connection could not be read.' };
+      const run = async (attempt?: SignInAttemptContext): Promise<IpcResult> => {
+        const ensureActive = (): void => throwIfAttemptCancelled(attempt);
+        try {
+          ensureActive();
+          let savedChatGptRecord: ChatGptTokenRecord | undefined;
+          // The model list the profile already holds, so signing in again does not drop it.
+          let existingCachedModels: readonly string[] | undefined;
+          // A sign-in can only update a profile of the same provider, so it never changes what a profile is.
+          if (request.id !== undefined) {
+            const existing = deps.localDatabase.getProviderProfile(request.id);
+            if (existing === undefined || existing.provider !== request.provider) {
+              return { ok: false, error: 'That profile cannot be signed in again' };
+            }
+            existingCachedModels = existing.cachedModels;
+            if (request.provider === 'chatgpt') {
+              try {
+                const stored = await deps.secretStore.get(existing.secretHandleId);
+                ensureActive();
+                savedChatGptRecord = stored === null ? undefined : decodeTokenRecord(stored);
+              } catch (error) {
+                ensureActive();
+                if (error instanceof OAuthFlowError) throw error;
+                return { ok: false, error: 'The saved ChatGPT connection could not be read.' };
+              }
+              if (savedChatGptRecord === undefined) {
+                return {
+                  ok: false,
+                  error:
+                    'The saved ChatGPT connection cannot be reauthorized; remove it locally and sign in again.',
+                };
+              }
+            }
           }
-          if (savedChatGptRecord === undefined) {
+          const context: ProviderSignInContext | undefined =
+            savedChatGptRecord === undefined
+              ? undefined
+              : {
+                  savedChatGptAccount: {
+                    clientId: savedChatGptRecord.clientId,
+                    accountId: savedChatGptRecord.accountId,
+                  },
+                };
+          const call: ProviderSignInCall | undefined =
+            attempt === undefined
+              ? undefined
+              : {
+                  signal: attempt.signal,
+                  openExternal: (url) => {
+                    ensureActive();
+                    attempt.setAuthorizationUrl(url);
+                    if (deps.openExternal === undefined) {
+                      throw new OAuthFlowError(
+                        'EXCHANGE_FAILED',
+                        'The sign-in page could not be opened.',
+                      );
+                    }
+                    return deps.openExternal(url);
+                  },
+                };
+          const signedIn = await providerSignIn(request.provider, context, call);
+          ensureActive();
+          // The result must name the provider that was asked for, and that provider must permit a sign-in. A runner that
+          // answered with another provider would otherwise save a profile for a provider that is set up with an API key.
+          if (signedIn.provider !== request.provider || !isSignInProvider(signedIn.provider)) {
             return {
               ok: false,
-              error:
-                'The saved ChatGPT connection cannot be reauthorized; remove it locally and sign in again.',
+              error: 'The sign-in did not return a provider that can be signed in to',
             };
           }
-        }
-      }
-      try {
-        const context: ProviderSignInContext | undefined =
-          savedChatGptRecord === undefined
-            ? undefined
-            : {
-                savedChatGptAccount: {
-                  clientId: savedChatGptRecord.clientId,
-                  accountId: savedChatGptRecord.accountId,
-                },
-              };
-        const signedIn =
-          context === undefined
-            ? await deps.providerSignIn(request.provider)
-            : await deps.providerSignIn(request.provider, context);
-        // The result must name the provider that was asked for, and that provider must permit a sign-in. A runner that
-        // answered with another provider would otherwise save a profile for a provider that is set up with an API key.
-        if (signedIn.provider !== request.provider || !isSignInProvider(signedIn.provider)) {
-          return {
-            ok: false,
-            error: 'The sign-in did not return a provider that can be signed in to',
-          };
-        }
-        if (savedChatGptRecord !== undefined) {
-          const replacement = decodeTokenRecord(signedIn.secret);
-          if (replacement === undefined) {
-            return {
-              ok: false,
-              error:
-                'ChatGPT did not return a valid replacement authorization. The saved connection was kept.',
-            };
-          }
-          if (
-            replacement.accountId !== savedChatGptRecord.accountId ||
-            replacement.clientId !== savedChatGptRecord.clientId
-          ) {
-            const accountMismatch = replacement.accountId !== savedChatGptRecord.accountId;
-            try {
-              if (deps.providerSignOut === undefined) throw new Error('revocation unavailable');
-              await deps.providerSignOut(replacement);
-            } catch {
+          if (savedChatGptRecord !== undefined) {
+            const replacement = decodeTokenRecord(signedIn.secret);
+            if (replacement === undefined) {
               return {
                 ok: false,
                 error:
-                  'ChatGPT returned an authorization that did not match the saved account. The saved connection was kept, but JOY Media could not revoke the new grant; remove it in ChatGPT settings.',
+                  'ChatGPT did not return a valid replacement authorization. The saved connection was kept.',
               };
             }
-            throw new OAuthFlowError(
-              accountMismatch ? 'ACCOUNT_MISMATCH' : 'CLIENT_MISMATCH',
-              accountMismatch
-                ? 'ChatGPT returned a different account. The new grant was revoked and the saved connection was kept.'
-                : 'ChatGPT returned a different client. The new grant was revoked and the saved connection was kept.',
-            );
+            if (
+              replacement.accountId !== savedChatGptRecord.accountId ||
+              replacement.clientId !== savedChatGptRecord.clientId
+            ) {
+              const accountMismatch = replacement.accountId !== savedChatGptRecord.accountId;
+              try {
+                if (deps.providerSignOut === undefined) throw new Error('revocation unavailable');
+                await deps.providerSignOut(replacement);
+              } catch {
+                return {
+                  ok: false,
+                  error:
+                    'ChatGPT returned an authorization that did not match the saved account. The saved connection was kept, but JOY Media could not revoke the new grant; remove it in ChatGPT settings.',
+                };
+              }
+              throw new OAuthFlowError(
+                accountMismatch ? 'ACCOUNT_MISMATCH' : 'CLIENT_MISMATCH',
+                accountMismatch
+                  ? 'ChatGPT returned a different account. The new grant was revoked and the saved connection was kept.'
+                  : 'ChatGPT returned a different client. The new grant was revoked and the saved connection was kept.',
+              );
+            }
           }
-        }
-        // The result is saved through the profile route, so it is checked and bound like any other save.
-        const cachedModels = signedIn.cachedModels ?? existingCachedModels;
-        const saved = await handlers['desktop.provider-profile.save']({
-          ...(request.id === undefined ? {} : { id: request.id }),
-          ...(cachedModels === undefined ? {} : { cachedModels }),
-          provider: signedIn.provider,
-          baseUrl: signedIn.baseUrl,
-          modelId: signedIn.modelId,
-          apiKey: signedIn.secret,
-        });
-        // A first sign-in fills an empty Workhorse, so the new subscription is in use without a pick. A slot that already
-        // names a profile is left as it is.
-        if (saved.ok && request.id === undefined) {
-          const profileId = (saved.data as { readonly id?: unknown } | undefined)?.id;
-          if (
-            typeof profileId === 'string' &&
-            readAgentSlot(deps.localDatabase, 'workhorse').profileId === undefined
-          ) {
-            writeAgentSlot(deps.localDatabase, 'workhorse', { profileId, model: signedIn.modelId });
+          // Recheck at the save boundary; the save route also guards its async secret write.
+          ensureActive();
+          const cachedModels = signedIn.cachedModels ?? existingCachedModels;
+          const saved = await handlers['desktop.provider-profile.save'](
+            {
+              ...(request.id === undefined ? {} : { id: request.id }),
+              ...(cachedModels === undefined ? {} : { cachedModels }),
+              provider: signedIn.provider,
+              baseUrl: signedIn.baseUrl,
+              modelId: signedIn.modelId,
+              apiKey: signedIn.secret,
+            },
+            attempt === undefined
+              ? undefined
+              : { signal: attempt.signal, onProfileSaved: attempt.markCommitted },
+          );
+          // A first sign-in fills an empty Workhorse, so the new subscription is in use without a pick. A slot that already
+          // names a profile is left as it is.
+          if (saved.ok && request.id === undefined) {
+            const profileId = (saved.data as { readonly id?: unknown } | undefined)?.id;
+            if (
+              typeof profileId === 'string' &&
+              readAgentSlot(deps.localDatabase, 'workhorse').profileId === undefined
+            ) {
+              writeAgentSlot(deps.localDatabase, 'workhorse', {
+                profileId,
+                model: signedIn.modelId,
+              });
+            }
           }
+          return saved;
+        } catch (error) {
+          return {
+            ok: false,
+            error:
+              error instanceof OAuthFlowError ? error.message : 'The sign-in did not complete.',
+          };
         }
-        return saved;
+      };
+
+      try {
+        return deps.signInAttempts === undefined
+          ? await run()
+          : await deps.signInAttempts.start(request.provider, run);
       } catch (error) {
         return {
           ok: false,
@@ -314,7 +377,8 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       );
       return { ok: true, data: updated };
     },
-    'desktop.provider-profile.save': async (payload): Promise<IpcResult> => {
+    'desktop.provider-profile.save': async (payload, saveContext): Promise<IpcResult> => {
+      throwIfAttemptSignalCancelled(saveContext?.signal);
       const request = asSaveProviderProfileRequest(payload);
       if (request === undefined) {
         return { ok: false, error: 'Invalid provider profile request' };
@@ -355,6 +419,13 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       }
       // Whether this save writes a handle the profile does not hold yet.
       const freshHandle = secretHandleId !== existing?.secretHandleId;
+      let wroteSecret = false;
+      const cleanCancelledSecret = async (): Promise<never> => {
+        if (wroteSecret && freshHandle) {
+          await deps.secretStore.delete(secretHandleId).catch(() => undefined);
+        }
+        throw new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.');
+      };
 
       // Validation already refused any URL the policy would not allow, so the verdict is allowed here.
       const verdict = evaluateEndpoint(request.provider, request.baseUrl, {
@@ -367,13 +438,19 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       // never actually written.
       if (request.apiKey !== undefined) {
         await deps.secretStore.set(secretHandleId, request.apiKey);
+        wroteSecret = true;
+        if (saveContext?.signal?.aborted) await cleanCancelledSecret();
       } else if (existing === undefined) {
         // A keyless local model stores the placeholder, so its profile still reads as present.
         if (verdict.kind !== 'loopback') {
           return { ok: false, error: 'An API key is required for this endpoint' };
         }
         await deps.secretStore.set(secretHandleId, 'not-provided');
+        wroteSecret = true;
+        if (saveContext?.signal?.aborted) await cleanCancelledSecret();
       }
+
+      if (saveContext?.signal?.aborted) await cleanCancelledSecret();
 
       // A saved key keeps the binding it has. A key written now, or a new profile, is bound to this
       // endpoint and to the version of the key just written (PLAN-v4 §6c). A keyless save therefore
@@ -398,6 +475,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       };
       try {
         deps.localDatabase.saveProviderProfile(profile);
+        saveContext?.onProfileSaved?.();
       } catch (error) {
         // The profile still points at its old key, so the key this save wrote is removed.
         if (freshHandle) await deps.secretStore.delete(secretHandleId).catch(() => undefined);
@@ -450,6 +528,23 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       // A slot that named the profile is left without one, so it cannot run until the owner picks another.
       clearAgentSlotsForProfile(deps.localDatabase, id);
       return { ok: true };
+    },
+    'desktop.provider-profile.sign-in-cancel': async (payload): Promise<IpcResult> => {
+      const provider = asSignInProviderPayload(payload);
+      if (provider === undefined) return { ok: false, error: 'Invalid sign-in request' };
+      if (deps.signInAttempts === undefined) {
+        return { ok: false, error: 'Sign-in is not available in this build' };
+      }
+      // The attempt's own listener closes and frees its port; the sign-in then fails as cancelled.
+      return { ok: true, data: { cancelled: deps.signInAttempts.cancel(provider) } };
+    },
+    'desktop.provider-profile.sign-in-reopen': async (payload): Promise<IpcResult> => {
+      const provider = asSignInProviderPayload(payload);
+      if (provider === undefined) return { ok: false, error: 'Invalid sign-in request' };
+      if (deps.signInAttempts === undefined) {
+        return { ok: false, error: 'Sign-in is not available in this build' };
+      }
+      return { ok: true, data: { reopened: await deps.signInAttempts.reopen(provider) } };
     },
     'desktop.provider-profile.sign-out': async (payload): Promise<IpcResult> => {
       const id = asProfileId(payload);
@@ -660,7 +755,47 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       }
       try {
         const raw = fs.readFileSync(catalogPath, 'utf8');
-        const catalog = JSON.parse(raw);
+        const catalog: unknown = JSON.parse(raw);
+        if (
+          typeof catalog === 'object' &&
+          catalog !== null &&
+          !Array.isArray(catalog) &&
+          Array.isArray((catalog as Record<string, unknown>)['assets'])
+        ) {
+          const record = catalog as Record<string, unknown> & { assets: unknown[] };
+          const assets = record.assets.filter(
+            (entry) =>
+              !(
+                typeof entry === 'object' &&
+                entry !== null &&
+                !Array.isArray(entry) &&
+                (entry as Record<string, unknown>)['internal'] === true
+              ),
+          );
+          if (assets.length !== record.assets.length) {
+            const kindCount = (kind: string): number =>
+              assets.filter(
+                (entry) =>
+                  typeof entry === 'object' &&
+                  entry !== null &&
+                  !Array.isArray(entry) &&
+                  (entry as Record<string, unknown>)['kind'] === kind,
+              ).length;
+            return {
+              ok: true,
+              data: {
+                ...record,
+                assets,
+                counts: {
+                  total: assets.length,
+                  audio: kindCount('audio'),
+                  image: kindCount('image'),
+                  video: kindCount('video'),
+                },
+              },
+            };
+          }
+        }
         return { ok: true, data: catalog };
       } catch (err: unknown) {
         return {
@@ -671,6 +806,16 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     },
   };
   return handlers;
+}
+
+function throwIfAttemptCancelled(attempt: SignInAttemptContext | undefined): void {
+  throwIfAttemptSignalCancelled(attempt?.signal);
+}
+
+function throwIfAttemptSignalCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    throw new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.');
+  }
 }
 
 /**
@@ -738,6 +883,13 @@ function asJobId(value: unknown): string | undefined {
 }
 
 /** The provider to sign in to, and the saved profile to update, when there is one. */
+/** The provider a cancel or reopen names: a sign-in provider and nothing else. */
+function asSignInProviderPayload(value: unknown): SignInProvider | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const provider = (value as Record<string, unknown>)['provider'];
+  return typeof provider === 'string' && isSignInProvider(provider) ? provider : undefined;
+}
+
 function asSignInRequest(
   value: unknown,
 ): { readonly provider: SignInProvider; readonly id?: string } | undefined {

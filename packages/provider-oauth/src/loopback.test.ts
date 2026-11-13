@@ -1,6 +1,6 @@
 import { request } from 'node:http';
 import { describe, expect, it } from 'vitest';
-import { startLoopbackCallback } from './loopback.js';
+import { CALLBACK_TIMEOUT_MS, startLoopbackCallback } from './loopback.js';
 
 /** One GET to the loopback listener. A refused connection rejects. */
 function get(url: string, hostHeader?: string): Promise<{ status: number; body: string }> {
@@ -29,6 +29,10 @@ function get(url: string, hostHeader?: string): Promise<{ status: number; body: 
 }
 
 describe('startLoopbackCallback', () => {
+  it('defaults to the three-minute callback window from T-J03', () => {
+    expect(CALLBACK_TIMEOUT_MS).toBe(3 * 60_000);
+  });
+
   it('takes the code on the expected state, answers the page and stops listening', async () => {
     const callback = await startLoopbackCallback({
       path: '/callback',

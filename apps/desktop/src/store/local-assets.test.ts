@@ -25,6 +25,17 @@ describe('SqliteLocalAssetStore', () => {
     expect(assets.get('asset-1')).toEqual(REGISTRATION);
   });
 
+  it('persists the internal marker and refuses to reuse an internal ID as a user asset', () => {
+    const assets = createStore();
+    const internal = { ...REGISTRATION, id: 'stage-attempt-1', internal: true };
+
+    expect(assets.register(internal as typeof REGISTRATION)).toEqual({ kind: 'registered' });
+    expect(assets.get(internal.id)).toEqual(internal);
+    expect(assets.register({ ...internal, internal: false } as typeof REGISTRATION)).toEqual({
+      kind: 'conflict',
+    });
+  });
+
   it('exposes a stored path only after the original is marked stored', () => {
     const assets = createStore();
     assets.register(REGISTRATION);

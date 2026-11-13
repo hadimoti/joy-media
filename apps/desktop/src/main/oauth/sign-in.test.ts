@@ -223,6 +223,56 @@ describe('createProviderSignIn', () => {
     ]);
   });
 
+  it('cancels Kimi model lookup before returning a profile', async () => {
+    const now = Date.UTC(2026, 9, 30);
+    const controller = new AbortController();
+    let modelSignal: AbortSignal | undefined;
+    let releaseModels: (response: Response) => void = () => undefined;
+    const modelResponse = new Promise<Response>((resolve) => {
+      releaseModels = resolve;
+    });
+    const fetch: FetchLike = async (url, init) => {
+      if (url === 'https://auth.kimi.ai/api/oauth/device_authorization') {
+        return json({
+          user_code: 'KIMI-USER-CODE',
+          device_code: 'private-device-code',
+          verification_uri_complete:
+            'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+          expires_in: 120,
+          interval: 1,
+        });
+      }
+      if (url === 'https://auth.kimi.ai/api/oauth/token') {
+        return json({
+          access_token: 'kimi-access-token',
+          refresh_token: 'kimi-refresh-token',
+          expires_in: 3600,
+          scope: 'kimi-code',
+        });
+      }
+      if (url === `${KIMI_CODE_BASE_URL}/models`) {
+        modelSignal = init.signal ?? undefined;
+        return modelResponse;
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const signIn = createProviderSignIn({
+      openExternal: vi.fn(),
+      fetch,
+      now: () => now,
+      chatGptClientId: undefined,
+      installId: () => HOST_ID,
+    });
+    const pending = signIn('kimi', undefined, { signal: controller.signal });
+    await vi.waitFor(() => expect(modelSignal).toBeDefined());
+
+    controller.abort();
+    releaseModels(json({ data: [{ id: 'kimi-code-model' }] }));
+
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(modelSignal?.aborted).toBe(true);
+  });
+
   it('starts a ChatGPT registration when no client is saved, and ends when the person declines', async () => {
     let authUrl = '';
     const openExternal = vi.fn(async (url: string) => {
@@ -680,6 +730,27 @@ describe('ChatGPT model list branches', () => {
       chatGptPort: 0,
     });
   }
+
+  it('cancels a ChatGPT model catalog lookup before returning a profile', async () => {
+    const controller = new AbortController();
+    let modelSignal: AbortSignal | undefined;
+    let releaseModels: (response: Response) => void = () => undefined;
+    const modelResponse = new Promise<Response>((resolve) => {
+      releaseModels = resolve;
+    });
+    const signIn = chatGptSignIn(async (_url, init) => {
+      modelSignal = init.signal ?? undefined;
+      return modelResponse;
+    });
+    const pending = signIn('chatgpt', undefined, { signal: controller.signal });
+    await vi.waitFor(() => expect(modelSignal).toBeDefined());
+
+    controller.abort();
+    releaseModels(json({ models: [{ slug: 'gpt-first', visibility: 'list' }] }));
+
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(modelSignal?.aborted).toBe(true);
+  });
 
   it('gives up on a ChatGPT list whose body never finishes, after 30 seconds', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

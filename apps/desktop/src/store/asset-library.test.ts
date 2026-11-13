@@ -98,6 +98,140 @@ describe('createAssetLibrary', () => {
     );
   });
 
+  it('marks an internal export row in the catalog without relying on its name', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const bytes = Buffer.from('internal export bytes');
+    const internal = await writeOriginal(
+      root,
+      {
+        ...registration({ id: 'export-attempt-1', kind: 'video', displayName: 'render.stage' }),
+        internal: true,
+      } as LocalAsset,
+      bytes,
+    );
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: (assetId) => (assetId === internal.id ? internal : undefined) },
+    });
+
+    expect(await library.addAsset(internal.id)).toEqual({ ok: true });
+
+    const catalog = JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8'));
+    expect(catalog.assets).toHaveLength(1);
+    expect(catalog.assets[0]).toMatchObject({ internal: true });
+  });
+
+  it('keeps a user row when an internal export has the same bytes', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const bytes = Buffer.from('same user and export bytes');
+    const user = await writeOriginal(
+      root,
+      registration({ id: 'user-video', kind: 'video', displayName: 'my-video.mp4' }),
+      bytes,
+    );
+    const internal = await writeOriginal(
+      root,
+      {
+        ...registration({
+          id: 'export-attempt-2',
+          kind: 'video',
+          displayName: 'my-video.mp4.stage',
+        }),
+        internal: true,
+      } as LocalAsset,
+      bytes,
+    );
+    const registrations = new Map([
+      [user.id, user],
+      [internal.id, internal],
+    ]);
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: (assetId) => registrations.get(assetId) },
+    });
+
+    expect(await library.addAsset(user.id)).toEqual({ ok: true });
+    expect(await library.addAsset(internal.id)).toEqual({ ok: true });
+
+    const catalog = JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8'));
+    expect(catalog.assets).toHaveLength(1);
+    expect(catalog.assets[0]).toMatchObject({ displayName: 'my-video.mp4' });
+    expect(catalog.assets[0].internal).not.toBe(true);
+  });
+
+  it('removes an internal row by registration id, never by its content id', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const internal = await writeOriginal(root, {
+      ...registration({ id: 'stage-attempt-3', kind: 'video', displayName: 'render.mp4.stage' }),
+      internal: true,
+    } as LocalAsset);
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: (assetId) => (assetId === internal.id ? internal : undefined) },
+    });
+    await library.addAsset(internal.id);
+    const cleanup = (
+      library as unknown as {
+        removeInternalAsset?: (assetId: string) => Promise<{ readonly removed: boolean }>;
+      }
+    ).removeInternalAsset;
+
+    expect(cleanup).toBeTypeOf('function');
+    await expect(cleanup!.call(library, `joylib-${internal.sha256}`)).resolves.toEqual({
+      removed: false,
+    });
+    expect(
+      JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8')).assets,
+    ).toHaveLength(1);
+    await expect(cleanup!.call(library, internal.id)).resolves.toEqual({ removed: true });
+    expect(
+      JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8')).assets,
+    ).toHaveLength(0);
+  });
+
+  it('clears leftover internal rows at startup and leaves user rows intact', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const user = await writeOriginal(
+      root,
+      registration({ id: 'user-image', displayName: 'keep.png' }),
+    );
+    const internal = await writeOriginal(
+      root,
+      {
+        ...registration({ id: 'stage-attempt-4', kind: 'video', displayName: 'render.mp4.stage' }),
+        internal: true,
+      } as LocalAsset,
+      Buffer.from('leftover export bytes'),
+    );
+    const registrations = new Map([
+      [user.id, user],
+      [internal.id, internal],
+    ]);
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: (assetId) => registrations.get(assetId) },
+    });
+    await library.addAsset(user.id);
+    await library.addAsset(internal.id);
+    const cleanup = (library as unknown as { removeInternalEntries?: () => Promise<void> })
+      .removeInternalEntries;
+
+    expect(cleanup).toBeTypeOf('function');
+    await cleanup!.call(library);
+
+    const catalog = JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8'));
+    expect(catalog.assets).toHaveLength(1);
+    expect(catalog.assets[0]).toMatchObject({
+      id: `joylib-${user.sha256}`,
+      displayName: 'keep.png',
+    });
+    expect(catalog.counts).toEqual({ total: 1, audio: 0, image: 1, video: 0 });
+  });
+
   it('shows the newest name when the same content is added again under another name', async () => {
     const root = await temporaryDirectory();
     const directory = path.join(root, 'library');

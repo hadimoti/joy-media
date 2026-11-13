@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SIGN_IN_WAIT_MS } from '@joy-media/provider-sdk';
 import { ProviderSignInPanel } from './ProviderSignInPanel.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -159,22 +160,52 @@ describe('ProviderSignInPanel', () => {
     }
   });
 
-  it('shows the risk notice only under the xAI sign-in button', async () => {
+  it('shows the risk notice under the sign-in button of every OAuth route (T-F09)', async () => {
     installDesktopBridge();
     await mount();
 
     for (const provider of ['ChatGPT', 'Kimi', 'xAI']) await openAccordion(provider);
 
-    const xaiButton = route('xAI', 'OAuth').querySelector('button');
-    expect(xaiButton?.nextElementSibling?.tagName).toBe('P');
-    expect(xaiButton?.nextElementSibling?.textContent).toBe(RISK_NOTICE);
-    expect(route('ChatGPT', 'OAuth').textContent).not.toContain(RISK_NOTICE);
-    expect(route('Kimi', 'OAuth').textContent).not.toContain(RISK_NOTICE);
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) {
+      const signInButton = route(provider, 'OAuth').querySelector('button');
+      expect(signInButton?.nextElementSibling?.tagName).toBe('P');
+      expect(signInButton?.nextElementSibling?.textContent).toBe(RISK_NOTICE);
+    }
     expect(
       [...container.querySelectorAll('p')].filter(
         (paragraph) => paragraph.textContent === RISK_NOTICE,
       ),
+    ).toHaveLength(3);
+  });
+
+  it('says on the ChatGPT card that an OpenAI API key is billed separately (T-F09)', async () => {
+    installDesktopBridge();
+    await mount();
+
+    await openAccordion('ChatGPT');
+
+    expect(route('ChatGPT', 'API-key').textContent).toContain(
+      'An OpenAI API key is billed separately from ChatGPT.',
+    );
+  });
+
+  it('says on the ChatGPT card that the sign-in cannot make pictures, and on no other card', async () => {
+    installDesktopBridge();
+    await mount();
+
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) await openAccordion(provider);
+
+    const note = 'ChatGPT sign-in cannot make pictures. Use MiniMax or an API key.';
+    const chatGptCard = container
+      .querySelector('button[aria-label="Toggle ChatGPT connection routes"]')
+      ?.closest('.joy-accordion-item');
+    expect(chatGptCard?.textContent).toContain(note);
+    expect(
+      [...container.querySelectorAll('p')].filter((paragraph) => paragraph.textContent === note),
     ).toHaveLength(1);
+    expect(container.textContent).not.toContain('Kimi cannot make');
+    expect(container.textContent).not.toContain('xAI cannot make');
+    expect(container.textContent).not.toContain('Can make:');
   });
 
   it('signs in with xAI from the primary route and reports the result there', async () => {
@@ -222,6 +253,35 @@ describe('ProviderSignInPanel', () => {
       'xAI sign-in was refused.',
     );
     expect(route('xAI', 'API-key').querySelector('[role="status"]')).toBeNull();
+  });
+
+  it('shows the timeout message with a way to start again when the sign-in wait runs out', async () => {
+    let clock = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const invoke = installDesktopBridge();
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.sign-in') {
+        clock += SIGN_IN_WAIT_MS;
+        throw new Error('xAI device authorization timed out.');
+      }
+      return undefined;
+    });
+    const onSignedIn = vi.fn();
+    await mount(onSignedIn);
+    await openAccordion('xAI');
+
+    const button = route('xAI', 'OAuth').querySelector<HTMLButtonElement>('button');
+    if (button === null) throw new Error('Expected the xAI sign-in button');
+    await act(async () => {
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(onSignedIn).not.toHaveBeenCalled();
+    expect(route('xAI', 'OAuth').querySelector('[role="status"]')?.textContent).toBe(
+      'The xAI sign-in ran out of time. Sign in again to start over.',
+    );
+    expect(route('xAI', 'OAuth').querySelector<HTMLButtonElement>('button')?.disabled).toBe(false);
   });
 
   it('uses only API-key regions for the API-key route and keeps OAuth-only bases out of it', async () => {

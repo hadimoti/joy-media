@@ -60,6 +60,8 @@ import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { createProviderBroker } from './providers/provider-broker.js';
 import { pinnedFetch } from './providers/pinned-transport.js';
 import { createProviderSignIn, loadOrCreateInstallId } from './oauth/sign-in.js';
+import { createSignInAttempts } from './oauth/sign-in-attempts.js';
+import { CALLBACK_TIMEOUT_MS } from '@joy-media/provider-oauth';
 import { revokeChatGptRefreshToken } from './oauth/chatgpt.js';
 import { createWorkerCompletion } from './providers/worker-completion.js';
 import { checkProfileCredentials } from './profile-credential-check.js';
@@ -183,6 +185,21 @@ if (!app.requestSingleInstanceLock()) {
       }
     },
   });
+  // The sign-in runner and its attempt registry (T-J03). Created before the IPC dependencies that use them.
+  const signInRunner = createProviderSignIn({
+    openExternal: (url) => shell.openExternal(url),
+    fetch: (url, init) => fetch(url, init),
+    now: () => Date.now(),
+    // No saved client: each ChatGPT sign-in registers one with ChatGPT (SIWC dynamic registration, PLAN-v4 §6d).
+    chatGptClientId: undefined,
+    getSetting: (key) => localDatabase.getSetting(key),
+    installId: () => loadOrCreateInstallId(localDatabase),
+  });
+  const signInAttempts = createSignInAttempts({
+    now: () => Date.now(),
+    waitMs: CALLBACK_TIMEOUT_MS,
+    openExternal: (url) => shell.openExternal(url),
+  });
   const ipcHandlers = createIpcHandlers({
     agentRequests,
     fileRegistry,
@@ -237,15 +254,9 @@ if (!app.requestSingleInstanceLock()) {
     classifyDrive: async (directory) => classifyDriveOfDirectory(directory),
     secretStore,
     providerBroker,
-    providerSignIn: createProviderSignIn({
-      openExternal: (url) => shell.openExternal(url),
-      fetch: (url, init) => fetch(url, init),
-      now: () => Date.now(),
-      // No saved client: each ChatGPT sign-in registers one with ChatGPT (SIWC dynamic registration, PLAN-v4 §6d).
-      chatGptClientId: undefined,
-      getSetting: (key) => localDatabase.getSetting(key),
-      installId: () => loadOrCreateInstallId(localDatabase),
-    }),
+    providerSignIn: (provider, context, call) => signInRunner(provider, context, call),
+    openExternal: (url) => shell.openExternal(url),
+    signInAttempts,
     providerSignOut: (record) =>
       revokeChatGptRefreshToken({ record, fetch: (url, init) => fetch(url, init) }),
     handleWindowControl: (action) => {
@@ -357,6 +368,9 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     if (shuttingDown) return;
+    void assetLibrary.removeInternalEntries().catch((error) => {
+      console.error('Internal asset startup cleanup failed', error);
+    });
     // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
     // Keys are read only after ready: safeStorage is not guaranteed to work before it.
     void checkProfileCredentials(localDatabase, secretStore).catch(() => undefined);

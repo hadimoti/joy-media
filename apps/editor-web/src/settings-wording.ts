@@ -328,7 +328,22 @@ export const SETTINGS_MODELS = {
   filterClaude: 'Claude',
   filterGpt: 'GPT',
   browserOnly: 'Live model discovery requires Joy Media Desktop.',
+  /** The line on a saved connection card, from the generation flags of its provider (T-C07). */
+  canMakeBoth: 'Can make: pictures and videos',
+  canMakePictures: 'Can make: pictures',
+  canMakeVideos: 'Can make: videos',
 } as const;
+
+/**
+ * The line that says what a provider can make in JOY Media (T-C07). Returns nothing when it can make neither, so a card
+ * with no generation shows no line at all.
+ */
+export function canMakeLabel(pictures: boolean, videos: boolean): string | undefined {
+  if (pictures && videos) return SETTINGS_MODELS.canMakeBoth;
+  if (pictures) return SETTINGS_MODELS.canMakePictures;
+  if (videos) return SETTINGS_MODELS.canMakeVideos;
+  return undefined;
+}
 
 /** The desktop-only agent slots shown at the top of the models page. */
 export const SETTINGS_AGENT_SLOTS = {
@@ -384,6 +399,11 @@ export const SETTINGS_PROVIDER_SIGN_IN = {
   oauthRiskNotice:
     'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.',
   signedIn: 'Signed in to {provider}.',
+  waitingForBrowser: 'Waiting for the browser. {time} left.',
+  openSignInPageAgain: 'Open the sign-in page again',
+  cancelSignIn: 'Cancel',
+  signInCancelled: 'Sign-in cancelled. You can start again.',
+  signInTimedOut: 'The {provider} sign-in ran out of time. Sign in again to start over.',
   signInFailed: 'The {provider} sign-in did not complete.',
   modelIdRequired: 'Enter a model ID before saving.',
   apiKeyRequired: 'Enter an API key before saving.',
@@ -410,6 +430,10 @@ export const SETTINGS_PROVIDER_SIGN_IN = {
   modelIdLabel: 'Model ID',
   modelIdAriaLabel: '{provider} Model ID',
   saveApiKey: 'Save API key',
+  /** On the ChatGPT card: the sign-in cannot make pictures, so the user is pointed to MiniMax or a key (T-C07). */
+  chatGptCannotMakePictures: 'ChatGPT sign-in cannot make pictures. Use MiniMax or an API key.',
+  /** On the ChatGPT card: an OpenAI API key is a separate purchase from the ChatGPT plan (T-F09). */
+  chatGptApiKeyBilling: 'An OpenAI API key is billed separately from ChatGPT.',
 } as const;
 
 /**

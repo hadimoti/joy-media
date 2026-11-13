@@ -6,6 +6,8 @@
  * CLI and the editor can all import it. Only the main-process broker reads a credential.
  */
 
+import { isPrivateOrInternalHost } from './internal-address.js';
+
 /**
  * The providers offered for API-key sign-in, and ChatGPT for sign-in only (`signInOnly`). Each one has fixed origins
  * (PLAN-v4 §5, §6d).
@@ -112,7 +114,39 @@ export interface RegistryProvider {
       readonly sourceDate: string;
     };
   };
+  /** The pictures and videos this provider can make in JOY Media (T-C02). Absent means none. */
+  readonly generation?: ProviderGeneration;
 }
+
+/** The two things a provider may generate. */
+export type GenerationKind = 'image' | 'video';
+
+/**
+ * One generation route a provider offers. The adapter for `api` lives in apps/desktop/src/main/providers/generation/.
+ * Limits and model names are not here: they are settings of that adapter, so they can be corrected without a change
+ * to the registry.
+ */
+export interface GenerationCapability {
+  readonly api: 'minimax-h3';
+  /** Where the fact was read. */
+  readonly source: string;
+  readonly sourceDate: string;
+  /** What the route makes, in one line. */
+  readonly note: string;
+}
+
+export interface ProviderGeneration {
+  readonly image?: GenerationCapability;
+  readonly video?: GenerationCapability;
+}
+
+/**
+ * Whether a provider can make a picture or a video. A refusal carries a plain reason the settings or the editor can show,
+ * so no caller has to name a provider to explain it.
+ */
+export type GenerationSupport =
+  | { readonly supported: true; readonly capability: GenerationCapability }
+  | { readonly supported: false; readonly reason: string };
 
 const INTERNATIONAL = 'international';
 const CHINA = 'china';
@@ -206,6 +240,21 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
         docsUrl: 'https://platform.minimax.cn/docs',
       },
     ],
+    generation: {
+      image: {
+        api: 'minimax-h3',
+        source: 'Master plan facts P4 and P5 (MiniMax image-generation pages, read 12 Nov 2026)',
+        sourceDate: '2026-11-12',
+        note: 'Pictures from MiniMax-H3-Image, with image-01 as the legacy route.',
+      },
+      video: {
+        api: 'minimax-h3',
+        source:
+          'Master plan facts P6 to P9 (MiniMax video pages and M Plan notes, read 12 Nov 2026)',
+        sourceDate: '2026-11-12',
+        note: 'Videos from MiniMax-H3-Lite at 480P, 4 seconds, with Hailuo-02 as the legacy route. M Plan Go has no video (P9).',
+      },
+    },
   },
   {
     id: 'gemini',
@@ -385,6 +434,34 @@ export function getProviderThinkingMode(provider: string): ProviderThinkingMode 
 }
 
 /**
+ * Whether a provider can make a picture or a video. Any provider without a route, the ChatGPT sign-in and a custom
+ * endpoint included, is refused with a plain reason. The reason names the kind, so the text reads the same wherever it
+ * is shown.
+ */
+export function generationSupport(provider: string, kind: GenerationKind): GenerationSupport {
+  const noun = kind === 'image' ? 'pictures' : 'videos';
+  if (isCustomProviderId(provider)) {
+    return { supported: false, reason: `A custom endpoint cannot make ${noun} in JOY Media.` };
+  }
+  const registered = findRegistryProvider(provider);
+  if (registered === undefined) {
+    return { supported: false, reason: `This provider cannot make ${noun} in JOY Media.` };
+  }
+  const capability = registered.generation?.[kind];
+  if (capability !== undefined) return { supported: true, capability };
+  if (registered.signInOnly === true) {
+    return {
+      supported: false,
+      reason: `The ChatGPT sign-in cannot make ${noun}: OpenAI refuses image and video tools for a ChatGPT sign-in.`,
+    };
+  }
+  return {
+    supported: false,
+    reason: `${registered.label} cannot make ${noun} in JOY Media. Only MiniMax can.`,
+  };
+}
+
+/**
  * The authentication a custom OpenAI-compatible endpoint permits (PLAN-v4 §6d-1, rows 'OpenAI-compatible endpoint' and
  * 'Local model (LM Studio)').
  */
@@ -558,112 +635,6 @@ export function evaluateEndpoint(
     return refuse('BASE_URL_REFUSED', 'The base URL is not one of the regions of this provider.');
   }
   return allowedVerdict('registry', url);
-}
-
-/** A host that is never a public endpoint: local names, private and link-local addresses, and cloud metadata. */
-export function isPrivateOrInternalHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
-  if (host === 'localhost' || host.endsWith('.localhost')) return true;
-  if (host === 'metadata' || host === 'metadata.google.internal') return true;
-  if (host.endsWith('.internal') || host.endsWith('.local')) return true;
-  return host.includes(':') ? isPrivateIpv6(host) : isPrivateIpv4(host);
-}
-
-function isPrivateIpv4(host: string): boolean {
-  const parts = host.split('.');
-  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return false;
-  const numbers = parts.map(Number);
-  if (numbers.some((part) => part > 255)) return false;
-  const [first = -1, second = -1] = numbers;
-  return (
-    first === 0 ||
-    first === 10 ||
-    first === 127 ||
-    (first === 100 && second >= 64 && second <= 127) ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168) ||
-    (first === 198 && (second === 18 || second === 19)) ||
-    first >= 224
-  );
-}
-
-function isPrivateIpv6(host: string): boolean {
-  if (host === '::' || host === '::1') return true;
-  // Unique-local fc00::/7, link-local fe80::/10 and the deprecated site-local fec0::/10 are never public.
-  if (/^f[cd]/.test(host) || /^fe[89a-f]/.test(host)) return true;
-  // Multicast (ff00::/8) is never a public endpoint.
-  if (/^ff/.test(host)) return true;
-  // IPv4-mapped in the dotted form, ::ffff:127.0.0.1, is judged by its IPv4 address.
-  const dotted = host.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (dotted?.[1] !== undefined) return isPrivateIpv4(dotted[1]);
-  const mapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (mapped?.[1] !== undefined && mapped[2] !== undefined) {
-    const high = Number.parseInt(mapped[1], 16);
-    const low = Number.parseInt(mapped[2], 16);
-    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
-  }
-  return isPrivateEmbeddedIpv4(host);
-}
-
-/** The eight 16-bit groups of an IPv6 address written as text, or undefined when the text is not one. */
-function ipv6Groups(text: string): number[] | undefined {
-  const sides = text.split('::');
-  if (sides.length > 2) return undefined;
-  const parse = (side: string, endsAddress: boolean): number[] | undefined => {
-    if (side === '') return [];
-    const pieces = side.split(':');
-    const groups: number[] = [];
-    for (const [index, piece] of pieces.entries()) {
-      const dotted =
-        endsAddress && index === pieces.length - 1
-          ? /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(piece)
-          : null;
-      if (dotted !== null) {
-        const octets = dotted.slice(1).map(Number);
-        if (octets.some((octet) => octet > 255)) return undefined;
-        const [a = 0, b = 0, c = 0, d = 0] = octets;
-        groups.push(a * 256 + b, c * 256 + d);
-      } else if (/^[0-9a-f]{1,4}$/i.test(piece)) {
-        groups.push(Number.parseInt(piece, 16));
-      } else {
-        return undefined;
-      }
-    }
-    return groups;
-  };
-  if (sides.length === 1) {
-    const whole = parse(text, true);
-    return whole?.length === 8 ? whole : undefined;
-  }
-  const head = parse(sides[0] ?? '', false);
-  const tail = parse(sides[1] ?? '', true);
-  if (head === undefined || tail === undefined) return undefined;
-  const missing = 8 - head.length - tail.length;
-  return missing < 1 ? undefined : [...head, ...new Array<number>(missing).fill(0), ...tail];
-}
-
-/**
- * An IPv6 address that carries an IPv4 address (S8 item 4). The mapped form, in any spelling, the translated form
- * ::ffff:0:a.b.c.d, and the NAT64 well-known prefix 64:ff9b::/96 are judged by the IPv4 address they carry: a DNS64
- * network returns that prefix for a public IPv4-only server. The IPv4-compatible ::/96, the NAT64 local-use prefix
- * 64:ff9b:1::/48 and 6to4 2002::/16 are refused whatever IPv4 address they carry.
- */
-function isPrivateEmbeddedIpv4(host: string): boolean {
-  const groups = ipv6Groups(host);
-  if (groups === undefined) return false;
-  const leading = (count: number): boolean => groups.slice(0, count).every((group) => group === 0);
-  const embeddedPrivate = (): boolean => {
-    const [high = 0, low = 0] = groups.slice(6);
-    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
-  };
-  if (leading(5) && groups[5] === 0xffff) return embeddedPrivate();
-  if (leading(4) && groups[4] === 0xffff && groups[5] === 0) return embeddedPrivate();
-  const nat64 = groups[0] === 0x64 && groups[1] === 0xff9b;
-  if (nat64 && groups[2] === 1) return true;
-  if (nat64 && groups.slice(2, 6).every((group) => group === 0)) return embeddedPrivate();
-  if (leading(6)) return true;
-  return groups[0] === 0x2002;
 }
 
 function allowedVerdict(kind: 'registry' | 'loopback' | 'public', url: URL): EndpointVerdict {

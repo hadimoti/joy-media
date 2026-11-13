@@ -176,6 +176,7 @@ export interface BrowserAssetRegistration {
   readonly bytes: number;
   readonly descriptor: BrowserMediaDescriptor;
   readonly locations: readonly { readonly kind: 'opfs-cache'; readonly ref: string }[];
+  readonly internal?: boolean;
 }
 
 export const RESUMABLE_ORIGINAL_UPLOAD_THRESHOLD_BYTES = 8 * 1024 * 1024;

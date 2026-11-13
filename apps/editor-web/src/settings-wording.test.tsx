@@ -11,6 +11,7 @@ import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyAgentMediaCapabilityReport } from './joy-agent/protocol.js';
 import {
+  canMakeLabel,
   SETTINGS_AGENT_SLOTS,
   SETTINGS_BUDGET,
   SETTINGS_DIAGNOSTICS,
@@ -332,6 +333,13 @@ describe('the Joy Code Settings wording (T-P07)', () => {
     expect(SETTINGS_STORAGE.savedNote).toBe('Saved on this computer');
   });
 
+  it('names what a provider can make, and nothing when it makes neither (T-C07)', () => {
+    expect(canMakeLabel(true, true)).toBe('Can make: pictures and videos');
+    expect(canMakeLabel(true, false)).toBe('Can make: pictures');
+    expect(canMakeLabel(false, true)).toBe('Can make: videos');
+    expect(canMakeLabel(false, false)).toBeUndefined();
+  });
+
   it('names every permission in plain words', () => {
     for (const [capability, name] of Object.entries(SETTINGS_TOOLS.names)) {
       expect(name, `${capability} needs a name`).toBeTruthy();
@@ -465,11 +473,14 @@ describe('the words on the five pages (T-P07)', () => {
   ];
 
   /** The desktop bridge the dialog reads its saved connections and models from. */
-  const desktopBridge = (models: readonly { id: string }[] = []): void => {
+  const desktopBridge = (
+    models: readonly { id: string }[] = [],
+    profiles: readonly unknown[] = savedProfiles,
+  ): void => {
     window.joyDesktop = {
       channels: ['desktop.provider-profile.list', 'desktop.provider.models'],
       invoke: vi.fn(async (channel: string) => {
-        if (channel === 'desktop.provider-profile.list') return savedProfiles;
+        if (channel === 'desktop.provider-profile.list') return profiles;
         if (channel === 'desktop.provider.models') return models;
         return undefined;
       }),
@@ -617,6 +628,33 @@ describe('the words on the five pages (T-P07)', () => {
     const saved = await wordsOfPage(rendered, SETTINGS_PAGES.models.name);
 
     expect({ models, saved }).toMatchSnapshot();
+  });
+
+  it('says what a saved connection can make, and nothing when it can make neither (T-C07)', async () => {
+    desktopBridge(undefined, [
+      {
+        id: 'prof-minimax',
+        provider: 'minimax',
+        baseUrl: 'https://api.minimax.io/v1',
+        modelId: 'MiniMax-H3',
+        createdAt: '2026-11-13T00:00:00.000Z',
+        updatedAt: '2026-11-13T00:00:00.000Z',
+        bound: true,
+      },
+      ...savedProfiles.slice(0, 1),
+    ]);
+    const rendered = await render(engineClient());
+
+    const models = await wordsOfPage(rendered, SETTINGS_PAGES.models.name);
+    const cards = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')];
+    const minimaxCard = cards.find((card) => card.textContent?.includes('MiniMax-H3'));
+    const openRouterCard = cards.find((card) => card.textContent?.includes('openrouter/verified'));
+
+    expect(minimaxCard?.querySelector('.joy-settings-can-make')?.textContent).toBe(
+      'Can make: pictures and videos',
+    );
+    expect(openRouterCard?.querySelector('.joy-settings-can-make')).toBeNull();
+    expect(models).toContain('Can make: pictures and videos');
   });
 
   it('shows the media support check after it has run', async () => {

@@ -15,8 +15,8 @@ import {
   resolveTransitionShaderId,
   type TransitionCategoryId,
 } from '@joy-media/transition-shaders';
-import type { TransitionDragPayload } from '@joy-media/visual-effects';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
+import { beginEditorPointerDrag } from './editor-pointer-dnd.js';
 import { TransitionPreviewCard } from './TransitionPreviewCard.js';
 import { StarFilledIcon } from './icons.js';
 import { PanelShell } from './PanelShell.js';
@@ -240,14 +240,12 @@ function TransitionCard({
   isFavorite,
   onAdd,
   onToggleFavorite,
-  onDragStart,
 }: {
   readonly entry: { readonly id: string; readonly label: string; readonly description?: string };
   readonly isActive: boolean;
   readonly isFavorite: boolean;
   readonly onAdd: () => void;
   readonly onToggleFavorite: () => void;
-  readonly onDragStart: (event: React.DragEvent) => void;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(false);
@@ -273,8 +271,12 @@ function TransitionCard({
       tabIndex={0}
       aria-pressed={isActive}
       aria-label={`${isActive ? 'Selected' : 'Apply'} ${entry.label} transition`}
-      draggable
-      onDragStart={onDragStart}
+      onPointerDown={(event) => {
+        beginEditorPointerDrag(event.nativeEvent, event.currentTarget, {
+          kind: 'transition',
+          transitionId: entry.id,
+        });
+      }}
       onClick={onAdd}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -282,7 +284,7 @@ function TransitionCard({
         event.preventDefault();
         onAdd();
       }}
-      title={entry.description === undefined ? entry.label : `${entry.label}: ${entry.description}`}
+      title={`${entry.description === undefined ? entry.label : `${entry.label}: ${entry.description}`}. Drag onto a cut between clips.`}
     >
       <div className="transition-card-thumb">
         {(visible || isActive) && shaderEntry !== undefined ? (
@@ -463,16 +465,6 @@ export function TransitionsPanel({
     ],
   );
 
-  const handleDragStart = useCallback((type: string, event: React.DragEvent) => {
-    const payload: TransitionDragPayload = {
-      kind: 'joy/transition',
-      transitionId: type,
-      source: 'transitions-panel',
-    };
-    event.dataTransfer.setData('application/x-joy-transition', JSON.stringify(payload));
-    event.dataTransfer.effectAllowed = 'copy';
-  }, []);
-
   const hasFavorites = favorites.size > 0;
   const favItems = hasFavorites ? SHADER_CATALOG.filter((e) => favorites.has(e.id)) : [];
 
@@ -546,7 +538,6 @@ export function TransitionsPanel({
                   isFavorite={true}
                   onAdd={() => handleAddTransition(entry.id)}
                   onToggleFavorite={() => toggleFavorite(entry.id)}
-                  onDragStart={(e) => handleDragStart(entry.id, e)}
                 />
               ))}
             </div>
@@ -605,7 +596,6 @@ export function TransitionsPanel({
                       isFavorite={favorites.has(entry.id)}
                       onAdd={() => handleAddTransition(entry.id)}
                       onToggleFavorite={() => toggleFavorite(entry.id)}
-                      onDragStart={(e) => handleDragStart(entry.id, e)}
                     />
                   ))}
                 </div>

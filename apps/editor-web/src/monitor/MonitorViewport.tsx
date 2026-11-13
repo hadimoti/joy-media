@@ -531,6 +531,7 @@ export function MonitorViewport({
       aria-label="Monitor picture: Tab selects elements, arrows move, Alt+arrows scale, [ ] rotate, Esc leaves"
       data-monitor-stage=""
       className={`monitor-canvas-wrap${dragOver ? ' drag-over' : ''}`}
+      data-editor-pointer-dnd-target="monitor"
       data-monitor-zoom={controller.view.zoom}
       data-monitor-pan-x={Math.round(controller.view.panX)}
       data-monitor-pan-y={Math.round(controller.view.panY)}

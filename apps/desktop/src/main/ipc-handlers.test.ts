@@ -482,9 +482,13 @@ describe('IPC dispatch', () => {
     });
 
     expect(result).toMatchObject({ ok: true, data: { id: profile.id, provider: 'chatgpt' } });
-    expect(providerSignIn).toHaveBeenCalledWith('chatgpt', {
-      savedChatGptAccount: { clientId: record.clientId, accountId: record.accountId },
-    });
+    expect(providerSignIn).toHaveBeenCalledWith(
+      'chatgpt',
+      {
+        savedChatGptAccount: { clientId: record.clientId, accountId: record.accountId },
+      },
+      undefined,
+    );
     expect(await d.secretStore.get(profile.secretHandleId)).not.toBe(encodeTokenRecord(record));
     expect(d.localDatabase.getProviderProfile(profile.id)?.modelId).toBe('gpt-4.1');
   });
@@ -542,9 +546,13 @@ describe('IPC dispatch', () => {
     });
 
     expect(result).toMatchObject({ ok: false });
-    expect(providerSignIn).toHaveBeenCalledWith('chatgpt', {
-      savedChatGptAccount: { clientId: record.clientId, accountId: record.accountId },
-    });
+    expect(providerSignIn).toHaveBeenCalledWith(
+      'chatgpt',
+      {
+        savedChatGptAccount: { clientId: record.clientId, accountId: record.accountId },
+      },
+      undefined,
+    );
     expect(providerSignOut).toHaveBeenCalledWith(unexpectedClient);
     expect(d.localDatabase.getProviderProfile(profile.id)?.modelId).toBe('gpt-4o-mini');
     expect(await d.secretStore.get(profile.secretHandleId)).toBe(encodeTokenRecord(record));
@@ -920,6 +928,51 @@ describe('IPC dispatch', () => {
 
     expect(res.ok).toBe(true);
     expect((res.data as { driveType: string }).driveType).toBe('unknown');
+  });
+});
+
+describe('asset library catalog', () => {
+  it('does not return internal export rows in the Media catalog', async () => {
+    const d = deps();
+    const userRow = {
+      id: `joylib-${'a'.repeat(64)}`,
+      kind: 'image',
+      displayName: 'cover.png',
+      sha256: 'a'.repeat(64),
+      bytes: 12,
+    };
+    const internalRow = {
+      id: `joylib-${'b'.repeat(64)}`,
+      kind: 'video',
+      displayName: 'render.mp4.stage',
+      sha256: 'b'.repeat(64),
+      bytes: 34,
+      internal: true,
+      internalAssetIds: ['stage-attempt-3'],
+    };
+    const catalog = {
+      version: 1,
+      counts: { total: 2, audio: 0, image: 1, video: 1 },
+      assets: [userRow, internalRow],
+    };
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify(catalog) as never);
+    d.localDatabase.getAssetLibraryDirectory = () => 'C:\\test-assets\\library';
+
+    try {
+      const result = await createIpcHandlers(d)['desktop.asset-library.get-catalog'](undefined);
+      expect(result).toEqual({
+        ok: true,
+        data: {
+          version: 1,
+          counts: { total: 1, audio: 0, image: 1, video: 0 },
+          assets: [userRow],
+        },
+      });
+    } finally {
+      vi.restoreAllMocks();
+      d.localDatabase.close();
+    }
   });
 });
 
