@@ -43,24 +43,14 @@ const staticAssetInventory = () => ({
       sourceSha256: '2'.repeat(64),
     },
     {
-      path: 'effects/preview/glow.png',
+      path: 'effects/preview/glow.webp',
       kind: 'effect-preview' as const,
-      mimeType: 'image/png',
-      signature: '89504e470d0a1a0a',
-      size: 4,
+      mimeType: 'image/webp',
+      signature: 'RIFF:WEBP',
+      size: 12,
       sha256: '3'.repeat(64),
-      sourcePath: 'apps/editor-web/public/effects/preview/glow.png',
+      sourcePath: 'apps/editor-web/public/effects/preview/glow.webp',
       sourceSha256: '4'.repeat(64),
-    },
-    {
-      path: 'effects/preview-motion/joy-motion-01.webm',
-      kind: 'effect-motion-preview' as const,
-      mimeType: 'video/webm',
-      signature: '1a45dfa3',
-      size: 4,
-      sha256: '5'.repeat(64),
-      sourcePath: 'apps/editor-web/public/effects/preview-motion/joy-motion-01.webm',
-      sourceSha256: '6'.repeat(64),
     },
     {
       path: 'assets/index-a1b2c3.js',
@@ -74,11 +64,11 @@ const staticAssetInventory = () => ({
   htmlEntryPoints: ['index.html'],
   htmlReferences: ['assets/index-a1b2c3.js'],
   summary: {
-    publicAssetCount: 54,
-    copiedSourceAssetCount: 53,
+    publicAssetCount: 35,
+    copiedSourceAssetCount: 34,
     builtAssetCount: 1,
     requiredTransitionFrameCount: 2,
-    effectPreviewCount: 33,
+    effectPreviewCount: 34,
     effectMotionPreviewCount: REQUIRED_EFFECT_MOTION_PREVIEW_COUNT,
   },
 });
@@ -663,11 +653,10 @@ describe('JOY Media 1.0 release gate', () => {
     ];
     const publicFiles = [
       ...svgAssets,
-      'effects/preview/glow.png',
-      'effects/preview/emboss.png',
-      'effects/preview/sepia.png',
-      'effects/preview-motion/joy-motion-01.webm',
-      'effects/preview-motion/joy-motion-02.webm',
+      'effects/preview/glow.webp',
+      'effects/preview/emboss.webp',
+      'effects/preview/sepia.webp',
+      'transitions/preview/gl-fade.webp',
       'fonts/demo.woff2',
     ];
     for (const asset of publicFiles) {
@@ -678,16 +667,10 @@ describe('JOY Media 1.0 release gate', () => {
       if (asset.endsWith('.svg')) {
         writeFileSync(sourcePath, '<svg viewBox="0 0 1 1"/>');
         writeFileSync(distPath, '<svg viewBox="0 0 1 1"/>');
-      } else if (asset.endsWith('.png')) {
-        const png = Buffer.from([
-          0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00,
-        ]);
-        writeFileSync(sourcePath, png);
-        writeFileSync(distPath, png);
-      } else if (asset.endsWith('.webm')) {
-        const webm = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x93, 0x42]);
-        writeFileSync(sourcePath, webm);
-        writeFileSync(distPath, webm);
+      } else if (asset.endsWith('.webp')) {
+        const webp = Buffer.from('RIFF\x04\x00\x00\x00WEBPVP8 ', 'latin1');
+        writeFileSync(sourcePath, webp);
+        writeFileSync(distPath, webp);
       } else {
         const woff2 = Buffer.from('wOF2demo');
         writeFileSync(sourcePath, woff2);
@@ -711,7 +694,7 @@ describe('JOY Media 1.0 release gate', () => {
     ]);
     expect(result.inventory.summary.requiredTransitionFrameCount).toBe(2);
     expect(result.inventory.summary.effectPreviewCount).toBe(3);
-    expect(result.inventory.summary.effectMotionPreviewCount).toBe(2);
+    expect(result.inventory.summary.effectMotionPreviewCount).toBe(0);
     expect(
       result.inventory.assets.find((asset) => asset.path === 'assets/index-abcd1234.js'),
     ).toMatchObject({
