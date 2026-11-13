@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import * as ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const panelSource = readFileSync(new URL('./AgentPanel.tsx', import.meta.url), 'utf8');
@@ -88,11 +89,12 @@ describe('Joy Code capability panel contract', () => {
     const region4 = panelSource.slice(region4Start, region4End);
     expect(region4).toContain('joyCodeKeyForThrown(error)');
 
-    // Six table lookups for a thrown error: the four runner catch paths, plus the
-    // apply path and the plan path, which also show a failure card.
+    // Seven table lookups for a thrown error: the four runner catch paths, plus the
+    // apply path and the plan path, which also show a failure card, plus the
+    // attachment path, whose message is shown in the composer.
     const tableRefs = panelSource.match(/joyCodeKeyForThrown\(error\)/g);
     expect(tableRefs).not.toBeNull();
-    expect(tableRefs!.length).toBe(6);
+    expect(tableRefs!.length).toBe(7);
 
     // None of the old inline Error/fallback expressions should remain.
     expect(panelSource).not.toMatch(
@@ -190,5 +192,59 @@ describe('Joy Code capability panel contract', () => {
 
   it('hides the grey live-status strip while a run has failed', () => {
     expect(panelSource).toContain("liveAgentPhase !== undefined && liveAgentPhase !== 'failed'");
+  });
+
+  it('never renders an engine, host or thrown message in JSX, only the table sentence', () => {
+    // Parse the panel and look at every JSX expression container, so a `{...}` in a
+    // plain object or a block is not counted. A raw reason or message must not be
+    // rendered in the chat, the composer or the plan card.
+    const sourceFile = ts.createSourceFile(
+      'AgentPanel.tsx',
+      panelSource,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    // A raw reference is the property itself, such as `pending.approval.reason`, not a
+    // value that a table lookup (`joyCodeMessageByKey(...)`, `joyCodeKey...(...)`) has turned
+    // into a sentence first.
+    const rawReference = /^(?:[\w$]+\.)*(?:approval\.reason|error\.message|result\.message)$/;
+    const jsxExpressions: string[] = [];
+    const rawRenders: string[] = [];
+
+    /** The raw references a JSX expression renders, not counting nested JSX or table lookups. */
+    const rawReferencesIn = (root: ts.Node): string[] => {
+      const found: string[] = [];
+      const walk = (node: ts.Node): void => {
+        if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node))
+          return;
+        if (ts.isCallExpression(node) && /^joyCode\w*$/.test(node.expression.getText(sourceFile)))
+          return;
+        const text = node.getText(sourceFile);
+        if (ts.isPropertyAccessExpression(node) && rawReference.test(text)) {
+          found.push(text);
+          return;
+        }
+        ts.forEachChild(node, walk);
+      };
+      walk(root);
+      return found;
+    };
+
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxExpression(node) && node.expression !== undefined) {
+        jsxExpressions.push(node.expression.getText(sourceFile));
+        for (const reference of rawReferencesIn(node.expression)) {
+          const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+          rawRenders.push(`AgentPanel.tsx:${line} renders ${reference}`);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+
+    // The scan must actually have seen the panel's JSX, or it proves nothing.
+    expect(jsxExpressions.length, 'the scan must see the panel JSX').toBeGreaterThan(100);
+    expect(rawRenders, 'no raw reason or message may be rendered in JSX').toEqual([]);
   });
 });

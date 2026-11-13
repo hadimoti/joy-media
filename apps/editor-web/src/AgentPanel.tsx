@@ -1855,6 +1855,8 @@ export function AgentPanel({
         `The “${intent.label}” plan is ready. Preview: ${dryRun.aggregateDiff.summary}. Review the proposed change below.`,
       );
     }
+    // The engine's reason is free text: the card shows only its table entry, and the console gets a plain code.
+    if (approval.decision !== 'auto-approved') reportJoyCodeFailure(approval.reason);
     setPending({
       runId,
       threadId,
@@ -3345,7 +3347,9 @@ export function AgentPanel({
         });
       }
     } catch (error) {
-      setAttachError(error instanceof Error ? error.message : String(error));
+      // The thrown text is never shown: the console gets a plain code, the chat the table sentence.
+      reportJoyCodeFailure(joyCodeCodeOfThrown(error));
+      setAttachError(joyCodeMessageByKey(joyCodeKeyForThrown(error)).sentence);
     } finally {
       setAttaching(false);
       if (attachInputRef.current !== null) attachInputRef.current.value = '';
@@ -3727,7 +3731,11 @@ export function AgentPanel({
                     {joyCodeMessageByKey('JOY_AGENT_INVALID_PROPOSAL').sentence}
                   </p>
                 )}
-                <span className="joy-code-plan-reason">{pending.approval.reason}</span>
+                {pending.approval.decision === 'blocked' && (
+                  <span className="joy-code-plan-reason">
+                    {joyCodeMessageByKey(joyCodeKeyForRunError(pending.approval.reason)).sentence}
+                  </span>
+                )}
                 <div className="joy-code-plan-actions">
                   {pending.approval.decision === 'blocked' && (
                     <button type="button" onClick={reject}>

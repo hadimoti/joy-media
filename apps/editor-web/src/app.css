@@ -8920,15 +8920,15 @@ label {
 }
 .joy-code-failure-card-sentence {
   margin: 0.15rem 0 0;
-  color: var(--joy-text-muted);
-  font-size: 0.72rem;
+  color: var(--joy-text-secondary);
+  font-size: 0.75rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 .joy-code-failure-card-action {
   flex: 0 0 auto;
   padding: 0.3rem 0.8rem;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   line-height: 1.2;
 }
 .joy-code-brief-artifact {
