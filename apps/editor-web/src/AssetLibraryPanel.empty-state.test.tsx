@@ -2,24 +2,18 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { BrowserAsset } from './control-plane-client.js';
+import { importDroppedMediaFiles, type DroppedMediaImportBatchResult } from './media-import.js';
+import type {
+  DesktopDroppedFileBatch,
+  DesktopDroppedFileTicket,
+  DesktopJoyBridge,
+} from './desktop-client.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
-
-// The import itself is not what this card is about; the drop zone is. The
-// mock fails on purpose, so the test can see that the dropped file reached it.
-const mocks = vi.hoisted(() => ({
-  importMediaFile: vi.fn(async () => {
-    throw new Error('the import stops here in the test');
-  }),
-}));
-
-vi.mock('./media-import.js', () => ({
-  describeMedia: vi.fn(async () => ({ kind: 'video' as const, durationUs: 1_000_000 })),
-  importMediaFile: mocks.importMediaFile,
-}));
 
 const storage = {
   getItem: (): string | null => null,
@@ -29,22 +23,112 @@ const storage = {
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
+let restoreBridge: (() => void) | undefined;
 
-async function renderPanel(): Promise<HTMLDivElement> {
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function ticket(file: File, sourceIndex: number): DesktopDroppedFileTicket {
+  return {
+    kind: 'local-file',
+    id: `drop-ticket-${sourceIndex + 1}`,
+    displayName: file.name,
+    mediaKind: 'image',
+    mimeType: 'image/png',
+    sourceIndex,
+  };
+}
+
+function installDroppedFileBridge(batch: DesktopDroppedFileBatch) {
+  const priorBridge = Object.getOwnPropertyDescriptor(window, 'joyDesktop');
+  const bridge: DesktopJoyBridge = {
+    channels: [],
+    invoke: vi.fn(async (channel: string) =>
+      channel === 'desktop.asset-library.get-catalog' ? { assets: [] } : undefined,
+    ),
+    importDroppedFiles: vi.fn(async () => batch),
+    onDroppedImportProgress: vi.fn(() => () => undefined),
+  };
+  Object.defineProperty(window, 'joyDesktop', {
+    value: bridge,
+    configurable: true,
+    writable: true,
+  });
+  restoreBridge = () => {
+    if (priorBridge === undefined) Reflect.deleteProperty(window, 'joyDesktop');
+    else Object.defineProperty(window, 'joyDesktop', priorBridge);
+    restoreBridge = undefined;
+  };
+  return bridge;
+}
+
+function importClient(
+  files: readonly File[],
+  importDroppedAsset: (file: File, ticket: DesktopDroppedFileTicket) => Promise<BrowserAsset>,
+) {
+  return {
+    ensureProject: vi.fn(async () => undefined),
+    importDroppedAsset: vi.fn(async (_projectId: string, ticketId: string) => {
+      const found = files
+        .map((file, index) => ({ file, ticket: ticket(file, index) }))
+        .find((entry) => entry.ticket.id === ticketId);
+      if (found === undefined) throw new Error(`Unknown ticket ${ticketId}`);
+      return importDroppedAsset(found.file, found.ticket);
+    }),
+    cancelDroppedImport: vi.fn(async () => undefined),
+  };
+}
+
+function importedAsset(file: File, item: DesktopDroppedFileTicket): BrowserAsset {
+  return {
+    id: `asset-${item.sourceIndex + 1}`,
+    kind: item.mediaKind,
+    displayName: file.name,
+    sha256: 'a'.repeat(64),
+    bytes: file.size,
+    descriptor: { mimeType: item.mimeType },
+    projectId: 'project-1',
+    createdAt: 1,
+    cloudBacked: true,
+  };
+}
+
+async function renderPanel(
+  props: {
+    readonly onImportFiles?: (files: readonly File[]) => void;
+    readonly droppedImportProgress?: {
+      readonly fileName: string;
+      readonly current: number;
+      readonly total: number;
+      readonly percentage: number;
+      readonly cancelling: boolean;
+    };
+    readonly onCancelDroppedImport?: () => void;
+  } = {},
+): Promise<HTMLDivElement> {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root?.render(<AssetLibraryPanel projectId="project-1" storage={storage} />);
+    root?.render(<AssetLibraryPanel projectId="project-1" storage={storage} {...props} />);
     await Promise.resolve();
     await Promise.resolve();
   });
   return container;
 }
 
-/** A file the way the browser hands one to a drop handler. */
-function droppedFile(name: string): File {
-  return new File(['bytes'], name, { type: 'video/mp4' });
+function dispatchDrop(rendered: HTMLElement, files: readonly File[]): void {
+  const dropZone = rendered.querySelector<HTMLElement>('.asset-library-drop-zone');
+  if (dropZone === null) throw new Error('Expected the asset library drop zone');
+  const transfer = { files, types: ['Files'], dropEffect: 'none' };
+  const drop = new Event('drop', { bubbles: true, cancelable: true });
+  Object.defineProperty(drop, 'dataTransfer', { value: transfer });
+  dropZone.dispatchEvent(drop);
 }
 
 afterEach(async () => {
@@ -52,7 +136,7 @@ afterEach(async () => {
   container?.remove();
   root = undefined;
   container = undefined;
-  mocks.importMediaFile.mockClear();
+  restoreBridge?.();
   vi.restoreAllMocks();
 });
 
@@ -71,35 +155,201 @@ describe('the Media panel empty state (T-D05)', () => {
     expect(buttons[0]?.textContent?.trim()).toBe('Import');
     expect(buttons[0]?.className).toContain('button-primary');
 
-    // One message, not two: the filters did not hide anything, the library is empty.
     expect(rendered.textContent).not.toContain('No library assets match the current filters.');
     expect(rendered.textContent).not.toContain('Failed to load media catalog.');
+
+    await act(async () => buttons[0]?.click());
+    expect(rendered.querySelector('[role="dialog"][aria-label="Import media"]')).not.toBeNull();
   });
 
-  it('imports a file dropped on the drop zone', async () => {
-    const rendered = await renderPanel();
-    const dropZone = rendered.querySelector<HTMLElement>('.asset-library-drop-zone');
-    if (dropZone === null) throw new Error('Expected the asset library drop zone');
-
-    const file = droppedFile('clip.mp4');
-    const transfer = {
-      files: [file],
-      types: ['Files'],
-      dropEffect: 'none',
-    };
-    // jsdom has no DragEvent, so the drop is a plain event carrying the
-    // dataTransfer the way a browser would.
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', { value: transfer });
-    await act(async () => {
-      dropZone.dispatchEvent(drop);
-      await Promise.resolve();
-      await Promise.resolve();
+  it('routes one dropped file through the desktop import bridge', async () => {
+    const file = new File(['one'], 'one.png', { type: 'image/png' });
+    const batch = { tickets: [ticket(file, 0)], folderDepth: 1 as const, folderCount: 0 };
+    const bridge = installDroppedFileBridge(batch);
+    const client = importClient([file], async (source, item) => importedAsset(source, item));
+    const importedAssets: BrowserAsset[] = [];
+    const completed = deferred<DroppedMediaImportBatchResult | undefined>();
+    const rendered = await renderPanel({
+      onImportFiles: (files) => {
+        void importDroppedMediaFiles({
+          projectId: 'project-1',
+          projectTitle: 'Project',
+          files,
+          client,
+          originalAssetCache: { putFromVerifiedDesktopImport: vi.fn(async () => undefined) },
+          onImported: (asset) => {
+            importedAssets.push(asset);
+          },
+        }).then(completed.resolve);
+      },
     });
 
-    expect(mocks.importMediaFile).toHaveBeenCalledTimes(1);
-    expect(mocks.importMediaFile).toHaveBeenCalledWith(
-      expect.objectContaining({ file, projectId: 'project-1' }),
+    await act(async () => {
+      dispatchDrop(rendered, [file]);
+      await Promise.resolve();
+    });
+    const result = await completed.promise;
+
+    expect(bridge.importDroppedFiles).toHaveBeenCalledWith([file]);
+    expect(client.importDroppedAsset).toHaveBeenCalledTimes(1);
+    expect(importedAssets.map((asset) => asset.displayName)).toEqual(['one.png']);
+    expect(result?.assets).toHaveLength(1);
+  });
+
+  it('routes every dropped file through the desktop import bridge', async () => {
+    const files = [
+      new File(['one'], 'one.png', { type: 'image/png' }),
+      new File(['two'], 'two.png', { type: 'image/png' }),
+    ];
+    const batch = {
+      tickets: files.map(ticket),
+      folderDepth: 1 as const,
+      folderCount: 0,
+    };
+    const bridge = installDroppedFileBridge(batch);
+    const client = importClient(files, async (source, item) => importedAsset(source, item));
+    const completed = deferred<DroppedMediaImportBatchResult | undefined>();
+    const rendered = await renderPanel({
+      onImportFiles: (droppedFiles) => {
+        void importDroppedMediaFiles({
+          projectId: 'project-1',
+          projectTitle: 'Project',
+          files: droppedFiles,
+          client,
+          originalAssetCache: { putFromVerifiedDesktopImport: vi.fn(async () => undefined) },
+        }).then(completed.resolve);
+      },
+    });
+
+    await act(async () => {
+      dispatchDrop(rendered, files);
+      await Promise.resolve();
+    });
+    const result = await completed.promise;
+
+    expect(bridge.importDroppedFiles).toHaveBeenCalledWith(files);
+    expect(client.importDroppedAsset).toHaveBeenCalledTimes(2);
+    expect(result?.assets.map((asset) => asset.displayName)).toEqual(['one.png', 'two.png']);
+  });
+
+  it('returns the bridge folder and skipped-file report to the Media drop handler', async () => {
+    const file = new File(['one'], 'one.png', { type: 'image/png' });
+    const batch: DesktopDroppedFileBatch = {
+      tickets: [ticket(file, 0)],
+      folderDepth: 1,
+      folderCount: 1,
+      skippedMessage: 'Skipped 2 unsupported files.',
+    };
+    installDroppedFileBridge(batch);
+    const client = importClient([file], async (source, item) => importedAsset(source, item));
+    const completed = deferred<DroppedMediaImportBatchResult | undefined>();
+    const rendered = await renderPanel({
+      onImportFiles: (files) => {
+        void importDroppedMediaFiles({
+          projectId: 'project-1',
+          projectTitle: 'Project',
+          files,
+          client,
+          originalAssetCache: { putFromVerifiedDesktopImport: vi.fn(async () => undefined) },
+        }).then(completed.resolve);
+      },
+    });
+
+    await act(async () => {
+      dispatchDrop(rendered, [file]);
+      await Promise.resolve();
+    });
+    const result = await completed.promise;
+
+    expect(result).toMatchObject({
+      folderDepth: 1,
+      folderCount: 1,
+      skippedMessage: 'Skipped 2 unsupported files.',
+    });
+  });
+
+  it('shows the shared progress strip and lets the user cancel a bridge import', async () => {
+    const file = new File(['one'], 'one.png', { type: 'image/png' });
+    const item = ticket(file, 0);
+    const batch = { tickets: [item], folderDepth: 1 as const, folderCount: 0 };
+    installDroppedFileBridge(batch);
+    const controller = new AbortController();
+    const started = deferred<void>();
+    const finishImport = deferred<BrowserAsset>();
+    const completed = deferred<DroppedMediaImportBatchResult | undefined>();
+    const client = importClient([file], async () => {
+      started.resolve();
+      return finishImport.promise;
+    });
+    const onCancelDroppedImport = vi.fn(() => controller.abort());
+    const rendered = await renderPanel({
+      droppedImportProgress: {
+        fileName: file.name,
+        current: 1,
+        total: 1,
+        percentage: 25,
+        cancelling: false,
+      },
+      onCancelDroppedImport,
+      onImportFiles: (files) => {
+        void importDroppedMediaFiles({
+          projectId: 'project-1',
+          projectTitle: 'Project',
+          files,
+          signal: controller.signal,
+          client,
+          originalAssetCache: { putFromVerifiedDesktopImport: vi.fn(async () => undefined) },
+        }).then(completed.resolve);
+      },
+    });
+
+    expect(rendered.querySelector('.dropped-import-progress')).not.toBeNull();
+    await act(async () => {
+      dispatchDrop(rendered, [file]);
+      await Promise.resolve();
+    });
+    await started.promise;
+    const cancel = [...rendered.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Cancel',
     );
+    if (cancel === undefined) throw new Error('Expected the dropped import Cancel button');
+    await act(async () => cancel.click());
+    finishImport.resolve(importedAsset(file, item));
+    const result = await completed.promise;
+
+    expect(onCancelDroppedImport).toHaveBeenCalledOnce();
+    expect(client.cancelDroppedImport).toHaveBeenCalledWith(item.id);
+    expect(result?.cancelled).toBe(true);
+  });
+
+  it('hands dropped files to the timeline-compatible web fallback when the bridge is absent', async () => {
+    const files = [
+      new File(['one'], 'one.png', { type: 'image/png' }),
+      new File(['two'], 'two.png', { type: 'image/png' }),
+    ];
+    const fallbackFiles: File[] = [];
+    const completed = deferred<void>();
+    const rendered = await renderPanel({
+      onImportFiles: (droppedFiles) => {
+        void importDroppedMediaFiles({
+          projectId: 'project-1',
+          projectTitle: 'Project',
+          files: droppedFiles,
+          client: importClient(droppedFiles, async (source, item) => importedAsset(source, item)),
+          originalAssetCache: { putFromVerifiedDesktopImport: vi.fn(async () => undefined) },
+        }).then((result) => {
+          if (result === undefined) fallbackFiles.push(...droppedFiles);
+          completed.resolve();
+        });
+      },
+    });
+
+    await act(async () => {
+      dispatchDrop(rendered, files);
+      await Promise.resolve();
+    });
+    await completed.promise;
+
+    expect(fallbackFiles).toEqual(files);
   });
 });

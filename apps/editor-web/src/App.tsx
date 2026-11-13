@@ -5306,6 +5306,116 @@ function EditorWorkspace({
     if (activeTimelineView === undefined)
       throw new Error('timeline root composition is unavailable');
     const activeTimelinePlayheadUs = timelineViewLocalTime(activeTimelineView, state.playheadUs);
+    const handleCancelDroppedImport = () => {
+      const controller = droppedImportControllerRef.current;
+      if (controller === null || controller.signal.aborted) return;
+      setDroppedImportProgress((current) =>
+        current === undefined ? current : { ...current, cancelling: true },
+      );
+      controller.abort();
+    };
+    const handleImportDroppedFiles = (files: readonly File[]) => {
+      const controller = new AbortController();
+      droppedImportControllerRef.current = controller;
+      setDroppedImportProgress({
+        fileName: files[0]?.name ?? 'Dropped media',
+        current: 0,
+        total: files.length,
+        percentage: 0,
+        cancelling: false,
+      });
+      const addImportedAsset = (asset: Awaited<ReturnType<typeof importMediaFile>>) => {
+        rememberImportedAsset(asset);
+        const composition = activeTimelineView.composition;
+        if (composition !== undefined) {
+          const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${Date.now()}`;
+          bindMediaClip(asset, clipId);
+          context.dispatchTimeline(
+            buildTimelineMediaImportTransaction(
+              composition,
+              [asset],
+              activeTimelinePlayheadUs,
+              new Set(),
+              () => clipId,
+            ),
+          );
+        }
+        context.showToast(`${asset.displayName} added to the timeline.`, 'success');
+      };
+      void (async () => {
+        try {
+          const imported = await importDroppedMediaFiles({
+            projectId: controlPlaneProject.controlPlaneProjectId,
+            projectTitle: controlPlaneProject.title,
+            files,
+            client: mediaControlPlaneClient,
+            originalAssetCache: originalAssetCachePromise,
+            signal: controller.signal,
+            onProgress: (progress) => {
+              setDroppedImportProgress((current) => ({
+                fileName: progress.fileName ?? current?.fileName ?? 'Dropped media',
+                current: progress.current ?? current?.current ?? 1,
+                total: progress.total ?? current?.total ?? files.length,
+                percentage: Math.round(progress.ratio * 100),
+                cancelling: current?.cancelling ?? false,
+              }));
+            },
+            onImported: (asset) => addImportedAsset(asset),
+          });
+          if (imported !== undefined) {
+            if (imported.cancelled) {
+              context.showToast(
+                'Import cancelled. Completed files are kept; the current file was not added.',
+                'info',
+              );
+              return;
+            }
+            if (imported.folderCount > 0) {
+              context.showToast('Folders are read one level deep.', 'info');
+            }
+            if (imported.skippedMessage !== undefined) {
+              context.showToast(imported.skippedMessage, 'info');
+            }
+            for (const failure of imported.failures) {
+              context.showToast(
+                `Failed to import ${failure.displayName}: ${failure.message}`,
+                'error',
+              );
+            }
+            return;
+          }
+          setDroppedImportProgress(undefined);
+          for (const file of files) {
+            void importMediaFile({
+              projectId: controlPlaneProject.controlPlaneProjectId,
+              projectTitle: controlPlaneProject.title,
+              file,
+              client: mediaControlPlaneClient,
+              originalAssetCache: originalAssetCachePromise,
+            })
+              .then(addImportedAsset)
+              .catch((error) => {
+                context.showToast(
+                  `Failed to import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
+                  'error',
+                );
+              });
+          }
+        } catch (error) {
+          context.showToast(
+            controller.signal.aborted
+              ? 'Import cancelled. No partial file was added.'
+              : `Dropped media could not be imported: ${error instanceof Error ? error.message : String(error)}`,
+            controller.signal.aborted ? 'info' : 'error',
+          );
+        } finally {
+          if (droppedImportControllerRef.current === controller) {
+            droppedImportControllerRef.current = null;
+            setDroppedImportProgress(undefined);
+          }
+        }
+      })();
+    };
     const activeTimelineDurationUs = timelineEffectiveDurationUs(activeTimelineView.composition);
     const activeTimelineMarkers = visualProject.markers
       .filter(
@@ -6318,119 +6428,11 @@ function EditorWorkspace({
             return asset;
           }}
           {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
-          onCancelDroppedImport={() => {
-            const controller = droppedImportControllerRef.current;
-            if (controller === null || controller.signal.aborted) return;
-            setDroppedImportProgress((current) =>
-              current === undefined ? current : { ...current, cancelling: true },
-            );
-            controller.abort();
-          }}
+          onCancelDroppedImport={handleCancelDroppedImport}
           assetDisplayNames={Object.fromEntries(
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
           )}
-          onImportFiles={(files) => {
-            const controller = new AbortController();
-            droppedImportControllerRef.current = controller;
-            setDroppedImportProgress({
-              fileName: files[0]?.name ?? 'Dropped media',
-              current: 0,
-              total: files.length,
-              percentage: 0,
-              cancelling: false,
-            });
-            const addImportedAsset = (asset: Awaited<ReturnType<typeof importMediaFile>>) => {
-              rememberImportedAsset(asset);
-              const composition = activeTimelineView.composition;
-              if (composition !== undefined) {
-                const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${Date.now()}`;
-                bindMediaClip(asset, clipId);
-                context.dispatchTimeline(
-                  buildTimelineMediaImportTransaction(
-                    composition,
-                    [asset],
-                    activeTimelinePlayheadUs,
-                    new Set(),
-                    () => clipId,
-                  ),
-                );
-              }
-              context.showToast(`${asset.displayName} added to the timeline.`, 'success');
-            };
-            void (async () => {
-              try {
-                const imported = await importDroppedMediaFiles({
-                  projectId: controlPlaneProject.controlPlaneProjectId,
-                  projectTitle: controlPlaneProject.title,
-                  files,
-                  client: mediaControlPlaneClient,
-                  originalAssetCache: originalAssetCachePromise,
-                  signal: controller.signal,
-                  onProgress: (progress) => {
-                    setDroppedImportProgress((current) => ({
-                      fileName: progress.fileName ?? current?.fileName ?? 'Dropped media',
-                      current: progress.current ?? current?.current ?? 1,
-                      total: progress.total ?? current?.total ?? files.length,
-                      percentage: Math.round(progress.ratio * 100),
-                      cancelling: current?.cancelling ?? false,
-                    }));
-                  },
-                  onImported: (asset) => addImportedAsset(asset),
-                });
-                if (imported !== undefined) {
-                  if (imported.cancelled) {
-                    context.showToast(
-                      'Import cancelled. Completed files are kept; the current file was not added.',
-                      'info',
-                    );
-                    return;
-                  }
-                  if (imported.folderCount > 0) {
-                    context.showToast('Folders are read one level deep.', 'info');
-                  }
-                  if (imported.skippedMessage !== undefined) {
-                    context.showToast(imported.skippedMessage, 'info');
-                  }
-                  for (const failure of imported.failures) {
-                    context.showToast(
-                      `Failed to import ${failure.displayName}: ${failure.message}`,
-                      'error',
-                    );
-                  }
-                  return;
-                }
-                setDroppedImportProgress(undefined);
-                for (const file of files) {
-                  void importMediaFile({
-                    projectId: controlPlaneProject.controlPlaneProjectId,
-                    projectTitle: controlPlaneProject.title,
-                    file,
-                    client: mediaControlPlaneClient,
-                    originalAssetCache: originalAssetCachePromise,
-                  })
-                    .then(addImportedAsset)
-                    .catch((error) => {
-                      context.showToast(
-                        `Failed to import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
-                        'error',
-                      );
-                    });
-                }
-              } catch (error) {
-                context.showToast(
-                  controller.signal.aborted
-                    ? 'Import cancelled. No partial file was added.'
-                    : `Dropped media could not be imported: ${error instanceof Error ? error.message : String(error)}`,
-                  controller.signal.aborted ? 'info' : 'error',
-                );
-              } finally {
-                if (droppedImportControllerRef.current === controller) {
-                  droppedImportControllerRef.current = null;
-                  setDroppedImportProgress(undefined);
-                }
-              }
-            })();
-          }}
+          onImportFiles={handleImportDroppedFiles}
           onMediaPlaced={(asset, clipId) => bindMediaClip(asset, clipId)}
           onTogglePlayback={context.togglePlayback}
           onSeek={(timeUs) => context.seek(timelineViewRootTime(activeTimelineView, timeUs))}
@@ -6596,6 +6598,9 @@ function EditorWorkspace({
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
           storage={context.storage}
+          onImportFiles={handleImportDroppedFiles}
+          {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
+          onCancelDroppedImport={handleCancelDroppedImport}
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onAddToTimeline={addAssetToTimeline}
           onEditWithAi={(asset) => {

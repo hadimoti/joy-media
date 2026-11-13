@@ -57,6 +57,7 @@ import {
   resolveDesktopAssetUrl,
 } from './desktop-client.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { DroppedImportProgress, type DroppedImportProgressState } from './DroppedImportProgress.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import { MissingMediaSection } from './MissingMediaSection.js';
@@ -137,6 +138,9 @@ export function AssetLibraryPanel({
   onAddToTimeline,
   onEditWithAi,
   onOpenAssetSettings,
+  onImportFiles,
+  droppedImportProgress,
+  onCancelDroppedImport,
   missingMedia,
 }: {
   readonly projectId: string;
@@ -164,6 +168,10 @@ export function AssetLibraryPanel({
     readonly displayName: string;
   }) => void;
   readonly onOpenAssetSettings?: () => void;
+  /** Import OS-dropped files through the shared desktop bridge flow. */
+  readonly onImportFiles?: (files: readonly File[]) => void;
+  readonly droppedImportProgress?: DroppedImportProgressState;
+  readonly onCancelDroppedImport?: () => void;
   /** Missing project media, relinked from the panel's Missing media section. */
   readonly missingMedia?: {
     readonly host: MissingMediaHost;
@@ -417,14 +425,18 @@ export function AssetLibraryPanel({
     setDropActive(false);
   }, []);
   const handleDrop = useCallback(
-    async (event: React.DragEvent) => {
+    (event: React.DragEvent) => {
       event.preventDefault();
       setDropActive(false);
-      const file = event.dataTransfer.files?.[0];
-      if (file === undefined) return;
-      await importFile(file);
+      const files = Array.from(event.dataTransfer.files ?? []);
+      if (files.length === 0) return;
+      if (onImportFiles !== undefined) {
+        onImportFiles(files);
+        return;
+      }
+      for (const file of files) void importFile(file);
     },
-    [importFile],
+    [importFile, onImportFiles],
   );
   const addAssetToTimeline = useCallback(
     async (asset: {
@@ -895,6 +907,12 @@ export function AssetLibraryPanel({
           </div>
         </aside>
         <div className="asset-library-main">
+          {droppedImportProgress !== undefined && onCancelDroppedImport !== undefined && (
+            <DroppedImportProgress
+              progress={droppedImportProgress}
+              onCancel={onCancelDroppedImport}
+            />
+          )}
           {missingMedia !== undefined && (
             <MissingMediaSection
               host={missingMedia.host}
