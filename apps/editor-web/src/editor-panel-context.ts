@@ -99,6 +99,8 @@ export interface EditorPanelContextValue {
   readonly toggleSelection: (id: string) => void;
   readonly selectClips: (clipIds: readonly string[]) => void;
   readonly clearSelection: () => void;
+  /** Restores the default workspace layout and clears saved workspace preferences. */
+  readonly resetWorkspace: () => void;
   readonly dispatchTimeline: (transaction: CommandTransaction) => void;
   readonly dispatchTimelineAndProjectAudio: (
     label: string,

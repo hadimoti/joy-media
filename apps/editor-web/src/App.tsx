@@ -13,6 +13,7 @@ import {
 import { DockviewReact } from 'dockview';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
 import { PanelTab } from './PanelTab.js';
+import { PanelHeaderActions } from './PanelHeaderMenu.js';
 import {
   EditorPanelContext,
   type AnimationGraphFocusRequest,
@@ -422,7 +423,6 @@ import {
   loadEditorUiPreferences,
   saveEditorUiPreferences,
   updateEditorUiPreferences,
-  EDITOR_UI_PREFERENCES_KEY,
 } from './ui-preferences.js';
 import type { EditorUiPreferencesV2 } from './ui-preferences.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
@@ -432,8 +432,7 @@ import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
   persistWorkspacePresetLayout,
-  resetWorkspaceTarget,
-  workspacePresetLayoutKey,
+  resetWorkspaceStorage,
 } from './workspace-presets.js';
 import {
   DOCK_LAYOUT_KEY,
@@ -441,7 +440,6 @@ import {
   DOCK_PANEL_MINIMUM_WIDTH,
   SUPERSEDED_DOCK_LAYOUT_KEYS,
   type EditorViewMode,
-  dockLayoutKey,
   migrateLegacyDockLayout,
   saveViewMode,
 } from './dock-layout.js';
@@ -3636,12 +3634,14 @@ function EditorWorkspace({
       // A saved layout always wins; the first-run layout (Joy Code collapsed)
       // applies only when nothing is saved for this workspace yet.
       const plan = planWorkspaceLayout(storage, preset, mode);
+      let restoredSavedLayout = plan.restored;
       try {
         api.fromJSON(plan.layout as never, { reuseExistingPanels: false });
       } catch (error) {
         if (plan.restored) {
           // A saved layout the editor cannot read: drop it and use the default.
           storage.removeItem(plan.key);
+          restoredSavedLayout = false;
           try {
             api.fromJSON(firstRunWorkspaceLayout(preset, mode) as never, {
               reuseExistingPanels: false,
@@ -3653,7 +3653,9 @@ function EditorWorkspace({
           console.warn('default dock layout rejected, falling back to a stack', error);
         }
       }
-      ensureDockPanels(api);
+      // A missing panel in a saved layout can be an intentional Close panel
+      // action. Repair the first-run seed, but keep saved closures durable.
+      if (!restoredSavedLayout) ensureDockPanels(api);
       api.getPanel('monitor')?.api.setActive();
       persistWorkspacePresetLayout(storage, preset, mode, api.toJSON());
     },
@@ -3690,18 +3692,7 @@ function EditorWorkspace({
   );
 
   const resetWorkspace = useCallback(() => {
-    for (const mode of ['vertical', 'widescreen'] as const) {
-      storage.removeItem(dockLayoutKey(mode));
-      for (const preset of ['enhance', 'audio-captions', 'automate', 'custom'] as const) {
-        storage.removeItem(workspacePresetLayoutKey(mode, preset));
-      }
-    }
-    storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
-    // The older view-mode key would otherwise bring the previous mode back on the next launch.
-    storage.removeItem('joy-media.view-mode.v1');
-    // The same mode and preset as the defaults the preferences were reset to, so the layout and the saved
-    // preferences agree (T-D12 round 2).
-    const target = resetWorkspaceTarget();
+    const target = resetWorkspaceStorage(storage);
     workspacePresetRef.current = target.preset;
     setWorkspacePreset(target.preset);
     setEnhanceTool('effects');
@@ -7585,6 +7576,7 @@ function EditorWorkspace({
                 })),
               selectClips,
               clearSelection: () => setState((current) => ({ ...current, selectedIds: [] })),
+              resetWorkspace,
               dispatchTimeline,
               dispatchTimelineAndProjectAudio,
               updateVisualProperty,
@@ -7654,6 +7646,7 @@ function EditorWorkspace({
               className="workspace"
               components={dockviewComponents}
               defaultTabComponent={PanelTab}
+              rightHeaderActionsComponent={PanelHeaderActions}
               onReady={onReady}
             />
           </EditorPanelContext.Provider>

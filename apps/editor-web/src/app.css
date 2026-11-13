@@ -3011,6 +3011,19 @@ label {
   display: none;
   flex: none;
 }
+#root .workspace .panel-header-action-overflow-menu {
+  display: inline-flex;
+  align-items: center;
+}
+#root .workspace .panel-header-action-overflow-menu .action-overflow-trigger {
+  width: 2rem;
+  min-width: 2rem;
+  height: 2.25rem;
+  padding: 0;
+}
+#root .workspace .panel-header-action-overflow-menu .action-overflow-trigger-label {
+  display: none;
+}
 .action-overflow-trigger {
   font-size: 1.2rem;
   line-height: 1;
@@ -3021,12 +3034,20 @@ label {
   white-space: nowrap;
 }
 .action-overflow-popover {
-  position: absolute;
-  top: calc(100% + 0.25rem);
-  right: 0;
-  z-index: 30;
+  position: fixed;
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  /* Portaled to body, so it must clear Dockview's overlay band (--dv-overlay-z-index 999; floating
+     groups stack up from it by 2 each) and stay below the dialog layer (AppDialogs, 1100). */
+  z-index: 1050;
   display: grid;
-  min-width: 12rem;
+  box-sizing: border-box;
+  min-width: min(12rem, calc(100vw - 1rem));
+  max-width: calc(100vw - 1rem);
+  max-height: calc(100vh - 1rem);
+  overflow-y: auto;
   padding: 0.25rem;
   border: 1px solid var(--joy-border-strong);
   border-radius: var(--radius-md);
