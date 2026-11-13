@@ -1,0 +1,45 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Clip colour by type (T-D11) > 'audio' clip rule snapshot 1`] = `
+{
+  "sharedFill": "--clip-tint: color-mix(in srgb, var(--clip-type) 28%, var(--joy-bg-raised));
+  --clip-rail-fill: var(--clip-type);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 12%), transparent 42%, rgb(0 0 0 / 18%)),
+    var(--clip-tint);",
+  "typeRule": "--clip-type: #3cc8b4;",
+}
+`;
+
+exports[`Clip colour by type (T-D11) > 'effect' clip rule snapshot 1`] = `
+{
+  "sharedFill": "--clip-tint: color-mix(in srgb, var(--clip-type) 28%, var(--joy-bg-raised));
+  --clip-rail-fill: var(--clip-type);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 12%), transparent 42%, rgb(0 0 0 / 18%)),
+    var(--clip-tint);",
+  "typeRule": "--clip-type: #fb7185;",
+}
+`;
+
+exports[`Clip colour by type (T-D11) > 'text' clip rule snapshot 1`] = `
+{
+  "sharedFill": "--clip-tint: color-mix(in srgb, var(--clip-type) 28%, var(--joy-bg-raised));
+  --clip-rail-fill: var(--clip-type);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 12%), transparent 42%, rgb(0 0 0 / 18%)),
+    var(--clip-tint);",
+  "typeRule": "--clip-type: #c4b5fd;",
+}
+`;
+
+exports[`Clip colour by type (T-D11) > 'video' clip rule snapshot 1`] = `
+{
+  "sharedFill": "--clip-tint: color-mix(in srgb, var(--clip-type) 28%, var(--joy-bg-raised));
+  --clip-rail-fill: var(--clip-type);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 12%), transparent 42%, rgb(0 0 0 / 18%)),
+    var(--clip-tint);",
+  "typeRule": "--clip-type: #5b8def;",
+}
+`;
