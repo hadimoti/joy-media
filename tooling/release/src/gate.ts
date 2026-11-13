@@ -83,7 +83,12 @@ export interface ReleaseAttendedEvidence {
   /** Attended receipts by scenario id; a missing receipt is undefined. */
   readonly receipts: Readonly<Record<string, unknown>>;
   readonly sandboxLifecycle: unknown;
+  /** Upgrade receipt from v1.0.2 (sandbox-upgrade.json). */
   readonly sandboxUpgrade: unknown;
+  /** Upgrade receipt from v1.1.0 (sandbox-upgrade-from-1.1.0.json). */
+  readonly sandboxUpgradeFrom110?: unknown;
+  /** The candidate's version, from apps/desktop/package.json: the version each upgrade must end on. */
+  readonly candidateVersion?: string;
   /** Reasons the receipts can not be tied to the commit under test (see resolveAttendedCandidate). Empty when they can. */
   readonly bindingProblems?: readonly string[];
 }
@@ -430,12 +435,22 @@ function lifecycleBlockers(evidence: ReleaseAttendedEvidence | null | undefined)
       setupSha256: evidence.setupSha256,
     }))
       blockers.push(`lifecycle: ${reason}`);
-  if (evidence.sandboxUpgrade === undefined) blockers.push('upgrade: the receipt is missing');
-  else
-    for (const reason of validateSandboxUpgrade(evidence.sandboxUpgrade, {
+  const upgrades: readonly [string, string, unknown][] = [
+    ['1.0.2', 'upgrade', evidence.sandboxUpgrade],
+    ['1.1.0', 'upgrade-from-1.1.0', evidence.sandboxUpgradeFrom110],
+  ];
+  for (const [fromVersion, label, receipt] of upgrades) {
+    if (receipt === undefined) {
+      blockers.push(`${label}: the receipt is missing`);
+      continue;
+    }
+    for (const reason of validateSandboxUpgrade(receipt, {
       setupSha256: evidence.setupSha256,
+      fromVersion,
+      toVersion: evidence.candidateVersion ?? '',
     }))
-      blockers.push(`upgrade: ${reason}`);
+      blockers.push(`${label}: ${reason}`);
+  }
   return blockers;
 }
 
@@ -443,7 +458,7 @@ function lifecycleMessage(evidence: ReleaseAttendedEvidence | null | undefined):
   if (evidence === undefined) return 'Sandbox receipts not supplied to pure evaluator';
   const blockers = lifecycleBlockers(evidence);
   return blockers.length === 0
-    ? 'Windows Sandbox install, upgrade over v1.0.2 and uninstall passed on the candidate setup'
+    ? 'Windows Sandbox install, upgrades over v1.0.2 and v1.1.0 and uninstall passed on the candidate setup'
     : `Sandbox receipts are incomplete: ${blockers.join('; ')}`;
 }
 
@@ -1459,12 +1474,24 @@ export function readAttendedEvidence(
     const value = readJson(fileName);
     if (value !== undefined) receipts[scenarioId] = value;
   }
+  // The desktop package version is the version every Sandbox upgrade must end on.
+  let candidateVersion: string | undefined;
+  try {
+    const pkg = JSON.parse(readFileSync(join(root, 'apps', 'desktop', 'package.json'), 'utf8')) as {
+      version?: unknown;
+    };
+    candidateVersion = typeof pkg.version === 'string' ? pkg.version : undefined;
+  } catch {
+    candidateVersion = undefined;
+  }
   return {
     candidateSha,
     setupSha256,
     receipts,
     sandboxLifecycle: readJson('sandbox-lifecycle.json'),
     sandboxUpgrade: readJson('sandbox-upgrade.json'),
+    sandboxUpgradeFrom110: readJson('sandbox-upgrade-from-1.1.0.json'),
+    candidateVersion,
     bindingProblems: [...bindingProblems, ...setupProblems],
   };
 }
