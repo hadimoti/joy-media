@@ -474,6 +474,7 @@ export function ModelDrawer({
             type="button"
             className="model-drawer-close-btn"
             aria-label="Close Model Drawer"
+            title="Close Model Drawer"
             onClick={onClose}
           >
             <CloseIcon />

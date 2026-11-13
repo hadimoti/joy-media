@@ -170,6 +170,7 @@ export function AssetLibrarySettingsDialog({
             className="agent-settings-close"
             onClick={onClose}
             aria-label="Close dialog"
+            title="Close dialog"
           >
             <CloseIcon />
           </button>

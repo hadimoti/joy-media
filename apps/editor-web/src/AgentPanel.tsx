@@ -3902,6 +3902,7 @@ export function AgentPanel({
                         <button
                           type="button"
                           aria-label={`Detach ${asset.displayName}`}
+                          title={`Detach ${asset.displayName}`}
                           onClick={() => onDetachAsset(asset.assetId)}
                         >
                           <CloseIcon />
