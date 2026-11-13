@@ -47,6 +47,7 @@ import type {
 } from '@joy-media/render-ir';
 import { toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
+import { validateH264ExportDimensions } from '@joy-media/job-protocol';
 import type {
   CommandTransaction,
   GraphTransaction,
@@ -3840,6 +3841,24 @@ function EditorWorkspace({
       const exportTimelineProject = structuredClone(session.timelineProject);
       const exportVisualProject = structuredClone(session.visualProject);
       const exportAudioState = structuredClone(audioState);
+      const compositionV1 =
+        exportVisualProject.compositions[exportVisualProject.rootCompositionId];
+      const exportSettings = resolveExportSettings(activeExportPreset, {
+        width: compositionV1?.width ?? 1080,
+        height: compositionV1?.height ?? 1920,
+      });
+      const { width, height, frameRate, videoBitrate, audio } = exportSettings;
+      const dimensionValidation = validateH264ExportDimensions(width, height);
+      if (!dimensionValidation.ok) {
+        window.clearTimeout(exportToastTimerRef.current);
+        showToast(dimensionValidation.reason, 'error');
+        setExportStatus(`Export failed: ${dimensionValidation.reason}`);
+        setExportProgress(undefined);
+        exportToastTimerRef.current = window.setTimeout(() => {
+          setExportStatus(undefined);
+        }, 8_000);
+        return;
+      }
       const missingLuts = missingColorLutExportDependencies(exportVisualProject);
       if (missingLuts.length > 0) {
         showToast(
@@ -3930,15 +3949,6 @@ function EditorWorkspace({
           throw new Error('Browser storage is almost full. Free space before exporting.');
         }
         await syncStickerBitmaps(exportVisualProject);
-        const compositionV1 =
-          exportVisualProject.compositions[exportVisualProject.rootCompositionId];
-        const baseWidth = compositionV1?.width ?? 1080;
-        const baseHeight = compositionV1?.height ?? 1920;
-        const exportSettings = resolveExportSettings(activeExportPreset, {
-          width: baseWidth,
-          height: baseHeight,
-        });
-        const { width, height, frameRate, videoBitrate, audio } = exportSettings;
         const compositionTimeline =
           exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
         const allTimelineClips = flattenRootTimelineVideoClips(exportTimelineProject);

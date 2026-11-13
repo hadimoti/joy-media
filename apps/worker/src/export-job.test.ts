@@ -31,6 +31,41 @@ describe('leased export job', () => {
     });
   });
 
+  it('rejects odd canvas dimensions before invoking FFmpeg or completing the lease', () => {
+    const calls: string[] = [];
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-invalid-export-'));
+    const output = join(directory, 'out.mp4');
+
+    expect(() =>
+      executeLeasedExport(
+        { complete: (_workerId, jobId) => calls.push(jobId) },
+        'worker-1',
+        'job-odd-size',
+        {
+          sourcePath: join(directory, 'missing.mp4'),
+          payload: {
+            schemaVersion: 1,
+            frameCount: 3,
+            producer: 'browser-staged-preview-export',
+            manifest: {
+              projectId: 'p',
+              revision: 1,
+              width: 65,
+              height: 36,
+              frameRate: 30,
+              durationUs: 100_000,
+              preset: 'custom',
+            },
+          },
+        },
+        output,
+      ),
+    ).toThrow(/even/i);
+
+    expect(calls).toEqual([]);
+    expect(existsSync(output)).toBe(false);
+  });
+
   it('verifies output before completing the lease', () => {
     const calls: string[] = [];
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-leased-export-'));

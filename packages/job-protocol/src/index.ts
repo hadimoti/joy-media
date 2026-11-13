@@ -6,6 +6,13 @@
  */
 export const PACKAGE_NAME = '@joy-media/job-protocol' as const;
 
+export {
+  MAX_H264_EXPORT_DIMENSION,
+  MAX_H264_EXPORT_PIXELS,
+  validateH264ExportDimensions,
+} from './export-dimensions.js';
+export type { H264ExportDimensionsResult } from './export-dimensions.js';
+
 export type {
   WorkerCapability,
   LocalGpuWorkerJobType,

@@ -730,7 +730,7 @@ describe('detectOfflineMp4Capability', () => {
       encoder,
     );
     const large = await detectOfflineMp4Capability(
-      { width: 7680, height: 4320, frameRate: 60, needsAudio: false },
+      { width: 3840, height: 2160, frameRate: 60, needsAudio: false },
       encoder,
     );
 
@@ -800,6 +800,25 @@ describe('detectOfflineMp4Capability', () => {
       expect(capability.ok).toBe(false);
       expect(reasonOf(capability)).toContain(`${size.width}x${size.height}`);
     }
+    expect(queries).toBe(0);
+  });
+
+  it('refuses a canvas above the H.264 export limit before probing browser support', async () => {
+    let queries = 0;
+    const capability = await detectOfflineMp4Capability(
+      { ...input, width: 3840, height: 2162 },
+      {
+        videoEncoder: {
+          isConfigSupported: async () => {
+            queries += 1;
+            return { supported: true };
+          },
+        },
+      },
+    );
+
+    expect(capability.ok).toBe(false);
+    expect(reasonOf(capability)).toMatch(/8,294,400|export limit|maximum/i);
     expect(queries).toBe(0);
   });
 

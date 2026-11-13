@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { validateH264ExportDimensions } from '@joy-media/job-protocol';
 export type ExportPresetId =
   | 'social-h264-aac'
   | 'reels-1080'
@@ -51,6 +52,9 @@ export function freezeManifest(manifest: RenderManifest): RenderManifest {
     manifest.durationUs < 1
   )
     throw new RangeError('render manifest is invalid');
+  const dimensions = validateH264ExportDimensions(manifest.width, manifest.height);
+  if (!dimensions.ok)
+    throw new RangeError(`render manifest dimensions are invalid: ${dimensions.reason}`);
   return Object.freeze({ ...manifest });
 }
 /** Arguments only: no shell interpolation or project-controlled executable paths. */

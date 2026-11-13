@@ -252,22 +252,12 @@ export function frameCountFor(durationUs: number, frameRate: number): number {
   return Math.max(1, Math.round((durationUs / 1_000_000) * frameRate));
 }
 
-/** The pixel size each preset exports at (packages/export-core/src/index.ts). */
+/** The canvas size each preset exports at (packages/export-core/src/index.ts). */
 export function dimensionsForPreset(
-  preset: ExportPreset,
+  _preset: ExportPreset,
   fallback: { readonly width: number; readonly height: number },
 ): { readonly width: number; readonly height: number } {
-  switch (preset) {
-    case 'reels-1080':
-    case 'shorts-1080':
-      return { width: 1080, height: 1920 };
-    case 'youtube-1080':
-      return { width: 1920, height: 1080 };
-    case 'high-bitrate':
-      return { width: Math.max(fallback.width, 1920), height: Math.max(fallback.height, 1080) };
-    default:
-      return fallback;
-  }
+  return fallback;
 }
 
 /**

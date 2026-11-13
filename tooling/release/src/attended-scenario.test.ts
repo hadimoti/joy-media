@@ -712,20 +712,32 @@ describe('scenario helpers', () => {
   });
 
   it('sizes each preset as the export core does', () => {
-    const fallback = { width: 1920, height: 1080 };
-    expect(dimensionsForPreset('reels-1080', fallback)).toEqual({ width: 1080, height: 1920 });
-    expect(dimensionsForPreset('shorts-1080', fallback)).toEqual({ width: 1080, height: 1920 });
-    expect(dimensionsForPreset('youtube-1080', { width: 1080, height: 1920 })).toEqual({
-      width: 1920,
-      height: 1080,
-    });
-    expect(dimensionsForPreset('social-h264-aac', { width: 720, height: 1280 })).toEqual({
-      width: 720,
-      height: 1280,
-    });
-    expect(dimensionsForPreset('high-bitrate', { width: 640, height: 480 })).toEqual({
-      width: 1920,
-      height: 1080,
+    for (const preset of [
+      'reels-1080',
+      'shorts-1080',
+      'youtube-1080',
+      'social-h264-aac',
+      'high-bitrate',
+    ] as const) {
+      const canvas = { width: 640, height: 480 };
+      expect(dimensionsForPreset(preset, canvas)).toEqual(canvas);
+    }
+  });
+
+  it('expects high-bitrate verification at the saved canvas size', () => {
+    const document = baseDocument();
+    const highBitrateDocument: JoyDocument = {
+      ...document,
+      exportPreset: 'high-bitrate',
+      compositions: {
+        root: { ...document.compositions.root, width: 640, height: 480 },
+      },
+    };
+
+    expect(exportExpectation(highBitrateDocument)).toMatchObject({
+      preset: 'high-bitrate',
+      width: 640,
+      height: 480,
     });
   });
 

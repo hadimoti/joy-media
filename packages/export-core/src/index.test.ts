@@ -29,6 +29,23 @@ describe('deterministic export contract', () => {
     expect(ffmpegArgs(manifest, 'out.mp4')).toContain('libx264');
   });
 
+  it('accepts a normal canvas export size', () => {
+    expect(freezeManifest({ ...manifest, width: 1920, height: 1080 })).toMatchObject({
+      width: 1920,
+      height: 1080,
+    });
+  });
+
+  it('rejects odd H.264 canvas dimensions instead of changing the output size', () => {
+    expect(() => freezeManifest({ ...manifest, width: 65, height: 36 })).toThrow(/even/i);
+  });
+
+  it('rejects a canvas above the documented H.264 export limit', () => {
+    expect(() => freezeManifest({ ...manifest, width: 3840, height: 2162 })).toThrow(
+      /export limit|maximum/i,
+    );
+  });
+
   it.each(['reels-1080', 'shorts-1080', 'youtube-1080', 'high-bitrate'] as const)(
     'keeps canvas dimensions for the %s export preset',
     (preset) => {

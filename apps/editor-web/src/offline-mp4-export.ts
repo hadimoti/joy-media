@@ -16,6 +16,7 @@ import type {
   BrowserExportManifest,
   BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
+import { validateH264ExportDimensions } from '@joy-media/job-protocol';
 import { avcCodecString, selectAvcLevels, type AvcProfile } from './avc-level.js';
 import { OFFLINE_AAC_CODEC } from './offline-aac-track.js';
 
@@ -159,13 +160,8 @@ export async function detectOfflineMp4Capability(
 ): Promise<OfflineMp4Capability> {
   const { width, height, frameRate } = input;
   const bitrate = input.bitrate ?? defaultOfflineMp4Bitrate(width, height, frameRate);
-  // mediabunny refuses an odd width or height for H.264 when the first frame is added, which would
-  // fail the whole export. Say so here, so the recorder is used instead.
-  if (width % 2 !== 0 || height % 2 !== 0)
-    return {
-      ok: false,
-      reason: `H.264 needs an even width and height, and this export is ${width}x${height}.`,
-    };
+  const dimensions = validateH264ExportDimensions(width, height);
+  if (!dimensions.ok) return dimensions;
   const videoEncoder =
     deps.videoEncoder ?? (typeof VideoEncoder === 'undefined' ? undefined : VideoEncoder);
   if (videoEncoder === undefined)
