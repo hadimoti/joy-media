@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import {
   findRegistryProvider,
+  generationSupport,
   signInProviders,
   type ProviderRegion,
   type ProviderRegionId,
@@ -129,6 +130,9 @@ function ProviderRouteAccordion({
   const [apiKeyMessage, setApiKeyMessage] = useState<string | undefined>(undefined);
   const apiKeyRef = useRef<HTMLInputElement>(null);
   const selectedRegion = regions.find((region) => region.id === apiKeyRegionId) ?? regions[0];
+  // Only the ChatGPT sign-in card says this: the sign-in cannot make pictures (T-C07).
+  const cannotMakePictures =
+    provider.signInOnly === true && !generationSupport(provider.id, 'image').supported;
 
   const toggle = (): void => {
     if (open && apiKeyRef.current !== null) apiKeyRef.current.value = '';
@@ -192,6 +196,11 @@ function ProviderRouteAccordion({
 
       {open && (
         <div id={'joy-provider-routes-' + provider.id} className="joy-accordion-content">
+          {cannotMakePictures && (
+            <p className="joy-provider-capability-note">
+              {SETTINGS_PROVIDER_SIGN_IN.chatGptCannotMakePictures}
+            </p>
+          )}
           <section
             className="joy-provider-route"
             aria-label={SETTINGS_PROVIDER_SIGN_IN.oauthRouteLabel.replace(

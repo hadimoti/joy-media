@@ -446,6 +446,17 @@ The `{label}`, `{model}`, `{provider}` and `{reason}` parts are filled in by the
 
 ---
 
+### Generation on provider cards (T-C07)
+
+The `{provider}` part is filled in by the app. The "Can make" line appears only on a saved connection whose provider can make pictures or videos in JOY Media (MiniMax today). Every other card shows no such line.
+
+| Old text       | New text                                                         | Where it is                                                        | Owner's answer |
+| -------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------ | -------------- |
+| (new in T-C07) | Can make: pictures and videos                                    | Saved connection card, for a provider that makes both              |                |
+| (new in T-C07) | Can make: pictures                                               | Saved connection card, for a provider that makes only pictures     |                |
+| (new in T-C07) | Can make: videos                                                 | Saved connection card, for a provider that makes only videos       |                |
+| (new in T-C07) | ChatGPT sign-in cannot make pictures. Use MiniMax or an API key. | ChatGPT card under Connection and sign-in, above the sign-in route |                |
+
 ## 13. Words to avoid in this dialog
 
 For anyone writing more text here later, these are the words the owner did not want, and what to write instead.

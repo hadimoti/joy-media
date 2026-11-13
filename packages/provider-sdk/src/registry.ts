@@ -112,7 +112,39 @@ export interface RegistryProvider {
       readonly sourceDate: string;
     };
   };
+  /** The pictures and videos this provider can make in JOY Media (T-C02). Absent means none. */
+  readonly generation?: ProviderGeneration;
 }
+
+/** The two things a provider may generate. */
+export type GenerationKind = 'image' | 'video';
+
+/**
+ * One generation route a provider offers. The adapter for `api` lives in apps/desktop/src/main/providers/generation/.
+ * Limits and model names are not here: they are settings of that adapter, so they can be corrected without a change
+ * to the registry.
+ */
+export interface GenerationCapability {
+  readonly api: 'minimax-h3';
+  /** Where the fact was read. */
+  readonly source: string;
+  readonly sourceDate: string;
+  /** What the route makes, in one line. */
+  readonly note: string;
+}
+
+export interface ProviderGeneration {
+  readonly image?: GenerationCapability;
+  readonly video?: GenerationCapability;
+}
+
+/**
+ * Whether a provider can make a picture or a video. A refusal carries a plain reason the settings or the editor can show,
+ * so no caller has to name a provider to explain it.
+ */
+export type GenerationSupport =
+  | { readonly supported: true; readonly capability: GenerationCapability }
+  | { readonly supported: false; readonly reason: string };
 
 const INTERNATIONAL = 'international';
 const CHINA = 'china';
@@ -206,6 +238,21 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
         docsUrl: 'https://platform.minimax.cn/docs',
       },
     ],
+    generation: {
+      image: {
+        api: 'minimax-h3',
+        source: 'Master plan facts P4 and P5 (MiniMax image-generation pages, read 12 Nov 2026)',
+        sourceDate: '2026-11-12',
+        note: 'Pictures from MiniMax-H3-Image, with image-01 as the legacy route.',
+      },
+      video: {
+        api: 'minimax-h3',
+        source:
+          'Master plan facts P6 to P9 (MiniMax video pages and M Plan notes, read 12 Nov 2026)',
+        sourceDate: '2026-11-12',
+        note: 'Videos from MiniMax-H3-Lite at 480P, 4 seconds, with Hailuo-02 as the legacy route. M Plan Go has no video (P9).',
+      },
+    },
   },
   {
     id: 'gemini',
@@ -382,6 +429,34 @@ export function findRegistryProvider(id: string): RegistryProvider | undefined {
 /** The thinking mode a registry provider requires for chat completions, if its documented row specifies one. */
 export function getProviderThinkingMode(provider: string): ProviderThinkingMode | undefined {
   return findRegistryProvider(provider)?.requestSettings?.thinkingMode?.value;
+}
+
+/**
+ * Whether a provider can make a picture or a video. Any provider without a route, the ChatGPT sign-in and a custom
+ * endpoint included, is refused with a plain reason. The reason names the kind, so the text reads the same wherever it
+ * is shown.
+ */
+export function generationSupport(provider: string, kind: GenerationKind): GenerationSupport {
+  const noun = kind === 'image' ? 'pictures' : 'videos';
+  if (isCustomProviderId(provider)) {
+    return { supported: false, reason: `A custom endpoint cannot make ${noun} in JOY Media.` };
+  }
+  const registered = findRegistryProvider(provider);
+  if (registered === undefined) {
+    return { supported: false, reason: `This provider cannot make ${noun} in JOY Media.` };
+  }
+  const capability = registered.generation?.[kind];
+  if (capability !== undefined) return { supported: true, capability };
+  if (registered.signInOnly === true) {
+    return {
+      supported: false,
+      reason: `The ChatGPT sign-in cannot make ${noun}: OpenAI refuses image and video tools for a ChatGPT sign-in.`,
+    };
+  }
+  return {
+    supported: false,
+    reason: `${registered.label} cannot make ${noun} in JOY Media. Only MiniMax can.`,
+  };
 }
 
 /**
