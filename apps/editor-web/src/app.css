@@ -3191,13 +3191,16 @@ label {
 }
 .timeline-clip--audio,
 .timeline-clip--voice {
-  /* Audio sits one surface step apart from video — by value, never by hue. */
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 42%, rgb(0 0 0 / 18%)),
-    var(--joy-bg-control);
   border-color: var(--joy-border);
   border-top-color: rgb(255 255 255 / 10%);
   border-bottom-color: rgb(0 0 0 / 55%);
+}
+/* Audio sits one surface step apart from video — by value, never by hue. Audio clips
+   take the T-D11 type tint, so only voice keeps this background. */
+.timeline-clip--voice {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 42%, rgb(0 0 0 / 18%)),
+    var(--joy-bg-control);
 }
 .timeline-clip--comp {
   background:
@@ -3205,10 +3208,9 @@ label {
     var(--joy-bg-active);
   --clip-rail: var(--joy-accent);
 }
-.timeline-clip--text,
+/* Text and effect take the T-D11 type tint, so they are not listed here. */
 .timeline-clip--caption,
 .timeline-clip--motion,
-.timeline-clip--effect,
 .timeline-clip--filter,
 .timeline-clip--adjust,
 .timeline-clip--scene3d {
@@ -3231,10 +3233,6 @@ label {
   pointer-events: none;
   overflow: hidden;
 }
-.timeline-clip--text .timeline-clip-kind-surface {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 45%), var(--joy-bg-raised);
-}
 .timeline-clip--caption .timeline-clip-kind-surface {
   background:
     linear-gradient(180deg, rgb(255 255 255 / 9%), transparent 48%),
@@ -3245,11 +3243,6 @@ label {
   background:
     linear-gradient(135deg, transparent 0 38%, rgb(255 255 255 / 8%) 39% 42%, transparent 43%),
     linear-gradient(180deg, rgb(255 255 255 / 6%), transparent 52%), var(--joy-bg-control);
-}
-.timeline-clip--effect .timeline-clip-kind-surface {
-  background:
-    repeating-linear-gradient(135deg, rgb(255 255 255 / 7%) 0 5px, transparent 5px 10px),
-    var(--joy-bg-control);
 }
 .timeline-clip--filter .timeline-clip-kind-surface {
   background: linear-gradient(
@@ -3294,15 +3287,51 @@ label {
   transform: translate(-50%, -50%) rotate(30deg) skewY(-8deg);
   box-shadow: 0.22rem -0.22rem 0 rgb(0 0 0 / 28%);
 }
+/* T-D11: clip colour by type. Each type sets --clip-type; its fill is a 28% tint of
+   that colour over the raised surface, and its left rail is the full colour. These
+   rules come after the base surfaces above, so they win at equal specificity.
+   The selection outline stays gold (--joy-accent). */
+.timeline-clip--video {
+  --clip-type: #5b8def;
+}
+.timeline-clip--audio {
+  --clip-type: #3cc8b4;
+}
+.timeline-clip--text {
+  --clip-type: #c4b5fd;
+}
+.timeline-clip--effect {
+  --clip-type: #fb7185;
+}
+.timeline-clip--video,
+.timeline-clip--audio,
+.timeline-clip--text,
+.timeline-clip--effect {
+  --clip-tint: color-mix(in srgb, var(--clip-type) 28%, var(--joy-bg-raised));
+  --clip-rail-fill: var(--clip-type);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 12%), transparent 42%, rgb(0 0 0 / 18%)),
+    var(--clip-tint);
+}
+.timeline-clip--video .timeline-clip-cell {
+  background: linear-gradient(145deg, rgb(255 255 255 / 13%), transparent 52%), var(--clip-tint);
+}
+.timeline-clip--text .timeline-clip-kind-surface {
+  background: linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 45%), var(--clip-tint);
+}
+.timeline-clip--effect .timeline-clip-kind-surface {
+  background:
+    repeating-linear-gradient(135deg, rgb(255 255 255 / 7%) 0 5px, transparent 5px 10px),
+    var(--clip-tint);
+}
 .timeline-clip::before {
   content: '';
   position: absolute;
   inset: 0 auto 0 0;
   width: 3px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--clip-rail) 88%, white),
-    var(--clip-rail)
+  background: var(
+    --clip-rail-fill,
+    linear-gradient(180deg, color-mix(in srgb, var(--clip-rail) 88%, white), var(--clip-rail))
   );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
   border-radius: var(--radius-sm) 0 0 var(--radius-sm);
@@ -3321,11 +3350,20 @@ label {
     0 2px 4px rgb(0 0 0 / 38%),
     0 6px 14px rgb(0 0 0 / 34%);
 }
-.timeline-clip--audio:hover,
+/* Audio hover is set by the T-D11 hover rule below; only voice keeps its own. */
 .timeline-clip--voice:hover {
   background:
     linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 42%, rgb(0 0 0 / 26%)),
     var(--joy-bg-active);
+}
+/* T-D11: hover keeps the type tint, so the colour does not drop on hover. */
+.timeline-clip--video:hover,
+.timeline-clip--audio:hover,
+.timeline-clip--text:hover,
+.timeline-clip--effect:hover {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 40%, rgb(0 0 0 / 22%)),
+    var(--clip-tint);
 }
 .timeline-clip[aria-pressed='true'] {
   outline: 2px solid var(--joy-accent);
@@ -3356,7 +3394,7 @@ label {
     linear-gradient(145deg, rgb(255 255 255 / 13%), transparent 52%), var(--joy-bg-elevated);
 }
 .timeline-clip--video .timeline-clip-cell:nth-child(3n + 2) {
-  background: linear-gradient(35deg, rgb(255 255 255 / 10%), transparent 55%), var(--joy-bg-active);
+  background: linear-gradient(35deg, rgb(255 255 255 / 10%), transparent 55%), var(--clip-tint);
 }
 .timeline-clip--overlay .timeline-clip-filmstrip {
   bottom: 32%;
