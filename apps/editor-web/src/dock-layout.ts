@@ -107,6 +107,45 @@ export function seedDockLayout(mode: EditorViewMode): unknown {
   return mode === 'widescreen' ? widescreenDockLayout() : verticalDockLayout();
 }
 
+/** The Dockview group that holds the Joy Code panel in both seeds. */
+const JOY_CODE_GROUP_ID = 'agent-col';
+
+/**
+ * Takes the Joy Code group out of the grid.
+ *
+ * Joy Code is optional, so the editor does not reserve a column for it before
+ * the user asks for it. The panel stays registered in `panels`, so the saved
+ * layout still knows it and "Open Joy Code" can bring it back.
+ */
+export function collapseJoyCodeGroup(layout: unknown): unknown {
+  if (!isRecord(layout) || !isRecord(layout.grid)) return layout;
+  const grid = layout.grid;
+  const root = grid.root;
+  if (!isRecord(root) || !Array.isArray(root.data)) return layout;
+
+  const strip = (nodes: readonly unknown[]): unknown[] =>
+    nodes.flatMap((node) => {
+      if (!isRecord(node)) return [node];
+      const data = node.data;
+      if (node.type === 'leaf' && isRecord(data) && data.id === JOY_CODE_GROUP_ID) {
+        return [];
+      }
+      if (node.type === 'branch' && Array.isArray(data)) {
+        const next = strip(data);
+        // A branch that lost every child goes with it.
+        return next.length === 0 ? [] : [{ ...node, data: next }];
+      }
+      return [node];
+    });
+
+  const nextRoot = { ...root, data: strip(root.data) };
+  const nextLayout = { ...layout, grid: { ...grid, root: nextRoot } };
+  if (layout.activeGroup === JOY_CODE_GROUP_ID) {
+    return { ...nextLayout, activeGroup: 'monitor' };
+  }
+  return nextLayout;
+}
+
 /** @deprecated Alias for vertical seed — tests and older call sites. */
 export function defaultDockLayout(): unknown {
   return verticalDockLayout();

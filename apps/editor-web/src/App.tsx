@@ -387,7 +387,11 @@ import type { EditorUiPreferencesV2 } from './ui-preferences.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
 import { usePopup, usePopupManager, usePopupsClosedWhile } from './popup-manager.js';
 import { POPUP_IDS } from './popup-ids.js';
-import { workspacePresetLayout, workspacePresetLayoutKey } from './workspace-presets.js';
+import {
+  firstRunWorkspaceLayout,
+  planWorkspaceLayout,
+  workspacePresetLayoutKey,
+} from './workspace-presets.js';
 import {
   DOCK_LAYOUT_KEY,
   DOCK_PANEL_MINIMUM_HEIGHT,
@@ -396,10 +400,8 @@ import {
   type EditorViewMode,
   dockLayoutKey,
   migrateLegacyDockLayout,
-  migrateDockLayout,
   serializeDockLayout,
   saveViewMode,
-  seedDockLayout,
 } from './dock-layout.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
@@ -3486,6 +3488,9 @@ function EditorWorkspace({
     };
 
     for (const panel of CORE_WORKSPACE_PANELS) {
+      // Joy Code is optional: a layout without its group keeps it out of the
+      // dock until the user opens it from the menu.
+      if (panel === 'agent' && api.getPanel('agent') === undefined) continue;
       addPanel(panel, {
         inactive: true,
         ...(panel === 'flow' && api.getPanel('timeline') !== undefined
@@ -3497,35 +3502,29 @@ function EditorWorkspace({
 
   const applyDockLayout = useCallback(
     (api: DockviewApi, mode: EditorViewMode, preset = workspacePresetRef.current) => {
-      const layoutKey =
-        preset === 'edit' ? dockLayoutKey(mode) : workspacePresetLayoutKey(mode, preset);
-      const saved = storage.getItem(layoutKey);
-      let restored = false;
-      if (saved !== null) {
-        try {
-          api.fromJSON(migrateDockLayout(JSON.parse(saved)) as never, {
-            reuseExistingPanels: false,
-          });
-          restored = true;
-        } catch {
-          storage.removeItem(layoutKey);
-        }
-      }
-      if (!restored) {
-        try {
-          api.fromJSON(
-            (preset === 'edit'
-              ? seedDockLayout(mode)
-              : workspacePresetLayout(preset, mode)) as never,
-            { reuseExistingPanels: false },
-          );
-        } catch (error) {
+      // A saved layout always wins; the first-run layout (Joy Code collapsed)
+      // applies only when nothing is saved for this workspace yet.
+      const plan = planWorkspaceLayout(storage, preset, mode);
+      try {
+        api.fromJSON(plan.layout as never, { reuseExistingPanels: false });
+      } catch (error) {
+        if (plan.restored) {
+          // A saved layout the editor cannot read: drop it and use the default.
+          storage.removeItem(plan.key);
+          try {
+            api.fromJSON(firstRunWorkspaceLayout(preset, mode) as never, {
+              reuseExistingPanels: false,
+            });
+          } catch (fallbackError) {
+            console.warn('default dock layout rejected, falling back to a stack', fallbackError);
+          }
+        } else {
           console.warn('default dock layout rejected, falling back to a stack', error);
         }
       }
       ensureDockPanels(api);
       api.getPanel('monitor')?.api.setActive();
-      storage.setItem(layoutKey, serializeDockLayout(api.toJSON()));
+      storage.setItem(plan.key, serializeDockLayout(api.toJSON()));
     },
     [ensureDockPanels, storage],
   );
