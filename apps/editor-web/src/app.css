@@ -2197,7 +2197,7 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 .monitor-timecode.is-invalid {
-  border-color: #ff7b72;
+  border-color: var(--joy-danger);
 }
 .monitor-time-speed {
   min-width: 2.2rem;
@@ -2239,7 +2239,7 @@ h2 {
   opacity: 0.4;
 }
 .monitor-meter-clip.is-lit {
-  color: #ff5c5c;
+  color: var(--joy-danger);
   font-weight: 600;
   opacity: 1;
 }
