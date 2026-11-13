@@ -22,6 +22,7 @@ import {
 } from '@joy-media/project-schema';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { PropertyRow, type PropertyAnimationState } from './components/PropertyRow.js';
+import { ColorWheels } from './ColorWheels.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { readMonitorPixels as readLiveMonitorPixels } from './monitor-readback.js';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
@@ -556,13 +557,15 @@ export function ColorPanel({
           />
         )}
         {tab === 'wheels' && (
-          <WheelsSection
+          <ColorWheels
             draft={draft}
             onChange={setDraft}
             onCommit={commit}
             animationStateFor={animationStateFor}
             onToggleAnimation={toggleNumericAnimation}
             canAnimate={onDispatch !== undefined}
+            scope={target === 'clip' ? 'clip' : 'output'}
+            clipId={target === 'clip' ? selectedClipId : undefined}
           />
         )}
         {tab === 'curves' && (
@@ -683,85 +686,6 @@ function AdjustSection({
         onClick={() => onCommit({ ...draft, adjust: IDENTITY_COLOR_ADJUSTMENTS })}
       >
         Reset section
-      </button>
-    </section>
-  );
-}
-
-function WheelsSection({
-  draft,
-  onChange,
-  onCommit,
-  animationStateFor,
-  onToggleAnimation,
-  canAnimate,
-}: {
-  draft: ColorGradeV2;
-  onChange: (next: ColorGradeV2) => void;
-  onCommit: (next: ColorGradeV2) => void;
-  animationStateFor: (propertyId: string) => PropertyAnimationState;
-  onToggleAnimation: (propertyId: string, value: number, kind?: 'scalar' | 'hue') => void;
-  canAnimate: boolean;
-}) {
-  const wheels = { ...IDENTITY_COLOR_WHEELS, ...(draft.wheels ?? {}) };
-  const update = (
-    name: 'lift' | 'gamma' | 'gain' | 'offset',
-    key: 'r' | 'g' | 'b' | 'master',
-    value: number,
-    commit = false,
-  ) => {
-    const next = { ...draft, wheels: { ...wheels, [name]: { ...wheels[name], [key]: value } } };
-    onChange(next);
-    if (commit) onCommit(next);
-  };
-  return (
-    <section className="color-section">
-      <h3>Lift · Gamma · Gain</h3>
-      <div className="color-wheels-grid">
-        {(['lift', 'gamma', 'gain', 'offset'] as const).map((name) => (
-          <div className="color-wheel-card" key={name}>
-            <div className={`color-wheel color-wheel--${name}`} aria-label={`${name} color wheel`}>
-              <span>+</span>
-            </div>
-            <strong>{name}</strong>
-            <PropertyRow
-              label="Master"
-              controlId={`color-wheel-${name}-master`}
-              value={wheels[name].master.toFixed(2)}
-              onReset={() => update(name, 'master', 0, true)}
-              {...(!canAnimate
-                ? {}
-                : {
-                    animationState: animationStateFor(`wheels.${name}.master`),
-                    onToggleAnimation: () =>
-                      onToggleAnimation(`wheels.${name}.master`, wheels[name].master),
-                  })}
-            >
-              <input
-                id={`color-wheel-${name}-master`}
-                type="range"
-                min={-1}
-                max={1}
-                step={0.01}
-                value={wheels[name].master}
-                onChange={(e) => update(name, 'master', e.currentTarget.valueAsNumber)}
-                onPointerUp={(e) => update(name, 'master', e.currentTarget.valueAsNumber, true)}
-                onBlur={(e) => update(name, 'master', e.currentTarget.valueAsNumber, true)}
-                onKeyUp={(e) => {
-                  if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End')
-                    update(name, 'master', e.currentTarget.valueAsNumber, true);
-                }}
-              />
-            </PropertyRow>
-          </div>
-        ))}
-      </div>
-      <button
-        type="button"
-        className="section-reset"
-        onClick={() => onCommit({ ...draft, wheels: IDENTITY_COLOR_WHEELS })}
-      >
-        Reset wheels
       </button>
     </section>
   );
