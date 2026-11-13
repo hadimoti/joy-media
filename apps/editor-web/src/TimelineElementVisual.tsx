@@ -3,11 +3,11 @@ import {
   AutoCaptionIcon,
   CubeIcon,
   EffectsUiIcon,
+  FilmIcon,
   FilterIcon,
   LayersIcon,
   SlidersIcon,
   TextTabIcon,
-  TimelineVideoTrackIcon,
   WorkflowPathIcon,
 } from './icons.js';
 import type { TimelineElementKind } from './timeline-element-kind.js';
@@ -52,7 +52,7 @@ export function TimelineElementGlyph({ kind }: { readonly kind: TimelineElementK
       return <AudioIcon />;
     case 'video':
     default:
-      return <TimelineVideoTrackIcon />;
+      return <FilmIcon />;
   }
 }
 

@@ -31,6 +31,32 @@ describe('dock panel tab icons', () => {
     expect(panelTabIconUrl('scene3d')).not.toContain('24_3d');
   });
 
+  it('draws every other panel from the one outline set (T-D09)', () => {
+    for (const panelId of PANEL_IDS) {
+      if (panelId === 'scene3d') continue;
+      expect(
+        panelTabSvgIcon(panelId),
+        `${panelId} (${panelLabel(panelId)}) should draw an inline SVG glyph`,
+      ).toBeTruthy();
+      // The PNG masks are the old set; a panel that still uses one is not on
+      // the shared outline set yet.
+      expect(
+        panelTabIconUrl(panelId),
+        `${panelId} should not fall back to a PNG mask`,
+      ).toBeUndefined();
+    }
+  });
+
+  it('gives every panel its own glyph, so two panels never look the same (T-D09)', () => {
+    const seen = new Map<unknown, string>();
+    for (const panelId of PANEL_IDS) {
+      const glyph = panelTabSvgIcon(panelId) ?? panelTabIconUrl(panelId);
+      const owner = seen.get(glyph);
+      expect(owner, `${panelId} shares its glyph with ${owner ?? 'another panel'}`).toBe(undefined);
+      seen.set(glyph, panelId);
+    }
+  });
+
   it('gives every panel a non-empty name that also serves as its tooltip (OB-01b, OB-16c)', () => {
     for (const panelId of PANEL_IDS) {
       const label = PANEL_LABELS[panelId];

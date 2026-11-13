@@ -306,6 +306,20 @@ input[type='checkbox']:focus-visible {
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
 }
+/* The section tab glyph from the shared outline set (T-D09). */
+.joy-panel-tab-svg {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  color: inherit;
+}
+.joy-panel-tab-svg svg {
+  width: 1rem;
+  height: 1rem;
+}
 .joy-panel-tab:hover:not(:disabled) {
   color: var(--joy-text);
 }
@@ -14256,9 +14270,8 @@ label {
 .asset-library > .joy-panel-tabs .joy-panel-tab {
   justify-content: center;
 }
-.asset-library > .joy-panel-tabs .joy-panel-tab-label {
-  display: none;
-}
+/* The section tab shows its name as well as its glyph (T-D09): the label is
+   what tells the sections apart, and the count alone does not. */
 .asset-library > .joy-panel-tabs .joy-panel-tab-count {
   flex: none;
   color: var(--joy-text-secondary);
@@ -14421,6 +14434,20 @@ label {
   -webkit-mask-size: contain;
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
+}
+/* The sidebar glyph from the shared outline set (T-D09). */
+.templates-sidebar-tab-svg {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  color: inherit;
+}
+.templates-sidebar-tab-svg svg {
+  width: 1.15rem;
+  height: 1.15rem;
 }
 .templates-sidebar-tab:hover,
 .templates-sidebar-tab:focus-visible {

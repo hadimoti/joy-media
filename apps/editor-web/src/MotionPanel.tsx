@@ -16,6 +16,7 @@ import {
   useContext,
   type MutableRefObject,
   type CSSProperties,
+  type ComponentType,
 } from 'react';
 import type { AnimatablePropertyV1, VisualObjectV1 } from '@joy-media/project-schema';
 import { ANIMATABLE_PROPERTIES } from '@joy-media/project-schema';
@@ -45,9 +46,12 @@ import {
   CheckIcon,
   CloseIcon,
   InfoIcon,
+  LibraryIcon,
   PlusIcon,
   SaveIcon,
   DuplicateIcon,
+  ScenesIcon,
+  SpatialIcon,
   StarIcon,
   StarFilledIcon,
   TrashIcon,
@@ -60,7 +64,6 @@ import { EditorPanelContext } from './editor-panel-context.js';
 import { JOY_COLORS } from './theme.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
-import { iconUrl } from './icon-assets.js';
 import { createMotionScene, type MotionSceneCatalogEntry } from './motion-scene-catalog.js';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 
@@ -132,12 +135,12 @@ const IDLE_OBJECT: VisualObjectV1 = {
 const LIBRARY_SUBTABS: readonly {
   readonly id: LibrarySubtab;
   readonly label: string;
-  readonly iconUrl: string;
+  readonly icon: ComponentType;
 }[] = [
-  { id: 'library', label: 'Library', iconUrl: iconUrl('24_library.png') },
-  { id: 'html-scenes', label: 'Scenes', iconUrl: iconUrl('24_scenes.png') },
-  { id: 'presets', label: 'Presets', iconUrl: iconUrl('24_presets.png') },
-  { id: 'spatial', label: 'Spatial', iconUrl: iconUrl('24_spatial.png') },
+  { id: 'library', label: 'Library', icon: LibraryIcon },
+  { id: 'html-scenes', label: 'Scenes', icon: ScenesIcon },
+  { id: 'presets', label: 'Presets', icon: StarIcon },
+  { id: 'spatial', label: 'Spatial', icon: SpatialIcon },
 ];
 
 /* ─── Motion Card ─── */
@@ -1209,27 +1212,25 @@ export function MotionPanel({
       <div className="templates-content">
         <aside className="templates-sidebar" aria-label="Motion sections">
           <div className="templates-sidebar-tabs" role="tablist" aria-label="Motion sections">
-            {LIBRARY_SUBTABS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                role="tab"
-                className="templates-sidebar-tab"
-                aria-label={item.label}
-                title={item.label}
-                aria-selected={subtab === item.id}
-                onClick={() => setSubtab(item.id)}
-              >
-                <span
-                  className="templates-sidebar-tab-icon"
-                  style={{
-                    maskImage: `url(${item.iconUrl})`,
-                    WebkitMaskImage: `url(${item.iconUrl})`,
-                  }}
-                  aria-hidden="true"
-                />
-              </button>
-            ))}
+            {LIBRARY_SUBTABS.map((item) => {
+              const SubtabIcon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  className="templates-sidebar-tab"
+                  aria-label={item.label}
+                  title={item.label}
+                  aria-selected={subtab === item.id}
+                  onClick={() => setSubtab(item.id)}
+                >
+                  <span className="templates-sidebar-tab-svg" aria-hidden="true">
+                    <SubtabIcon />
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </aside>
         <div className="templates-main">
