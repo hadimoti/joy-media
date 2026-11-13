@@ -1,4 +1,6 @@
 // Author: Matt DesLauriers
+// Changed for JOY Media (T-V08): the redundant `in` parameter qualifiers were dropped (`in` is the
+// default), because the Pixi filter compiles transitions with `#define in varying`.
 // License: MIT
 
 #ifdef GL_ES
@@ -14,7 +16,7 @@ float random(vec2 co)
     float sn= mod(dt,3.14);
     return fract(sin(sn) * c);
 }
-float voronoi( in vec2 x ) {
+float voronoi( vec2 x ) {
     vec2 p = floor( x );
     vec2 f = fract( x );
     float res = 8.0;

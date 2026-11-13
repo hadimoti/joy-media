@@ -8,6 +8,7 @@ export const PACKAGE_NAME = '@joy-media/render-ir' as const;
 export type {
   Rgba,
   Viewport,
+  CropInsets,
   Transform2D,
   SpriteNode,
   VideoFrameNode,
@@ -34,6 +35,7 @@ export type { TextPlateBounds } from './text-layout.js';
 export type { NodeBounds, NodePoint, NodeRect } from './node-geometry.js';
 export {
   DEFAULT_NODE_ORIGIN,
+  cropNodeBox,
   frameToLocalPoint,
   isRotated,
   localToFramePoint,

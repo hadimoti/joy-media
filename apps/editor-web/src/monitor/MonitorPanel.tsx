@@ -44,11 +44,17 @@ import {
 import {
   activeTransitionAt,
   applyClipGradesToTransitionBitmaps,
+  findVideoClipById,
   imageSizesFromCache,
   renderFrameOptions,
   rgbaBase64,
   transitionClipTimes,
 } from '../preview-frame-helpers.js';
+import {
+  useColorGradePreview,
+  withColorGradePreview,
+  withColorGradePreviewNode,
+} from '../color-grade-preview.js';
 import {
   appAgentPreviewStore,
   mediaControlPlaneClient,
@@ -310,6 +316,8 @@ function MonitorPanelContent({
     });
   };
   const livePatches = useMonitorTransformPreview();
+  // A colour gesture in progress draws with its live grade (never written yet).
+  const liveGrade = useColorGradePreview();
   const transformHost = useMemo<MonitorTransformHost>(
     () => ({
       preview: (patches) => monitorTransformPreview.set(patches),
@@ -448,6 +456,12 @@ function MonitorPanelContent({
     // A Monitor drag in progress draws with its live values (never written yet).
     const patches = monitorTransformPreview.get();
     const drawnProject = withTransformPatches(previewVisualProject, patches);
+    // A colour gesture in progress draws with its live grade (never written yet).
+    const gradedProject = withColorGradePreview(previewVisualProject, liveGrade);
+    const gradedClip =
+      liveGrade?.scope === 'clip' && liveGrade.clipId !== undefined
+        ? findVideoClipById(timelineProject, liveGrade.clipId)
+        : undefined;
     const objectsById = drawnProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
     const resolved: ResolvedObject[] = Object.values(drawnProject.visualObjects).map((object) => ({
       object,
@@ -467,7 +481,7 @@ function MonitorPanelContent({
         composition.height,
         resolved,
         renderFrameOptions(
-          previewVisualProject,
+          gradedProject,
           timelineProject,
           state.playheadUs,
           imageSizesFromCache(state.playheadUs),
@@ -480,7 +494,20 @@ function MonitorPanelContent({
         ? visualFrame
         : withVideoFrameNode(
             visualFrame,
-            withPreviewVideoNode(previewVideoFrame.node, drawnProject, patches, state.playheadUs),
+            withPreviewVideoNode(
+              withColorGradePreviewNode(
+                previewVideoFrame.node,
+                liveGrade,
+                gradedProject,
+                state.playheadUs,
+                gradedClip === undefined
+                  ? undefined
+                  : { startUs: gradedClip.startUs, durationUs: gradedClip.durationUs },
+              ),
+              drawnProject,
+              patches,
+              state.playheadUs,
+            ),
           );
     currentFrameRef.current = frame;
     const videoBitmaps = new Map(clipFrameCache);
@@ -494,12 +521,8 @@ function MonitorPanelContent({
       videoBitmaps.set(id, bitmap);
     }
     applyClipGradesToTransitionBitmaps(
-      previewVisualProject,
-      activeTransitionAt(
-        previewVisualProject,
-        state.playheadUs,
-        transitionClipTimes(timelineProject),
-      ),
+      gradedProject,
+      activeTransitionAt(gradedProject, state.playheadUs, transitionClipTimes(timelineProject)),
       state.playheadUs,
       videoBitmaps,
       (grade) => colorLutResolverRef.current?.resolveColorLut(grade),
@@ -782,6 +805,7 @@ function MonitorPanelContent({
     previewVisualProject,
     sceneTick,
     livePatches,
+    liveGrade,
   ]);
 
   const monitorAspectRatio: MonitorAspectRatio = monitorFitView

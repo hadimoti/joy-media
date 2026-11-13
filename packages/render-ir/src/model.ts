@@ -20,7 +20,19 @@ export interface Viewport {
   readonly dpr: number;
 }
 
-/** Already-evaluated affine subset used by this spike. */
+/** Crop edges as fractions of the node's local pixel box. */
+export interface CropInsets {
+  /** Fraction of the node's untransformed width to remove from its left edge. */
+  readonly left: number;
+  /** Fraction of the node's untransformed height to remove from its top edge. */
+  readonly top: number;
+  /** Fraction of the node's untransformed width to remove from its right edge. */
+  readonly right: number;
+  /** Fraction of the node's untransformed height to remove from its bottom edge. */
+  readonly bottom: number;
+}
+
+/** Evaluated affine subset used by this spike, with optional local crop insets. */
 export interface Transform2D {
   readonly translateX: number;
   readonly translateY: number;
@@ -37,6 +49,8 @@ export interface Transform2D {
    * not move the node: with rotation 0 the origin changes nothing.
    */
   readonly origin?: { readonly x: number; readonly y: number };
+  /** Crop insets as fractions of the untransformed node box; absent means no crop. */
+  readonly crop?: CropInsets;
 }
 
 interface RenderNodeBase {
@@ -323,6 +337,17 @@ function validateNodes(nodes: readonly RenderNode[], ids: Set<string>): void {
     ) {
       throw new RangeError(`node "${node.id}" origin must be finite`);
     }
+    if (
+      node.transform.crop !== undefined &&
+      ![
+        node.transform.crop.left,
+        node.transform.crop.top,
+        node.transform.crop.right,
+        node.transform.crop.bottom,
+      ].every(Number.isFinite)
+    ) {
+      throw new RangeError(`node "${node.id}" crop edges must be finite`);
+    }
     if (node.kind === 'group' && (node.transform.rotationDeg ?? 0) !== 0) {
       // A group has no box of its own to rotate about; nothing builds rotated
       // groups yet, so refuse instead of drawing something undefined.
@@ -407,6 +432,7 @@ function composeTransform(parent: Transform2D, child: Transform2D): Transform2D 
     scaleY: parent.scaleY * child.scaleY,
     ...(child.rotationDeg === undefined ? {} : { rotationDeg: child.rotationDeg }),
     ...(child.origin === undefined ? {} : { origin: child.origin }),
+    ...(child.crop === undefined ? {} : { crop: child.crop }),
   };
 }
 

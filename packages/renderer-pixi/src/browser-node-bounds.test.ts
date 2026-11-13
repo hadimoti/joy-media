@@ -287,6 +287,36 @@ describe('nodeBounds and drawing with rotation', () => {
     renderer.destroy();
   });
 
+  it('clips a rotated image to its crop and reports the cropped box', async () => {
+    const renderer = await createBrowserPixiRenderer();
+    const crop = { left: 0.25, top: 0.1, right: 0.25, bottom: 0.1 };
+    const node = {
+      ...kinds.image,
+      transform: { ...kinds.image.transform, rotationDeg: 90, crop } as Transform2D,
+    };
+    renderer.render(frame([node]));
+
+    const bounds = renderer.nodeBounds(node.id)!;
+    expect(bounds.width).toBe(200);
+    expect(bounds.height).toBe(240);
+    expect(bounds.center).toEqual({ x: 210, y: 170 });
+    expect(bounds.aabb.x).toBeCloseTo(90, 9);
+    expect(bounds.aabb.y).toBeCloseTo(70, 9);
+    expect(bounds.aabb.width).toBeCloseTo(240, 9);
+    expect(bounds.aabb.height).toBeCloseTo(200, 9);
+
+    const layer = layerOf(node.id);
+    expect(layer.mask).toBeDefined();
+    const mask = layer.mask as Pixi.Graphics;
+    expect(mask.getLocalBounds()).toMatchObject({ x: 200, y: 60, width: 400, height: 480 });
+
+    // Resetting a reused layer to the old zero-crop transform removes the mask.
+    renderer.render(frame([kinds.image]));
+    expect(layer.mask).toBeFalsy();
+    expect(renderer.nodeBounds(node.id)!.aabb).toEqual(expected.image);
+    renderer.destroy();
+  });
+
   it('turning back to 0 restores the old placement on a reused layer', async () => {
     const renderer = await createBrowserPixiRenderer();
     const turned = { ...kinds.shape, transform: { ...kinds.shape.transform, rotationDeg: 45 } };

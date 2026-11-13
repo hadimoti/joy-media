@@ -10,17 +10,21 @@ import {
 } from './index.js';
 
 describe('transition-shaders registry', () => {
-  it('lists curated entries including legacy dissolve/wipe/slide', () => {
+  it('lists curated entries without the removed doubles dissolve/wipe/slide (T-V08)', () => {
     const ids = listTransitionShaders().map((entry) => entry.id);
-    expect(ids).toContain('dissolve');
-    expect(ids).toContain('wipe');
-    expect(ids).toContain('slide');
+    expect(ids).not.toContain('dissolve');
+    expect(ids).not.toContain('wipe');
+    expect(ids).not.toContain('slide');
+    expect(ids).toContain('gl:fade');
+    expect(ids).toContain('gl:wipeLeft');
+    expect(ids).toContain('gl:Directional');
     expect(ids.some((id) => id.startsWith('gl:'))).toBe(true);
-    expect(listTransitionShaders().length).toBeGreaterThanOrEqual(18);
+    // Was 18 with the three doubles; 17 remain after T-V08 removed them.
+    expect(listTransitionShaders().length).toBeGreaterThanOrEqual(17);
   });
 
   it('resolves legacy aliases and unknown gl ids', () => {
-    expect(resolveTransitionShaderId('dissolve')).toBe('dissolve');
+    expect(resolveTransitionShaderId('dissolve')).toBe('gl:fade');
     expect(getTransitionShader('dissolve')?.glName).toBe('fade');
     expect(isKnownTransitionType('gl:CrossZoom')).toBe(true);
     expect(isKnownTransitionType('gl:nope')).toBe(false);
