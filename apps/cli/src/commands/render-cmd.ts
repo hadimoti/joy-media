@@ -38,6 +38,7 @@ import {
   printBanner,
 } from '../utils/logger.js';
 import { listProjects, loadProject, type createDefaultProject } from '../utils/project-loader.js';
+import { createAssetLibraryFileCheck, resolveAssetLibraryDirectory } from './assets-cmd.js';
 
 export interface RenderCommandFlags {
   project?: string | undefined;
@@ -46,6 +47,7 @@ export interface RenderCommandFlags {
   concurrency?: number | undefined;
   json?: boolean | undefined;
   sqlitePath?: string | undefined;
+  allowMissing?: boolean | undefined;
 }
 
 export interface RenderPresetSpec {
@@ -153,7 +155,13 @@ export interface RenderCompleteEvent {
 }
 
 export type RenderErrorCode =
-  'usage' | 'project-load' | 'invalid-project' | 'output' | 'cancelled' | 'internal';
+  | 'usage'
+  | 'project-load'
+  | 'invalid-project'
+  | 'output'
+  | 'cancelled'
+  | 'missing-media'
+  | 'internal';
 
 export interface RenderErrorEvent {
   readonly type: 'error';
@@ -246,6 +254,7 @@ export async function handleRenderCommand(args: string[], flags: CliFlags): Prom
       outDir,
       concurrency,
       json,
+      allowMissing: flags.allowMissing === true,
     });
 
     return result.exitCode;
@@ -274,6 +283,10 @@ export interface RunHeadlessRenderInput {
    * terminal" so piped/redirected output is never spammed with `\r` frames.
    */
   readonly progress?: boolean | undefined;
+  /** Render even when a used clip's file is missing (T-R04). Default: stop with exit 1. */
+  readonly allowMissing?: boolean | undefined;
+  /** The asset library to check files against. Default: the library the CLI resolves. */
+  readonly libraryDirectory?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +472,87 @@ export function planRender(project: unknown, presetSpec: RenderPresetSpec): Rend
   };
 }
 
+/** A clip on an enabled root track that uses a file the asset library does not have (T-R04). */
+export interface MissingRenderClip {
+  readonly trackId: string;
+  readonly clipId: string;
+  readonly assetId: string;
+  /** The file's name, as the project records it. */
+  readonly name: string;
+  readonly startUs: number;
+  readonly endUs: number;
+}
+
+/** Asset kinds that are not files, so they are never missing (the editor's rule too). */
+const NON_FILE_ASSET_KINDS: ReadonlySet<unknown> = new Set(['lut', 'other']);
+
+/**
+ * The root-track clips whose file is missing. Only a clip whose project asset is a file asset
+ * counts: a clip with no declared asset, or a text-like asset, is not checked. `hasFile` says
+ * whether the asset library holds the file. Never throws.
+ */
+export function missingRenderClips(
+  project: unknown,
+  hasFile: (assetId: string) => boolean,
+): readonly MissingRenderClip[] {
+  if (!isRecord(project)) return [];
+  const assets: Record<string, unknown> = isRecord(project['assets']) ? project['assets'] : {};
+  const compositions = project['compositions'];
+  const rootId = project['rootCompositionId'];
+  const root =
+    isRecord(compositions) && typeof rootId === 'string' ? compositions[rootId] : undefined;
+  if (!isRecord(root) || !Array.isArray(root['tracks'])) return [];
+
+  const missing: MissingRenderClip[] = [];
+  for (const rawTrack of root['tracks']) {
+    if (!isRecord(rawTrack) || typeof rawTrack['id'] !== 'string') continue;
+    if (rawTrack['enabled'] === false || !Array.isArray(rawTrack['clips'])) continue;
+    for (const rawClip of rawTrack['clips']) {
+      if (!isRecord(rawClip) || typeof rawClip['id'] !== 'string') continue;
+      const assetId = rawClip['assetId'];
+      if (typeof assetId !== 'string') continue;
+      const record = assets[assetId];
+      if (!isRecord(record) || NON_FILE_ASSET_KINDS.has(record['kind'])) continue;
+      if (hasFile(assetId)) continue;
+      const startUs = finiteOrNull(rawClip['startUs']) ?? 0;
+      const durationUs = finiteOrNull(rawClip['durationUs']) ?? 0;
+      missing.push({
+        trackId: rawTrack['id'],
+        clipId: rawClip['id'],
+        assetId,
+        name: typeof record['displayName'] === 'string' ? record['displayName'] : assetId,
+        startUs,
+        endUs: startUs + durationUs,
+      });
+    }
+  }
+  return missing.sort((left, right) => left.startUs - right.startUs);
+}
+
+/** `hh:mm:ss:ff` for `us` at `fps`, the same layout the editor's Monitor uses. */
+export function formatRenderTimecode(us: number, fps: number): string {
+  const nominal = Math.max(1, Math.round(fps));
+  const frames = Math.round((Math.max(0, us) * fps) / 1_000_000);
+  const totalSeconds = Math.floor(frames / nominal);
+  return [
+    Math.floor(totalSeconds / 3600),
+    Math.floor((totalSeconds % 3600) / 60),
+    totalSeconds % 60,
+    frames % nominal,
+  ]
+    .map((part) => part.toString().padStart(2, '0'))
+    .join(':');
+}
+
+/** One line per missing clip: `name at hh:mm:ss:ff - hh:mm:ss:ff (clip id, track id)`. */
+export function missingRenderLines(clips: readonly MissingRenderClip[], fps: number): string[] {
+  return clips.map(
+    (clip) =>
+      `${clip.name} at ${formatRenderTimecode(clip.startUs, fps)} - ` +
+      `${formatRenderTimecode(clip.endUs, fps)} (clip ${clip.clipId} on track ${clip.trackId})`,
+  );
+}
+
 /** Make a project id safe to use as a file name (no separators, no leading dots). */
 export function safeFileStem(id: string): string {
   const cleaned = id
@@ -514,6 +608,30 @@ export async function runHeadlessRender(
   const manifestName = `${fileStem}.${presetSpec.extension}.manifest.json`;
   if (fileStem !== plan.projectId) {
     warnings.push(`Project id "${plan.projectId}" is not a safe file name; using "${fileStem}".`);
+  }
+
+  // T-R04: a used clip whose file is missing stops the render (exit 1) unless --allow-missing.
+  const missing = missingRenderClips(
+    project,
+    createAssetLibraryFileCheck(input.libraryDirectory ?? resolveAssetLibraryDirectory()),
+  );
+  if (missing.length > 0) {
+    const lines = missingRenderLines(missing, plan.composition.fps ?? presetSpec.fps);
+    if (!input.allowMissing) {
+      return failure(
+        'missing-media',
+        [
+          `${missing.length} clip(s) use a file that is missing. Render stopped; pass --allow-missing to render anyway (missing parts are black and silent):`,
+          ...lines.map((line) => `  ${line}`),
+        ].join('\n'),
+        totalFrames,
+        totalClips,
+      );
+    }
+    warnings.push(
+      `${missing.length} clip(s) use a file that is missing; with --allow-missing they render black and silent:`,
+      ...lines,
+    );
   }
 
   if (totalClips > 0) {

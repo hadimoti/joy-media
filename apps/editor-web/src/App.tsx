@@ -577,6 +577,12 @@ import { MonitorPanel } from './monitor/index.js';
 import { useMonitorTransportControls } from './monitor/useMonitorTransportControls.js';
 import { monitorFps } from './monitor/monitor-timecode.js';
 import { MONITOR_FULLSCREEN_EVENT } from './monitor/monitor-transport-model.js';
+import {
+  missingExportClipIds,
+  missingExportClips,
+  type MissingExportClip,
+} from './export-missing-media.js';
+import { MissingExportDialog } from './MissingExportDialog.js';
 
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
 // One missing-media host per editor session, so the panel's list and operations share state.
@@ -1091,6 +1097,15 @@ function EditorWorkspace({
   );
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [assetLibrarySettingsOpen, setAssetLibrarySettingsOpen] = useState(false);
+  // Set while the owner decides what to do about clips whose files are missing (T-R04).
+  const [missingExportPrompt, setMissingExportPrompt] = useState<
+    | {
+        readonly clips: readonly MissingExportClip[];
+        readonly fps: number;
+        readonly retryEntry: ProjectExportProcessEntry | undefined;
+      }
+    | undefined
+  >(undefined);
   const [isMaximized, setIsMaximized] = useState(false);
   useEffect(() => {
     if (!isDesktopHost()) return;
@@ -4010,7 +4025,10 @@ function EditorWorkspace({
   );
 
   const handleExport = useCallback(
-    async (retryEntry?: ProjectExportProcessEntry) => {
+    async (
+      retryEntry?: ProjectExportProcessEntry,
+      options?: { readonly allowMissing?: boolean },
+    ) => {
       if (exportInFlightRef.current) return;
       const retryPreset = retryEntry?.presetId;
       if (retryPreset !== undefined && !isExportPresetId(retryPreset)) {
@@ -4064,7 +4082,39 @@ function EditorWorkspace({
         }, 8_000);
         return;
       }
+      // T-R04: claim the export before the first await, so a second click cannot start another
+      // one. A clip whose file is missing is listed first: the owner relinks, exports with those
+      // clips drawn black and silent, or cancels.
       exportInFlightRef.current = true;
+      let missingClips: readonly MissingExportClip[];
+      try {
+        missingClips = missingExportClips(
+          exportTimelineProject,
+          await missingMediaHostFor(session).list(),
+        );
+      } catch (error) {
+        exportInFlightRef.current = false;
+        const message = error instanceof Error ? error.message : String(error);
+        window.clearTimeout(exportToastTimerRef.current);
+        setExportStatus(`Export failed: ${message}`);
+        setExportProgress(undefined);
+        exportToastTimerRef.current = window.setTimeout(() => {
+          setExportStatus(undefined);
+        }, 8_000);
+        return;
+      }
+      if (missingClips.length > 0 && options?.allowMissing !== true) {
+        exportInFlightRef.current = false;
+        setMissingExportPrompt({
+          clips: missingClips,
+          fps: monitorFps(
+            exportTimelineProject.compositions[exportTimelineProject.rootCompositionId]?.frameRate,
+          ),
+          retryEntry,
+        });
+        return;
+      }
+      const missingExportIds = missingExportClipIds(missingClips);
       const abortController = new AbortController();
       exportAbortRef.current = abortController;
       setExporting(true);
@@ -4131,8 +4181,12 @@ function EditorWorkspace({
         const compositionTimeline =
           exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
         const allTimelineClips = flattenRootTimelineVideoClips(exportTimelineProject);
+        // Missing clips keep their place in the duration (they render black) but have no source.
+        const sourcedTimelineClips = allTimelineClips.filter(
+          (clip) => !missingExportIds.has(clip.id),
+        );
         const exportElementKinds = readTimelineElementKindMap(exportVisualProject);
-        const playableTimelineClips = allTimelineClips.filter((clip) => {
+        const playableTimelineClips = sourcedTimelineClips.filter((clip) => {
           const kind = timelineElementKindForClip(clip, exportElementKinds);
           const assetKind = exportVisualProject.assets[clip.assetId]?.kind;
           return isExportVisualTimelineClip(kind, assetKind);
@@ -4217,7 +4271,8 @@ function EditorWorkspace({
         );
         const exportClips = [...clipsByBoundary, ...transitionPartnerClips].filter(
           (clip, index, clips) =>
-            clips.findIndex((candidate) => candidate.id === clip.id) === index,
+            clips.findIndex((candidate) => candidate.id === clip.id) === index &&
+            !missingExportIds.has(clip.id),
         );
         const hasHtmlScenes = Object.values(exportVisualProject.visualObjects).some(
           (object) => object.kind === 'html-scene',
@@ -4227,7 +4282,7 @@ function EditorWorkspace({
         // Audio lanes use video leaves in the timeline model, but have no visual
         // boundary. Keep their mix inputs independent of visual preparation.
         const audioMixClips = selectExportAudioClips(
-          allTimelineClips,
+          sourcedTimelineClips,
           exportVisualProject.assets,
           exportAudioState.clips,
         );
@@ -7748,6 +7803,22 @@ function EditorWorkspace({
                 }
               }}
               onNotice={showToast}
+            />
+          )}
+          {missingExportPrompt !== undefined && (
+            <MissingExportDialog
+              clips={missingExportPrompt.clips}
+              fps={missingExportPrompt.fps}
+              onRelink={() => {
+                setMissingExportPrompt(undefined);
+                activatePanel('media');
+              }}
+              onExportAnyway={() => {
+                const retryEntry = missingExportPrompt.retryEntry;
+                setMissingExportPrompt(undefined);
+                void handleExport(retryEntry, { allowMissing: true });
+              }}
+              onCancel={() => setMissingExportPrompt(undefined)}
             />
           )}
           {assetLibrarySettingsOpen && (
