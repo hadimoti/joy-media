@@ -8,7 +8,7 @@ import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import {
   qualityCheckTag,
-  SETTINGS_FRAME_CONSENT,
+  SETTINGS_FRAME_PRIVACY_NOTICE,
   SETTINGS_QUALITY_CHECK,
 } from './settings-wording.js';
 
@@ -129,27 +129,100 @@ describe('the Quality check section of Joy Code settings (T-B05)', () => {
     expect(neverSend.checked).toBe(false);
   });
 
-  it('writes a typed budget through the policy, held inside its bounds', async () => {
+  it('uses singular words for a one-frame, one-round limit', () => {
+    expect(qualityCheckTag(1, 1)).toBe('1 frame a check, 1 fix round');
+  });
+
+  it('keeps a multi-digit run budget while typing and commits it on blur', async () => {
     const onPolicyChange = vi.fn();
     const rendered = await render(DEFAULT_AGENT_POLICY, onPolicyChange);
     await openQualityCheck(rendered);
 
-    await typeInto(fieldLabelled(rendered, SETTINGS_QUALITY_CHECK.framesPerCheckLabel), '40');
+    const framesPerRun = fieldLabelled(rendered, SETTINGS_QUALITY_CHECK.framesPerRunLabel);
+    await act(async () => framesPerRun.focus());
+    await typeInto(framesPerRun, '2');
+    expect(framesPerRun.value).toBe('2');
+    expect(onPolicyChange).not.toHaveBeenCalled();
+
+    await typeInto(framesPerRun, '20');
+    expect(framesPerRun.value).toBe('20');
+    expect(onPolicyChange).not.toHaveBeenCalled();
+
+    await act(async () => framesPerRun.blur());
+    expect(onPolicyChange).toHaveBeenLastCalledWith({
+      ...DEFAULT_AGENT_POLICY,
+      qualityCheck: { ...DEFAULT_AGENT_POLICY.qualityCheck, framesPerRun: 20 },
+    });
+  });
+
+  it('clamps a run budget on Enter and keeps the check budget within it', async () => {
+    const onPolicyChange = vi.fn();
+    const policy = {
+      ...DEFAULT_AGENT_POLICY,
+      qualityCheck: { ...DEFAULT_AGENT_POLICY.qualityCheck, framesPerCheck: 16 },
+    };
+    const rendered = await render(policy, onPolicyChange);
+    await openQualityCheck(rendered);
+
+    const framesPerRun = fieldLabelled(rendered, SETTINGS_QUALITY_CHECK.framesPerRunLabel);
+    await act(async () => framesPerRun.focus());
+    await typeInto(framesPerRun, '5');
+    expect(framesPerRun.value).toBe('5');
+    expect(onPolicyChange).not.toHaveBeenCalled();
+    await act(async () => {
+      framesPerRun.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+
+    expect(onPolicyChange).toHaveBeenLastCalledWith({
+      ...policy,
+      qualityCheck: { ...policy.qualityCheck, framesPerCheck: 12, framesPerRun: 12 },
+    });
+  });
+
+  it('clamps the check and round budgets when they are committed', async () => {
+    const onPolicyChange = vi.fn();
+    const rendered = await render(DEFAULT_AGENT_POLICY, onPolicyChange);
+    await openQualityCheck(rendered);
+
+    const framesPerCheck = fieldLabelled(rendered, SETTINGS_QUALITY_CHECK.framesPerCheckLabel);
+    await act(async () => framesPerCheck.focus());
+    await typeInto(framesPerCheck, '40');
+    expect(framesPerCheck.value).toBe('40');
+    await act(async () => framesPerCheck.blur());
     expect(onPolicyChange).toHaveBeenLastCalledWith({
       ...DEFAULT_AGENT_POLICY,
       qualityCheck: { ...DEFAULT_AGENT_POLICY.qualityCheck, framesPerCheck: 16 },
     });
 
-    await typeInto(fieldLabelled(rendered, SETTINGS_QUALITY_CHECK.framesPerRunLabel), '5');
-    expect(onPolicyChange).toHaveBeenLastCalledWith({
-      ...DEFAULT_AGENT_POLICY,
-      qualityCheck: { ...DEFAULT_AGENT_POLICY.qualityCheck, framesPerRun: 12 },
-    });
-
-    await typeInto(fieldLabelled(rendered, SETTINGS_QUALITY_CHECK.fixRoundsLabel), '0');
+    const fixRounds = fieldLabelled(rendered, SETTINGS_QUALITY_CHECK.fixRoundsLabel);
+    await act(async () => fixRounds.focus());
+    await typeInto(fixRounds, '0');
+    expect(fixRounds.value).toBe('0');
+    await act(async () => fixRounds.blur());
     expect(onPolicyChange).toHaveBeenLastCalledWith({
       ...DEFAULT_AGENT_POLICY,
       qualityCheck: { ...DEFAULT_AGENT_POLICY.qualityCheck, fixRounds: 1 },
+    });
+  });
+
+  it('keeps a changed check budget at or below the saved run budget', async () => {
+    const onPolicyChange = vi.fn();
+    const policy = {
+      ...DEFAULT_AGENT_POLICY,
+      qualityCheck: { ...DEFAULT_AGENT_POLICY.qualityCheck, framesPerRun: 12 },
+    };
+    const rendered = await render(policy, onPolicyChange);
+    await openQualityCheck(rendered);
+
+    const framesPerCheck = fieldLabelled(rendered, SETTINGS_QUALITY_CHECK.framesPerCheckLabel);
+    await act(async () => framesPerCheck.focus());
+    await typeInto(framesPerCheck, '16');
+    expect(framesPerCheck.value).toBe('16');
+    await act(async () => framesPerCheck.blur());
+
+    expect(onPolicyChange).toHaveBeenLastCalledWith({
+      ...policy,
+      qualityCheck: { ...policy.qualityCheck, framesPerCheck: 12 },
     });
   });
 
@@ -169,28 +242,28 @@ describe('the Quality check section of Joy Code settings (T-B05)', () => {
     });
   });
 
-  it('says where the pictures go for the connected model', async () => {
+  it('shows saved limits and model settings for the future quality check', async () => {
     const rendered = await render(DEFAULT_AGENT_POLICY, vi.fn(), connectedStatus);
     await openQualityCheck(rendered);
 
-    const card = rendered.querySelector<HTMLElement>('.quality-check-consent');
+    const card = rendered.querySelector<HTMLElement>('.quality-check-privacy-notice');
     expect(card?.getAttribute('data-frame-destination')).toBe('remote');
     expect(card?.textContent).toContain(
-      'Up to 12 pictures a check and 16 a run go to OpenRouter, model openrouter/auto.',
+      'For a future quality check, the saved limits are 12 pictures per check and 16 across the run, with OpenRouter, model openrouter/auto.',
     );
-    expect(card?.textContent).toContain(SETTINGS_FRAME_CONSENT.askFirst);
+    expect(card?.textContent).toContain(SETTINGS_FRAME_PRIVACY_NOTICE.approvalUnavailable);
   });
 
-  it('says that no picture is sent when no model is connected', async () => {
+  it('shows that no model is connected without claiming a quality check is running', async () => {
     const rendered = await render(DEFAULT_AGENT_POLICY, vi.fn());
     await openQualityCheck(rendered);
 
-    const card = rendered.querySelector<HTMLElement>('.quality-check-consent');
+    const card = rendered.querySelector<HTMLElement>('.quality-check-privacy-notice');
     expect(card?.getAttribute('data-frame-destination')).toBe('no-model');
-    expect(card?.textContent).toContain(SETTINGS_FRAME_CONSENT.noModel);
+    expect(card?.textContent).toContain(SETTINGS_FRAME_PRIVACY_NOTICE.noModel);
   });
 
-  it('keeps the card to the words of this card when the switch is on', async () => {
+  it('shows the saved local privacy choice when the switch is on', async () => {
     const policy: AgentPolicyPreferences = {
       ...DEFAULT_AGENT_POLICY,
       qualityCheck: { ...DEFAULT_AGENT_POLICY.qualityCheck, neverSendFramesToRemoteModel: true },
@@ -198,9 +271,9 @@ describe('the Quality check section of Joy Code settings (T-B05)', () => {
     const rendered = await render(policy, vi.fn(), connectedStatus);
     await openQualityCheck(rendered);
 
-    const card = rendered.querySelector<HTMLElement>('.quality-check-consent');
+    const card = rendered.querySelector<HTMLElement>('.quality-check-privacy-notice');
     expect(card?.getAttribute('data-frame-destination')).toBe('kept-on-pc');
-    expect(card?.textContent).toContain(SETTINGS_FRAME_CONSENT.neverRemote);
-    expect(card?.textContent).not.toContain(SETTINGS_FRAME_CONSENT.askFirst);
+    expect(card?.textContent).toContain(SETTINGS_FRAME_PRIVACY_NOTICE.neverRemote);
+    expect(card?.textContent).not.toContain(SETTINGS_FRAME_PRIVACY_NOTICE.approvalUnavailable);
   });
 });

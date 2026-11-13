@@ -15,7 +15,7 @@ import {
   SETTINGS_BUDGET,
   SETTINGS_DIAGNOSTICS,
   SETTINGS_DIALOG,
-  SETTINGS_FRAME_CONSENT,
+  SETTINGS_FRAME_PRIVACY_NOTICE,
   SETTINGS_LIVE_PREVIEW,
   SETTINGS_MEDIA_CHECK,
   SETTINGS_MESSAGES,
@@ -60,8 +60,8 @@ const wordingComponentSources = [
   ['AgentSlotsSection.tsx', readFileSync(resolve(here, 'AgentSlotsSection.tsx'), 'utf8')],
   ['ProviderSignInPanel.tsx', readFileSync(resolve(here, 'ProviderSignInPanel.tsx'), 'utf8')],
   [
-    'QualityCheckConsentCard.tsx',
-    readFileSync(resolve(here, 'QualityCheckConsentCard.tsx'), 'utf8'),
+    'QualityCheckPrivacyNotice.tsx',
+    readFileSync(resolve(here, 'QualityCheckPrivacyNotice.tsx'), 'utf8'),
   ],
 ] as const;
 const table = readFileSync(resolve(here, '../../../docs/qa/v1.1.1/SETTINGS-WORDING.md'), 'utf8');
@@ -253,7 +253,7 @@ function wordingStrings(): readonly string[] {
     modes: SETTINGS_MODES,
     budget: SETTINGS_BUDGET,
     qualityCheck: SETTINGS_QUALITY_CHECK,
-    frameConsent: SETTINGS_FRAME_CONSENT,
+    framePrivacyNotice: SETTINGS_FRAME_PRIVACY_NOTICE,
     storage: SETTINGS_STORAGE,
     media: SETTINGS_MEDIA_CHECK,
     tools: SETTINGS_TOOLS,
@@ -347,7 +347,7 @@ describe('the Joy Code Settings wording (T-P07)', () => {
       modes: SETTINGS_MODES,
       budget: SETTINGS_BUDGET,
       qualityCheck: SETTINGS_QUALITY_CHECK,
-      frameConsent: SETTINGS_FRAME_CONSENT,
+      framePrivacyNotice: SETTINGS_FRAME_PRIVACY_NOTICE,
       storage: SETTINGS_STORAGE,
       tools: SETTINGS_TOOLS,
       models: SETTINGS_MODELS,

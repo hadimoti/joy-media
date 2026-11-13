@@ -5,8 +5,12 @@ import {
   clampQualityCheckBudget,
   QUALITY_CHECK_BUDGET_BOUNDS,
   type AgentPolicyPreferences,
+  type QualityCheckBudgetKey,
 } from './agent-policy-settings.js';
-import { QualityCheckConsentCard, qualityCheckConsentInput } from './QualityCheckConsentCard.js';
+import {
+  QualityCheckPrivacyNotice,
+  qualityCheckPrivacyNoticeInput,
+} from './QualityCheckPrivacyNotice.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type {
   ByokSessionStatus,
@@ -261,6 +265,9 @@ export function JoyAgentSettingsDialog({
   const profileReadRef = useRef(0);
 
   const [activeTab, setActiveTab] = useState<JoyAgentSettingsTab>(initialTab);
+  const [qualityCheckBudgetDrafts, setQualityCheckBudgetDrafts] = useState<
+    Partial<Record<QualityCheckBudgetKey, string>>
+  >({});
 
   // Accordion state (keys: section IDs)
   const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({
@@ -307,6 +314,24 @@ export function JoyAgentSettingsDialog({
 
   const toggleAccordion = (id: string) => {
     setOpenAccordions((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const setQualityCheckBudgetDraft = (key: QualityCheckBudgetKey, value: string) => {
+    setQualityCheckBudgetDrafts((current) => ({ ...current, [key]: value }));
+  };
+
+  const commitQualityCheckBudget = (key: QualityCheckBudgetKey, value: string) => {
+    const qualityCheck = {
+      ...policy.qualityCheck,
+      [key]: clampQualityCheckBudget(key, Number(value)),
+    };
+    qualityCheck.framesPerCheck = Math.min(qualityCheck.framesPerCheck, qualityCheck.framesPerRun);
+    onPolicyChange({ ...policy, qualityCheck });
+    setQualityCheckBudgetDrafts((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
   };
 
   // No provider is preselected, and OpenRouter is never a default (PLAN-v4 §6d-1 rule 3). A new connection
@@ -1906,19 +1931,25 @@ export function JoyAgentSettingsDialog({
                               min={QUALITY_CHECK_BUDGET_BOUNDS.framesPerCheck.min}
                               max={QUALITY_CHECK_BUDGET_BOUNDS.framesPerCheck.max}
                               step="1"
-                              value={policy.qualityCheck.framesPerCheck}
-                              onChange={(e) =>
-                                onPolicyChange({
-                                  ...policy,
-                                  qualityCheck: {
-                                    ...policy.qualityCheck,
-                                    framesPerCheck: clampQualityCheckBudget(
-                                      'framesPerCheck',
-                                      Number(e.target.value),
-                                    ),
-                                  },
-                                })
+                              value={
+                                qualityCheckBudgetDrafts.framesPerCheck ??
+                                String(policy.qualityCheck.framesPerCheck)
                               }
+                              onFocus={(e) =>
+                                setQualityCheckBudgetDraft('framesPerCheck', e.currentTarget.value)
+                              }
+                              onChange={(e) =>
+                                setQualityCheckBudgetDraft('framesPerCheck', e.currentTarget.value)
+                              }
+                              onBlur={(e) =>
+                                commitQualityCheckBudget('framesPerCheck', e.currentTarget.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                              }}
                             />
                           </label>
                           <span className="joy-settings-hint-muted">
@@ -1934,19 +1965,25 @@ export function JoyAgentSettingsDialog({
                               min={QUALITY_CHECK_BUDGET_BOUNDS.framesPerRun.min}
                               max={QUALITY_CHECK_BUDGET_BOUNDS.framesPerRun.max}
                               step="1"
-                              value={policy.qualityCheck.framesPerRun}
-                              onChange={(e) =>
-                                onPolicyChange({
-                                  ...policy,
-                                  qualityCheck: {
-                                    ...policy.qualityCheck,
-                                    framesPerRun: clampQualityCheckBudget(
-                                      'framesPerRun',
-                                      Number(e.target.value),
-                                    ),
-                                  },
-                                })
+                              value={
+                                qualityCheckBudgetDrafts.framesPerRun ??
+                                String(policy.qualityCheck.framesPerRun)
                               }
+                              onFocus={(e) =>
+                                setQualityCheckBudgetDraft('framesPerRun', e.currentTarget.value)
+                              }
+                              onChange={(e) =>
+                                setQualityCheckBudgetDraft('framesPerRun', e.currentTarget.value)
+                              }
+                              onBlur={(e) =>
+                                commitQualityCheckBudget('framesPerRun', e.currentTarget.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                              }}
                             />
                           </label>
                           <span className="joy-settings-hint-muted">
@@ -1962,19 +1999,25 @@ export function JoyAgentSettingsDialog({
                               min={QUALITY_CHECK_BUDGET_BOUNDS.fixRounds.min}
                               max={QUALITY_CHECK_BUDGET_BOUNDS.fixRounds.max}
                               step="1"
-                              value={policy.qualityCheck.fixRounds}
-                              onChange={(e) =>
-                                onPolicyChange({
-                                  ...policy,
-                                  qualityCheck: {
-                                    ...policy.qualityCheck,
-                                    fixRounds: clampQualityCheckBudget(
-                                      'fixRounds',
-                                      Number(e.target.value),
-                                    ),
-                                  },
-                                })
+                              value={
+                                qualityCheckBudgetDrafts.fixRounds ??
+                                String(policy.qualityCheck.fixRounds)
                               }
+                              onFocus={(e) =>
+                                setQualityCheckBudgetDraft('fixRounds', e.currentTarget.value)
+                              }
+                              onChange={(e) =>
+                                setQualityCheckBudgetDraft('fixRounds', e.currentTarget.value)
+                              }
+                              onBlur={(e) =>
+                                commitQualityCheckBudget('fixRounds', e.currentTarget.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                              }}
                             />
                           </label>
                           <span className="joy-settings-hint-muted">
@@ -2004,8 +2047,8 @@ export function JoyAgentSettingsDialog({
                           </span>
                         </div>
                       </div>
-                      <QualityCheckConsentCard
-                        {...qualityCheckConsentInput(policy, {
+                      <QualityCheckPrivacyNotice
+                        {...qualityCheckPrivacyNoticeInput(policy, {
                           provider: connectionStatus?.provider,
                           modelId: connectionStatus?.modelId,
                         })}

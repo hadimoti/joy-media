@@ -146,40 +146,38 @@ export const SETTINGS_BUDGET = {
  */
 export const SETTINGS_QUALITY_CHECK = {
   title: 'Quality check',
-  /** `{perCheck}` and `{rounds}` are the two budgets in the tag. */
-  tag: '{perCheck} frames a check, {rounds} fix rounds',
+  /** `{frameCount}` and `{fixRoundCount}` use the right singular or plural form. */
+  tag: '{frameCount} a check, {fixRoundCount}',
   intro:
-    'Joy Code can look at pictures from your timeline or export to find faults. These limits say how many pictures it may send to a model, and how many times it may fix and check again.',
+    'These settings are saved for a future quality check. They set how many pictures a check may send to a model and how many fix rounds a run may use.',
   framesPerCheckLabel: 'Frames per check',
-  framesPerCheckHint: 'Most pictures one check may look at. Stays between 1 and 16.',
+  framesPerCheckHint: 'Saved limit for pictures in one future check. Stays between 1 and 16.',
   framesPerRunLabel: 'Frames per run',
   framesPerRunHint:
-    'Most pictures one run may look at in all, including every fix round. Stays between 12 and 48.',
+    'Saved limit for all pictures in one future run, across every fix round. Stays between 12 and 48.',
   fixRoundsLabel: 'Fix rounds',
   fixRoundsHint:
-    'How many times one run may fix what it found and check again. Stays between 1 and 3.',
+    'Saved limit for how many times a future run may fix what it finds and check again. Stays between 1 and 3.',
   neverRemoteLabel: 'Never send frames to a remote model',
   neverRemoteHint:
-    'When this is on, pictures stay on this PC and no remote model looks at them. Checks that measure the file itself still run.',
+    'Saved for the quality check. Once the quality check exists it will keep pictures on this PC.',
 } as const;
 
 /**
- * The card that says where a check's pictures go. It states the current settings and the connected
- * provider and model, in plain words.
+ * The notice that summarizes saved picture settings and the connected provider and model.
  */
-export const SETTINGS_FRAME_CONSENT = {
-  title: 'Where a quality check sends pictures',
+export const SETTINGS_FRAME_PRIVACY_NOTICE = {
+  title: 'Quality check privacy notice',
   /** `{perCheck}`, `{perRun}`, `{provider}` and `{model}` are filled in. */
   withModel:
-    'Up to {perCheck} pictures a check and {perRun} a run go to {provider}, model {model}.',
-  noModel:
-    'No model is connected, so no picture is sent anywhere. Checks that measure the file itself still run.',
+    'For a future quality check, the saved limits are {perCheck} pictures per check and {perRun} across the run, with {provider}, model {model}.',
+  noModel: 'No model is connected. These settings are saved for a future quality check.',
   neverRemote:
-    'Never send frames to a remote model is on, so no picture leaves this PC. Checks that measure the file itself still run.',
+    'Saved for the quality check. Once the quality check exists it will keep pictures on this PC.',
   localOnly:
-    'Local-only mode is on, so no picture leaves this PC. Checks that measure the file itself still run.',
-  askFirst:
-    'Joy Code asks you first, once for each round, and lists the pictures before any of them is sent.',
+    'Local-only mode is saved for the quality check. Once it exists, pictures will stay on this PC.',
+  approvalUnavailable:
+    'Picture approval is not available yet. This notice only shows saved settings.',
 } as const;
 
 /** Where the settings and the keys are kept. */
@@ -517,21 +515,25 @@ export function missingItemsMessage(items: string): string {
   return SETTINGS_MESSAGES.missingItems.replace('{items}', items);
 }
 
-/** Fills `{perCheck}` and `{rounds}` in the tag of the quality check. */
-export function qualityCheckTag(perCheck: number, rounds: number): string {
-  return SETTINGS_QUALITY_CHECK.tag
-    .replace('{perCheck}', () => String(perCheck))
-    .replace('{rounds}', () => String(rounds));
+function countLabel(count: number, singular: string): string {
+  return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
-/** Fills the budgets, the provider and the model in the line that says where pictures go. */
-export function frameConsentWithModel(
+/** Fills the quality-check tag with singular or plural counts. */
+export function qualityCheckTag(perCheck: number, rounds: number): string {
+  return SETTINGS_QUALITY_CHECK.tag
+    .replace('{frameCount}', () => countLabel(perCheck, 'frame'))
+    .replace('{fixRoundCount}', () => countLabel(rounds, 'fix round'));
+}
+
+/** Fills saved limits, provider and model into the future quality-check notice. */
+export function framePrivacyNoticeWithModel(
   perCheck: number,
   perRun: number,
   provider: string,
   model: string,
 ): string {
-  return SETTINGS_FRAME_CONSENT.withModel
+  return SETTINGS_FRAME_PRIVACY_NOTICE.withModel
     .replace('{perCheck}', () => String(perCheck))
     .replace('{perRun}', () => String(perRun))
     .replace('{provider}', () => provider)

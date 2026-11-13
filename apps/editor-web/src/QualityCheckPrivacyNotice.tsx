@@ -1,21 +1,16 @@
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import { providerLabel } from './provider-labels.js';
 import {
-  frameConsentWithModel,
-  SETTINGS_FRAME_CONSENT,
+  framePrivacyNoticeWithModel,
+  SETTINGS_FRAME_PRIVACY_NOTICE,
   SETTINGS_MODELS,
 } from './settings-wording.js';
-import './QualityCheckConsentCard.css';
+import './QualityCheckPrivacyNotice.css';
 
-/**
- * Where a quality check's pictures go:
- * - `no-model`: no model is connected, so no picture goes anywhere;
- * - `kept-on-pc`: the switch or local-only mode keeps every picture on this PC;
- * - `remote`: pictures go to the connected provider and model.
- */
+/** The destination described by saved preferences for a future quality check. */
 export type FrameDestination = 'no-model' | 'kept-on-pc' | 'remote';
 
-export interface QualityCheckConsentInput {
+export interface QualityCheckPrivacyNoticeInput {
   /** The provider of the connected session, as the session reports it. */
   readonly provider?: string | undefined;
   /** The model of the connected session. Empty or missing means no model is connected. */
@@ -26,11 +21,11 @@ export interface QualityCheckConsentInput {
   readonly localOnly: boolean;
 }
 
-/** Builds the consent input from the saved policy and the connected session. */
-export function qualityCheckConsentInput(
+/** Builds the privacy-notice input from saved preferences and the connected session. */
+export function qualityCheckPrivacyNoticeInput(
   policy: AgentPolicyPreferences,
   session: { readonly provider?: string | undefined; readonly modelId?: string | undefined },
-): QualityCheckConsentInput {
+): QualityCheckPrivacyNoticeInput {
   return {
     provider: session.provider,
     modelId: session.modelId,
@@ -41,7 +36,7 @@ export function qualityCheckConsentInput(
   };
 }
 
-export function frameDestinationOf(input: QualityCheckConsentInput): FrameDestination {
+export function frameDestinationOf(input: QualityCheckPrivacyNoticeInput): FrameDestination {
   if (input.modelId === undefined || input.modelId.trim() === '') return 'no-model';
   if (input.neverSendFramesToRemoteModel || input.localOnly) return 'kept-on-pc';
   return 'remote';
@@ -56,16 +51,16 @@ function providerNameOf(provider: string | undefined): string {
   return providerLabel(provider);
 }
 
-/** The one line that says where pictures go, in plain words. */
-export function frameConsentLine(input: QualityCheckConsentInput): string {
+/** The one line that summarizes saved picture settings, in plain words. */
+export function framePrivacyNoticeLine(input: QualityCheckPrivacyNoticeInput): string {
   const destination = frameDestinationOf(input);
-  if (destination === 'no-model') return SETTINGS_FRAME_CONSENT.noModel;
+  if (destination === 'no-model') return SETTINGS_FRAME_PRIVACY_NOTICE.noModel;
   if (destination === 'kept-on-pc') {
     return input.neverSendFramesToRemoteModel
-      ? SETTINGS_FRAME_CONSENT.neverRemote
-      : SETTINGS_FRAME_CONSENT.localOnly;
+      ? SETTINGS_FRAME_PRIVACY_NOTICE.neverRemote
+      : SETTINGS_FRAME_PRIVACY_NOTICE.localOnly;
   }
-  return frameConsentWithModel(
+  return framePrivacyNoticeWithModel(
     input.framesPerCheck,
     input.framesPerRun,
     providerNameOf(input.provider),
@@ -73,19 +68,21 @@ export function frameConsentLine(input: QualityCheckConsentInput): string {
   );
 }
 
-/** The card in Joy Code settings that states how many pictures go to which provider and model. */
-export function QualityCheckConsentCard(input: QualityCheckConsentInput) {
+/** A settings notice about the saved quality-check limits and privacy choice. */
+export function QualityCheckPrivacyNotice(input: QualityCheckPrivacyNoticeInput) {
   const destination = frameDestinationOf(input);
   return (
     <section
-      className="quality-check-consent"
+      className="quality-check-privacy-notice"
       data-frame-destination={destination}
-      aria-label={SETTINGS_FRAME_CONSENT.title}
+      aria-label={SETTINGS_FRAME_PRIVACY_NOTICE.title}
     >
-      <p className="quality-check-consent__title">{SETTINGS_FRAME_CONSENT.title}</p>
-      <p className="quality-check-consent__line">{frameConsentLine(input)}</p>
+      <p className="quality-check-privacy-notice__title">{SETTINGS_FRAME_PRIVACY_NOTICE.title}</p>
+      <p className="quality-check-privacy-notice__line">{framePrivacyNoticeLine(input)}</p>
       {destination === 'remote' && (
-        <p className="quality-check-consent__ask">{SETTINGS_FRAME_CONSENT.askFirst}</p>
+        <p className="quality-check-privacy-notice__pending">
+          {SETTINGS_FRAME_PRIVACY_NOTICE.approvalUnavailable}
+        </p>
       )}
     </section>
   );

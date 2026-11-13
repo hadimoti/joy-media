@@ -129,7 +129,7 @@ describe('the quality check settings (T-B05)', () => {
         maxCostPerRunUsd: 4,
         privacyMode: 'local-only',
         workerPreference: 'browser-worker',
-        mediaProvider: 'Approved provider',
+        mediaProvider: 'Saved media provider',
         livePreview: false,
       }),
     );
@@ -139,10 +139,29 @@ describe('the quality check settings (T-B05)', () => {
     expect(loaded.qualityCheck).toEqual(DEFAULT_QUALITY_CHECK);
     // The rest of the saved policy is read as it was saved.
     expect(loaded).toMatchObject({
+      allowedCapabilities: ['timeline.read', 'timeline.write'],
       executionMode: 'auto-apply-low-risk',
       maxCostPerRunUsd: 4,
       privacyMode: 'local-only',
+      workerPreference: 'browser-worker',
+      mediaProvider: 'Saved media provider',
       livePreview: false,
+    });
+  });
+
+  it('clamps frames per check to the total run budget when loading saved values', () => {
+    const store = storage();
+    store.setItem(
+      AGENT_POLICY_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        qualityCheck: { framesPerCheck: 16, framesPerRun: 12 },
+      }),
+    );
+
+    expect(loadAgentPolicy(store).qualityCheck).toMatchObject({
+      framesPerCheck: 12,
+      framesPerRun: 12,
     });
   });
 
@@ -211,7 +230,7 @@ describe('the quality check settings (T-B05)', () => {
     );
 
     expect(loadAgentPolicy(store).qualityCheck).toEqual({
-      framesPerCheck: 16,
+      framesPerCheck: 12,
       framesPerRun: 12,
       fixRounds: 3,
       neverSendFramesToRemoteModel: false,

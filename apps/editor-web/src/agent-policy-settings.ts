@@ -27,7 +27,7 @@ export interface QualityCheckPreferences {
   readonly framesPerRun: number;
   /** The most fix rounds one run may make. */
   readonly fixRounds: number;
-  /** When true, no picture is sent to a remote model. */
+  /** When true, the future quality check should keep pictures on this PC. */
   readonly neverSendFramesToRemoteModel: boolean;
 }
 
@@ -220,9 +220,13 @@ function normalizeAgentPolicy(value: unknown): AgentPolicyPreferences {
 function normalizeQualityCheck(value: unknown): QualityCheckPreferences {
   const candidate =
     typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  const framesPerRun = clampQualityCheckBudget('framesPerRun', candidate.framesPerRun);
   return {
-    framesPerCheck: clampQualityCheckBudget('framesPerCheck', candidate.framesPerCheck),
-    framesPerRun: clampQualityCheckBudget('framesPerRun', candidate.framesPerRun),
+    framesPerCheck: Math.min(
+      clampQualityCheckBudget('framesPerCheck', candidate.framesPerCheck),
+      framesPerRun,
+    ),
+    framesPerRun,
     fixRounds: clampQualityCheckBudget('fixRounds', candidate.fixRounds),
     neverSendFramesToRemoteModel: candidate.neverSendFramesToRemoteModel === true,
   };
