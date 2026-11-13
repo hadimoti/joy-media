@@ -25,7 +25,7 @@ import {
   type MonitorAspectRatio,
 } from '../MonitorAspectRatioSelector.js';
 import type { BrowserGpuPreviewSession } from '../control-plane-client.js';
-import { setMonitorPixelReader } from '../monitor-readback.js';
+import { setMonitorPixelReader, setMonitorUngradedPixelReader } from '../monitor-readback.js';
 import { readImageMatteMap, resolveObjectIdForSelection } from '../sticker-bindings.js';
 import { isSingleVideoClipSelected } from '../effects-apply-state.js';
 import {
@@ -55,6 +55,12 @@ import {
   withColorGradePreview,
   withColorGradePreviewNode,
 } from '../color-grade-preview.js';
+import {
+  useColorGradeBypass,
+  withoutColorGrades,
+  withoutVideoNodeGrade,
+} from '../color-grade-bypass.js';
+import { MonitorEyedropper } from './MonitorEyedropper.js';
 import {
   appAgentPreviewStore,
   mediaControlPlaneClient,
@@ -97,6 +103,7 @@ import {
 } from './monitor-selection.js';
 import { monitorPixelScale } from './monitor-pixel-scale.js';
 import { createProjectColorLutResolver } from '../project-color-luts.js';
+import { applyCanvasDimensions } from '../export-format-actions.js';
 
 /**
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
@@ -317,6 +324,10 @@ function MonitorPanelContent({
   const livePatches = useMonitorTransformPreview();
   // A colour gesture in progress draws with its live grade (never written yet).
   const liveGrade = useColorGradePreview();
+  // Hold to compare (T-K04) draws the picture without any colour grade; the
+  // eyedropper's read-back draws one such frame, copies it and draws again.
+  const gradeBypassed = useColorGradeBypass();
+  const ungradedPaintRef = useRef(false);
   const transformHost = useMemo<MonitorTransformHost>(
     () => ({
       preview: (patches) => monitorTransformPreview.set(patches),
@@ -474,10 +485,14 @@ function MonitorPanelContent({
     const patches = monitorTransformPreview.get();
     const drawnProject = withTransformPatches(previewVisualProject, patches);
     // A colour gesture in progress draws with its live grade (never written yet).
-    const gradedProject = withColorGradePreview(previewVisualProject, liveGrade);
+    const withoutGrade = gradeBypassed || ungradedPaintRef.current;
+    const drawnGrade = withoutGrade ? undefined : liveGrade;
+    const gradedProject = withoutGrade
+      ? withoutColorGrades(previewVisualProject)
+      : withColorGradePreview(previewVisualProject, liveGrade);
     const gradedClip =
-      liveGrade?.scope === 'clip' && liveGrade.clipId !== undefined
-        ? findVideoClipById(timelineProject, liveGrade.clipId)
+      drawnGrade?.scope === 'clip' && drawnGrade.clipId !== undefined
+        ? findVideoClipById(timelineProject, drawnGrade.clipId)
         : undefined;
     const objectsById = drawnProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
     const resolved: ResolvedObject[] = Object.values(drawnProject.visualObjects).map((object) => ({
@@ -513,8 +528,10 @@ function MonitorPanelContent({
             visualFrame,
             withPreviewVideoNode(
               withColorGradePreviewNode(
-                previewVideoFrame.node,
-                liveGrade,
+                withoutGrade
+                  ? withoutVideoNodeGrade(previewVideoFrame.node)
+                  : previewVideoFrame.node,
+                drawnGrade,
                 gradedProject,
                 state.playheadUs,
                 gradedClip === undefined
@@ -586,6 +603,16 @@ function MonitorPanelContent({
         rendererRef.current = created;
         recordPreviewResourceCreated('pixi-renderer', rendererResourceToken);
         setMonitorPixelReader(() => created.readPixels());
+        setMonitorUngradedPixelReader((maxWidth, maxHeight, region) => {
+          ungradedPaintRef.current = true;
+          try {
+            paintRef.current();
+            return created.readPixels(maxWidth, maxHeight, region);
+          } finally {
+            ungradedPaintRef.current = false;
+            paintRef.current();
+          }
+        });
         paintRef.current();
       })
       .catch((reason: unknown) => {
@@ -605,6 +632,7 @@ function MonitorPanelContent({
         rendererPromiseRef.current = null;
         rendererRef.current = null;
         setMonitorPixelReader(undefined);
+        setMonitorUngradedPixelReader(undefined);
         if (pending !== null)
           void pending
             .then((created) => created.destroy())
@@ -823,6 +851,7 @@ function MonitorPanelContent({
     sceneTick,
     livePatches,
     liveGrade,
+    gradeBypassed,
   ]);
 
   const monitorAspectRatio: MonitorAspectRatio = monitorFitView
@@ -873,43 +902,13 @@ function MonitorPanelContent({
         showToast('The root composition is unavailable for this aspect-ratio change.', 'error');
         return;
       }
-      if (
-        visualComposition.width === dimensions.width &&
-        visualComposition.height === dimensions.height &&
-        timelineComposition.width === dimensions.width &&
-        timelineComposition.height === dimensions.height
-      ) {
-        setMonitorFitView(false);
-        return;
-      }
       try {
-        session.dispatchCompound(`Change canvas aspect ratio to ${nextAspectRatio}`, {
-          document: {
-            ...visualProject,
-            updatedAt: new Date().toISOString(),
-            compositions: {
-              ...visualProject.compositions,
-              [visualComposition.id]: {
-                ...visualComposition,
-                width: dimensions.width,
-                height: dimensions.height,
-              },
-            },
-          },
-          timeline: {
-            label: `Change canvas aspect ratio to ${nextAspectRatio}`,
-            commands: [
-              {
-                type: 'timeline.setCompositionDimensions',
-                payload: {
-                  compositionId: timelineComposition.id,
-                  width: dimensions.width,
-                  height: dimensions.height,
-                },
-              },
-            ],
-          },
-        });
+        applyCanvasDimensions(
+          session,
+          dimensions.width,
+          dimensions.height,
+          `Change canvas aspect ratio to ${nextAspectRatio}`,
+        );
         setMonitorFitView(false);
         bumpProjectRevision();
         showToast(`Canvas changed to ${nextAspectRatio}.`, 'success');
@@ -1007,6 +1006,11 @@ function MonitorPanelContent({
           viewportSize={monitorView.viewportSize}
           interactive={monitorView.tool === 'select' && !spaceHeld}
           startGesture={transformController.startGesture}
+        />
+        <MonitorEyedropper
+          view={monitorView.view}
+          frame={frameSize}
+          playheadUs={state.playheadUs}
         />
         <AgentPreviewBadge
           surface="Program Monitor"

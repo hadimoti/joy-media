@@ -42,13 +42,9 @@ export function executeLeasedExport(
   leaseToken?: string,
 ): ExportJobResult {
   try {
-    remuxBrowserMp4(
-      input.sourcePath,
-      outputPath,
-      input.payload.manifest.frameRate,
-      input.payload.frameCount,
-    );
-    const probe = verifyExportAgainstManifest(outputPath, input.payload.manifest);
+    const manifest = freezeManifest(input.payload.manifest);
+    remuxBrowserMp4(input.sourcePath, outputPath, manifest.frameRate, input.payload.frameCount);
+    const probe = verifyExportAgainstManifest(outputPath, manifest);
     coordinator.complete(workerId, jobId, undefined, undefined, leaseToken);
     return { outputPath, videoCodec: probe.videoCodec, audioCodec: probe.audioCodec };
   } catch (error) {
@@ -78,7 +74,12 @@ export function exportJobPayload(value: unknown): ExportJobPayload {
     manifestRecord.preset !== 'reels-1080' &&
     manifestRecord.preset !== 'shorts-1080' &&
     manifestRecord.preset !== 'youtube-1080' &&
-    manifestRecord.preset !== 'high-bitrate'
+    manifestRecord.preset !== 'high-bitrate' &&
+    manifestRecord.preset !== 'tiktok-1080' &&
+    manifestRecord.preset !== 'instagram-feed-4x5' &&
+    manifestRecord.preset !== 'square-1080' &&
+    manifestRecord.preset !== 'landscape-4k' &&
+    manifestRecord.preset !== 'custom'
   )
     throw new Error('render.export payload preset is invalid');
   let frozenManifest: RenderManifest;

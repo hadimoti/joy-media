@@ -24,6 +24,8 @@ describe('render export job request', () => {
         frameRate: 30,
         durationUs: 1_000_000,
         preset: 'reels-1080',
+        videoBitrate: 62_208_000,
+        audio: { codec: 'aac', sampleRate: 48_000, channels: 2, bitrate: 128_000 },
       }),
     ).toEqual({
       schemaVersion: 1,
@@ -37,7 +39,31 @@ describe('render export job request', () => {
         frameRate: 30,
         durationUs: 1_000_000,
         preset: 'reels-1080',
+        videoBitrate: 62_208_000,
+        audio: { codec: 'aac', sampleRate: 48_000, channels: 2, bitrate: 128_000 },
       },
+    });
+  });
+
+  it('accepts the new canvas-backed export presets in the worker payload', () => {
+    expect(
+      createRenderExportJobPayload({
+        controlPlaneProjectId: 'project-control-123',
+        frameCount: 30,
+        revision: 7,
+        width: 3840,
+        height: 2160,
+        frameRate: 30,
+        durationUs: 1_000_000,
+        preset: 'landscape-4k',
+        videoBitrate: 248_832_000,
+        audio: { codec: 'aac', sampleRate: 48_000, channels: 2, bitrate: 128_000 },
+      }).manifest,
+    ).toMatchObject({
+      preset: 'landscape-4k',
+      width: 3840,
+      height: 2160,
+      videoBitrate: 248_832_000,
     });
   });
 });

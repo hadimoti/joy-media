@@ -21,7 +21,7 @@ describe('Color workspace sections', () => {
 
     for (const property of [
       'Red Hue',
-      'Red Range',
+      'Red Width',
       'Red Softness',
       'Red Saturation',
       'Red Luminance',
