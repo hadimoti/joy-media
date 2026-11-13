@@ -39,6 +39,7 @@ import {
   DEV_LOADING_BAR_MS,
   DEV_RENDERER_RETRY_MS,
   DEV_RENDERER_URL,
+  PACKAGED_LOADING_DELAY_MS,
   PACKAGED_RENDERER_SCHEME,
   buildSecureWebPreferences,
   devLoadingPageHtml,
@@ -86,6 +87,66 @@ function readDevLogoDataUrl(): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * A packaged window stays hidden until its renderer has loaded. If that takes longer than
+ * PACKAGED_LOADING_DELAY_MS, a small JOY Media loading window (a data: page, so no network) shows until then.
+ * A quick start never shows it. The renderer's load is the signal: `did-finish-load` on the packaged page.
+ */
+function showPackagedWindowWhenLoaded(win: BrowserWindow): void {
+  let splash: BrowserWindow | undefined;
+  let loaded = false;
+  const closeSplash = (): void => {
+    if (splash !== undefined && !splash.isDestroyed()) splash.destroy();
+    splash = undefined;
+  };
+  const openSplash = (): void => {
+    if (loaded || win.isDestroyed() || splash !== undefined) return;
+    const loadingWindow = new BrowserWindow({
+      width: 360,
+      height: 240,
+      frame: false,
+      resizable: false,
+      show: false,
+      center: true,
+      backgroundColor: '#000000',
+      // No preload: the loading page is static and must not get the IPC bridge.
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        nodeIntegrationInWorker: false,
+        webviewTag: false,
+      },
+    });
+    splash = loadingWindow;
+    loadingWindow.once('ready-to-show', () => {
+      if (!loadingWindow.isDestroyed() && !loaded) loadingWindow.show();
+    });
+    const page = devLoadingPageHtml(readDevLogoDataUrl());
+    void loadingWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
+  };
+  const timer = setTimeout(openSplash, PACKAGED_LOADING_DELAY_MS);
+  const showEditor = (): void => {
+    loaded = true;
+    clearTimeout(timer);
+    closeSplash();
+    if (!win.isDestroyed()) win.show();
+  };
+  win.webContents.once('did-finish-load', showEditor);
+  win.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, _errorDescription, _validatedUrl, isMainFrame) => {
+      // -3 is an aborted navigation. A failed main frame still shows its error page, as it did before the wait.
+      if (errorCode === -3 || !isMainFrame) return;
+      showEditor();
+    },
+  );
+  win.on('closed', () => {
+    clearTimeout(timer);
+    closeSplash();
+  });
 }
 // Automated runtime smoke check (`pnpm --filter @joy-media/desktop test:smoke`, wave 9): a real
 // `electron .` launch that proves app.whenReady, window construction, and IPC registration all
@@ -489,7 +550,8 @@ if (!app.requestSingleInstanceLock()) {
     const win = new BrowserWindow({
       width: 1440,
       height: 900,
-      show: !isSmokeMode,
+      // A packaged window is shown once its renderer has loaded (see showPackagedWindowWhenLoaded).
+      show: isDev && !isSmokeMode,
       frame: false,
       titleBarStyle: 'hidden',
       backgroundColor: '#000000',
@@ -499,6 +561,7 @@ if (!app.requestSingleInstanceLock()) {
     cancelWhenPageGoes(agentRequests, win);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
+    if (!isDev && !isSmokeMode) showPackagedWindowWhenLoaded(win);
     if (isDev) {
       // A development window loads the editor dev server. While it does not answer, the window shows the JOY Media
       // loading page and checks the server every few seconds, then opens the editor as soon as it answers.

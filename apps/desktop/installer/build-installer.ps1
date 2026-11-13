@@ -64,3 +64,23 @@ $sumsEntries.Add("$setupSha256  joy-media-setup.exe")
 [IO.File]::WriteAllText($sumsPath, (($sumsEntries -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
 Write-Host "Recorded joy-media-setup.exe in $sumsPath."
 # (SUMS-BLOCK-END)
+
+# The release manifest lists the setup exe as well. The packager writes the manifest before the setup exists,
+# so the setup's entry is added here with the same digest as SHA256SUMS.txt. A rebuilt setup replaces its entry.
+# (MANIFEST-BLOCK-BEGIN)
+$manifestPath = Join-Path $distReleases "joy-media-release-manifest.json"
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw "joy-media-release-manifest.json not found at $manifestPath. Run desktop packager first."
+}
+$manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$setupEntry = [pscustomobject]@{
+    fileName = "joy-media-setup.exe"
+    type     = "installer"
+    byteSize = (Get-Item -LiteralPath $outExe).Length
+    sha256   = (Get-FileHash -LiteralPath $outExe -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$otherArtifacts = @($manifest.artifacts | Where-Object { $_.fileName -ne "joy-media-setup.exe" })
+$manifest.artifacts = @($otherArtifacts + $setupEntry)
+[IO.File]::WriteAllText($manifestPath, (($manifest | ConvertTo-Json -Depth 10) + "`n"), [Text.UTF8Encoding]::new($false))
+Write-Host "Recorded joy-media-setup.exe in $manifestPath."
+# (MANIFEST-BLOCK-END)
