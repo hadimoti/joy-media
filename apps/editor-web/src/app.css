@@ -9140,6 +9140,17 @@ label {
 }
 
 /* Joy Code's one calm card: optional, one sentence, one gold action. */
+/* The connect step as a keyboard-reachable control (T-J02): a gold button, same text role as the card. */
+.joy-code-connect-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--joy-type-xs);
+  cursor: pointer;
+  user-select: none;
+}
 .joy-code-connect-card {
   display: flex;
   align-items: center;
@@ -9949,7 +9960,8 @@ label {
   line-height: 1.4;
 }
 .joy-code-input textarea::placeholder {
-  color: var(--joy-text-disabled);
+  /* Readable hint: 8:1 on the input field (T-J02). */
+  color: var(--joy-text-secondary);
 }
 .joy-code-send {
   display: inline-grid;
@@ -9965,9 +9977,10 @@ label {
   cursor: pointer;
 }
 .joy-code-send:disabled {
+  /* Still visible when idle: at least 4.5:1 on the control background (T-J02). */
   border-color: var(--joy-border);
   background: var(--joy-bg-control);
-  color: var(--joy-text-disabled);
+  color: var(--joy-text-secondary);
   cursor: default;
 }
 @container (max-width: 300px) {
@@ -10946,11 +10959,11 @@ label {
   color: #f0c346;
 }
 .project-library-create {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
   margin-bottom: 1.25rem;
+  max-width: 100%;
 }
 .project-library-create input {
   min-width: min(100%, 18rem);
@@ -10960,6 +10973,132 @@ label {
   background: #1f1f21;
   color: #e4e4e6;
   font: inherit;
+}
+.new-project-formats {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+.new-project-formats legend {
+  padding: 0;
+  margin-bottom: 0.4rem;
+  color: var(--joy-text-secondary);
+  font-size: 0.78rem;
+}
+.new-project-format-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.5rem;
+  max-width: 100%;
+}
+.new-project-format {
+  position: relative;
+  display: grid;
+  gap: 0.35rem;
+  justify-items: center;
+  align-content: start;
+  padding: 0.6rem 0.5rem 0.55rem;
+  border: 1px solid #2e2e32;
+  border-radius: 0.4rem;
+  background: #1f1f21;
+  color: var(--joy-text);
+  text-align: center;
+  cursor: pointer;
+}
+.new-project-format:hover {
+  border-color: #4a4a50;
+}
+.new-project-format.is-selected {
+  border-color: var(--joy-accent);
+  box-shadow: 0 0 0 1px var(--joy-accent);
+}
+/* The generic `.project-library-create input` rule sizes every input; a radio
+   must reset all of it, or it covers the tile's picture and text. */
+.new-project-format input[type='radio'] {
+  position: absolute;
+  top: 0.45rem;
+  left: 0.45rem;
+  width: 1rem;
+  height: 1rem;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  accent-color: var(--joy-accent);
+}
+.new-project-format:focus-within {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 2px;
+}
+.new-project-format-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 4.5rem;
+}
+.new-project-format-picture {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  border: 1px solid #6b6b73;
+  border-radius: 0.2rem;
+  background: #2a2a2e;
+}
+.new-project-format-picture.is-custom {
+  border-style: dashed;
+  border-color: var(--joy-text-faint);
+  background: transparent;
+}
+.new-project-format-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.new-project-format-detail {
+  color: var(--joy-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+.new-project-custom-size {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+.new-project-custom-size label,
+.new-project-name {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--joy-text-secondary);
+  font-size: 0.78rem;
+}
+.new-project-custom-size input {
+  width: 7.5rem;
+  min-width: 0;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #3a3a3e;
+  border-radius: 0.3rem;
+  background: #1f1f21;
+  color: #e4e4e6;
+  font: inherit;
+}
+.new-project-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+  max-width: 100%;
+}
+.new-project-name-row .icon-button {
+  align-self: flex-end;
 }
 .project-library-grid {
   display: grid;
