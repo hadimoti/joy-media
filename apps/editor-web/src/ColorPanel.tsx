@@ -15,7 +15,6 @@ import {
   createIdentityColorGrade,
   encodeColorLutReference,
   IDENTITY_COLOR_ADJUSTMENTS,
-  IDENTITY_COLOR_CURVES,
   IDENTITY_HSL_BANDS,
   IDENTITY_COLOR_WHEELS,
   isColorLutReferenceAvailable,
@@ -23,6 +22,7 @@ import {
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { PropertyRow, type PropertyAnimationState } from './components/PropertyRow.js';
 import { ColorWheels } from './ColorWheels.js';
+import { ColorCurves } from './ColorCurves.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { readMonitorPixels as readLiveMonitorPixels } from './monitor-readback.js';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
@@ -569,13 +569,15 @@ export function ColorPanel({
           />
         )}
         {tab === 'curves' && (
-          <CurvesSection
+          <ColorCurves
             draft={draft}
             onChange={setDraft}
             onCommit={commit}
             animationStateFor={animationStateFor}
             onToggleAnimation={toggleCurveAnimation}
             canAnimate={onDispatch !== undefined}
+            scope={target === 'clip' ? 'clip' : 'output'}
+            clipId={target === 'clip' ? selectedClipId : undefined}
           />
         )}
         {tab === 'hsl' && (
@@ -686,106 +688,6 @@ function AdjustSection({
         onClick={() => onCommit({ ...draft, adjust: IDENTITY_COLOR_ADJUSTMENTS })}
       >
         Reset section
-      </button>
-    </section>
-  );
-}
-
-function CurvesSection({
-  draft,
-  onChange,
-  onCommit,
-  animationStateFor,
-  onToggleAnimation,
-  canAnimate,
-}: {
-  draft: ColorGradeV2;
-  onChange: (next: ColorGradeV2) => void;
-  onCommit: (next: ColorGradeV2) => void;
-  animationStateFor: (propertyId: string) => PropertyAnimationState;
-  onToggleAnimation: (
-    channel: 'rgb' | 'red' | 'green' | 'blue',
-    curves: ColorGradeV2['curves'],
-  ) => void;
-  canAnimate: boolean;
-}) {
-  const [channel, setChannel] = useState<'rgb' | 'red' | 'green' | 'blue'>('rgb');
-  const curves = { ...IDENTITY_COLOR_CURVES, ...(draft.curves ?? {}) };
-  const points = curves[channel];
-  const updatePoint = (index: number, y: number, finalize = false) => {
-    const next = {
-      ...draft,
-      curves: {
-        ...curves,
-        [channel]: points.map((point, i) => (i === index ? { ...point, y } : point)),
-      },
-    };
-    onChange(next);
-    if (finalize) onCommit(next);
-  };
-  return (
-    <section className="color-section">
-      <h3>Curves</h3>
-      <div className="curve-tabs">
-        {(['rgb', 'red', 'green', 'blue'] as const).map((id) => (
-          <button
-            type="button"
-            className={channel === id ? 'is-active' : ''}
-            key={id}
-            onClick={() => setChannel(id)}
-          >
-            {id.toUpperCase()}
-          </button>
-        ))}
-      </div>
-      <PropertyRow
-        label={`${channel.toUpperCase()} curve`}
-        value={canAnimate ? animationStateFor(`curves.${channel}`) : undefined}
-        {...(!canAnimate
-          ? {}
-          : {
-              animationState: animationStateFor(`curves.${channel}`),
-              onToggleAnimation: () => onToggleAnimation(channel, curves),
-            })}
-      >
-        <div className="curve-editor" aria-label={`${channel} curve`}>
-          <svg viewBox="0 0 100 100" role="img">
-            <path d="M0 100 L100 0" className="curve-grid-line" />
-            {points.map((point, index) => (
-              <circle
-                key={`${point.x}-${index}`}
-                cx={point.x * 100}
-                cy={(1 - point.y) * 100}
-                r="4"
-                className="curve-point"
-                onDoubleClick={() => updatePoint(index, point.x, true)}
-              />
-            ))}
-          </svg>
-        </div>
-        <div className="curve-sliders">
-          {points.map((point, index) => (
-            <label key={index}>
-              Point {index + 1}
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={point.y}
-                onChange={(e) => updatePoint(index, e.currentTarget.valueAsNumber)}
-                onPointerUp={(e) => updatePoint(index, e.currentTarget.valueAsNumber, true)}
-              />
-            </label>
-          ))}
-        </div>
-      </PropertyRow>
-      <button
-        type="button"
-        className="section-reset"
-        onClick={() => onCommit({ ...draft, curves: IDENTITY_COLOR_CURVES })}
-      >
-        Reset curves
       </button>
     </section>
   );

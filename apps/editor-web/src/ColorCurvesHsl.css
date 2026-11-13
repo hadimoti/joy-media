@@ -1,0 +1,123 @@
+/* The curves editor (T-K03) and the HSL bands with the eyedropper (T-K04).
+   Own class names (ccv-*, chsl-*), so the older .curve-* and .hsl-* rules in
+   app.css do not reach these controls. */
+
+.ccv-section {
+  gap: 0.5rem;
+}
+
+.ccv-tabs {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.ccv-tabs button {
+  position: relative;
+  border: 1px solid #44454b;
+  border-radius: 0.3rem;
+  padding: 0.28rem 0.55rem;
+  background: #202125;
+  color: #b8bac3;
+  font-size: 0.68rem;
+}
+
+.ccv-tabs button.is-active {
+  border-color: #dba925;
+  background: #3a321e;
+  color: #f0bd2d;
+}
+
+/* A small dot marks a channel whose curve is not straight. */
+.ccv-tabs button[data-curve-modified='true']::after {
+  content: '';
+  position: absolute;
+  top: 0.18rem;
+  right: 0.18rem;
+  width: 0.28rem;
+  height: 0.28rem;
+  border-radius: 50%;
+  background: #e4b42e;
+}
+
+/* The graph keeps its square shape and fills the panel width. */
+.ccv-graph {
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid #43444a;
+  border-radius: 0.25rem;
+  overflow: visible;
+}
+
+.ccv-graph svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.ccv-graph svg:focus {
+  outline: none;
+}
+
+.ccv-graph svg:focus-visible {
+  outline: 1px solid #e4b42e;
+  outline-offset: 2px;
+}
+
+.ccv-graph.is-dragging svg {
+  cursor: grabbing;
+}
+
+.ccv-bg {
+  fill: #18191d;
+}
+
+.ccv-grid line {
+  stroke: #2f3036;
+  stroke-width: 1;
+}
+
+.ccv-diagonal {
+  stroke: #55565e;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.ccv-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.ccv-point {
+  fill: #18191d;
+  stroke: #e6e7ea;
+  stroke-width: 2;
+  cursor: grab;
+}
+
+.ccv-point.is-selected {
+  fill: #e4b42e;
+  stroke: #15161a;
+}
+
+.ccv-readout {
+  display: block;
+  min-height: 1rem;
+  color: #b8bac3;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ccv-actions {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.ccv-actions .section-reset:disabled {
+  color: #6b6d75;
+}
