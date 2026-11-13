@@ -134,7 +134,7 @@ describe('AudioPanel engine status popover (T-D15, T-P05)', () => {
     act(() => trigger.click());
     expect(popover()).not.toBeNull();
     expect(popover()?.textContent).toMatch(/Browser DSP/);
-    expect(popover()?.textContent).toMatch(/Local Worker/);
+    expect(popover()?.textContent).toMatch(/Local device/);
     expect(button('Engine status').getAttribute('aria-expanded')).toBe('true');
 
     act(() => button('Close engine status').click());

@@ -47,7 +47,7 @@ describe('MaskInspector', () => {
       maskRuntimeStatus({ kind: 'image', assetId: 'photo-1' }, [photoWorker], 2_000),
     ).toMatchObject({
       state: 'ready',
-      label: 'Photo Worker ready',
+      label: 'Photo ready',
     });
     expect(
       maskRuntimeStatus({ kind: 'video', assetId: 'video-1' }, [photoWorker], 2_000),
@@ -59,7 +59,7 @@ describe('MaskInspector', () => {
       maskRuntimeStatus({ kind: 'image', assetId: 'photo-1' }, [photoWorker], 40_000),
     ).toMatchObject({
       state: 'offline',
-      label: 'Local Worker offline',
+      label: 'Local device offline',
     });
   });
 

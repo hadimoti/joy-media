@@ -43,15 +43,16 @@ describe('JobsPanel: the desktop Worker process', () => {
     expect(panel.querySelector('.jobs-worker-process')).toBeNull();
   });
 
-  it('shows a stopped Worker with its reason, and starts it again on Retry', async () => {
+  it('shows a plain message for a stopped local service and starts it again on Retry', async () => {
     mockControlPlane();
+    const log = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const invoke = vi.fn(async (channel: string) =>
       channel === 'desktop.worker-retry'
         ? { connection: 'online', capabilities: [], workerId: 'worker-2' }
         : {
             connection: 'degraded',
             capabilities: [],
-            lastError: 'Worker exited with code 137',
+            lastError: 'Local service exited with code 137',
           },
     );
     window.joyDesktop = { channels: ['desktop.worker-status', 'desktop.worker-retry'], invoke };
@@ -59,15 +60,20 @@ describe('JobsPanel: the desktop Worker process', () => {
 
     const row = panel.querySelector<HTMLElement>('.jobs-worker-process');
     expect(row?.textContent).toContain('stopped');
-    expect(row?.textContent).toContain('Worker exited with code 137');
+    expect(row?.textContent).toContain('The background helper stopped. Try again.');
+    expect(row?.textContent).not.toContain('Local service exited with code 137');
+    expect(log).toHaveBeenCalledWith(
+      'Desktop local service reported an error:',
+      'Local service exited with code 137',
+    );
 
     await act(async () => {
-      panel.querySelector<HTMLButtonElement>('[aria-label="Retry local Worker"]')?.click();
+      panel.querySelector<HTMLButtonElement>('[aria-label="Retry local service"]')?.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(invoke).toHaveBeenCalledWith('desktop.worker-retry');
     expect(panel.querySelector('.jobs-worker-process')?.textContent).toContain('running');
-    expect(panel.querySelector('[aria-label="Retry local Worker"]')).toBeNull();
+    expect(panel.querySelector('[aria-label="Retry local service"]')).toBeNull();
   });
 });

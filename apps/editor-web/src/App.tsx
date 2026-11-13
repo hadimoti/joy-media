@@ -4784,7 +4784,7 @@ function EditorWorkspace({
         }
         if (browserExportResult.blob === undefined)
           throw new Error('Browser export did not produce a downloadable MP4');
-        setExportStatus('Staging export for Worker verification…');
+        setExportStatus('Staging export for verification…');
         // Hashed in slices: the staged file is never copied into script memory as one buffer.
         const stagedBlob = browserExportResult.blob;
         const stagedSha256 = await sha256OfBlob(stagedBlob, { signal: abortController.signal });
@@ -4851,7 +4851,7 @@ function EditorWorkspace({
             audio,
           }),
         );
-        setExportStatus('Waiting for Worker export verification…');
+        setExportStatus('Waiting for export verification…');
         let workerJob: BrowserJob | undefined;
         // A Worker outage must surface as a retryable export failure instead
         // of leaving the editor in an unbounded polling loop.  The browser
@@ -4862,7 +4862,7 @@ function EditorWorkspace({
           workerJob = (
             await mediaControlPlaneClient.jobs(controlPlaneProject.controlPlaneProjectId)
           ).find((candidate) => candidate.id === workerJobId);
-          if (workerJob === undefined) throw new Error('Export Worker job disappeared');
+          if (workerJob === undefined) throw new Error('Export job disappeared');
           if (
             workerJob.state === 'completed' ||
             workerJob.state === 'failed' ||
@@ -4870,9 +4870,7 @@ function EditorWorkspace({
           )
             break;
           if (Date.now() >= workerExportDeadline)
-            throw new Error(
-              'Export Worker verification timed out. Check Worker connectivity and retry.',
-            );
+            throw new Error('Export verification timed out. Check the connection and retry.');
           setExportProgress(0.98);
           await new Promise<void>((resolve, reject) => {
             let settled = false;
@@ -4892,12 +4890,12 @@ function EditorWorkspace({
           });
         }
         abortController.signal.throwIfAborted();
-        if (workerJob === undefined) throw new Error('Export Worker job was not found');
+        if (workerJob === undefined) throw new Error('Export job was not found');
         if (workerJob.state === 'failed')
-          throw new Error(workerJob.error ?? 'Worker export verification failed');
-        if (workerJob.state === 'canceled') throw new Error('Worker export was canceled');
+          throw new Error(workerJob.error ?? 'Export verification failed');
+        if (workerJob.state === 'canceled') throw new Error('Export was canceled');
         if (workerJob.derivative === undefined)
-          throw new Error('Worker export completed without a verified derivative');
+          throw new Error('Export completed without a verified derivative');
         const remuxedBlob = await mediaControlPlaneClient.derivativeBytes(
           controlPlaneProject.controlPlaneProjectId,
           stagedExportAssetId,

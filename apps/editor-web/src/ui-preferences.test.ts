@@ -39,4 +39,16 @@ describe('editor UI preferences', () => {
     expect(loadEditorUiPreferences(store)).toEqual(next);
     expect(resetEditorUiPreferences(store)).toEqual(DEFAULT_EDITOR_UI_PREFERENCES);
   });
+
+  it('migrates the old default Quarter preview and drops the removed renderer setting', () => {
+    const store = storage({
+      [EDITOR_UI_PREFERENCES_KEY]: JSON.stringify({
+        ...DEFAULT_EDITOR_UI_PREFERENCES,
+        monitorPreview: { quality: 'quarter', renderer: 'auto' },
+      }),
+    });
+
+    expect(DEFAULT_EDITOR_UI_PREFERENCES.monitorPreview).toEqual({ quality: 'auto' });
+    expect(loadEditorUiPreferences(store).monitorPreview).toEqual({ quality: 'auto' });
+  });
 });
