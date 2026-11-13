@@ -61,6 +61,7 @@ import {
 } from './icons.js';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
 import { JoyCodeReadinessSlot } from './joy-code-connect-model-card.js';
+import { createRunStartAnnouncer, runControlGate } from './joy-code-run-gate.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import {
@@ -2543,7 +2544,11 @@ export function AgentPanel({
     activeModelRunIdRef.current = scope.runId;
     setRecipeRunningId(skillId);
     setAgentPhase('connecting');
-    appendMessage(threadId, 'user', `Run recipe — ${entry.skill.title}`);
+    // The "Run recipe" message is added only when the run really starts (its
+    // first checkpoint). A run refused before that adds no user message.
+    const runAnnouncer = createRunStartAnnouncer(() =>
+      appendMessage(threadId, 'user', `Run recipe — ${entry.skill.title}`),
+    );
     const lifecycleRun = { runId: scope.runId, epoch: scope.epoch };
     try {
       beginRunLifecycle(lifecycleRun);
@@ -2555,6 +2560,7 @@ export function AgentPanel({
         signal: recipeController.signal,
         onEvent: (checkpoint) => {
           if (recipeRunScopeRef.current?.runId !== scope.runId) return;
+          runAnnouncer.observe(checkpoint);
           if (checkpoint.state === 'started') setAgentPhase('planning');
         },
       });
@@ -3562,10 +3568,19 @@ export function AgentPanel({
               {creativeSkills.map((entry) => {
                 const missing = [...entry.missingCapabilities, ...entry.missingOperations];
                 const running = recipeRunningId === entry.skill.id;
+                const gate = runControlGate({
+                  ready: isRecipeRunnerReady,
+                  noModel: capability === undefined,
+                  readinessText: recipeReadinessText,
+                  blocked: !entry.available || recipeRunningId !== undefined || liveAgentBusy,
+                });
                 return (
                   <li
                     key={entry.skill.id}
                     className={`joy-code-recipe ${entry.available ? '' : 'is-unavailable'}`}
+                    onClick={
+                      gate.opensConnect && onOpenSettings !== undefined ? onOpenSettings : undefined
+                    }
                   >
                     <div className="joy-code-recipe-copy">
                       <strong>{entry.skill.title}</strong>
@@ -3574,19 +3589,16 @@ export function AgentPanel({
                         <span className="joy-code-recipe-missing">Needs: {missing.join(', ')}</span>
                       )}
                     </div>
-                    {isRecipeRunnerReady && (
-                      <button
-                        type="button"
-                        className="joy-code-recipe-run"
-                        disabled={
-                          !entry.available || recipeRunningId !== undefined || liveAgentBusy
-                        }
-                        aria-label={`Run ${entry.skill.title}`}
-                        onClick={() => void runRecipe(entry.skill.id)}
-                      >
-                        {running ? 'Running…' : 'Run'}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="joy-code-recipe-run"
+                      disabled={gate.disabled}
+                      title={gate.title}
+                      aria-label={`Run ${entry.skill.title}`}
+                      onClick={() => void runRecipe(entry.skill.id)}
+                    >
+                      {running ? 'Running…' : 'Run'}
+                    </button>
                   </li>
                 );
               })}
@@ -3635,6 +3647,8 @@ export function AgentPanel({
               onBriefReady={handOffCreativeBrief}
               onBriefHydrated={setCreativeBriefContext}
               onBriefCleared={() => setCreativeBriefContext(undefined)}
+              noModelConnected={capability === undefined}
+              {...(onOpenSettings === undefined ? {} : { onConnectModel: onOpenSettings })}
               {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
               {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
               embedded

@@ -25,6 +25,7 @@ import { CreativeBriefDisplay } from './CreativeBriefDisplay.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
+import { CONNECT_MODEL_FIRST_TITLE } from './joy-code-run-gate.js';
 import {
   loadCreativeBrief,
   removeCreativeBrief,
@@ -64,6 +65,10 @@ export interface CreativeBriefPanelProps {
   readonly onBriefCleared?: () => void;
   /** Mount inside the Joy Code surface without a second visual panel header. */
   readonly embedded?: boolean;
+  /** No model is connected: the Improve control is disabled and the card opens the connect step. */
+  readonly noModelConnected?: boolean;
+  /** Opens JOY Agent Settings (the connect step). */
+  readonly onConnectModel?: () => void;
 }
 
 /** Versioned disclosure shown immediately before project-level opt-in. */
@@ -95,6 +100,8 @@ export function CreativeBriefPanel({
   onBriefCleared,
   embedded = false,
   storage,
+  noModelConnected = false,
+  onConnectModel,
 }: CreativeBriefPanelProps) {
   const [state, dispatch] = useReducer(creativeBriefReducer, INITIAL_BRIEF_STATE);
   const [requestText, setRequestText] = useState('');
@@ -335,19 +342,26 @@ export function CreativeBriefPanel({
 
       {/* Request Input */}
       {optedIn && (
-        <div className="creative-brief-panel-input" aria-label="Brief request input">
+        <div
+          className="creative-brief-panel-input"
+          aria-label="Brief request input"
+          onClick={noModelConnected && onConnectModel ? onConnectModel : undefined}
+        >
           <textarea
             className="creative-brief-panel-textarea"
             value={displayedRequest}
             onChange={(e) => setRequestText(e.target.value)}
             placeholder="Describe what you want to improve..."
             aria-label="Describe creative improvement"
-            disabled={isCollecting(state)}
+            disabled={isCollecting(state) || noModelConnected}
           />
           <button
             className="creative-brief-panel-button"
             onClick={handleImprove}
-            disabled={isCollecting(state) || (!runBrief && !isUnavailable(state))}
+            disabled={
+              isCollecting(state) || (!runBrief && !isUnavailable(state)) || noModelConnected
+            }
+            title={noModelConnected ? CONNECT_MODEL_FIRST_TITLE : undefined}
             aria-label="Improve project"
           >
             Improve project

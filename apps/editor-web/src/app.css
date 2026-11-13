@@ -9703,7 +9703,8 @@ label {
   line-height: 1.4;
 }
 .joy-code-input textarea::placeholder {
-  color: var(--joy-text-disabled);
+  /* Readable hint: 8:1 on the input field (T-J02). */
+  color: var(--joy-text-secondary);
 }
 .joy-code-send {
   display: inline-grid;
@@ -9719,9 +9720,10 @@ label {
   cursor: pointer;
 }
 .joy-code-send:disabled {
+  /* Still visible when idle: at least 4.5:1 on the control background (T-J02). */
   border-color: var(--joy-border);
   background: var(--joy-bg-control);
-  color: var(--joy-text-disabled);
+  color: var(--joy-text-secondary);
   cursor: default;
 }
 @container (max-width: 300px) {

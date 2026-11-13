@@ -36,9 +36,26 @@ describe('Joy Code not-connected card wiring', () => {
     expect(chat).not.toContain('to run natural-language JOY edits.');
   });
 
-  it('hides the Recipes Run buttons until a model is connected', () => {
-    expect(panelSource).toContain('{isRecipeRunnerReady && (');
-    expect(panelSource).not.toContain('!isRecipeRunnerReady ||');
+  it('keeps the Recipes Run buttons visible but disabled until a model is connected', () => {
+    // The gate decides disabled, hover text and the connect click (T-J02).
+    expect(panelSource).toContain('const gate = runControlGate({');
+    expect(panelSource).toContain('disabled={gate.disabled}');
+    expect(panelSource).toContain('title={gate.title}');
+    expect(panelSource).not.toContain('{isRecipeRunnerReady && (');
+  });
+
+  it('adds the "Run recipe" message only from the run start, never before the run', () => {
+    // The one append of the message sits inside the start announcer, not in the run body.
+    const appends = panelSource.match(/appendMessage\(threadId, 'user', `Run recipe/g) ?? [];
+    expect(appends).toHaveLength(1);
+    expect(panelSource).toMatch(
+      /createRunStartAnnouncer\(\(\) =>\s*appendMessage\(threadId, 'user', `Run recipe/,
+    );
+    expect(panelSource).toContain('runAnnouncer.observe(checkpoint);');
+  });
+
+  it('offers the connect step from the Creative Brief card when no model is connected', () => {
+    expect(panelSource).toContain('noModelConnected={capability === undefined}');
   });
 
   it('keeps one message and one action for the not-connected state', () => {
