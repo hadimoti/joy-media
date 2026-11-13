@@ -246,18 +246,22 @@ uniform float uThreshold;
 
 void main()
 {
-    vec2 stepUv = uInputSize.zw * max(1.0, uRadius * 1.5);
+    vec2 stepUv = uInputSize.zw * max(1.5, uRadius * 2.0);
     vec2 contentMax = max(uOutputFrame.zw * uInputSize.zw, vec2(0.0001));
     vec4 center = texture(uTexture, vTextureCoord);
-    vec3 blurred = (
+    vec3 ring = (
         texture(uTexture, clamp(vTextureCoord + vec2(stepUv.x, 0.0), vec2(0.0), contentMax)).rgb +
         texture(uTexture, clamp(vTextureCoord - vec2(stepUv.x, 0.0), vec2(0.0), contentMax)).rgb +
         texture(uTexture, clamp(vTextureCoord + vec2(0.0, stepUv.y), vec2(0.0), contentMax)).rgb +
-        texture(uTexture, clamp(vTextureCoord - vec2(0.0, stepUv.y), vec2(0.0), contentMax)).rgb
-    ) * 0.25;
-    vec3 detail = center.rgb - blurred;
-    float mask = smoothstep(max(0.0, uThreshold * 0.25), max(0.05, uThreshold + 0.1), length(detail));
-    finalColor = vec4(clamp(center.rgb + detail * (uAmount * 2.5) * mask, 0.0, 1.0), center.a);
+        texture(uTexture, clamp(vTextureCoord - vec2(0.0, stepUv.y), vec2(0.0), contentMax)).rgb +
+        texture(uTexture, clamp(vTextureCoord + vec2(stepUv.x, stepUv.y), vec2(0.0), contentMax)).rgb +
+        texture(uTexture, clamp(vTextureCoord + vec2(-stepUv.x, stepUv.y), vec2(0.0), contentMax)).rgb +
+        texture(uTexture, clamp(vTextureCoord + vec2(stepUv.x, -stepUv.y), vec2(0.0), contentMax)).rgb +
+        texture(uTexture, clamp(vTextureCoord - vec2(stepUv.x, stepUv.y), vec2(0.0), contentMax)).rgb
+    ) * 0.125;
+    vec3 detail = center.rgb - ring;
+    float mask = smoothstep(max(0.0, uThreshold * 0.2), max(0.03, uThreshold + 0.03), length(detail));
+    finalColor = vec4(clamp(center.rgb + detail * (uAmount * 3.2) * mask, 0.0, 1.0), center.a);
 }
 `;
 
