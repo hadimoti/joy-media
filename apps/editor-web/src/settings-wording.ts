@@ -348,6 +348,7 @@ export const SETTINGS_PROVIDER_SIGN_IN = {
   openSignInPageAgain: 'Open the sign-in page again',
   cancelSignIn: 'Cancel',
   signInCancelled: 'Sign-in cancelled. You can start again.',
+  signInTimedOut: 'The {provider} sign-in ran out of time. Sign in again to start over.',
   signInFailed: 'The {provider} sign-in did not complete.',
   modelIdRequired: 'Enter a model ID before saving.',
   apiKeyRequired: 'Enter an API key before saving.',

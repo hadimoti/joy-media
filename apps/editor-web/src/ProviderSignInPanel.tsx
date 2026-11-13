@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   findRegistryProvider,
+  SIGN_IN_WAIT_MS,
   signInProviders,
   type ProviderRegion,
   type ProviderRegionId,
@@ -18,12 +19,6 @@ import {
 import { providerLabel } from './provider-labels.js';
 import { ChevronDownIcon } from './icons.js';
 import { SETTINGS_PROVIDER_SIGN_IN } from './settings-wording.js';
-
-/**
- * How long a sign-in waits for the browser to come back. Matches CALLBACK_TIMEOUT_MS in provider-oauth/loopback.ts
- * (the listener closes itself after this), so the countdown ends when the sign-in does.
- */
-export const SIGN_IN_WAIT_MS = 3 * 60_000;
 
 /** Minutes and seconds, such as 4:59. */
 export function formatSignInCountdown(ms: number): string {
@@ -85,9 +80,10 @@ export function ProviderSignInPanel({
 
   const signIn = async (target: RegistryProviderId): Promise<void> => {
     cancelledRef.current = undefined;
+    const startedAt = Date.now();
     setBusy(target);
-    setWaitingSince(Date.now());
-    setClock(Date.now());
+    setWaitingSince(startedAt);
+    setClock(startedAt);
     setSignInStatus(undefined);
     try {
       const profile = await signInDesktopProviderProfile({ provider: target });
@@ -99,16 +95,23 @@ export function ProviderSignInPanel({
         ),
       });
     } catch (error) {
+      // The main process ends the sign-in no earlier than the same wait after this click, so a failure after the
+      // whole wait is the timeout: it gets the start-again message (T-J03).
+      const timedOut = Date.now() - startedAt >= SIGN_IN_WAIT_MS;
       setSignInStatus({
         provider: target,
         message:
           cancelledRef.current === target
             ? SETTINGS_PROVIDER_SIGN_IN.signInCancelled
-            : error instanceof Error
-              ? error.message
-              : SETTINGS_PROVIDER_SIGN_IN.signInFailed.replace('{provider}', () =>
+            : timedOut
+              ? SETTINGS_PROVIDER_SIGN_IN.signInTimedOut.replace('{provider}', () =>
                   providerLabel(target),
-                ),
+                )
+              : error instanceof Error
+                ? error.message
+                : SETTINGS_PROVIDER_SIGN_IN.signInFailed.replace('{provider}', () =>
+                    providerLabel(target),
+                  ),
       });
     } finally {
       setBusy(undefined);

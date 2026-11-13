@@ -1,10 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { SIGN_IN_WAIT_MS } from '@joy-media/provider-sdk';
 import { OAuthFlowError } from './errors.js';
 
 /** The only host a sign-in listens on and redirects to. `localhost` is never used (PLAN-v4 §6d). */
 export const LOOPBACK_HOST = '127.0.0.1';
-/** How long a sign-in waits for the browser to come back (PLAN-v4 §6d). */
-export const CALLBACK_TIMEOUT_MS = 3 * 60_000;
+/** How long a sign-in waits for the browser to come back (PLAN-v4 §6d). The shared sign-in wait (T-J03). */
+export const CALLBACK_TIMEOUT_MS = SIGN_IN_WAIT_MS;
 
 export interface LoopbackCallbackOptions {
   /** The path the browser returns to, such as `/callback`. Any other path is ignored. */

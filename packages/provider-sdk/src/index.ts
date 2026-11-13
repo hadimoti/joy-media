@@ -138,6 +138,7 @@ export {
 } from './registry.js';
 export type { OAuthClient, OAuthClientProviderId } from './oauth-clients.js';
 export { getOAuthClient } from './oauth-clients.js';
+export { SIGN_IN_WAIT_MS } from './sign-in-wait.js';
 
 // Re-export the two general-purpose agent slots (D17, PLAN-v4 §6d-1)
 export type {

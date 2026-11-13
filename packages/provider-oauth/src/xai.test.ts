@@ -421,6 +421,89 @@ describe('xAI device OAuth', () => {
     ).rejects.toMatchObject({ code: 'TIMEOUT', message: 'xAI device authorization timed out.' });
   });
 
+  it('stops polling at the three-minute limit even when the server allows fifteen minutes', async () => {
+    vi.useFakeTimers({ now: NOW });
+    let tokenPolls = 0;
+    const fetch: FetchLike = async (url) => {
+      if (url === XAI_OAUTH_DISCOVERY_URL) return discovery();
+      if (url === DEVICE_ENDPOINT) {
+        return json({
+          device_code: 'test-device-code',
+          user_code: 'TEST-CODE',
+          verification_uri_complete: 'https://accounts.x.ai/oauth2/device?user_code=TEST-CODE',
+          expires_in: 900,
+          interval: 1,
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        tokenPolls += 1;
+        return json({ error: 'authorization_pending' }, 400);
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const outcome = signInWithXai({
+      clientId: CLIENT_ID,
+      openExternal: () => undefined,
+      fetch,
+      now: Date.now,
+      pollIntervalMs: 60_000,
+    }).catch((error: unknown) => error);
+
+    // Polls at 0, 60 and 120 seconds; the limit is reached at 180 seconds.
+    await vi.advanceTimersByTimeAsync(179_999);
+    expect(tokenPolls).toBe(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await outcome).toMatchObject({
+      code: 'TIMEOUT',
+      message: 'xAI device authorization timed out.',
+    });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(tokenPolls).toBe(3);
+  });
+
+  it('ignores an approval that arrives after the three-minute limit', async () => {
+    vi.useFakeTimers({ now: NOW });
+    let tokenPolls = 0;
+    const fetch: FetchLike = async (url) => {
+      if (url === XAI_OAUTH_DISCOVERY_URL) return discovery();
+      if (url === DEVICE_ENDPOINT) {
+        return json({
+          device_code: 'test-device-code',
+          user_code: 'TEST-CODE',
+          verification_uri_complete: 'https://accounts.x.ai/oauth2/device?user_code=TEST-CODE',
+          expires_in: 900,
+          interval: 1,
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        tokenPolls += 1;
+        if (tokenPolls === 1) return json({ error: 'authorization_pending' }, 400);
+        // The second poll is sent at 170 seconds. Its reply lands at 185 seconds, after the limit, and ignores the
+        // request's own abort, so the flow has to refuse it on the clock alone.
+        await new Promise((resolve) => setTimeout(resolve, 15_000));
+        return json({
+          access_token: 'test-access-token',
+          refresh_token: 'test-refresh-token',
+          expires_in: 3600,
+        });
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const outcome = signInWithXai({
+      clientId: CLIENT_ID,
+      openExternal: () => undefined,
+      fetch,
+      now: Date.now,
+      pollIntervalMs: 170_000,
+    }).catch((error: unknown) => error);
+
+    await vi.advanceTimersByTimeAsync(170_000);
+    expect(tokenPolls).toBe(2);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await outcome).toMatchObject({ code: 'TIMEOUT' });
+    expect(tokenPolls).toBe(2);
+  });
+
   it('turns access_denied into a fixed, credential-safe error', async () => {
     const fetch: FetchLike = async (url) => {
       if (url === XAI_OAUTH_DISCOVERY_URL) return discovery();

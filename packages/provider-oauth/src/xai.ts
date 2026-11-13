@@ -1,4 +1,8 @@
-import { getOAuthClient, XAI_OAUTH_INFERENCE_BASE_URL } from '@joy-media/provider-sdk';
+import {
+  getOAuthClient,
+  SIGN_IN_WAIT_MS,
+  XAI_OAUTH_INFERENCE_BASE_URL,
+} from '@joy-media/provider-sdk';
 import { OAuthFlowError } from './errors.js';
 import {
   type FetchLike,
@@ -22,9 +26,6 @@ export { XAI_OAUTH_INFERENCE_BASE_URL };
 export const XAI_OAUTH_REFRESH_MARGIN_MS = 60_000;
 /** No OAuth HTTP request is allowed to hang beyond this time. */
 export const XAI_OAUTH_REQUEST_TIMEOUT_MS = 30_000;
-/** Device authorization is bounded even if xAI omits an expiry. */
-const XAI_OAUTH_MAX_DEVICE_WAIT_MS = 15 * 60_000;
-const XAI_OAUTH_DEFAULT_DEVICE_WAIT_MS = 5 * 60_000;
 const XAI_OAUTH_DEFAULT_POLL_INTERVAL_MS = 5_000;
 
 /** xAI OAuth tokens and their metadata are kept together as one profile secret. */
@@ -120,11 +121,12 @@ export async function signInWithXai(options: XaiSignInOptions): Promise<XaiToken
       ? configuredInterval
       : 0,
   );
+  // The same wait the countdown shows: polling stops when it ends, whatever the server's expiry says (T-J03).
   const configuredTimeout = options.timeoutMs;
   const flowTimeout =
     typeof configuredTimeout === 'number' && Number.isFinite(configuredTimeout)
-      ? Math.min(XAI_OAUTH_MAX_DEVICE_WAIT_MS, Math.max(0, configuredTimeout))
-      : XAI_OAUTH_MAX_DEVICE_WAIT_MS;
+      ? Math.min(SIGN_IN_WAIT_MS, Math.max(0, configuredTimeout))
+      : SIGN_IN_WAIT_MS;
   const deadline = Math.min(device.expiresAt, requestedAt + flowTimeout);
   let pollImmediately = true;
   let slowDownReported = false;
@@ -383,11 +385,7 @@ async function requestDeviceCode(
   const approvalUrl = approvalUrlFor(verificationUri, userCode);
   const expiresInSeconds = positiveNumber(result.reply.expires_in);
   const expiresAt =
-    requestedAt +
-    Math.min(
-      XAI_OAUTH_MAX_DEVICE_WAIT_MS,
-      (expiresInSeconds ?? XAI_OAUTH_DEFAULT_DEVICE_WAIT_MS / 1000) * 1000,
-    );
+    requestedAt + Math.min(SIGN_IN_WAIT_MS, (expiresInSeconds ?? SIGN_IN_WAIT_MS / 1000) * 1000);
   if (expiresAt <= options.now()) throw deviceTimeout();
   const intervalSeconds =
     positiveNumber(result.reply.interval) ?? XAI_OAUTH_DEFAULT_POLL_INTERVAL_MS / 1000;

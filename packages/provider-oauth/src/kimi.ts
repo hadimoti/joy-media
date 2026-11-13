@@ -1,5 +1,5 @@
 import { isRecord } from './is-record.js';
-import { getOAuthClient } from '@joy-media/provider-sdk';
+import { getOAuthClient, SIGN_IN_WAIT_MS } from '@joy-media/provider-sdk';
 import { OAuthFlowError } from './errors.js';
 import {
   type FetchLike,
@@ -22,9 +22,6 @@ export const KIMI_CODE_DEFAULT_POLL_INTERVAL_MS = 5_000;
 export const KIMI_CODE_REFRESH_MARGIN_MS = 60_000;
 /** No OAuth HTTP request is allowed to hang beyond this time. */
 export const KIMI_CODE_REQUEST_TIMEOUT_MS = 30_000;
-/** A device flow is bounded even if the server omits an expiry. */
-const KIMI_CODE_MAX_DEVICE_WAIT_MS = 15 * 60_000;
-const KIMI_CODE_DEFAULT_DEVICE_WAIT_MS = 5 * 60_000;
 const KIMI_CODE_SCOPE = 'kimi-code';
 
 /** The OAuth tokens and their metadata are one secret in the local provider profile. */
@@ -114,11 +111,12 @@ export async function signInWithKimiCode(options: KimiCodeSignInOptions): Promis
       ? configuredInterval
       : 0,
   );
+  // The same wait the countdown shows: polling stops when it ends, whatever the server's expiry says (T-J03).
   const configuredTimeout = options.timeoutMs;
   const flowTimeout =
     typeof configuredTimeout === 'number' && Number.isFinite(configuredTimeout)
-      ? Math.min(KIMI_CODE_MAX_DEVICE_WAIT_MS, Math.max(0, configuredTimeout))
-      : KIMI_CODE_MAX_DEVICE_WAIT_MS;
+      ? Math.min(SIGN_IN_WAIT_MS, Math.max(0, configuredTimeout))
+      : SIGN_IN_WAIT_MS;
   const deadline = Math.min(device.expiresAt, requestedAt + flowTimeout);
   const endpoint = `${KIMI_CODE_OAUTH_HOST}/api/oauth/token`;
   let pollImmediately = true;
@@ -331,11 +329,7 @@ async function requestDeviceCode(
   }
   const expiresInSeconds = positiveNumber(result.reply.expires_in);
   const expiresAt =
-    requestedAt +
-    Math.min(
-      KIMI_CODE_MAX_DEVICE_WAIT_MS,
-      (expiresInSeconds ?? KIMI_CODE_DEFAULT_DEVICE_WAIT_MS / 1000) * 1000,
-    );
+    requestedAt + Math.min(SIGN_IN_WAIT_MS, (expiresInSeconds ?? SIGN_IN_WAIT_MS / 1000) * 1000);
   if (expiresAt <= options.now()) throw deviceTimeout();
   const intervalSeconds =
     positiveNumber(result.reply.interval) ?? KIMI_CODE_DEFAULT_POLL_INTERVAL_MS / 1000;

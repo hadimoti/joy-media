@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SIGN_IN_WAIT_MS } from '@joy-media/provider-sdk';
 import { ProviderSignInPanel } from './ProviderSignInPanel.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -222,6 +223,35 @@ describe('ProviderSignInPanel', () => {
       'xAI sign-in was refused.',
     );
     expect(route('xAI', 'API-key').querySelector('[role="status"]')).toBeNull();
+  });
+
+  it('shows the timeout message with a way to start again when the sign-in wait runs out', async () => {
+    let clock = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const invoke = installDesktopBridge();
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.sign-in') {
+        clock += SIGN_IN_WAIT_MS;
+        throw new Error('xAI device authorization timed out.');
+      }
+      return undefined;
+    });
+    const onSignedIn = vi.fn();
+    await mount(onSignedIn);
+    await openAccordion('xAI');
+
+    const button = route('xAI', 'OAuth').querySelector<HTMLButtonElement>('button');
+    if (button === null) throw new Error('Expected the xAI sign-in button');
+    await act(async () => {
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(onSignedIn).not.toHaveBeenCalled();
+    expect(route('xAI', 'OAuth').querySelector('[role="status"]')?.textContent).toBe(
+      'The xAI sign-in ran out of time. Sign in again to start over.',
+    );
+    expect(route('xAI', 'OAuth').querySelector<HTMLButtonElement>('button')?.disabled).toBe(false);
   });
 
   it('uses only API-key regions for the API-key route and keeps OAuth-only bases out of it', async () => {
