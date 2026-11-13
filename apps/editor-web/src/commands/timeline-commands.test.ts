@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { emptySpikeProject, makeVideoClip, withClips } from '@joy-media/test-fixtures';
-import { buildClipContextMenu, buildTrackHeaderContextMenu } from './timeline-commands.js';
+import {
+  buildClipContextMenu,
+  buildEmptyCanvasContextMenu,
+  buildTrackHeaderContextMenu,
+  TIMELINE_COMMANDS,
+} from './timeline-commands.js';
 
 describe('buildTrackHeaderContextMenu', () => {
   const buildMenu = (canRemoveTrack: boolean) =>
@@ -47,5 +52,53 @@ describe('buildTrackHeaderContextMenu', () => {
     expect(
       items.filter((item) => item.action && !item.dividerBefore).every((item) => item.disabled),
     ).toBe(true);
+  });
+
+  it('exposes copy and cut in clip context menu', () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-1', 0, 5_000_000),
+    ]);
+    const composition = project.compositions.root!;
+    const track = composition.tracks[0]!;
+    const items = buildClipContextMenu(
+      {
+        project,
+        compositionId: 'root',
+        playheadUs: 1_000_000,
+        selectedTrackIds: [track.id],
+        selectedClip: { track, clip: track.clips[0]! },
+      },
+      vi.fn(),
+      false,
+    );
+
+    const copyItem = items.find((item) => item.label === 'Copy clip');
+    const cutItem = items.find((item) => item.label === 'Cut clip');
+    expect(copyItem).toBeDefined();
+    expect(cutItem).toBeDefined();
+    expect(copyItem?.shortcut).toBe('Ctrl+C');
+    expect(cutItem?.shortcut).toBe('Ctrl+X');
+  });
+
+  it('includes paste in empty canvas context menu when onPaste is provided', () => {
+    const onPaste = vi.fn();
+    const items = buildEmptyCanvasContextMenu(vi.fn(), vi.fn(), onPaste);
+    const pasteItem = items.find((item) => item.label === 'Paste at playhead');
+    expect(pasteItem).toBeDefined();
+    expect(pasteItem?.shortcut).toBe('Ctrl+V');
+    pasteItem?.action?.();
+    expect(onPaste).toHaveBeenCalledOnce();
+  });
+
+  it('registers copy, cut, paste and snapping in TIMELINE_COMMANDS', () => {
+    const ids = TIMELINE_COMMANDS.map((c) => c.id);
+    expect(ids).toContain('clip.copy');
+    expect(ids).toContain('clip.cut');
+    expect(ids).toContain('clip.paste');
+    expect(ids).toContain('tool.snapping');
+
+    const snapCmd = TIMELINE_COMMANDS.find((c) => c.id === 'tool.snapping');
+    expect(snapCmd?.shortcut).toBe('N');
+    expect(snapCmd?.group).toBe('tools');
   });
 });

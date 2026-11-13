@@ -208,8 +208,27 @@ export function ZoomOutIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-import { FitWidthIcon } from '../icons.js';
-export { FitWidthIcon };
+import { CopyIcon, PasteIcon, FitWidthIcon } from '../icons.js';
+import { copyTimelineClips } from '../timeline-clip-clipboard.js';
+export { CopyIcon, PasteIcon, FitWidthIcon };
+
+export function MagnetIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="16"
+      height="16"
+    >
+      <path d="M6 3v7a6 6 0 0 0 12 0V3" />
+      <line x1="4" y1="7" x2="8" y2="7" />
+      <line x1="16" y1="7" x2="20" y2="7" />
+    </svg>
+  );
+}
 
 // --- Command Registry ---
 export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
@@ -318,8 +337,57 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     },
     toggleState: () => false, // handled by toolbar state
   },
+  {
+    id: 'tool.snapping',
+    label: 'Toggle snapping',
+    icon: MagnetIcon,
+    shortcut: 'N',
+    group: 'tools',
+    canExecute: () => true,
+    execute: () => null,
+    toggleState: () => false,
+  },
 
   // EDIT GROUP
+  {
+    id: 'clip.copy',
+    label: 'Copy clip',
+    icon: CopyIcon,
+    shortcut: 'Ctrl+C',
+    group: 'edit',
+    canExecute: (ctx) => !!ctx.selectedClip,
+    execute: () => null,
+  },
+  {
+    id: 'clip.cut',
+    label: 'Cut clip',
+    icon: ScissorsIcon,
+    shortcut: 'Ctrl+X',
+    group: 'edit',
+    canExecute: (ctx) => !!ctx.selectedClip,
+    execute: (ctx) => {
+      const clip = ctx.selectedClip?.clip;
+      const track = ctx.selectedClip?.track;
+      if (!clip || !track) return null;
+      return {
+        type: 'timeline.removeClip',
+        payload: {
+          compositionId: ctx.compositionId,
+          trackId: track.id,
+          clipId: clip.id,
+        },
+      };
+    },
+  },
+  {
+    id: 'clip.paste',
+    label: 'Paste clip',
+    icon: PasteIcon,
+    shortcut: 'Ctrl+V',
+    group: 'edit',
+    canExecute: (ctx) => !!ctx.project.compositions[ctx.compositionId],
+    execute: () => null,
+  },
   {
     id: 'clip.duplicate',
     label: 'Duplicate clip',
@@ -543,6 +611,42 @@ export function buildClipContextMenu(
     }
   }
 
+  // Copy
+  const copyCmd = TIMELINE_COMMANDS.find((c) => c.id === 'clip.copy')!;
+  if (copyCmd.canExecute(ctx)) {
+    const clip = ctx.selectedClip?.clip;
+    const comp = ctx.project.compositions[ctx.compositionId];
+    items.push({
+      label: 'Copy clip',
+      icon: CopyIcon,
+      shortcut: 'Ctrl+C',
+      disabled: trackLocked,
+      action: () => {
+        if (comp && clip) copyTimelineClips(comp, [clip.id]);
+      },
+    });
+  }
+
+  // Cut
+  const cutCmd = TIMELINE_COMMANDS.find((c) => c.id === 'clip.cut')!;
+  if (cutCmd.canExecute(ctx)) {
+    const clip = ctx.selectedClip?.clip;
+    const comp = ctx.project.compositions[ctx.compositionId];
+    items.push({
+      label: 'Cut clip',
+      icon: ScissorsIcon,
+      shortcut: 'Ctrl+X',
+      disabled: trackLocked,
+      action: () => {
+        if (comp && clip) {
+          copyTimelineClips(comp, [clip.id]);
+          const result = cutCmd.execute(ctx);
+          if (result) onExecute(result);
+        }
+      },
+    });
+  }
+
   items.push({ label: '', action: () => {}, dividerBefore: true });
 
   // Freeze frame
@@ -615,8 +719,9 @@ export function buildClipContextMenu(
 export function buildEmptyCanvasContextMenu(
   onImportClick: () => void,
   onAddFromLibrary: () => void,
+  onPaste?: () => void,
 ): readonly ContextMenuItem[] {
-  return [
+  const items: ContextMenuItem[] = [
     {
       label: 'Import Media...',
       shortcut: 'Cmd/Ctrl+I',
@@ -628,6 +733,14 @@ export function buildEmptyCanvasContextMenu(
       action: onAddFromLibrary,
     },
   ];
+  if (onPaste) {
+    items.push({
+      label: 'Paste at playhead',
+      shortcut: 'Ctrl+V',
+      action: onPaste,
+    });
+  }
+  return items;
 }
 
 export function buildTrackHeaderContextMenu(
