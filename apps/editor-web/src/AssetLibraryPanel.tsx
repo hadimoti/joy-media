@@ -299,6 +299,7 @@ export function AssetLibraryPanel({
       setStatus(`Failed to load media catalog: ${detail}`);
     }
   }, [client, projectId]);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -421,12 +422,16 @@ export function AssetLibraryPanel({
     event.dataTransfer.dropEffect = 'copy';
     setDropActive(true);
   }, []);
-  const handleDropLeave = useCallback(() => {
+  const handleDropLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
     setDropActive(false);
   }, []);
   const handleDrop = useCallback(
-    (event: React.DragEvent) => {
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (!event.dataTransfer.types.includes('Files') && event.dataTransfer.files.length === 0)
+        return;
       event.preventDefault();
+      event.stopPropagation();
       setDropActive(false);
       const files = Array.from(event.dataTransfer.files ?? []);
       if (files.length === 0) return;
@@ -910,7 +915,12 @@ export function AssetLibraryPanel({
             })}
           </div>
         </aside>
-        <div className="asset-library-main">
+        <div
+          className={`asset-library-main${dropActive ? ' is-file-drop-target' : ''}`}
+          onDragOver={handleDropOver}
+          onDragLeave={handleDropLeave}
+          onDrop={(event) => void handleDrop(event)}
+        >
           {droppedImportProgress !== undefined && onCancelDroppedImport !== undefined && (
             <DroppedImportProgress
               progress={droppedImportProgress}
@@ -1157,12 +1167,7 @@ export function AssetLibraryPanel({
               ) : items.length === 0 ? (
                 // An empty library says one thing and offers one way out: drop a
                 // file here, or use the gold Import button.
-                <div
-                  className={`asset-library-drop-zone${dropActive ? ' is-drag-active' : ''}`}
-                  onDragOver={handleDropOver}
-                  onDragLeave={handleDropLeave}
-                  onDrop={(event) => void handleDrop(event)}
-                >
+                <div className={`asset-library-drop-zone${dropActive ? ' is-drag-active' : ''}`}>
                   <p className="asset-library-drop-hint">Drop video, audio or images here</p>
                   <button
                     type="button"

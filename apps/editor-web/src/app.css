@@ -3222,6 +3222,29 @@ label {
   font-size: var(--joy-type-xs);
   font-style: italic;
 }
+.timeline-file-drop-indicator {
+  position: absolute;
+  z-index: 12;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--joy-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--joy-accent) 30%, transparent);
+  pointer-events: none;
+}
+.timeline-file-new-track-drop {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 2.5rem;
+  margin-inline-start: var(--timeline-track-gutter-width);
+  padding-inline: 0.55rem;
+  border: 1px dashed color-mix(in srgb, var(--joy-accent) 55%, var(--joy-border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-accent) 5%, transparent);
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+}
 .timeline-track--audio .track-code {
   color: #75a7ef;
 }
@@ -14707,6 +14730,11 @@ label {
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
+}
+.asset-library-main.is-file-drop-target {
+  outline: 2px dashed var(--joy-accent);
+  outline-offset: -3px;
+  background: color-mix(in srgb, var(--joy-accent) 6%, transparent);
 }
 .asset-library-collections {
   display: flex;
