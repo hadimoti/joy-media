@@ -1,12 +1,13 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import type { ExportPresetId } from '@joy-media/project-schema';
 import type { PopupControl } from '../popup-manager.js';
-import {
-  MonitorAspectRatioSelector,
-  type MonitorAspectRatio,
-} from '../MonitorAspectRatioSelector.js';
+import { POPUP_IDS } from '../popup-ids.js';
+import { canvasFormatReadout, canvasShapeLabel } from '../canvas-format.js';
+import { CANVAS_FORMAT_POPOVER_ID } from '../CanvasFormatMenu.js';
 import type { BrowserGpuPreviewSession } from '../control-plane-client.js';
 import { previewQualityLabel, type PreviewQuality } from '../preview-quality.js';
 import {
+  AspectRatioIcon,
   CloseIcon,
   FullscreenIcon,
   PauseIcon,
@@ -42,10 +43,12 @@ export interface MonitorTransportProps {
   readonly setPreviewRenderer: Dispatch<SetStateAction<MonitorPreviewRenderer>>;
   readonly gpuPreviewStatus: MonitorGpuPreviewStatus;
   readonly gpuSession: BrowserGpuPreviewSession | undefined;
-  readonly monitorAspectRatio: MonitorAspectRatio;
+  /** The Format popup, owned by the App header, which also renders the popover. */
+  readonly formatMenu: PopupControl;
   readonly width: number;
   readonly height: number;
-  readonly changeMonitorAspectRatio: (nextAspectRatio: MonitorAspectRatio) => void;
+  /** Export preset in effect for this canvas, for the read-out. */
+  readonly canvasPresetId: ExportPresetId;
 }
 
 /** The bar under the monitor: zoom drawer, play controls, quality, renderer, ratio. */
@@ -70,11 +73,13 @@ export function MonitorTransport({
   setPreviewRenderer,
   gpuPreviewStatus,
   gpuSession,
-  monitorAspectRatio,
+  formatMenu,
   width,
   height,
-  changeMonitorAspectRatio,
+  canvasPresetId,
 }: MonitorTransportProps) {
+  const formatReadout = canvasFormatReadout({ width, height }, canvasPresetId);
+  const formatShape = canvasShapeLabel(width, height);
   const zoomText = formatZoomPercent(zoom);
   const [typedZoom, setTypedZoom] = useState(zoomText);
   useEffect(() => setTypedZoom(zoomText), [zoomText]);
@@ -256,12 +261,24 @@ export function MonitorTransport({
         >
           <ZoomInIcon />
         </button>
-        <MonitorAspectRatioSelector
-          selectedAspectRatio={monitorAspectRatio}
-          authoredWidth={width}
-          authoredHeight={height}
-          onAspectRatioChange={changeMonitorAspectRatio}
-        />
+        <button
+          type="button"
+          className="monitor-transport-btn monitor-format-readout"
+          aria-label={`Canvas format: ${formatReadout}`}
+          title={`Canvas format: ${formatReadout}. Click to change.`}
+          aria-haspopup="dialog"
+          aria-expanded={formatMenu.open}
+          aria-controls={CANVAS_FORMAT_POPOVER_ID}
+          aria-pressed={formatMenu.open}
+          data-guide="Format"
+          data-popup-trigger={POPUP_IDS.canvasFormat}
+          onClick={(event) => formatMenu.toggle(event.currentTarget)}
+        >
+          <AspectRatioIcon />
+          <span className="monitor-format-readout-shape" aria-hidden="true">
+            {formatShape}
+          </span>
+        </button>
       </div>
     </div>
   );

@@ -705,7 +705,7 @@ main {
   transition: transform 0.14s ease;
 }
 .workspace-switcher-trigger[aria-expanded='true'] .workspace-switcher-chevron,
-.header-export-preset-trigger[aria-expanded='true'] .header-disclosure-chevron {
+.header-format-btn[aria-expanded='true'] .header-disclosure-chevron {
   transform: rotate(180deg);
 }
 .workspace-switcher-menu {
@@ -894,16 +894,33 @@ main {
   font-weight: 800;
   line-height: 1;
 }
-.header-export-preset-trigger {
-  width: auto !important;
-  min-width: 0 !important;
+.header-format-btn {
+  display: inline-flex;
+  align-items: center;
   gap: 0.3rem;
-  padding-inline: 0.45rem !important;
+  height: 1.9rem;
+  max-width: 17rem;
+  margin: 0;
+  padding: 0 0.45rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--joy-text-secondary);
+  font: inherit;
   font-size: var(--joy-type-xs);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  cursor: pointer;
 }
-.header-export-preset-label {
-  max-width: 9.5rem;
+.header-format-btn:hover,
+.header-format-btn:focus-visible,
+.header-format-btn[aria-expanded='true'] {
+  border-color: var(--joy-border-strong, var(--joy-border));
+  color: var(--joy-text);
+  outline: none;
+}
+.header-format-btn-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -979,10 +996,9 @@ main {
 }
 
 @media (max-width: 75rem) {
-  .header-export-preset-label {
+  .header-format-btn-label {
     display: none;
   }
-  .header-export-preset-trigger,
   .app-header .header-processes-trigger {
     width: 1.9rem !important;
     min-width: 1.9rem !important;
@@ -1044,10 +1060,6 @@ main {
 .header-dropdown p {
   margin: 0.3rem 0;
   font-size: 0.82rem;
-}
-.header-export-preset-dropdown {
-  min-width: 15rem;
-  max-width: 15rem;
 }
 .account-dropdown {
   min-width: 17rem;
@@ -2049,94 +2061,74 @@ h2 {
 .monitor-zoom-drawer-head .monitor-transport-btn {
   height: 1.75rem;
 }
-.monitor-aspect-ratio {
-  display: inline-flex;
-  align-items: stretch;
-  flex: 0 0 1.75rem;
+/* The monitor bar's Format read-out: the shape only; it opens the Format popover. */
+.monitor-format-readout {
+  width: auto;
   min-width: 1.75rem;
+  gap: 0.3rem;
+  padding-inline: 0.4rem;
+  font-size: var(--joy-type-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.monitor-aspect-ratio > .monitor-transport-btn {
-  width: 1.75rem;
-  min-width: 1.75rem;
-  flex: 0 0 1.75rem;
-  gap: 0;
-  padding-inline: 0;
+.monitor-format-readout-shape {
+  color: var(--joy-text-secondary);
 }
-.monitor-aspect-ratio-trigger-details {
-  display: none;
-}
-.monitor-aspect-ratio-drawer {
-  position: absolute;
-  z-index: 4;
-  right: var(--space-2);
-  bottom: calc(100% + 0.25rem);
+/* The Format popover, shared by the header button and the monitor read-out. */
+.canvas-format-popover {
+  width: min(22rem, calc(100vw - 1rem));
+  max-width: calc(100vw - 1rem);
+  max-height: min(80vh, 40rem);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  width: min(16rem, calc(100vw - 1rem));
-  max-width: calc(100% - 1rem);
-  padding: 0.4rem 0.5rem 0.5rem;
-  border: 1px solid var(--joy-border);
-  border-radius: var(--radius-md);
-  background: var(--joy-bg-panel);
-  box-shadow: 0 0.5rem 1.5rem #0008;
+  gap: 0.6rem;
 }
-.monitor-aspect-ratio-drawer[hidden] {
-  display: none;
-}
-.monitor-aspect-ratio-drawer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 1.75rem;
-}
-.monitor-aspect-ratio-drawer-head > div {
-  display: grid;
-  gap: 0.12rem;
-  min-width: 0;
-}
-.monitor-aspect-ratio-drawer-head strong {
+.canvas-format-popover h3 {
+  margin: 0 0 0.35rem;
   font-size: var(--joy-type-xs);
   font-weight: 650;
 }
-.monitor-aspect-ratio-current,
-.monitor-aspect-ratio-authored-note {
+.canvas-format-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.canvas-format-head > div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.canvas-format-head strong {
+  font-size: var(--joy-type-xs);
+  font-weight: 650;
+}
+.canvas-format-readout {
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
-.monitor-aspect-ratio-authored-note {
-  margin: 0;
-  padding-top: 0.2rem;
+.canvas-format-section {
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 0.5rem;
   border-top: 1px solid var(--joy-border-soft);
 }
-.monitor-preview-only .monitor-aspect-ratio-group-label {
-  color: var(--joy-accent);
-}
-.monitor-aspect-ratio-drawer-head .monitor-transport-btn {
-  height: 1.75rem;
-}
-.monitor-aspect-ratio-group {
+.canvas-format-shapes {
   display: grid;
-  grid-template-columns: 3.85rem minmax(0, 1fr);
-  gap: 0.35rem;
-  align-items: center;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.3rem;
 }
-.monitor-aspect-ratio-group-label {
-  color: var(--joy-text-secondary);
-  font-size: var(--joy-type-xs);
-  line-height: 1;
-}
-.monitor-aspect-ratio-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.2rem;
-}
-.monitor-aspect-ratio-option {
-  min-width: 2.55rem;
-  height: 1.6rem;
+.canvas-format-shape {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 0.3rem;
+  min-height: 3.1rem;
   margin: 0;
-  padding: 0 0.35rem;
+  padding: 0.35rem 0.2rem;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -2146,16 +2138,50 @@ h2 {
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
-.monitor-aspect-ratio-option:hover,
-.monitor-aspect-ratio-option:focus-visible {
+.canvas-format-shape-picture {
+  display: block;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.canvas-format-shape:hover,
+.canvas-format-shape:focus-visible {
   border-color: var(--joy-border-strong, var(--joy-border));
   color: var(--joy-text);
   outline: none;
 }
-.monitor-aspect-ratio-option[aria-checked='true'] {
+.canvas-format-shape[aria-pressed='true'] {
   border-color: color-mix(in srgb, var(--joy-accent) 70%, transparent);
   background: color-mix(in srgb, var(--joy-accent) 14%, transparent);
   color: var(--joy-accent);
+}
+.canvas-format-size {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.4rem;
+}
+.canvas-format-size label {
+  display: grid;
+  gap: 0.15rem;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+}
+.canvas-format-size input {
+  width: 5.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.canvas-format-apply {
+  height: 1.75rem;
+  padding-inline: 0.5rem;
+  font-size: var(--joy-type-xs);
+}
+.canvas-format-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+  font-weight: 600;
 }
 /* The portrait workspace intentionally gives Program Monitor a narrow,
    full-height dock. Keep every transport control reachable instead of letting
@@ -2211,11 +2237,8 @@ h2 {
     padding-inline: 0.25rem;
   }
 
-  .monitor-aspect-ratio > .monitor-transport-btn {
-    width: 1.75rem;
-    min-width: 1.75rem;
-    flex-basis: 1.75rem;
-    padding-inline: 0;
+  .monitor-format-readout-shape {
+    display: none;
   }
 }
 .playback-media {

@@ -59,6 +59,7 @@ import type {
   AnimationDescriptorV1,
   AssetRecordV1,
   AnimatablePropertyV1,
+  ExportPresetId,
   JoyProjectV1,
   SpikeProject,
   VideoClip,
@@ -92,10 +93,10 @@ import {
   canonicalStagedExportMimeType,
   createRenderExportJobPayload,
 } from './export-job-request.js';
-import { applyExportPresetSelection } from './export-format-actions.js';
+import { applyCanvasDimensions, applyExportPresetSelection } from './export-format-actions.js';
+import { CANVAS_FORMAT_POPOVER_ID, CanvasFormatPopover } from './CanvasFormatMenu.js';
+import { canvasFormatReadout } from './canvas-format.js';
 import {
-  EXPORT_PRESETS,
-  EXPORT_PRESET_MENU_IDS,
   exportPresetMismatchMessage,
   isExportPresetId,
   reconcileExportPresetOnLoad,
@@ -443,19 +444,17 @@ import {
   monitorSpaceGesture,
 } from './monitor/monitor-tools.js';
 import {
+  AspectRatioIcon,
   ChevronDownIcon,
   CloseIcon,
   CommandIcon,
   DownloadIcon,
   ExportIcon,
-  HighBitrateIcon,
   PngMaskIcon,
   RedoIcon,
-  ReelsIcon,
   UndoIcon,
   VerticalViewIcon,
   WideViewIcon,
-  YoutubeIcon,
 } from './icons.js';
 import {
   markCompletedExportCacheUnavailable,
@@ -1034,7 +1033,7 @@ function EditorWorkspace({
     () => loadEditorUiPreferences(storage).processFilter,
   );
   const projectPackageInputRef = useRef<HTMLInputElement | null>(null);
-  const exportPresetMenu = usePopup(POPUP_IDS.exportPreset);
+  const formatMenu = usePopup(POPUP_IDS.canvasFormat);
   const [stickerTick, setStickerTick] = useState(0);
   const [joyAgentAttachedAssets, setJoyAgentAttachedAssets] = useState<
     readonly JoyAgentAttachedAsset[]
@@ -1452,6 +1451,7 @@ function EditorWorkspace({
     exportCanvas,
   );
   const exportPreset = exportPresetResolution.presetId;
+  const formatReadout = canvasFormatReadout(exportCanvas, exportPreset);
   const exportPresetLoadKey = `${session.visualProject.id}:${session.visualProject.exportPreset ?? 'unset'}:${exportCanvas.width}x${exportCanvas.height}`;
   const exportPresetWarning =
     exportPresetMismatch === undefined
@@ -3494,6 +3494,36 @@ function EditorWorkspace({
   const toggleKeyboardShortcuts = useCallback(() => {
     setKeyboardShortcutsOpen((open) => !open);
   }, []);
+  // Choices from the Format popover (header button or monitor read-out). Each one is a
+  // single undoable project change through the T-N02 helpers.
+  const applyFormatCanvas = useCallback(
+    (width: number, height: number, label: string) => {
+      try {
+        if (applyCanvasDimensions(session, width, height, label)) bumpProjectRevision();
+        setExportPresetMismatch(undefined);
+      } catch (reason) {
+        showToast(
+          `Could not change canvas: ${reason instanceof Error ? reason.message : String(reason)}`,
+          'error',
+        );
+      }
+    },
+    [bumpProjectRevision, session, showToast],
+  );
+  const applyFormatPreset = useCallback(
+    (presetId: ExportPresetId) => {
+      try {
+        if (applyExportPresetSelection(session, presetId)) bumpProjectRevision();
+        setExportPresetMismatch(undefined);
+      } catch (reason) {
+        showToast(
+          `Could not change export format: ${reason instanceof Error ? reason.message : String(reason)}`,
+          'error',
+        );
+      }
+    },
+    [bumpProjectRevision, session, showToast],
+  );
 
   const ensureDockPanels = useCallback((api: DockviewApi) => {
     const addPanel = (
@@ -6691,7 +6721,12 @@ function EditorWorkspace({
         </PanelShell>
       );
     if (api.id === 'monitor')
-      return <MonitorPanel agentPreviewSurfaceVisible={agentPreviewSurfaceVisible} />;
+      return (
+        <MonitorPanel
+          agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
+          formatMenu={formatMenu}
+        />
+      );
     if (api.id === 'workflows') {
       return (
         <WorkflowsPanel
@@ -6938,6 +6973,37 @@ function EditorWorkspace({
               </button>
             </div>
             <div className="header-group" role="group" aria-label="Deliver">
+              <div className="header-menu" ref={formatMenu.rootRef}>
+                <button
+                  type="button"
+                  className="header-format-btn"
+                  aria-haspopup="dialog"
+                  aria-expanded={formatMenu.open}
+                  aria-controls={CANVAS_FORMAT_POPOVER_ID}
+                  aria-pressed={formatMenu.open}
+                  aria-label={`Format: ${formatReadout}`}
+                  title={`Format: ${formatReadout}. Canvas and export preset.`}
+                  data-guide="Format"
+                  data-popup-trigger={POPUP_IDS.canvasFormat}
+                  onClick={(event) => formatMenu.toggle(event.currentTarget)}
+                >
+                  <AspectRatioIcon />
+                  <span className="header-format-btn-label">{formatReadout}</span>
+                  <span className="header-disclosure-chevron">
+                    <ChevronDownIcon />
+                  </span>
+                </button>
+                {formatMenu.open && (
+                  <CanvasFormatPopover
+                    popup={formatMenu}
+                    width={exportCanvas.width}
+                    height={exportCanvas.height}
+                    presetId={exportPreset}
+                    onApplyCanvas={applyFormatCanvas}
+                    onApplyPreset={applyFormatPreset}
+                  />
+                )}
+              </div>
               <button
                 type="button"
                 className="header-export-btn"
@@ -6977,68 +7043,6 @@ function EditorWorkspace({
                   <CloseIcon />
                 </button>
               )}
-              <div className="header-menu" ref={exportPresetMenu.rootRef}>
-                <button
-                  type="button"
-                  className="icon-button header-export-preset-trigger"
-                  aria-label="Export preset"
-                  aria-haspopup="menu"
-                  aria-expanded={exportPresetMenu.open}
-                  title={`Export preset: ${EXPORT_PRESETS[exportPreset].label} (${exportCanvas.width}×${exportCanvas.height})`}
-                  onClick={(event) => exportPresetMenu.toggle(event.currentTarget)}
-                >
-                  <span className="header-export-preset-label">
-                    {EXPORT_PRESETS[exportPreset].label}
-                  </span>
-                  <span className="header-disclosure-chevron">
-                    <ChevronDownIcon />
-                  </span>
-                </button>
-                {exportPresetMenu.open && (
-                  <section
-                    className="header-dropdown header-export-preset-dropdown"
-                    aria-label="Export preset"
-                  >
-                    <h3>Export preset</h3>
-                    <ul className="export-preset-list" role="menu">
-                      {EXPORT_PRESET_MENU_IDS.map((id) => (
-                        <li key={id} role="none">
-                          <button
-                            type="button"
-                            role="menuitemradio"
-                            aria-checked={exportPreset === id}
-                            onClick={() => {
-                              try {
-                                if (applyExportPresetSelection(session, id)) bumpProjectRevision();
-                                setExportPresetMismatch(undefined);
-                              } catch (reason) {
-                                showToast(
-                                  `Could not change export format: ${reason instanceof Error ? reason.message : String(reason)}`,
-                                  'error',
-                                );
-                              }
-                              exportPresetMenu.close();
-                            }}
-                          >
-                            <span className="preset-icon-group" aria-hidden="true">
-                              {id === 'youtube-1080' ? (
-                                <YoutubeIcon />
-                              ) : id === 'high-bitrate' ? (
-                                <HighBitrateIcon />
-                              ) : (
-                                <ReelsIcon />
-                              )}
-                            </span>
-                            <span className="export-preset-option-label">
-                              {EXPORT_PRESETS[id].label}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
-              </div>
               <div className="header-menu" ref={processesMenu.rootRef}>
                 <button
                   className="icon-button header-processes-trigger"
