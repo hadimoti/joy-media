@@ -1,5 +1,6 @@
 import type { AssetRecordV1, JoyProjectV1 } from '@joy-media/project-schema';
 import type { AnimationDescriptorV1 } from '@joy-media/project-schema';
+import { calculateMediaFitTransform } from './media-fit-transform.js';
 import { bindClipToObject, writeClipMediaKind } from './sticker-bindings.js';
 
 export interface ImportedMediaAsset {
@@ -63,9 +64,26 @@ export function bindMediaClipToProject(
   project: JoyProjectV1,
   asset: ImportedMediaAsset,
   clipId: string,
+  /** The frame of the composition the clip was placed in: new media is fitted to it (T-D01). */
+  frame?: { readonly width: number; readonly height: number },
 ): JoyProjectV1 {
   const importedProject = projectWithImportedAsset(project, asset);
   const controllerId = `media-controller-${clipId}`;
+  const sourceWidth = asset.descriptor?.width;
+  const sourceHeight = asset.descriptor?.height;
+  const fitted =
+    asset.kind === 'audio' ||
+    frame === undefined ||
+    sourceWidth === undefined ||
+    sourceHeight === undefined
+      ? undefined
+      : calculateMediaFitTransform({
+          sourceWidth,
+          sourceHeight,
+          frameWidth: frame.width,
+          frameHeight: frame.height,
+          mode: 'fit',
+        });
   const existingController = importedProject.visualObjects[controllerId];
   if (existingController !== undefined) {
     return writeClipMediaKind(
@@ -92,10 +110,10 @@ export function bindMediaClipToProject(
             kind: 'null',
             assetId: asset.id,
             transform: {
-              x: 0,
-              y: 0,
-              scaleX: 1,
-              scaleY: 1,
+              x: fitted?.x ?? 0,
+              y: fitted?.y ?? 0,
+              scaleX: fitted?.scaleX ?? 1,
+              scaleY: fitted?.scaleY ?? 1,
               rotationDeg: 0,
               opacity: 1,
               crop: { left: 0, top: 0, right: 0, bottom: 0 },

@@ -1632,13 +1632,17 @@ export function TimelinePanel({
   const dispatchMediaPlacements = useCallback(
     (placements: readonly TimelineMediaPlacement[], transaction: CommandTransaction) => {
       if (onMediaPlacement !== undefined) {
-        onMediaPlacement(placements, transaction);
+        const frame = { width: composition.width, height: composition.height };
+        onMediaPlacement(
+          placements.map((placement) => ({ ...placement, frame })),
+          transaction,
+        );
         return;
       }
       for (const placement of placements) onMediaPlaced?.(placement.asset, placement.clipId);
       onDispatch(transaction);
     },
-    [onDispatch, onMediaPlaced, onMediaPlacement],
+    [composition.height, composition.width, onDispatch, onMediaPlaced, onMediaPlacement],
   );
 
   const insertAssetOnTrack = useCallback(

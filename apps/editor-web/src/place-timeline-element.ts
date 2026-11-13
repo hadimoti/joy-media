@@ -7,8 +7,11 @@ import type {
   UniversalTimelineSource,
   VisualObjectV1,
 } from '@joy-media/project-schema';
+import { calculateMediaFitTransform } from './media-fit-transform.js';
 import { bindClipToObject } from './sticker-bindings.js';
 import { upsertUniversalTimelineBinding } from './universal-placement.js';
+
+export { calculateMediaFitTransform } from './media-fit-transform.js';
 
 export interface MediaPlacementAsset {
   readonly id: string;
@@ -101,6 +104,20 @@ export function buildMediaPlacementDocument(request: MediaPlacementRequest): Joy
   const { baseProject, asset, clipId, planned } = request;
   const controllerId = `media-controller-${clipId}`;
   const objectKind = asset.kind === 'image' ? ('image' as const) : ('null' as const);
+  const composition = baseProject.compositions[planned.compositionId];
+  const fitted =
+    asset.kind === 'audio' ||
+    composition === undefined ||
+    asset.descriptor?.width === undefined ||
+    asset.descriptor.height === undefined
+      ? undefined
+      : calculateMediaFitTransform({
+          sourceWidth: asset.descriptor.width,
+          sourceHeight: asset.descriptor.height,
+          frameWidth: composition.width,
+          frameHeight: composition.height,
+          mode: 'fit',
+        });
   return buildTimelineElementDocument({
     baseProject,
     clipId,
@@ -117,10 +134,10 @@ export function buildMediaPlacementDocument(request: MediaPlacementRequest): Joy
       kind: objectKind,
       assetId: asset.id,
       transform: {
-        x: 0,
-        y: 0,
-        scaleX: 1,
-        scaleY: 1,
+        x: fitted?.x ?? 0,
+        y: fitted?.y ?? 0,
+        scaleX: fitted?.scaleX ?? 1,
+        scaleY: fitted?.scaleY ?? 1,
         rotationDeg: 0,
         opacity: 1,
         crop: { left: 0, top: 0, right: 0, bottom: 0 },
