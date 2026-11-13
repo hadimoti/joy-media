@@ -37,6 +37,63 @@ function pointIn(rect, fraction = { x: 0.5, y: 0.5 }) {
   };
 }
 
+const SNAP_TOLERANCE_PX = 8;
+/** A requested drag must be at least this many snap tolerances long before it is sent. */
+const MIN_REQUEST_TOLERANCES = 4;
+/** Group drags request this distance, which is well beyond the snap tolerance. */
+const GROUP_DRAG_PX = 40;
+
+/** Snap tolerance in microseconds: 8 px at the current zoom, plus one microsecond of rounding. */
+export function snapToleranceUs(pixelsPerSecond) {
+  return Math.ceil((SNAP_TOLERANCE_PX * 1_000_000) / pixelsPerSecond) + 1;
+}
+
+/** Throws before a drag is sent unless its pixel distance is well beyond the snap tolerance. */
+export function assertDragClearsTolerance(requestedPx, toleranceUs, pixelsPerSecond) {
+  const tolerancePx = (toleranceUs / 1_000_000) * pixelsPerSecond;
+  if (Math.abs(requestedPx) < MIN_REQUEST_TOLERANCES * tolerancePx)
+    throw new Error(
+      `drag request of ${Math.abs(requestedPx).toFixed(1)} px is under ${MIN_REQUEST_TOLERANCES} × the ${tolerancePx.toFixed(1)} px snap tolerance; a committed move could be zero`,
+    );
+}
+
+function isPlaced(clip) {
+  return clip !== undefined && Number.isFinite(clip.startUs) && typeof clip.trackId === 'string';
+}
+
+/**
+ * Returns the committed group delta in microseconds. Throws unless the primary clip moved by more
+ * than the snap tolerance, every member moved by that same delta, and every member kept its track.
+ * `before` and `after` are arrays of { clipId, startUs, trackId }; an unplaced clip has null fields.
+ */
+export function groupMoveDelta({ before, after, primaryClipId, toleranceUs }) {
+  const primaryBefore = before.find(({ clipId }) => clipId === primaryClipId);
+  if (primaryBefore === undefined) throw new Error(`primary clip ${primaryClipId} is not in group`);
+  const primaryAfter = after.find(({ clipId }) => clipId === primaryClipId);
+  if (!isPlaced(primaryAfter))
+    throw new Error(`primary clip ${primaryClipId} has no position after the drag`);
+  const deltaUs = primaryAfter.startUs - primaryBefore.startUs;
+  if (Math.abs(deltaUs) <= toleranceUs)
+    throw new Error(
+      `group move did not commit: primary clip ${primaryClipId} moved ${deltaUs} us, within the ${toleranceUs} us snap tolerance`,
+    );
+  for (const expected of before) {
+    const actual = after.find(({ clipId }) => clipId === expected.clipId);
+    if (!isPlaced(actual))
+      throw new Error(`group member ${expected.clipId} has no position after the drag`);
+    const memberDeltaUs = actual.startUs - expected.startUs;
+    if (memberDeltaUs !== deltaUs)
+      throw new Error(
+        `group member ${expected.clipId} moved ${memberDeltaUs} us, not the primary delta of ${deltaUs} us`,
+      );
+    if (actual.trackId !== expected.trackId)
+      throw new Error(
+        `group member ${expected.clipId} moved to unexpected track ${actual.trackId}`,
+      );
+  }
+  return deltaUs;
+}
+
 /** Drag with actual pointer moves, including intermediate moves past the 4 px threshold. */
 async function dragTo(page, sourceSelector, targetSelector, options = {}) {
   const source = pointIn(await box(page, sourceSelector), options.sourceFraction);
@@ -121,6 +178,9 @@ export async function altReplaceMedia(page, { assetId, clipId }) {
 
 /** D-H03-4: Move one clip in time and across compatible tracks. */
 export async function moveClipAcrossTrack(page, { clipId, targetTrackId, targetFraction }) {
+  const { trackId: beforeTrackId } = await clipPosition(page, clipId);
+  if (beforeTrackId === targetTrackId)
+    throw new Error(`clip ${clipId} is already on ${targetTrackId}; a drag there proves no move`);
   await dragTo(page, timelineClip(clipId), timelineTrack(targetTrackId), { targetFraction });
   const clip = page.locator(timelineClip(clipId));
   await page.waitForFunction(
@@ -135,63 +195,81 @@ export async function moveClipAcrossTrack(page, { clipId, targetTrackId, targetF
   return `clip ${clipId} moved to ${targetTrackId} at ${value} us`;
 }
 
-/** D-H03-5: Ctrl-select a group, then move it as one timeline transaction. */
-export async function moveClipGroup(page, { clipIds, primaryClipId, targetFraction }) {
+/** Reads { clipId, startUs, trackId } for each id in one evaluation; an unplaced clip has null fields. */
+async function readClips(page, clipIds) {
+  return page.evaluate(
+    (ids) =>
+      ids.map((clipId) => {
+        const clip = document.querySelector(
+          `.timeline-clip[data-clip-id=${JSON.stringify(clipId)}]`,
+        );
+        const startAttribute = clip?.getAttribute('data-start-us') ?? null;
+        const startUs = startAttribute === null ? null : Number(startAttribute);
+        const trackId = clip?.closest('.timeline-track')?.getAttribute('data-track-id') ?? null;
+        return { clipId, startUs: Number.isFinite(startUs) ? startUs : null, trackId };
+      }),
+    clipIds,
+  );
+}
+
+/** Polls until the group's committed move passes the checks, then returns its delta. On timeout the last check's error is thrown. */
+async function waitForGroupMove(page, before, primaryClipId, toleranceUs, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const after = await readClips(
+      page,
+      before.map(({ clipId }) => clipId),
+    );
+    try {
+      return groupMoveDelta({ before, after, primaryClipId, toleranceUs });
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+    }
+    await page.waitForTimeout(100);
+  }
+}
+
+/** Drag distance in px: GROUP_DRAG_PX to the right, or to the left when the lane has no room on the right. */
+function groupDragRequestPx(sourceX, lane) {
+  if (lane.x + lane.width - sourceX > GROUP_DRAG_PX + 2) return GROUP_DRAG_PX;
+  if (sourceX - lane.x > GROUP_DRAG_PX + 2) return -GROUP_DRAG_PX;
+  throw new Error(`no room in the lane for a ${GROUP_DRAG_PX} px group drag`);
+}
+
+/** D-H03-5: Ctrl-select a group, then drag its primary clip far enough to commit a measurable move. */
+export async function moveClipGroup(page, { clipIds, primaryClipId }) {
+  if (!clipIds.includes(primaryClipId))
+    throw new Error(`primary clip ${primaryClipId} is not in group`);
   await page.keyboard.down('Control');
   try {
     for (const clipId of clipIds) await page.locator(timelineClip(clipId)).click();
   } finally {
     await page.keyboard.up('Control');
   }
+  const pixelsPerSecond = Number(await page.getByLabel('Timeline zoom').inputValue());
+  if (!Number.isFinite(pixelsPerSecond) || pixelsPerSecond <= 0)
+    throw new Error('Timeline zoom has an invalid pixels-per-second value');
+  const toleranceUs = snapToleranceUs(pixelsPerSecond);
   const before = await Promise.all(
     clipIds.map(async (clipId) => ({
       clipId,
       ...(await clipPosition(page, clipId)),
     })),
   );
-  const pixelsPerSecond = Number(await page.getByLabel('Timeline zoom').inputValue());
-  if (!Number.isFinite(pixelsPerSecond) || pixelsPerSecond <= 0)
-    throw new Error('Timeline zoom has an invalid pixels-per-second value');
-  const trackSelector = await timelineTrackForClip(page, primaryClipId);
-  const { source, target } = await dragTo(page, timelineClip(primaryClipId), trackSelector, {
-    targetFraction,
-  });
-  const expectedDeltaUs = Math.round(((target.x - source.x) / pixelsPerSecond) * 1_000_000);
-  const snapToleranceUs = Math.ceil((8 * 1_000_000) / pixelsPerSecond) + 1;
-  await page.waitForFunction(
-    ({ clips, deltaUs, toleranceUs }) =>
-      clips.every(({ clipId, startUs, trackId }) => {
-        const clip = document.querySelector(
-          `.timeline-clip[data-clip-id=${JSON.stringify(clipId)}]`,
-        );
-        const actualStartUs = Number(clip?.getAttribute('data-start-us'));
-        const actualTrackId = clip?.closest('.timeline-track')?.getAttribute('data-track-id');
-        return (
-          Number.isFinite(actualStartUs) &&
-          Math.abs(actualStartUs - Math.max(0, startUs + deltaUs)) <= toleranceUs &&
-          actualTrackId === trackId
-        );
-      }),
-    { clips: before, deltaUs: expectedDeltaUs, toleranceUs: snapToleranceUs },
-  );
-  const primaryBefore = before.find(({ clipId }) => clipId === primaryClipId);
-  if (primaryBefore === undefined) throw new Error(`primary clip ${primaryClipId} is not in group`);
-  const primaryAfter = await clipPosition(page, primaryClipId);
-  const committedDeltaUs = primaryAfter.startUs - primaryBefore.startUs;
-  for (const expected of before) {
-    const actual = await clipPosition(page, expected.clipId);
-    if (actual.startUs !== expected.startUs + committedDeltaUs)
-      throw new Error(`group member ${expected.clipId} did not move by the primary clip delta`);
-    if (actual.trackId !== expected.trackId)
-      throw new Error(
-        `group member ${expected.clipId} moved to unexpected track ${actual.trackId}`,
-      );
-  }
+  const source = pointIn(await box(page, timelineClip(primaryClipId)));
+  const lane = await box(page, await timelineTrackForClip(page, primaryClipId));
+  const requestedPx = groupDragRequestPx(source.x, lane);
+  assertDragClearsTolerance(requestedPx, toleranceUs, pixelsPerSecond);
+  await page.mouse.move(source.x, source.y);
+  await page.mouse.down();
+  await page.mouse.move(source.x + requestedPx, source.y, { steps: 10 });
+  await page.mouse.up();
+  const deltaUs = await waitForGroupMove(page, before, primaryClipId, toleranceUs);
   for (const clipId of clipIds) {
     const isSelected = await page.locator(timelineClip(clipId)).getAttribute('aria-pressed');
     if (isSelected !== 'true') throw new Error(`group member ${clipId} lost its selection`);
   }
-  return `moved ${clipIds.length} selected clips as a group`;
+  return `moved ${clipIds.length} selected clips by ${deltaUs} us as a group`;
 }
 
 async function timelineTrackForClip(page, clipId) {
