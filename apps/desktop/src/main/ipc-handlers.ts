@@ -426,9 +426,9 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (issues.length > 0) {
         return { ok: false, error: issues.map((issue) => issue.message).join('; ') };
       }
-      // v1.1.0 no longer offers these providers, so nothing new can be saved under them.
+      // v1.1.1 no longer offers these providers, so nothing new can be saved under them.
       if (LEGACY_PROVIDER_IDS.includes(request.provider)) {
-        return { ok: false, error: 'This provider is no longer offered in v1.1.0' };
+        return { ok: false, error: 'This provider is no longer offered in v1.1.1' };
       }
 
       const timestamp = now();

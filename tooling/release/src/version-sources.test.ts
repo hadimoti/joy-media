@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..');
-const expectedVersion = '1.1.0';
+const expectedVersion = '1.1.1';
 
 function readRepositoryFile(relativePath: string): string {
   return readFileSync(resolve(repositoryRoot, relativePath), 'utf8');
@@ -16,12 +16,15 @@ function captureVersion(source: string, marker: RegExp): string {
 }
 
 describe('product version sources', () => {
-  it('keeps every product version source and installer zip name aligned', () => {
+  it('keeps every product version source, site, and installer scripts aligned', () => {
     const desktopPackage = JSON.parse(readRepositoryFile('apps/desktop/package.json')) as {
       version: string;
     };
     const cliPackageSource = readRepositoryFile('apps/cli/package.json');
     const cliPackageVersion = captureVersion(cliPackageSource, /"version": "([^"]+)"/);
+
+    const sitePackageSource = readRepositoryFile('apps/site/package.json');
+    const sitePackageVersion = captureVersion(sitePackageSource, /"version": "([^"]+)"/);
 
     const cliVersionSource = readRepositoryFile('apps/cli/src/version.ts');
     const cliVersion = captureVersion(cliVersionSource, /export const CLI_VERSION = '([^']+)';/);
@@ -43,11 +46,11 @@ describe('product version sources', () => {
     const setupWindowVersion = setupDisplayVersion;
 
     const packagerSource = readRepositoryFile('apps/desktop/scripts/package-installer.mjs');
-    const uninstallerDisplayVersion = captureVersion(
-      packagerSource,
-      /Set-ItemProperty -Path \$uninstallKey -Name "DisplayVersion" -Value "([^"]+)" -Force/,
+    expect(packagerSource).toMatch(/desktopPackage\s*=\s*JSON\.parse/);
+    expect(packagerSource).toMatch(/const version\s*=\s*desktopPackage\.version/);
+    expect(packagerSource).toContain(
+      'Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value "${version}" -Force',
     );
-    const packagerVersion = captureVersion(packagerSource, /const version = '([^']+)';/);
     expect(packagerSource).toContain(
       'const releaseZipName = `joy-media-windows-x64-v${version}.zip`;',
     );
@@ -62,25 +65,35 @@ describe('product version sources', () => {
       /\[string\]\$Version = "([^"]+)"/,
     );
 
+    const ipcSource = readRepositoryFile('apps/desktop/src/main/ipc-handlers.ts');
+    expect(ipcSource).toContain(
+      "return { ok: false, error: 'This provider is no longer offered in v1.1.1' };",
+    );
+
+    const brokerSource = readRepositoryFile('apps/desktop/src/main/providers/provider-broker.ts');
+    expect(brokerSource).toContain(
+      "'This profile is a v1.0.x provider that v1.1.1 no longer offers'",
+    );
+
     const versions = [
       desktopPackage.version,
       cliPackageVersion,
+      sitePackageVersion,
       cliVersion,
       cliVersion,
       setupDisplayVersion,
       setupWindowVersion,
-      uninstallerDisplayVersion,
-      packagerVersion,
       installerZipName,
     ];
 
-    expect(versions).toEqual(Array(9).fill(expectedVersion));
-    expect(`joy-media-windows-x64-v${packagerVersion}.zip`).toBe(
+    expect(versions).toEqual(Array(8).fill(expectedVersion));
+    expect(`joy-media-windows-x64-v${desktopPackage.version}.zip`).toBe(
       `joy-media-windows-x64-v${installerZipName}.zip`,
     );
+    expect(versions).not.toContain('1.1.0');
     expect(versions).not.toContain('1.0.0');
     expect(versions).not.toContain('0.0.0');
-    expect(`JOY Media CLI v${cliVersion}`).toBe('JOY Media CLI v1.1.0');
-    expect(`v${cliVersion}`).toBe('v1.1.0');
+    expect(`JOY Media CLI v${cliVersion}`).toBe('JOY Media CLI v1.1.1');
+    expect(`v${cliVersion}`).toBe('v1.1.1');
   });
 });
