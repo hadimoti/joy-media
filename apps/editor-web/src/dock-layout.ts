@@ -378,71 +378,205 @@ function dedupeViewIds(values: readonly unknown[]): readonly unknown[] {
 function removeRetiredMotionPanel(layout: unknown): unknown {
   if (!isRecord(layout)) return layout;
   const nextLayout: Record<string, unknown> = { ...layout };
+  const removedGroupIds = new Set<string>();
+
   if (isRecord(layout.panels)) {
     const panels = { ...layout.panels };
     delete panels.motion;
     nextLayout.panels = panels;
   }
 
-  const grid = layout.grid;
-  if (!isRecord(grid) || !('root' in grid)) return nextLayout;
+  const stripGroupData = (
+    data: unknown,
+    defaultActiveView: boolean,
+  ): Record<string, unknown> | undefined => {
+    if (!isRecord(data) || !Array.isArray(data.views)) return isRecord(data) ? data : undefined;
+    const hadMotion = data.views.includes('motion');
+    const views = data.views.filter((view) => view !== 'motion');
+    const id = typeof data.id === 'string' ? data.id : undefined;
+    if (views.length === 0) {
+      if (!hadMotion) return data;
+      if (id === 'context') return { ...data, views: ['inspector'], activeView: 'inspector' };
+      if (id !== undefined) removedGroupIds.add(id);
+      return undefined;
+    }
 
-  const removedGroupIds = new Set<string>();
-  const strip = (node: unknown): unknown | undefined => {
+    const activeView =
+      typeof data.activeView === 'string' && views.includes(data.activeView)
+        ? data.activeView
+        : views.includes('inspector')
+          ? 'inspector'
+          : views[0];
+    return {
+      ...data,
+      views,
+      ...((typeof data.activeView === 'string' || defaultActiveView) && activeView !== undefined
+        ? { activeView }
+        : {}),
+    };
+  };
+
+  const stripGridNode = (node: unknown, isRoot = false): unknown | undefined => {
     if (!isRecord(node)) return node;
     if (node.type === 'leaf' && isRecord(node.data) && Array.isArray(node.data.views)) {
-      const views = node.data.views.filter((view) => view !== 'motion');
-      const id = typeof node.data.id === 'string' ? node.data.id : undefined;
-      if (views.length === 0) {
-        if (id === 'context') {
-          return { ...node, data: { ...node.data, views: ['inspector'], activeView: 'inspector' } };
-        }
-        if (id !== undefined) removedGroupIds.add(id);
-        return undefined;
-      }
-
-      const activeView =
-        typeof node.data.activeView === 'string' && views.includes(node.data.activeView)
-          ? node.data.activeView
-          : views.includes('inspector')
-            ? 'inspector'
-            : views[0];
-      return {
-        ...node,
-        data: { ...node.data, views, ...(activeView === undefined ? {} : { activeView }) },
-      };
+      const data = stripGroupData(node.data, true);
+      if (data === undefined) return undefined;
+      return { ...node, data };
     }
     if (node.type === 'branch' && Array.isArray(node.data)) {
-      const children = node.data.map(strip).filter((child) => child !== undefined);
+      const children = node.data
+        .map((child) => stripGridNode(child))
+        .filter((child) => child !== undefined);
       if (children.length === 0) return undefined;
-      if (children.length === 1 && children.length < node.data.length) return children[0];
+      if (!isRoot && children.length === 1 && children.length < node.data.length)
+        return children[0];
       return { ...node, data: children };
     }
     return node;
   };
 
-  const root = strip(grid.root);
-  if (root === undefined) {
-    const mode = grid.orientation === 'VERTICAL' ? 'widescreen' : 'vertical';
-    return seedDockLayout(mode);
+  const stripSerializedGroups = (value: unknown): unknown => {
+    if (!Array.isArray(value)) return value;
+    return value
+      .map((group) => {
+        if (!isRecord(group) || !isRecord(group.data) || !Array.isArray(group.data.views)) {
+          return group;
+        }
+        const data = stripGroupData(group.data, false);
+        return data === undefined ? undefined : { ...group, data };
+      })
+      .filter((group) => group !== undefined);
+  };
+
+  if (Array.isArray(layout.floatingGroups)) {
+    nextLayout.floatingGroups = stripSerializedGroups(layout.floatingGroups);
+  }
+  if (Array.isArray(layout.popoutGroups)) {
+    nextLayout.popoutGroups = stripSerializedGroups(layout.popoutGroups);
   }
 
-  nextLayout.grid = { ...grid, root };
+  const grid = layout.grid;
+  if (isRecord(grid) && 'root' in grid) {
+    const root = stripGridNode(grid.root, true);
+    if (root === undefined) {
+      const hasDetachedGroups =
+        (Array.isArray(nextLayout.floatingGroups) && nextLayout.floatingGroups.length > 0) ||
+        (Array.isArray(nextLayout.popoutGroups) && nextLayout.popoutGroups.length > 0);
+      if (hasDetachedGroups) {
+        const hasRemovedPopoutAnchor =
+          Array.isArray(nextLayout.popoutGroups) &&
+          nextLayout.popoutGroups.some(
+            (group) =>
+              isRecord(group) &&
+              typeof group.gridReferenceGroup === 'string' &&
+              removedGroupIds.has(group.gridReferenceGroup),
+          );
+        const detachedGroupIds = new Set<string>();
+        for (const groups of [nextLayout.floatingGroups, nextLayout.popoutGroups]) {
+          if (!Array.isArray(groups)) continue;
+          for (const group of groups) {
+            if (isRecord(group) && isRecord(group.data) && typeof group.data.id === 'string') {
+              detachedGroupIds.add(group.data.id);
+            }
+          }
+        }
 
-  if (typeof layout.activeGroup === 'string' && removedGroupIds.has(layout.activeGroup)) {
-    const groups: string[] = [];
-    const collectGroups = (node: unknown): void => {
-      if (!isRecord(node)) return;
-      if (node.type === 'leaf' && isRecord(node.data) && typeof node.data.id === 'string') {
-        groups.push(node.data.id);
-        return;
+        const rootSize =
+          isRecord(grid.root) && typeof grid.root.size === 'number' ? grid.root.size : 1000;
+        let root: Record<string, unknown> = {
+          ...(isRecord(grid.root) ? grid.root : {}),
+          type: 'branch',
+          data: [],
+        };
+        if (hasRemovedPopoutAnchor) {
+          let anchorId = 'motion-migration-root';
+          let suffix = 1;
+          while (detachedGroupIds.has(anchorId)) anchorId = `motion-migration-root-${suffix++}`;
+          root = {
+            ...root,
+            data: [
+              {
+                type: 'leaf',
+                size: rootSize,
+                data: { id: anchorId, views: [] },
+              },
+            ],
+          };
+        }
+        nextLayout.grid = { ...grid, root };
+      } else {
+        const mode = grid.orientation === 'VERTICAL' ? 'widescreen' : 'vertical';
+        const seeded = seedDockLayout(mode) as Record<string, unknown>;
+        const seededGrid = seeded.grid as Record<string, unknown>;
+        nextLayout.grid = { ...seededGrid, ...grid, root: seededGrid.root };
+        nextLayout.panels = {
+          ...(isRecord(seeded.panels) ? seeded.panels : {}),
+          ...(isRecord(nextLayout.panels) ? nextLayout.panels : {}),
+        };
       }
-      if (node.type === 'branch' && Array.isArray(node.data)) node.data.forEach(collectGroups);
-    };
-    collectGroups(root);
-    const activeGroup = groups.includes('context') ? 'context' : groups[0];
-    if (activeGroup === undefined) delete nextLayout.activeGroup;
-    else nextLayout.activeGroup = activeGroup;
+    } else {
+      nextLayout.grid = { ...grid, root };
+    }
+  }
+
+  const groupIds: string[] = [];
+  const activeGroupIds: string[] = [];
+  const collectGridGroups = (
+    node: unknown,
+    includeEmptyGroups: boolean,
+    groups: string[],
+  ): void => {
+    if (!isRecord(node)) return;
+    if (node.type === 'leaf' && isRecord(node.data) && typeof node.data.id === 'string') {
+      if (includeEmptyGroups || !Array.isArray(node.data.views) || node.data.views.length > 0) {
+        groups.push(node.data.id);
+      }
+      return;
+    }
+    if (node.type === 'branch' && Array.isArray(node.data)) {
+      node.data.forEach((child) => collectGridGroups(child, includeEmptyGroups, groups));
+    }
+  };
+  const nextGrid = nextLayout.grid;
+  if (isRecord(nextGrid)) {
+    collectGridGroups(nextGrid.root, true, groupIds);
+    collectGridGroups(nextGrid.root, false, activeGroupIds);
+  }
+  for (const groups of [nextLayout.floatingGroups, nextLayout.popoutGroups]) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (isRecord(group) && isRecord(group.data) && typeof group.data.id === 'string') {
+        groupIds.push(group.data.id);
+        if (!Array.isArray(group.data.views) || group.data.views.length > 0) {
+          activeGroupIds.push(group.data.id);
+        }
+      }
+    }
+  }
+
+  const fallbackGroup = activeGroupIds.includes('context')
+    ? 'context'
+    : (activeGroupIds[0] ?? groupIds[0]);
+  if (
+    typeof nextLayout.activeGroup === 'string' &&
+    !groupIds.includes(nextLayout.activeGroup) &&
+    (removedGroupIds.has(nextLayout.activeGroup) || nextLayout.activeGroup === 'motion')
+  ) {
+    if (fallbackGroup === undefined) delete nextLayout.activeGroup;
+    else nextLayout.activeGroup = fallbackGroup;
+  }
+
+  if (Array.isArray(nextLayout.popoutGroups)) {
+    nextLayout.popoutGroups = nextLayout.popoutGroups.map((group) => {
+      if (!isRecord(group) || !removedGroupIds.has(String(group.gridReferenceGroup))) return group;
+      const gridGroups: string[] = [];
+      if (isRecord(nextGrid)) collectGridGroups(nextGrid.root, true, gridGroups);
+      const gridReferenceGroup = gridGroups.includes('context') ? 'context' : gridGroups[0];
+      const { gridReferenceGroup: _removedReference, ...withoutRemovedReference } = group;
+      return gridReferenceGroup === undefined
+        ? withoutRemovedReference
+        : { ...withoutRemovedReference, gridReferenceGroup };
+    });
   }
 
   return nextLayout;

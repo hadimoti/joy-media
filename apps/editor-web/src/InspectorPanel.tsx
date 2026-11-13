@@ -829,6 +829,7 @@ export function InspectorPanel({
                     type="button"
                     className="inspector-animation-action"
                     aria-label={`Edit ${label} animation`}
+                    title={`Edit ${label} animation`}
                     disabled={onOpenAnimationGraph === undefined}
                     onClick={() => onOpenAnimationGraph?.(target.id, property)}
                   >
@@ -838,6 +839,7 @@ export function InspectorPanel({
                     type="button"
                     className="inspector-animation-action"
                     aria-label={`Remove ${label} animation`}
+                    title={`Remove ${label} animation`}
                     disabled={idle}
                     onClick={() => removeAnimation(property, label)}
                   >

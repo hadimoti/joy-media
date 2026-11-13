@@ -83,8 +83,16 @@ describe('Inspector animations section', () => {
     expect(view.querySelector('[data-animation-property="opacity"]')?.textContent).toContain(
       'Opacity',
     );
-    expect(view.querySelector('button[aria-label="Edit Position X animation"]')).not.toBeNull();
-    expect(view.querySelector('button[aria-label="Remove Position X animation"]')).not.toBeNull();
+    const editButton = view.querySelector<HTMLButtonElement>(
+      'button[aria-label="Edit Position X animation"]',
+    );
+    const removeButton = view.querySelector<HTMLButtonElement>(
+      'button[aria-label="Remove Position X animation"]',
+    );
+    expect(editButton).not.toBeNull();
+    expect(editButton?.title).toBe('Edit Position X animation');
+    expect(removeButton).not.toBeNull();
+    expect(removeButton?.title).toBe('Remove Position X animation');
   });
 
   it('opens the selected animated property in Animate when Edit is pressed', async () => {
