@@ -120,11 +120,11 @@ function add(a: NodePoint, b: NodePoint): NodePoint {
 const ZERO: NodePoint = { x: 0, y: 0 };
 
 /** Turns a vector by `degrees` (clockwise on screen, y down). */
-function turn(vector: NodePoint, degrees: number): NodePoint {
+export function turn(vector: NodePoint, degrees: number): NodePoint {
   return rotatePointAbout(vector, ZERO, degrees);
 }
 
-function finite(transform: DrawnTransform): boolean {
+export function finite(transform: DrawnTransform): boolean {
   return (
     Number.isFinite(transform.x) &&
     Number.isFinite(transform.y) &&
@@ -212,13 +212,18 @@ export function moveTransform(transform: DrawnTransform, delta: NodePoint): Draw
 export interface ScaleModifiers {
   /** Keep the proportions. */
   readonly shift: boolean;
-  /** Scale about the centre instead of the opposite handle. */
+  /**
+   * Scale about the anchor point instead of the opposite handle (T-M05b). The
+   * anchor is the centre unless it was moved, so by default this is "from the
+   * centre".
+   */
   readonly alt: boolean;
 }
 
 /**
  * Drag a scale handle from `start` to `now` (canvas pixels). The opposite
- * handle (or the centre with Alt) stays where it is; the handle follows the
+ * handle (or, with Alt, the anchor point: the centre unless it was moved,
+ * T-M05b) stays where it is; the handle follows the
  * pointer along the box's own axes, so a turned box scales along its turned
  * sides. Shift keeps the proportions. There is no flip in v1.1.1: dragging
  * towards or past the fixed point stops each scale at `MIN_SCALE` (a scale
@@ -237,9 +242,7 @@ export function scaleTransform(
   const { transform, origin } = geometry;
   const rotation = transform.rotationDeg;
   const toBox = (vector: NodePoint) => turn(vector, -rotation);
-  const fixedPoint = modifiers.alt
-    ? geometry.center
-    : handlePoint(geometry, oppositeHandle(handle));
+  const fixedPoint = modifiers.alt ? origin : handlePoint(geometry, oppositeHandle(handle));
   const handleOffset = toBox(sub(handlePoint(geometry, handle), origin));
   const fixedOffset = toBox(sub(fixedPoint, origin));
   const span = sub(handleOffset, fixedOffset);
@@ -292,12 +295,12 @@ export function scaleTransform(
  * `MIN_SCALE`, or not below where it already is when it is smaller. A zero
  * (or invalid) scale is not limited: a ratio cannot change it into a valid one.
  */
-function smallestRatio(scale: number): number {
+export function smallestRatio(scale: number): number {
   return scale > 0 ? Math.min(MIN_SCALE, scale) / scale : Number.NEGATIVE_INFINITY;
 }
 
 /** The angle, in degrees, of `point` seen from `center` (clockwise on screen). */
-function angleFrom(center: NodePoint, point: NodePoint): number | undefined {
+export function angleFrom(center: NodePoint, point: NodePoint): number | undefined {
   const dx = point.x - center.x;
   const dy = point.y - center.y;
   if (Math.hypot(dx, dy) < 1e-6) return undefined;
@@ -305,7 +308,7 @@ function angleFrom(center: NodePoint, point: NodePoint): number | undefined {
 }
 
 /** Wraps an angle difference into (-180, 180]. */
-function wrapDegrees(degrees: number): number {
+export function wrapDegrees(degrees: number): number {
   let wrapped = degrees % 360;
   if (wrapped <= -180) wrapped += 360;
   if (wrapped > 180) wrapped -= 360;

@@ -5,7 +5,12 @@ import {
   rotateHandlePoint,
   type MonitorHandle,
 } from './monitor-transform-maths.js';
-import type { MonitorTransformTarget, TransformBlockReason } from './monitor-transform-targets.js';
+import {
+  gestureBlockReason,
+  type MonitorTransformTarget,
+  type TransformBlockReason,
+} from './monitor-transform-targets.js';
+import { groupGeometry } from './monitor-transform-group.js';
 
 /**
  * The editor-only model of the transform box (ADR-0046 section 5.1, T-M05a).
@@ -37,11 +42,28 @@ export interface MonitorOverlay {
    */
   readonly localToCanvas: readonly number[];
   readonly corners: readonly NodePoint[];
-  /** Scale handles and the rotate handle; empty for a group (T-M05b). */
+  /**
+   * Scale handles and the rotate handle. With several elements selected each
+   * element's box has none: the group box carries them (T-M05b).
+   */
   readonly handles: readonly MonitorOverlayHandle[];
   /** The rotate handle's stem starts here (the middle of the top edge). */
   readonly topCenter: NodePoint;
+  /** The anchor point, drawn and dragged for one selected element (T-M05b). */
+  readonly anchor?: MonitorOverlayAnchor;
+  /** True for the box around a group of several elements (T-M05b). */
+  readonly group?: true;
 }
+
+export interface MonitorOverlayAnchor {
+  /** Canvas point. */
+  readonly point: NodePoint;
+  /** Why the anchor point cannot be moved, when it cannot. */
+  readonly blocked?: TransformBlockReason;
+}
+
+/** The element id of the group box. */
+export const MONITOR_GROUP_OVERLAY_ID = 'monitor-group';
 
 function withBlocked(
   handle: MonitorHandle,
@@ -52,9 +74,10 @@ function withBlocked(
 }
 
 /**
- * The boxes for the selected targets. Handles are shown only when exactly one
- * element is selected: group scale and rotate are T-M05b. `zoom` keeps the
- * rotate handle a fixed screen distance from the box.
+ * The boxes for the selected targets. Handles and the anchor point are shown
+ * only when exactly one element is selected; with several, the group box
+ * (`buildMonitorGroupOverlay`) carries the handles. `zoom` keeps the rotate
+ * handle a fixed screen distance from the box.
  */
 export function buildMonitorOverlays(
   targets: readonly MonitorTransformTarget[],
@@ -80,8 +103,50 @@ export function buildMonitorOverlays(
       corners: geometry.corners,
       handles,
       topCenter: handlePoint(geometry, 'n'),
+      ...(single
+        ? {
+            anchor:
+              target.anchorBlocked === undefined
+                ? { point: geometry.origin }
+                : { point: geometry.origin, blocked: target.anchorBlocked },
+          }
+        : {}),
     };
   });
+}
+
+/**
+ * The group box for several selected elements (T-M05b): the straight box
+ * around all of them with eight scale handles and a rotate handle that scale
+ * and turn the group as one. A handle is greyed when any element cannot take
+ * the gesture. `undefined` for fewer than two elements.
+ */
+export function buildMonitorGroupOverlay(
+  targets: readonly MonitorTransformTarget[],
+  zoom: number,
+): MonitorOverlay | undefined {
+  if (targets.length < 2) return undefined;
+  const geometry = groupGeometry(targets.map((target) => target.geometry));
+  if (geometry === undefined) return undefined;
+  const offset = ROTATE_HANDLE_OFFSET_PX / (zoom > 0 ? zoom : 1);
+  const scaleBlocked = gestureBlockReason(targets, 'scale');
+  const rotateBlocked =
+    gestureBlockReason(targets, 'rotate') ?? gestureBlockReason(targets, 'move');
+  const [tl, tr, , bl] = geometry.corners;
+  return {
+    elementId: MONITOR_GROUP_OVERLAY_ID,
+    clipId: '',
+    localToCanvas: [tr.x - tl.x, tr.y - tl.y, bl.x - tl.x, bl.y - tl.y, tl.x, tl.y],
+    corners: geometry.corners,
+    handles: [
+      ...MONITOR_SCALE_HANDLES.map((handle) =>
+        withBlocked(handle, handlePoint(geometry, handle), scaleBlocked),
+      ),
+      withBlocked('rotate', rotateHandlePoint(geometry, offset), rotateBlocked),
+    ],
+    topCenter: handlePoint(geometry, 'n'),
+    group: true,
+  };
 }
 
 /** True when two overlay lists draw the same thing (avoids needless renders). */

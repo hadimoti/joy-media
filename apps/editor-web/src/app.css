@@ -1849,8 +1849,34 @@ h2 {
   opacity: 0.6;
   cursor: not-allowed;
 }
-.monitor-transform-layer.passive .monitor-transform-handle {
+.monitor-transform-layer.passive .monitor-transform-handle,
+.monitor-transform-layer.passive .monitor-transform-anchor {
   pointer-events: none;
+}
+/* T-M05b: the group box (several elements) and the anchor point (one element). */
+.monitor-transform-outline.group {
+  stroke-dasharray: 4 3;
+}
+.monitor-transform-anchor {
+  position: absolute;
+  box-sizing: border-box;
+  width: 13px;
+  height: 13px;
+  margin: -6.5px 0 0 -6.5px;
+  border: 1px solid var(--joy-accent);
+  border-radius: 50%;
+  background:
+    linear-gradient(var(--joy-accent), var(--joy-accent)) center / 1px 100% no-repeat,
+    linear-gradient(var(--joy-accent), var(--joy-accent)) center / 100% 1px no-repeat,
+    #fff8;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: move;
+}
+.monitor-transform-anchor.blocked {
+  border-color: var(--joy-text-muted);
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .monitor-gpu-frame {
   position: absolute;
