@@ -9,6 +9,10 @@ export type ShortcutAction =
   | 'clip.split'
   | 'clip.delete'
   | 'clip.duplicate'
+  | 'clip.copy'
+  | 'clip.cut'
+  | 'clip.paste'
+  | 'snapping.toggle'
   | 'playhead.back'
   | 'playhead.forward'
   | 'playhead.backFine'
@@ -80,6 +84,9 @@ export function resolveShortcut(event: ShortcutKeyEvent): ShortcutAction | undef
     if (key === 'y' && !event.shiftKey) return 'history.redo';
     if (key === 'k' && !event.shiftKey) return 'palette.toggle';
     if (key === 'd' && !event.shiftKey) return 'clip.duplicate';
+    if (key === 'c' && !event.shiftKey) return 'clip.copy';
+    if (key === 'x' && !event.shiftKey) return 'clip.cut';
+    if (key === 'v' && !event.shiftKey) return 'clip.paste';
     return undefined;
   }
   if (event.altKey) return undefined;
@@ -130,6 +137,9 @@ export function resolveShortcut(event: ShortcutKeyEvent): ShortcutAction | undef
     case 's':
     case 'S':
       return event.shiftKey ? undefined : 'clip.split';
+    case 'n':
+    case 'N':
+      return event.shiftKey ? undefined : 'snapping.toggle';
     case '?':
       return 'shortcuts.toggle';
     default:
@@ -173,9 +183,13 @@ export const SHORTCUT_REFERENCE: readonly ShortcutReferenceGroup[] = [
     rows: [
       { keys: 'Ctrl+Z', action: 'Undo' },
       { keys: 'Ctrl+Y', action: 'Redo' },
+      { keys: 'Ctrl+C', action: 'Copy selected clips' },
+      { keys: 'Ctrl+X', action: 'Cut selected clips' },
+      { keys: 'Ctrl+V', action: 'Paste clips at playhead' },
       { keys: 'Ctrl+D', action: 'Duplicate clip' },
       { keys: 'Delete / Backspace', action: 'Delete selected clip or marker' },
       { keys: 'S', action: 'Split clip at playhead' },
+      { keys: 'N', action: 'Toggle timeline snapping' },
       {
         keys: 'Tab / Shift+Tab (Monitor picture)',
         action: 'Select the next / previous element; past the last or first, focus leaves',

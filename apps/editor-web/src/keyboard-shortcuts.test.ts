@@ -56,8 +56,16 @@ describe('resolveShortcut', () => {
 
   it('maps clip and playhead keys', () => {
     expect(resolveShortcut(key('s'))).toBe('clip.split');
+    expect(resolveShortcut(key('n'))).toBe('snapping.toggle');
+    expect(resolveShortcut(key('N'))).toBe('snapping.toggle');
     expect(resolveShortcut(key('Delete'))).toBe('clip.delete');
     expect(resolveShortcut(key('Backspace'))).toBe('clip.delete');
+    expect(resolveShortcut(key('c', { ctrlKey: true }))).toBe('clip.copy');
+    expect(resolveShortcut(key('c', { metaKey: true }))).toBe('clip.copy');
+    expect(resolveShortcut(key('x', { ctrlKey: true }))).toBe('clip.cut');
+    expect(resolveShortcut(key('x', { metaKey: true }))).toBe('clip.cut');
+    expect(resolveShortcut(key('v', { ctrlKey: true }))).toBe('clip.paste');
+    expect(resolveShortcut(key('v', { metaKey: true }))).toBe('clip.paste');
     expect(resolveShortcut(key('d', { ctrlKey: true }))).toBe('clip.duplicate');
     expect(resolveShortcut(key('d', { metaKey: true }))).toBe('clip.duplicate');
     expect(resolveShortcut(key('ArrowLeft'))).toBe('playhead.back');
@@ -113,6 +121,10 @@ describe('shortcut reference', () => {
       SHORTCUT_REFERENCE.find((group) => group.title === title)?.rows.map((row) => row.keys);
     expect(keysIn('Playback')).toContain('Space');
     expect(keysIn('Editing')).toContain('Ctrl+Z');
+    expect(keysIn('Editing')).toContain('Ctrl+C');
+    expect(keysIn('Editing')).toContain('Ctrl+X');
+    expect(keysIn('Editing')).toContain('Ctrl+V');
+    expect(keysIn('Editing')).toContain('N');
     expect(keysIn('View')).toContain('Ctrl+K');
   });
 
