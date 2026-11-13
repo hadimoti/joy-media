@@ -19,11 +19,7 @@ import {
 } from '@joy-media/renderer-pixi/browser';
 import { HtmlSceneSurfaceCache } from '../html-scene-surfaces.js';
 import { withCaptionBurnInNodes } from '../caption-burn-in.js';
-import {
-  monitorAspectRatioDimensions,
-  monitorAspectRatioForDimensions,
-  type MonitorAspectRatio,
-} from '../MonitorAspectRatioSelector.js';
+import { canvasFormatPresetId } from '../canvas-format.js';
 import type { BrowserGpuPreviewSession } from '../control-plane-client.js';
 import { setMonitorPixelReader, setMonitorUngradedPixelReader } from '../monitor-readback.js';
 import { readImageMatteMap, resolveObjectIdForSelection } from '../sticker-bindings.js';
@@ -66,7 +62,7 @@ import {
   mediaControlPlaneClient,
   stickerImageCache,
 } from '../editor-runtime-singletons.js';
-import { usePopup } from '../popup-manager.js';
+import { usePopup, type PopupControl } from '../popup-manager.js';
 import { POPUP_IDS } from '../popup-ids.js';
 import { MonitorTransport } from './MonitorTransport.js';
 import { monitorZoomLabel } from './monitor-view.js';
@@ -105,7 +101,6 @@ import {
 } from './monitor-selection.js';
 import { monitorPixelScale } from './monitor-pixel-scale.js';
 import { createProjectColorLutResolver } from '../project-color-luts.js';
-import { applyCanvasDimensions } from '../export-format-actions.js';
 
 /**
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
@@ -114,8 +109,11 @@ import { applyCanvasDimensions } from '../export-format-actions.js';
 
 export function MonitorPanel({
   agentPreviewSurfaceVisible = true,
+  formatMenu,
 }: {
   readonly agentPreviewSurfaceVisible?: boolean;
+  /** The App-owned Format popup; the monitor bar's read-out opens the same popover. */
+  readonly formatMenu: PopupControl;
 }) {
   const context = useContext(EditorPanelContext);
   if (context === undefined)
@@ -128,6 +126,7 @@ export function MonitorPanel({
     <MonitorPanelContent
       context={context}
       agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
+      formatMenu={formatMenu}
     />
   );
 }
@@ -135,9 +134,11 @@ export function MonitorPanel({
 function MonitorPanelContent({
   context,
   agentPreviewSurfaceVisible,
+  formatMenu,
 }: {
   readonly context: EditorPanelContextValue;
   readonly agentPreviewSurfaceVisible: boolean;
+  readonly formatMenu: PopupControl;
 }) {
   const {
     state,
@@ -176,10 +177,6 @@ function MonitorPanelContent({
   const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
   const [sceneTick, setSceneTick] = useState(0);
   const [error, setError] = useState<string | undefined>(undefined);
-  // Fit is a monitor-only choice. Named presets are always derived from the
-  // persisted root composition so Undo/Redo and reload cannot leave the
-  // footer claiming a canvas ratio that no longer exists.
-  const [monitorFitView, setMonitorFitView] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [agentPreviewBefore, setAgentPreviewBefore] = useState(false);
   const [documentPreviewAcknowledgement, setDocumentPreviewAcknowledgement] = useState<
@@ -842,9 +839,8 @@ function MonitorPanelContent({
     gradeBypassed,
   ]);
 
-  const monitorAspectRatio: MonitorAspectRatio = monitorFitView
-    ? 'fit'
-    : monitorAspectRatioForDimensions(width, height);
+  // The read-out follows the persisted canvas, so Undo, Redo and reload keep it true.
+  const canvasPresetId = canvasFormatPresetId(visualProject.exportPreset, { width, height });
   const timelineComposition = timelineProject.compositions[timelineProject.rootCompositionId];
   const durationUs =
     timelineComposition === undefined
@@ -877,44 +873,6 @@ function MonitorPanelContent({
       .requestFullscreen()
       .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
   };
-
-  const changeMonitorAspectRatio = useCallback(
-    (nextAspectRatio: MonitorAspectRatio) => {
-      const dimensions = monitorAspectRatioDimensions(nextAspectRatio);
-      // Fit is intentionally a monitor view choice: it keeps the project's
-      // authored canvas unchanged while the canvas uses its existing contain
-      // behavior. Every named ratio below is a real, undoable project change.
-      if (dimensions === undefined) {
-        setMonitorFitView(true);
-        return;
-      }
-      const visualComposition = visualProject.compositions[visualProject.rootCompositionId];
-      const timelineComposition = timelineProject.compositions[timelineProject.rootCompositionId];
-      if (visualComposition === undefined || timelineComposition === undefined) {
-        showToast('The root composition is unavailable for this aspect-ratio change.', 'error');
-        return;
-      }
-      try {
-        applyCanvasDimensions(
-          session,
-          dimensions.width,
-          dimensions.height,
-          `Change canvas aspect ratio to ${nextAspectRatio}`,
-        );
-        setMonitorFitView(false);
-        bumpProjectRevision();
-        showToast(`Canvas changed to ${nextAspectRatio}.`, 'success');
-      } catch (reason) {
-        showToast(
-          `Could not change canvas aspect ratio: ${
-            reason instanceof Error ? reason.message : String(reason)
-          }`,
-          'error',
-        );
-      }
-    },
-    [bumpProjectRevision, session, showToast, timelineProject, visualProject],
-  );
 
   const handleMonitorEffectDragOver = useCallback((event: React.DragEvent) => {
     if (!event.dataTransfer.types.includes('application/x-joy-effect')) return;
@@ -1033,10 +991,10 @@ function MonitorPanelContent({
         setPreviewRenderer={setPreviewRenderer}
         gpuPreviewStatus={gpuPreviewStatus}
         gpuSession={gpuSession}
-        monitorAspectRatio={monitorAspectRatio}
+        formatMenu={formatMenu}
         width={width}
         height={height}
-        changeMonitorAspectRatio={changeMonitorAspectRatio}
+        canvasPresetId={canvasPresetId}
       />
     </article>
   );

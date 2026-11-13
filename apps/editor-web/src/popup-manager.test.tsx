@@ -57,7 +57,7 @@ function PopupButton({ id }: { readonly id: string }) {
   );
 }
 
-// A root that is detached and attached again on every render, as MonitorAspectRatioSelector does.
+// A root that is detached and attached again on every render, as the old aspect-ratio selector did.
 function InlineRootPopup() {
   const popup = usePopup(POPUP_IDS.canvasFormat);
   return (
