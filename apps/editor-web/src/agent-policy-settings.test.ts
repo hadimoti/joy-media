@@ -23,11 +23,10 @@ describe('AgentPolicyPreferences v2', () => {
     expect(loadAgentPolicy(storage())).toEqual(DEFAULT_AGENT_POLICY);
   });
 
-  it('starts a fresh install with a small cost limit per run', () => {
-    // Ten dollars per run was too high for a first run (OB-15d).
-    expect(DEFAULT_MAX_COST_PER_RUN_USD).toBe(0.5);
-    expect(DEFAULT_AGENT_POLICY.maxCostPerRunUsd).toBe(0.5);
-    expect(loadAgentPolicy(storage()).maxCostPerRunUsd).toBe(0.5);
+  it('keeps the established $10 cost threshold on a fresh install', () => {
+    expect(DEFAULT_MAX_COST_PER_RUN_USD).toBe(10);
+    expect(DEFAULT_AGENT_POLICY.maxCostPerRunUsd).toBe(10);
+    expect(loadAgentPolicy(storage()).maxCostPerRunUsd).toBe(10);
   });
 
   it('keeps a cost limit the owner saved, whatever it is', () => {

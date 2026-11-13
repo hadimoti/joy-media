@@ -4,19 +4,25 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import * as ts from 'typescript';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AGENT_POLICY } from './agent-policy-settings.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyAgentMediaCapabilityReport } from './joy-agent/protocol.js';
 import {
+  SETTINGS_AGENT_SLOTS,
   SETTINGS_BUDGET,
+  SETTINGS_DIAGNOSTICS,
   SETTINGS_DIALOG,
+  SETTINGS_LIVE_PREVIEW,
   SETTINGS_MEDIA_CHECK,
+  SETTINGS_MESSAGES,
   SETTINGS_MODELS,
   SETTINGS_MODES,
   SETTINGS_PAGES,
   SETTINGS_PAGE_IDS,
+  SETTINGS_PROVIDER_SIGN_IN,
   SETTINGS_STORAGE,
   SETTINGS_TOOLS,
 } from './settings-wording.js';
@@ -47,7 +53,177 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 /** The source of the dialog, and the wording file and the table beside it. */
 const dialogSource = readFileSync(resolve(here, 'JoyAgentSettingsDialog.tsx'), 'utf8');
+const wordingComponentSources = [
+  ['JoyAgentSettingsDialog.tsx', dialogSource],
+  ['AgentSlotsSection.tsx', readFileSync(resolve(here, 'AgentSlotsSection.tsx'), 'utf8')],
+  ['ProviderSignInPanel.tsx', readFileSync(resolve(here, 'ProviderSignInPanel.tsx'), 'utf8')],
+] as const;
 const table = readFileSync(resolve(here, '../../../docs/qa/v1.1.1/SETTINGS-WORDING.md'), 'utf8');
+
+function componentCopy(fileName: string, source: string): readonly string[] {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const copy: string[] = [];
+  const seen = new Set<string>();
+  const visibleAttributes = new Set(['aria-label', 'alt', 'placeholder', 'title']);
+
+  const add = (value: string, position: number, includeSingleWord = false): void => {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (!/[A-Za-z]/.test(normalized)) return;
+    // Provider IDs, modes, URLs and CSS classes are code values, not wording.
+    if (
+      !includeSingleWord &&
+      /^([a-z0-9._:/-]+)(?:\s+[a-z0-9._:/-]+)*$/.test(normalized) &&
+      /[-_/:]/.test(normalized)
+    )
+      return;
+    if (!includeSingleWord && !/\s/.test(normalized) && /^[a-z][A-Za-z0-9]*$/.test(normalized))
+      return;
+    if (!includeSingleWord && !/\s/.test(normalized) && !/[A-Z.!?…:]/.test(normalized)) return;
+    const line = sourceFile.getLineAndCharacterOfPosition(position).line + 1;
+    const entry = `${fileName}:${line}: ${normalized}`;
+    if (!seen.has(entry)) {
+      seen.add(entry);
+      copy.push(entry);
+    }
+  };
+
+  const scanAttributes = (attributes: ts.JsxAttributes): void => {
+    for (const attribute of attributes.properties) {
+      if (
+        !ts.isJsxAttribute(attribute) ||
+        !visibleAttributes.has(attribute.name.getText(sourceFile)) ||
+        attribute.initializer === undefined
+      )
+        continue;
+      if (ts.isStringLiteral(attribute.initializer)) {
+        add(attribute.initializer.text, attribute.initializer.getStart(sourceFile), true);
+      } else if (ts.isJsxExpression(attribute.initializer) && attribute.initializer.expression) {
+        scanOutputExpression(attribute.initializer.expression);
+      }
+    }
+  };
+
+  const scanOutputExpression = (node: ts.Node): void => {
+    if (
+      ts.isParenthesizedExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isTypeAssertionExpression(node) ||
+      ts.isNonNullExpression(node) ||
+      ts.isSatisfiesExpression(node)
+    ) {
+      scanOutputExpression(node.expression);
+      return;
+    }
+    if (ts.isJsxElement(node)) {
+      scanElement(node);
+      return;
+    }
+    if (ts.isJsxSelfClosingElement(node)) {
+      scanAttributes(node.attributes);
+      return;
+    }
+    if (ts.isJsxFragment(node)) {
+      scanChildren(node.children);
+      return;
+    }
+    if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      add(node.text, node.getStart(sourceFile), true);
+      return;
+    }
+    if (ts.isTemplateExpression(node)) {
+      add(node.head.text, node.head.getStart(sourceFile), true);
+      for (const span of node.templateSpans) {
+        add(span.literal.text, span.literal.getStart(sourceFile), true);
+      }
+      return;
+    }
+    if (ts.isConditionalExpression(node)) {
+      scanOutputExpression(node.whenTrue);
+      scanOutputExpression(node.whenFalse);
+      return;
+    }
+    if (ts.isBinaryExpression(node)) {
+      if (node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+        scanOutputExpression(node.left);
+        scanOutputExpression(node.right);
+      } else if (
+        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+        node.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+        node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+      ) {
+        scanOutputExpression(node.right);
+      }
+    }
+  };
+
+  const scanChildren = (children: readonly ts.JsxChild[]): void => {
+    for (const child of children) {
+      if (ts.isJsxText(child)) {
+        add(child.text, child.getStart(sourceFile), true);
+      } else if (ts.isJsxExpression(child) && child.expression !== undefined) {
+        scanOutputExpression(child.expression);
+      } else if (ts.isJsxElement(child)) {
+        scanElement(child);
+      } else if (ts.isJsxFragment(child)) {
+        scanChildren(child.children);
+      }
+    }
+  };
+
+  const scanElement = (element: ts.JsxElement): void => {
+    scanAttributes(element.openingElement.attributes);
+    scanChildren(element.children);
+  };
+
+  const scanJsx = (node: ts.Node): void => {
+    if (ts.isJsxElement(node)) scanElement(node);
+    if (ts.isJsxSelfClosingElement(node)) scanAttributes(node.attributes);
+    ts.forEachChild(node, scanJsx);
+  };
+  scanJsx(sourceFile);
+
+  // Also catch status and confirmation messages assembled outside JSX.
+  const scanSourceLiterals = (node: ts.Node): void => {
+    // JSX is handled separately so button types and CSS tokens are not
+    // mistaken for words on screen. Import paths are not wording either.
+    if (
+      ts.isJsxElement(node) ||
+      ts.isJsxSelfClosingElement(node) ||
+      ts.isJsxFragment(node) ||
+      ts.isImportDeclaration(node) ||
+      ts.isExportDeclaration(node)
+    )
+      return;
+    if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      if (!isConsoleMessage(node)) add(node.text, node.getStart(sourceFile));
+    } else if (ts.isTemplateExpression(node)) {
+      if (!isConsoleMessage(node)) add(node.head.text, node.head.getStart(sourceFile));
+      for (const span of node.templateSpans) {
+        if (!isConsoleMessage(node)) add(span.literal.text, span.literal.getStart(sourceFile));
+      }
+    }
+    ts.forEachChild(node, scanSourceLiterals);
+  };
+
+  function isConsoleMessage(node: ts.Node): boolean {
+    let current: ts.Node | undefined = node.parent;
+    while (current !== undefined && !ts.isCallExpression(current)) current = current.parent;
+    return (
+      current !== undefined &&
+      ts.isPropertyAccessExpression(current.expression) &&
+      current.expression.expression.getText(sourceFile) === 'console'
+    );
+  }
+
+  scanSourceLiterals(sourceFile);
+  return copy;
+}
 
 /** Every string of the wording file, with the placeholders left in. */
 function wordingStrings(): readonly string[] {
@@ -66,13 +242,19 @@ function wordingStrings(): readonly string[] {
     }
   };
   walk({
+    dialog: SETTINGS_DIALOG,
     pages: SETTINGS_PAGES,
     modes: SETTINGS_MODES,
     budget: SETTINGS_BUDGET,
     storage: SETTINGS_STORAGE,
     media: SETTINGS_MEDIA_CHECK,
     tools: SETTINGS_TOOLS,
+    livePreview: SETTINGS_LIVE_PREVIEW,
+    diagnostics: SETTINGS_DIAGNOSTICS,
     models: SETTINGS_MODELS,
+    messages: SETTINGS_MESSAGES,
+    agentSlots: SETTINGS_AGENT_SLOTS,
+    providerSignIn: SETTINGS_PROVIDER_SIGN_IN,
   });
   return found;
 }
@@ -152,6 +334,7 @@ describe('the Joy Code Settings wording (T-P07)', () => {
   it('keeps a snapshot of every string the dialog reads', () => {
     // Any later change to the wording shows up here, in the diff.
     expect({
+      dialog: SETTINGS_DIALOG,
       pages: SETTINGS_PAGES,
       modes: SETTINGS_MODES,
       budget: SETTINGS_BUDGET,
@@ -159,6 +342,11 @@ describe('the Joy Code Settings wording (T-P07)', () => {
       tools: SETTINGS_TOOLS,
       models: SETTINGS_MODELS,
       media: SETTINGS_MEDIA_CHECK,
+      livePreview: SETTINGS_LIVE_PREVIEW,
+      diagnostics: SETTINGS_DIAGNOSTICS,
+      messages: SETTINGS_MESSAGES,
+      agentSlots: SETTINGS_AGENT_SLOTS,
+      providerSignIn: SETTINGS_PROVIDER_SIGN_IN,
     }).toMatchSnapshot();
   });
 });
@@ -186,26 +374,14 @@ describe('the coverage of the wording table (T-P07)', () => {
     expect(table).toContain('Tools and permissions page, the twelfth switch');
   });
 
-  it('holds no copy of its own in the dialog', () => {
-    // Every visible word of the dialog comes from the wording file, so the
-    // dialog holds only class names, roles and the values of the code.
-    const source = dialogSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-    const lines = source.split('\n');
+  it('holds no copy of its own in the settings components', () => {
+    // Every visible word comes from the wording file, so these components
+    // hold only class names, roles and the values of the code.
     const copy: string[] = [];
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index] ?? '';
-      if (/^\s*(import|from)\b/.test(line)) continue;
-      // A console message is for the developer, not for the screen.
-      if (/console\.(warn|error|log|info)/.test(line)) continue;
-      for (const match of line.matchAll(/'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)"/g)) {
-        const value = match[1] ?? match[2] ?? '';
-        if (!value.includes(' ') || !/[A-Za-z]/.test(value)) continue;
-        // A class name, a role or a code value has no spaces of its own.
-        if (/^[a-z0-9-]+(\s+[a-z0-9-]+)*$/.test(value)) continue;
-        copy.push(`${index + 1}: ${value}`);
-      }
+    for (const [fileName, componentSource] of wordingComponentSources) {
+      copy.push(...componentCopy(fileName, componentSource));
     }
-    expect(copy, 'the dialog must read its words from the wording file').toEqual([]);
+    expect(copy, 'the settings components must read their words from the wording file').toEqual([]);
   });
 });
 

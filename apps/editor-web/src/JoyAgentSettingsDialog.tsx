@@ -1127,7 +1127,10 @@ export function JoyAgentSettingsDialog({
                     <div className="joy-settings-active-details">
                       <strong>
                         {connectionStatus?.modelId
-                          ? `Active: ${connectionStatus.modelId}`
+                          ? SETTINGS_MODELS.activeModel.replace(
+                              '{model}',
+                              () => connectionStatus.modelId,
+                            )
                           : SETTINGS_MODELS.noModel}
                       </strong>
                       <span role="status">
@@ -1175,14 +1178,14 @@ export function JoyAgentSettingsDialog({
                               )}
                               {prof.state === 'credential-unavailable' && (
                                 <span className="joy-settings-legacy-status">
-                                  Saved key could not be read. Enter it again.
+                                  {SETTINGS_MODELS.keyUnreadable}
                                 </span>
                               )}
                               {prof.bound === false &&
                                 !disabledLegacy &&
                                 prof.state !== 'credential-unavailable' && (
                                   <span className="joy-settings-legacy-status">
-                                    Enter the key again to confirm this endpoint.
+                                    {SETTINGS_MODELS.keyConfirmAgain}
                                   </span>
                                 )}
                             </div>
@@ -1994,13 +1997,13 @@ export function JoyAgentSettingsDialog({
                         <div className="joy-settings-diagnostic-row">
                           <span>{SETTINGS_DIAGNOSTICS.graphicsCard}</span>
                           <span className="joy-settings-hint-accent">
-                            NVIDIA GeForce RTX 5070 Ti
+                            {SETTINGS_DIAGNOSTICS.graphicsCardName}
                           </span>
                         </div>
                         <div className="joy-settings-diagnostic-row">
                           <span>{SETTINGS_DIAGNOSTICS.drawingMethod}</span>
                           <span className="joy-settings-diagnostic-status is-supported">
-                            ANGLE D3D11
+                            {SETTINGS_DIAGNOSTICS.drawingMethodName}
                           </span>
                         </div>
                         <div className="joy-settings-diagnostic-row">
@@ -2012,7 +2015,7 @@ export function JoyAgentSettingsDialog({
                         <div className="joy-settings-diagnostic-row">
                           <span>{SETTINGS_DIAGNOSTICS.backgroundWorker}</span>
                           <span className="joy-settings-diagnostic-status is-supported">
-                            joy-worker.exe
+                            {SETTINGS_DIAGNOSTICS.backgroundWorkerName}
                           </span>
                         </div>
                       </div>

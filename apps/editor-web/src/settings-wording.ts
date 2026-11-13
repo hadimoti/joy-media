@@ -134,7 +134,7 @@ export const SETTINGS_MODES: Readonly<Record<AgentExecutionMode, SettingsModeWor
  */
 export const SETTINGS_BUDGET = {
   title: 'When to ask you about cost',
-  /** `{amount}` is the limit, for example 0.50. */
+  /** `{amount}` is the estimated cost threshold for one step. */
   tag: 'Ask above {amount} for one step',
   field: 'Ask me before a step that may cost more than this (USD)',
   hint: 'In "Work on its own", JOY Media asks for your approval when one step of a run may cost more than this. It is not a limit on what a whole run may spend. Prices are estimates from the provider. JOY Media itself charges nothing.',
@@ -207,10 +207,13 @@ export const SETTINGS_DIAGNOSTICS = {
   hardwareTitle: 'How your computer draws the picture',
   accelerationTag: 'Hardware acceleration is on',
   graphicsCard: 'Graphics card',
+  graphicsCardName: 'NVIDIA GeForce RTX 5070 Ti',
   drawingMethod: 'How it draws',
+  drawingMethodName: 'ANGLE D3D11',
   mediaFolder: 'Your media folder',
   mediaFolderHint: 'See the Asset Library settings',
   backgroundWorker: 'Background worker',
+  backgroundWorkerName: 'joy-worker.exe',
 } as const;
 
 /** The models page: the connection, the key, the models and the check. */
@@ -219,6 +222,7 @@ export const SETTINGS_MODELS = {
   presetTitle: 'Your own API key',
   presetHint: 'One provider, with a key you enter here',
   noModel: 'No model connected',
+  activeModel: 'Active: {model}',
   readyToEdit: 'Ready to edit your project',
   briefOnly: 'Ready for a creative brief only',
   connectBelow: 'Connect a model below to start.',
@@ -284,6 +288,88 @@ export const SETTINGS_MODELS = {
   filterClaude: 'Claude',
   filterGpt: 'GPT',
   browserOnly: 'Live model discovery requires Joy Media Desktop.',
+} as const;
+
+/** The desktop-only agent slots shown at the top of the models page. */
+export const SETTINGS_AGENT_SLOTS = {
+  sectionLabel: 'Agent slots',
+  desktopNote: 'Agent slots are set up in the desktop app.',
+  loadFailure: 'Agent slots are unavailable: {reason}',
+  accountLabel: 'ChatGPT subscription',
+  accountDisconnected: 'ChatGPT is not connected.',
+  accountConnected: 'ChatGPT is connected.',
+  connectChatGpt: 'Connect ChatGPT',
+  logInAgain: 'Log in again',
+  logOut: 'Log out',
+  slotLabel: '{label} slot',
+  profileLabel: 'Provider profile',
+  profileAriaLabel: '{label} profile',
+  notSet: 'Not set',
+  modelLabel: 'Model',
+  modelAriaLabel: '{label} model',
+  chooseModel: 'Choose a model',
+  savedModel: '{model} (saved)',
+  chooseFromList: 'Choose from the list',
+  typeModelId: 'Type a model ID',
+  refreshModels: 'Refresh models',
+  instructionsLabel: 'Instructions',
+  instructionsAriaLabel: '{label} instructions',
+  temperatureLabel: 'Temperature',
+  temperatureAriaLabel: '{label} temperature',
+  maxOutputTokensLabel: 'Max output tokens',
+  maxOutputTokensAriaLabel: '{label} max output tokens',
+  saveSlot: 'Save {label}',
+  useForAgent: 'Use for agent',
+  signInOpening: 'Opening ChatGPT in your browser to sign in…',
+  signInSucceeded: 'ChatGPT is connected.',
+  signInAgainSucceeded: 'ChatGPT signed in again.',
+  signInFailed: 'ChatGPT sign-in did not complete: {reason}',
+  logOutConfirmation:
+    'Log out of ChatGPT? JOY Media revokes this connection, and the Workhorse slot stays empty until you connect again.',
+  loggingOut: 'Logging out of ChatGPT…',
+  loggedOut: 'Logged out of ChatGPT. The connection was removed.',
+  logOutFailed: 'ChatGPT did not confirm the log out, so the connection was kept: {reason}',
+  modelListHint: 'Refresh models to choose from the list this account offers, or type a model ID.',
+  readingModels: 'Reading the models this profile offers…',
+  noModels: 'This profile offers no models. Type a model ID.',
+  readingModelsFailed: 'The models could not be read: {reason}',
+  saved: '{label} saved.',
+  saveFailed: '{label} was not saved: {reason}',
+  needsProfileAndModel: 'Save {label} with a profile and a model first.',
+  isCurrentAgentConnection: '{label} is the connection the agent uses now.',
+} as const;
+
+/** Sign-in routes and API-key fields inside the provider panel. */
+export const SETTINGS_PROVIDER_SIGN_IN = {
+  oauthRiskNotice:
+    'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.',
+  signedIn: 'Signed in to {provider}.',
+  signInFailed: 'The {provider} sign-in did not complete.',
+  modelIdRequired: 'Enter a model ID before saving.',
+  apiKeyRequired: 'Enter an API key before saving.',
+  apiKeySaved: 'API key saved on this computer.',
+  apiKeySaveFailed: 'API key could not be saved. Check the fields and try again.',
+  toggleRoutesLabel: 'Toggle {provider} connection routes',
+  bothRoutesTag: 'Sign-in + API key',
+  signInOnlyTag: 'Sign-in only',
+  oauthRouteLabel: '{provider} OAuth route',
+  oauthRouteTitle: 'Sign-in route (Primary)',
+  signInButton: 'Sign in with {provider}',
+  signInButtonBusy: 'Sign in with {provider}…',
+  apiKeyRouteLabel: '{provider} API-key route',
+  apiKeyRouteTitle: 'API key route (Secondary)',
+  noApiKeyEndpoint:
+    'No API-key endpoint is registered for this provider. OpenAI API keys remain under the separate OpenAI provider.',
+  apiKeyRegionLabel: '{provider} API key region',
+  baseUrlLabel: 'OpenAI-compatible base URL',
+  baseUrlAriaLabel: '{provider} API key base URL',
+  apiKeyLabel: 'API key',
+  createApiKey: 'Create API key',
+  apiSecretKeyLabel: 'API Secret Key',
+  apiKeyAriaLabel: '{provider} API key',
+  modelIdLabel: 'Model ID',
+  modelIdAriaLabel: '{provider} Model ID',
+  saveApiKey: 'Save API key',
 } as const;
 
 /**
