@@ -24,7 +24,10 @@ export interface MediaFitTransform {
   readonly scaleY: number;
 }
 
+const MAX_CROP_EDGE = 0.49;
+
 function cleanNearInteger(value: number): number {
+  if (Math.abs(value) <= 1e-10) return 0;
   const nearest = Math.round(value);
   return Math.abs(value - nearest) <= 1e-10 ? nearest : value;
 }
@@ -58,17 +61,21 @@ export function calculateMediaFitTransform(
 
   const cropEdges = [crop.left, crop.top, crop.right, crop.bottom];
   if (
-    !cropEdges.every((edge) => Number.isFinite(edge) && edge >= 0 && edge < 1) ||
-    crop.left + crop.right >= 1 ||
-    crop.top + crop.bottom >= 1 ||
+    !cropEdges.every((edge) => Number.isFinite(edge) && edge >= 0) ||
     ![anchor.x, anchor.y].every((value) => Number.isFinite(value) && value >= -1 && value <= 2)
   )
     return undefined;
 
-  const visibleLeft = sourceWidth * crop.left;
-  const visibleTop = sourceHeight * crop.top;
-  const visibleWidth = sourceWidth * (1 - crop.left - crop.right);
-  const visibleHeight = sourceHeight * (1 - crop.top - crop.bottom);
+  const visibleCrop = {
+    left: Math.min(crop.left, MAX_CROP_EDGE),
+    top: Math.min(crop.top, MAX_CROP_EDGE),
+    right: Math.min(crop.right, MAX_CROP_EDGE),
+    bottom: Math.min(crop.bottom, MAX_CROP_EDGE),
+  };
+  const visibleLeft = sourceWidth * visibleCrop.left;
+  const visibleTop = sourceHeight * visibleCrop.top;
+  const visibleWidth = sourceWidth * (1 - visibleCrop.left - visibleCrop.right);
+  const visibleHeight = sourceHeight * (1 - visibleCrop.top - visibleCrop.bottom);
   const radians = (rotationDeg * Math.PI) / 180;
   const cosine = Math.cos(radians);
   const sine = Math.sin(radians);
@@ -77,7 +84,10 @@ export function calculateMediaFitTransform(
   const scale =
     mode === 'fit'
       ? Math.min(frameWidth / rotatedWidth, frameHeight / rotatedHeight)
-      : Math.max(frameWidth / rotatedWidth, frameHeight / rotatedHeight);
+      : Math.max(
+          (frameWidth * Math.abs(cosine) + frameHeight * Math.abs(sine)) / visibleWidth,
+          (frameWidth * Math.abs(sine) + frameHeight * Math.abs(cosine)) / visibleHeight,
+        );
   if (!Number.isFinite(scale) || scale <= 0) return undefined;
 
   const pivotX = visibleLeft + visibleWidth * anchor.x;

@@ -5762,12 +5762,11 @@ function EditorWorkspace({
         };
       },
       clipId: string,
+      compositionId: string,
     ) => {
       const controllerId = `media-controller-${clipId}`;
       if (context.visualProject.visualObjects[controllerId] !== undefined) return;
-      const composition =
-        context.timelineProject.compositions[context.activeTimelineCompositionId] ??
-        context.timelineProject.compositions[context.timelineProject.rootCompositionId];
+      const composition = context.timelineProject.compositions[compositionId];
       const fitted =
         asset.kind === 'audio' ||
         composition === undefined ||
@@ -6746,7 +6745,9 @@ function EditorWorkspace({
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
           )}
           onImportFiles={handleDroppedFiles}
-          onMediaPlaced={(asset, clipId) => bindMediaClip(asset, clipId)}
+          onMediaPlaced={(asset, clipId, compositionId) =>
+            bindMediaClip(asset, clipId, compositionId)
+          }
           onTogglePlayback={context.togglePlayback}
           onSeek={(timeUs) => context.seek(timelineViewRootTime(activeTimelineView, timeUs))}
           onSelectClips={context.selectClips}

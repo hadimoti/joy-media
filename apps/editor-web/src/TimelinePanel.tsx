@@ -761,7 +761,11 @@ export function TimelinePanel({
   readonly onImportFiles?: (files: readonly File[], target: DroppedFilesTarget) => void;
   readonly droppedImportProgress?: DroppedImportProgressState;
   readonly onCancelDroppedImport?: () => void;
-  readonly onMediaPlaced?: (asset: TimelineMediaAsset, clipId: string) => void;
+  readonly onMediaPlaced?: (
+    asset: TimelineMediaAsset,
+    clipId: string,
+    compositionId: string,
+  ) => void;
   /** Human labels from the creative asset catalog, keyed by opaque asset id. */
   readonly assetDisplayNames?: Readonly<Record<string, string>>;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
@@ -1474,6 +1478,7 @@ export function TimelinePanel({
           descriptor: asset.descriptor ?? {},
         },
         clipId,
+        composition.id,
       );
       onDispatch({
         label: `Insert ${asset.displayName ?? 'media'}`,
@@ -1528,6 +1533,7 @@ export function TimelinePanel({
           descriptor: asset.descriptor ?? {},
         },
         clipId,
+        composition.id,
       );
       onDispatch({
         label: `Add ${asset.displayName ?? 'media'}`,
@@ -2098,7 +2104,9 @@ export function TimelinePanel({
               lockedTrackIds,
               (_asset, index) => clipIds[index]!,
             );
-            imported.forEach((asset, index) => onMediaPlaced?.(asset, clipIds[index]!));
+            imported.forEach((asset, index) =>
+              onMediaPlaced?.(asset, clipIds[index]!, compositionRef.current.id),
+            );
             onDispatch(transaction);
           }
           if (failures.length > 0) {
@@ -2249,7 +2257,7 @@ export function TimelinePanel({
         descriptor: asset.descriptor ?? {},
       };
       const clipId = `${kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
-      onMediaPlaced?.(timelineAsset, clipId);
+      onMediaPlaced?.(timelineAsset, clipId, composition.id);
       onDispatch(
         buildTimelineMediaImportTransaction(
           composition,

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const appSource = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
+const timelinePanelSource = readFileSync(new URL('./TimelinePanel.tsx', import.meta.url), 'utf8');
 
 describe('App asset timeline integrity contract', () => {
   it('preserves the imported asset identity and verified bytes metadata', () => {
@@ -17,6 +18,23 @@ describe('App asset timeline integrity contract', () => {
     expect(callback).toContain('sha256: asset.sha256,');
     expect(callback).toContain('bytes: asset.bytes,');
     expect(callback).toContain('id: asset.assetId,');
+  });
+
+  it('fits a bound media clip against the composition that received it', () => {
+    const bindStart = appSource.indexOf('const bindMediaClip = (');
+    const bindEnd = appSource.indexOf('const selectedTimelineEntry =', bindStart);
+    const binder = appSource.slice(bindStart, bindEnd);
+
+    expect(binder).toContain('compositionId: string,');
+    expect(binder).toContain('context.timelineProject.compositions[compositionId]');
+    expect(binder).not.toContain('context.activeTimelineCompositionId');
+    expect(appSource).toContain('onMediaPlaced={(asset, clipId, compositionId) =>');
+    expect(appSource).toContain('bindMediaClip(asset, clipId, compositionId)');
+    expect(timelinePanelSource).toContain('clipId,\n        composition.id,');
+    expect(timelinePanelSource).toContain(
+      'onMediaPlaced?.(asset, clipIds[index]!, compositionRef.current.id)',
+    );
+    expect(timelinePanelSource).toContain('onMediaPlaced?.(timelineAsset, clipId, composition.id)');
   });
 
   it('uses one drop handler and keeps Media drops off the timeline', () => {

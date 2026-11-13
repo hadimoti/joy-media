@@ -3,7 +3,9 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { JoyProjectV1, VisualObjectV1 } from '@joy-media/project-schema';
+import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { InspectorPanel } from './InspectorPanel.js';
+import { EditorSession } from './editor-session.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -139,6 +141,15 @@ function clickButton(label: string): void {
   if (button !== null && button !== undefined) act(() => button.click());
 }
 
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  };
+}
+
 describe('Inspector Fit and Fill actions', () => {
   it('fits static media in one transaction', () => {
     const onDispatch = vi.fn();
@@ -194,6 +205,29 @@ describe('Inspector Fit and Fill actions', () => {
         }),
       ]),
     );
+  });
+
+  it('restores the exact previous transform with one Undo after Inspector Fill', () => {
+    const visualProject = {
+      ...PROJECT,
+      visualObjects: { ...PROJECT.visualObjects, [OBJECT.id]: STATIC_OBJECT },
+    } as JoyProjectV1;
+    const session = new EditorSession(memoryStorage(), buildReferenceSpikeProject(), visualProject);
+    const previousTransform = session.visualProject.visualObjects[OBJECT.id]?.transform;
+    const onDispatch = vi.fn((transaction: Parameters<EditorSession['dispatchVisualObjects']>[0]) =>
+      session.dispatchVisualObjects(transaction),
+    );
+    mount(onDispatch, STATIC_OBJECT, visualProject);
+
+    clickButton('Fill frame with clip');
+
+    expect(session.visualProject.visualObjects[OBJECT.id]?.transform).not.toEqual(
+      previousTransform,
+    );
+    expect(session.historyEntries.at(-1)?.label).toBe('Fill frame');
+    session.undo();
+    expect(session.visualProject.visualObjects[OBJECT.id]?.transform).toEqual(previousTransform);
+    expect(session.canUndo).toBe(false);
   });
 
   it('disables Fit and Fill when transform channels are animated', () => {
