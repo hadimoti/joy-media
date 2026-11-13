@@ -2,12 +2,17 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PopupProvider, usePopup, usePopupsClosedWhile } from './popup-manager.js';
+import { PopupProvider, usePopup, usePopupManager, usePopupsClosedWhile } from './popup-manager.js';
 import { AppMenuBar } from './AppMenuBar.js';
-import { POPUP_IDS, REGISTERED_POPUP_IDS, actionOverflowPopupId } from './popup-ids.js';
+import {
+  POPUP_IDS,
+  REGISTERED_POPUP_IDS,
+  actionOverflowPopupId,
+  appMenuPopupId,
+} from './popup-ids.js';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -87,6 +92,77 @@ function ToolbarToggle() {
       </button>
       {popup.open && (
         <section ref={popup.rootRef} role="dialog" aria-label="Palette" data-menu="palette">
+          <input />
+        </section>
+      )}
+    </>
+  );
+}
+
+const EDIT_MENU_ID = appMenuPopupId('edit');
+
+// Mirrors App.tsx: a toolbar button toggles the command palette, while Ctrl+K and an Edit
+// menu item open it without the toolbar button as the opener.
+function PaletteToolbar() {
+  const manager = usePopupManager();
+  const palette = usePopup(POPUP_IDS.commandPalette);
+  const edit = usePopup(EDIT_MENU_ID);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.key.toLowerCase() !== 'k') return;
+      event.preventDefault();
+      manager.toggle(POPUP_IDS.commandPalette);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [manager]);
+  return (
+    <>
+      <div ref={edit.rootRef}>
+        <button
+          type="button"
+          data-trigger="edit"
+          aria-haspopup="menu"
+          aria-expanded={edit.open}
+          onClick={(event) => edit.toggle(event.currentTarget)}
+        >
+          Edit
+        </button>
+        {edit.open && (
+          <ul role="menu" data-menu={EDIT_MENU_ID}>
+            <li>
+              <button
+                type="button"
+                role="menuitem"
+                data-item="palette"
+                onClick={() => {
+                  edit.close();
+                  manager.open(POPUP_IDS.commandPalette);
+                }}
+              >
+                Command palette
+              </button>
+            </li>
+          </ul>
+        )}
+      </div>
+      <button
+        type="button"
+        data-trigger="toolbar"
+        data-popup-trigger={POPUP_IDS.commandPalette}
+        aria-haspopup="dialog"
+        aria-expanded={palette.open}
+        onClick={(event) => palette.toggle(event.currentTarget)}
+      >
+        Palette
+      </button>
+      {palette.open && (
+        <section
+          ref={palette.rootRef}
+          role="dialog"
+          aria-label="Command palette"
+          data-menu={POPUP_IDS.commandPalette}
+        >
           <input />
         </section>
       )}
@@ -468,5 +544,149 @@ describe('app menu bar on the popup manager', () => {
 
     expect(container?.querySelectorAll('[role="menu"]').length).toBe(0);
     expect(document.activeElement).toBe(menubarTrigger('Edit'));
+  });
+});
+
+describe('command palette toggled from its toolbar button', () => {
+  const PALETTE = POPUP_IDS.commandPalette;
+
+  async function pressCtrlK() {
+    await act(async () => {
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }),
+      );
+    });
+  }
+
+  it('a click on the toolbar button closes the palette that Ctrl+K opened, and the next click reopens it', async () => {
+    await render(
+      <PopupProvider>
+        <PaletteToolbar />
+      </PopupProvider>,
+    );
+
+    await pressCtrlK();
+    expect(menu(PALETTE)).not.toBeNull();
+
+    await click(trigger('toolbar'));
+    expect(menu(PALETTE)).toBeNull();
+    expect(trigger('toolbar').getAttribute('aria-expanded')).toBe('false');
+    await flushTimers();
+    expect(menu(PALETTE)).toBeNull();
+
+    await click(trigger('toolbar'));
+    expect(menu(PALETTE)).not.toBeNull();
+  });
+
+  it('a click on the toolbar button closes the palette that an Edit menu item opened, and the next click reopens it', async () => {
+    await render(
+      <PopupProvider>
+        <PaletteToolbar />
+      </PopupProvider>,
+    );
+
+    await click(trigger('edit'));
+    await click(query<HTMLButtonElement>('[data-item="palette"]'));
+    expect(menu(PALETTE)).not.toBeNull();
+
+    await click(trigger('toolbar'));
+    expect(menu(PALETTE)).toBeNull();
+    await flushTimers();
+    expect(menu(PALETTE)).toBeNull();
+
+    await click(trigger('toolbar'));
+    expect(menu(PALETTE)).not.toBeNull();
+  });
+
+  it('the toolbar exemption covers only the palette: a toolbar press still closes an open Edit menu', async () => {
+    await render(
+      <PopupProvider>
+        <PaletteToolbar />
+      </PopupProvider>,
+    );
+
+    await click(trigger('edit'));
+    expect(menu(EDIT_MENU_ID)).not.toBeNull();
+
+    await pointerDown(trigger('toolbar'));
+    expect(menu(EDIT_MENU_ID)).toBeNull();
+  });
+});
+
+// A component that uses the popup manager must attach a root, because an outside click is
+// measured against it. `usePopup` controls must attach `rootRef` (here or in the child
+// they are passed to). `usePopupManager` users must call `registerRoot`.
+const MANAGER_USE = /\buse(?:Popup|PopupManager)\(/;
+const POPUP_CONTROL = /\b(?:const|let)\s+(\w+)\s*=\s*usePopup\(/g;
+const ROOT_CALLBACK = /\b(?:const|let)\s+(\w+)\s*=\s*[\w.]*registerRoot\(/g;
+
+function scanRootRegistration(source: string, attachedElsewhere: ReadonlySet<string>): string[] {
+  if (!MANAGER_USE.test(source)) return [];
+  const problems: string[] = [];
+  const controls = [...source.matchAll(POPUP_CONTROL)].map((match) => match[1] ?? '');
+  if (controls.length === 0 && !/\bregisterRoot\(/.test(source)) {
+    problems.push('uses the popup manager but never registers a root');
+  }
+  for (const match of source.matchAll(ROOT_CALLBACK)) {
+    // A callback that is created but never used as a ref (declaration only) detaches nothing.
+    const name = match[1] ?? '';
+    const uses = source.match(new RegExp(`\\b${name}\\b`, 'g'))?.length ?? 0;
+    if (uses < 2) problems.push(`${name} is created but never attached`);
+  }
+  for (const name of controls) {
+    if (new RegExp(`\\b${name}\\.rootRef\\b`).test(source)) continue;
+    const passedOn = new RegExp(`\\{${name}\\}`).test(source);
+    if (passedOn && attachedElsewhere.has(name)) continue;
+    problems.push(`${name} never attaches its rootRef`);
+  }
+  return problems;
+}
+
+describe('popup roots', () => {
+  const SOURCE_DIR = dirname(fileURLToPath(import.meta.url));
+  const files = sourceFiles(SOURCE_DIR).map((file) => ({
+    name: relative(SOURCE_DIR, file),
+    source: readFileSync(file, 'utf8'),
+  }));
+  const attachedElsewhere = new Set(
+    files.flatMap(({ source }) =>
+      [...source.matchAll(/\b(\w+)\.rootRef\b/g)].map((m) => m[1] ?? ''),
+    ),
+  );
+
+  it('every component that uses the popup manager registers a root for its popups', () => {
+    const problems = files.flatMap(({ name, source }) =>
+      scanRootRegistration(source, attachedElsewhere).map((problem) => `${name}: ${problem}`),
+    );
+
+    expect(problems).toEqual([]);
+  });
+
+  it('reports a component that uses the popup manager without a root', () => {
+    expect(
+      scanRootRegistration(
+        'const { open } = usePopupManager();\nopen(POPUP_IDS.projectMenu);',
+        new Set(),
+      ),
+    ).toHaveLength(1);
+    expect(
+      scanRootRegistration(
+        'const { open, registerRoot } = usePopupManager();\nconst ref = registerRoot(POPUP_IDS.projectMenu);',
+        new Set(),
+      ),
+    ).toEqual(['ref is created but never attached']);
+    expect(
+      scanRootRegistration(
+        'const { open, registerRoot } = usePopupManager();\nconst ref = registerRoot(POPUP_IDS.projectMenu);\n<div ref={ref} />;',
+        new Set(),
+      ),
+    ).toEqual([]);
+    expect(scanRootRegistration('const p = usePopup(POPUP_IDS.exportPreset);', new Set())).toEqual([
+      'p never attaches its rootRef',
+    ]);
+    expect(
+      scanRootRegistration('const p = usePopup(POPUP_IDS.exportPreset);\nf({p});', new Set(['p'])),
+    ).toEqual([]);
+    expect(scanRootRegistration('const x = 1;', new Set())).toEqual([]);
   });
 });

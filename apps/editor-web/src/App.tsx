@@ -6726,6 +6726,7 @@ function EditorWorkspace({
                 className="icon-button"
                 aria-haspopup="dialog"
                 aria-expanded={paletteOpen}
+                data-popup-trigger={POPUP_IDS.commandPalette}
                 onClick={(event) => paletteMenu.toggle(event.currentTarget)}
                 aria-label="Command palette"
                 title="Command palette (Ctrl+K)"

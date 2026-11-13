@@ -50,8 +50,21 @@ export interface PopupControl {
 const FOCUSABLE_TARGET =
   'button, a[href], input, select, textarea, [contenteditable="true"], [tabindex]';
 
+/**
+ * A control that opens or toggles popup `id` carries `data-popup-trigger="<id>"`. Its
+ * pointerdown counts as inside for that popup, however the popup was opened (a toolbar
+ * button, a keyboard shortcut or a menu item), so its click toggles the popup.
+ */
+export const POPUP_TRIGGER_ATTRIBUTE = 'data-popup-trigger';
+
 function isFocusableTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(FOCUSABLE_TARGET) !== null;
+}
+
+function isTriggerOf(target: EventTarget | null, id: string): boolean {
+  if (!(target instanceof Element)) return false;
+  const trigger = target.closest(`[${POPUP_TRIGGER_ATTRIBUTE}]`);
+  return trigger?.getAttribute(POPUP_TRIGGER_ATTRIBUTE) === id;
 }
 
 function usePopupStore(): PopupManager {
@@ -138,6 +151,8 @@ function usePopupStore(): PopupManager {
       // The opener is part of the popup: its own click toggles the popup, so it must not
       // close here first and reopen on click (a toolbar button for the palette, for example).
       if (opener !== null && target instanceof Node && opener.contains(target)) return;
+      // The popup's own trigger, whichever path opened it, is part of the popup too.
+      if (isTriggerOf(target, openId)) return;
       close(openId, { restoreFocus: false });
       // Let the pointer's own focus change (mousedown) happen first. A click on
       // another focusable control keeps its focus; a click on plain background

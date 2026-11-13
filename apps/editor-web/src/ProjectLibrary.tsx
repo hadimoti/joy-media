@@ -75,6 +75,8 @@ export function ProjectLibrary({
   // The project action menu is one popup among the app's popups (OB-18).
   const popups = usePopupManager();
   const { open: openPopup, close: closePopup } = popups;
+  // The menu is the popup's root: unmounting it while open clears the manager's open id.
+  const registerProjectMenuRoot = popups.registerRoot(POPUP_IDS.projectMenu);
   const menuProjectId = popups.openId === POPUP_IDS.projectMenu ? menuEntryId : null;
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [dialog, setDialog] = useState<DialogState | undefined>(undefined);
@@ -486,7 +488,10 @@ export function ProjectLibrary({
                   </button>
                   {menuEntry?.id === entry.id && (
                     <div
-                      ref={menuRef}
+                      ref={(element) => {
+                        menuRef.current = element;
+                        registerProjectMenuRoot(element);
+                      }}
                       className="project-library-action-menu"
                       role="menu"
                       aria-label={`Actions for ${entry.title}`}
