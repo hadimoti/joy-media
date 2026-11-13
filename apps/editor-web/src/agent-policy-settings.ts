@@ -16,6 +16,52 @@ export interface AgentPolicyStorage {
   removeItem?(key: string): void;
 }
 
+/**
+ * The budgets of the quality check and the switch that keeps pictures on this PC (ADR-0045
+ * sections 5 and 8; T-B05). The numbers are limits on what the check may send, not a price.
+ */
+export interface QualityCheckPreferences {
+  /** The most pictures one check may look at. */
+  readonly framesPerCheck: number;
+  /** The most pictures one run may look at in all, across its fix rounds. */
+  readonly framesPerRun: number;
+  /** The most fix rounds one run may make. */
+  readonly fixRounds: number;
+  /** When true, no picture is sent to a remote model. */
+  readonly neverSendFramesToRemoteModel: boolean;
+}
+
+export type QualityCheckBudgetKey = 'framesPerCheck' | 'framesPerRun' | 'fixRounds';
+
+export interface QualityCheckBudgetBounds {
+  readonly min: number;
+  readonly max: number;
+  readonly default: number;
+}
+
+/** The bounds and defaults of each budget (ADR-0045 section 8). Each value is a whole number. */
+export const QUALITY_CHECK_BUDGET_BOUNDS: Readonly<
+  Record<QualityCheckBudgetKey, QualityCheckBudgetBounds>
+> = Object.freeze({
+  framesPerCheck: Object.freeze({ min: 1, max: 16, default: 12 }),
+  framesPerRun: Object.freeze({ min: 12, max: 48, default: 16 }),
+  fixRounds: Object.freeze({ min: 1, max: 3, default: 3 }),
+});
+
+export const DEFAULT_QUALITY_CHECK: QualityCheckPreferences = Object.freeze({
+  framesPerCheck: QUALITY_CHECK_BUDGET_BOUNDS.framesPerCheck.default,
+  framesPerRun: QUALITY_CHECK_BUDGET_BOUNDS.framesPerRun.default,
+  fixRounds: QUALITY_CHECK_BUDGET_BOUNDS.fixRounds.default,
+  neverSendFramesToRemoteModel: false,
+});
+
+/** Rounds a typed budget to a whole number and keeps it inside its bounds. A value that is not a number gives the default. */
+export function clampQualityCheckBudget(key: QualityCheckBudgetKey, value: unknown): number {
+  const bounds = QUALITY_CHECK_BUDGET_BOUNDS[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) return bounds.default;
+  return Math.min(bounds.max, Math.max(bounds.min, Math.round(value)));
+}
+
 export interface AgentPolicyPreferences {
   readonly version: 2;
   readonly executionMode: AgentExecutionMode;
@@ -26,6 +72,7 @@ export interface AgentPolicyPreferences {
   readonly workerPreference: 'browser-worker';
   readonly mediaProvider: string;
   readonly livePreview: boolean;
+  readonly qualityCheck: QualityCheckPreferences;
 }
 
 /** Fresh-install threshold for asking before a step is auto-approved. */
@@ -40,6 +87,7 @@ export const DEFAULT_AGENT_POLICY: AgentPolicyPreferences = {
   workerPreference: 'browser-worker',
   mediaProvider: 'Approved provider',
   livePreview: true,
+  qualityCheck: DEFAULT_QUALITY_CHECK,
 };
 
 /** Local compound edits have no additional provider/job cost. Model token spend is
@@ -161,6 +209,22 @@ function normalizeAgentPolicy(value: unknown): AgentPolicyPreferences {
         ? candidate.mediaProvider.trim()
         : DEFAULT_AGENT_POLICY.mediaProvider,
     livePreview: candidate.livePreview !== false,
+    qualityCheck: normalizeQualityCheck(candidate.qualityCheck),
+  };
+}
+
+/**
+ * A policy saved before the quality check existed has no `qualityCheck`, and one saved with
+ * part of it has only some keys. Each missing or unusable key takes its ADR default.
+ */
+function normalizeQualityCheck(value: unknown): QualityCheckPreferences {
+  const candidate =
+    typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  return {
+    framesPerCheck: clampQualityCheckBudget('framesPerCheck', candidate.framesPerCheck),
+    framesPerRun: clampQualityCheckBudget('framesPerRun', candidate.framesPerRun),
+    fixRounds: clampQualityCheckBudget('fixRounds', candidate.fixRounds),
+    neverSendFramesToRemoteModel: candidate.neverSendFramesToRemoteModel === true,
   };
 }
 

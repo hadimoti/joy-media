@@ -109,6 +109,32 @@ Each one has one plain sentence, and the default says so.
 
 ---
 
+## 4a. The quality check and where its pictures go (T-B05)
+
+These words are new in T-B05. There was no old text. The numbers are limits on what a quality check may send to a model. They are not a price and not a cap on the cost of a run. The defaults are the ones in ADR-0045 section 8: 12 frames a check, 16 frames a run, 3 fix rounds, and the switch off. A policy saved before this card loads with those defaults, and nothing already saved changes.
+
+| Old text       | New text                                                                                                                                                                             | Where it is                                                               | Owner's answer |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | -------------- |
+| (new in T-B05) | **Quality check**                                                                                                                                                                    | Safety and limits page, the third block                                   |                |
+| (new in T-B05) | **{perCheck} frames a check, {rounds} fix rounds**                                                                                                                                   | Safety and limits page, the small tag on that block                       |                |
+| (new in T-B05) | Joy Code can look at pictures from your timeline or export to find faults. These limits say how many pictures it may send to a model, and how many times it may fix and check again. | Safety and limits page, under the block's title                           |                |
+| (new in T-B05) | **Frames per check**                                                                                                                                                                 | Safety and limits page, the first field of the block                      |                |
+| (new in T-B05) | Most pictures one check may look at. Stays between 1 and 16.                                                                                                                         | Safety and limits page, under the first field                             |                |
+| (new in T-B05) | **Frames per run**                                                                                                                                                                   | Safety and limits page, the second field of the block                     |                |
+| (new in T-B05) | Most pictures one run may look at in all, including every fix round. Stays between 12 and 48.                                                                                        | Safety and limits page, under the second field                            |                |
+| (new in T-B05) | **Fix rounds**                                                                                                                                                                       | Safety and limits page, the third field of the block                      |                |
+| (new in T-B05) | How many times one run may fix what it found and check again. Stays between 1 and 3.                                                                                                 | Safety and limits page, under the third field                             |                |
+| (new in T-B05) | **Never send frames to a remote model**                                                                                                                                              | Safety and limits page, the switch at the foot of the block               |                |
+| (new in T-B05) | When this is on, pictures stay on this PC and no remote model looks at them. Checks that measure the file itself still run.                                                          | Safety and limits page, under the switch                                  |                |
+| (new in T-B05) | **Where a quality check sends pictures**                                                                                                                                             | The card at the foot of the block                                         |                |
+| (new in T-B05) | Up to {perCheck} pictures a check and {perRun} a run go to {provider}, model {model}.                                                                                                | The card at the foot of the block, when a model is connected              |                |
+| (new in T-B05) | No model is connected, so no picture is sent anywhere. Checks that measure the file itself still run.                                                                                | The card at the foot of the block, when no model is connected             |                |
+| (new in T-B05) | Never send frames to a remote model is on, so no picture leaves this PC. Checks that measure the file itself still run.                                                              | The card at the foot of the block, when the switch is on                  |                |
+| (new in T-B05) | Local-only mode is on, so no picture leaves this PC. Checks that measure the file itself still run.                                                                                  | The card at the foot of the block, in local-only mode                     |                |
+| (new in T-B05) | Joy Code asks you first, once for each round, and lists the pictures before any of them is sent.                                                                                     | The card at the foot of the block, under the line about where pictures go |                |
+
+---
+
 ## 5. Where the settings and the keys are kept
 
 | Old text                                                                        | New text                                                               | Where it is                                          | Owner's answer |

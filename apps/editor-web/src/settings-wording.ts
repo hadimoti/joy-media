@@ -140,6 +140,48 @@ export const SETTINGS_BUDGET = {
   hint: 'In "Work on its own", JOY Media asks for your approval when one step of a run may cost more than this. It is not a limit on what a whole run may spend. Prices are estimates from the provider. JOY Media itself charges nothing.',
 } as const;
 
+/**
+ * The quality check: how many pictures a check may send, how many a run may send, and how many fix
+ * rounds it may make. The numbers are limits on what is sent to a model, not a price.
+ */
+export const SETTINGS_QUALITY_CHECK = {
+  title: 'Quality check',
+  /** `{perCheck}` and `{rounds}` are the two budgets in the tag. */
+  tag: '{perCheck} frames a check, {rounds} fix rounds',
+  intro:
+    'Joy Code can look at pictures from your timeline or export to find faults. These limits say how many pictures it may send to a model, and how many times it may fix and check again.',
+  framesPerCheckLabel: 'Frames per check',
+  framesPerCheckHint: 'Most pictures one check may look at. Stays between 1 and 16.',
+  framesPerRunLabel: 'Frames per run',
+  framesPerRunHint:
+    'Most pictures one run may look at in all, including every fix round. Stays between 12 and 48.',
+  fixRoundsLabel: 'Fix rounds',
+  fixRoundsHint:
+    'How many times one run may fix what it found and check again. Stays between 1 and 3.',
+  neverRemoteLabel: 'Never send frames to a remote model',
+  neverRemoteHint:
+    'When this is on, pictures stay on this PC and no remote model looks at them. Checks that measure the file itself still run.',
+} as const;
+
+/**
+ * The card that says where a check's pictures go. It states the current settings and the connected
+ * provider and model, in plain words.
+ */
+export const SETTINGS_FRAME_CONSENT = {
+  title: 'Where a quality check sends pictures',
+  /** `{perCheck}`, `{perRun}`, `{provider}` and `{model}` are filled in. */
+  withModel:
+    'Up to {perCheck} pictures a check and {perRun} a run go to {provider}, model {model}.',
+  noModel:
+    'No model is connected, so no picture is sent anywhere. Checks that measure the file itself still run.',
+  neverRemote:
+    'Never send frames to a remote model is on, so no picture leaves this PC. Checks that measure the file itself still run.',
+  localOnly:
+    'Local-only mode is on, so no picture leaves this PC. Checks that measure the file itself still run.',
+  askFirst:
+    'Joy Code asks you first, once for each round, and lists the pictures before any of them is sent.',
+} as const;
+
 /** Where the settings and the keys are kept. */
 export const SETTINGS_STORAGE = {
   savedNote: 'Saved on this computer',
@@ -473,4 +515,25 @@ export function removeProfileLabel(profile: string): string {
 /** Fills `{items}` in the message that says what is still missing. */
 export function missingItemsMessage(items: string): string {
   return SETTINGS_MESSAGES.missingItems.replace('{items}', items);
+}
+
+/** Fills `{perCheck}` and `{rounds}` in the tag of the quality check. */
+export function qualityCheckTag(perCheck: number, rounds: number): string {
+  return SETTINGS_QUALITY_CHECK.tag
+    .replace('{perCheck}', () => String(perCheck))
+    .replace('{rounds}', () => String(rounds));
+}
+
+/** Fills the budgets, the provider and the model in the line that says where pictures go. */
+export function frameConsentWithModel(
+  perCheck: number,
+  perRun: number,
+  provider: string,
+  model: string,
+): string {
+  return SETTINGS_FRAME_CONSENT.withModel
+    .replace('{perCheck}', () => String(perCheck))
+    .replace('{perRun}', () => String(perRun))
+    .replace('{provider}', () => provider)
+    .replace('{model}', () => model);
 }

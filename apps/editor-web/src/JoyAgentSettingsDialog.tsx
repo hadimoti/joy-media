@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentExecutionMode, ToolCapability } from '@joy-media/agent-tools';
 import { ALL_TOOL_CAPABILITIES } from '@joy-media/agent-tools';
-import type { AgentPolicyPreferences } from './agent-policy-settings.js';
+import {
+  clampQualityCheckBudget,
+  QUALITY_CHECK_BUDGET_BOUNDS,
+  type AgentPolicyPreferences,
+} from './agent-policy-settings.js';
+import { QualityCheckConsentCard, qualityCheckConsentInput } from './QualityCheckConsentCard.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type {
   ByokSessionStatus,
@@ -67,6 +72,7 @@ import {
   mediaCheckComplete,
   missingItemsMessage,
   modelsReadyTag,
+  qualityCheckTag,
   removeProfileLabel,
   SETTINGS_BUDGET,
   SETTINGS_DIALOG,
@@ -77,6 +83,7 @@ import {
   SETTINGS_MODELS,
   SETTINGS_MODES,
   SETTINGS_PAGES,
+  SETTINGS_QUALITY_CHECK,
   SETTINGS_STORAGE,
   SETTINGS_TOOLS,
   type SettingsPageId,
@@ -262,6 +269,7 @@ export function JoyAgentSettingsDialog({
     'models-probe': true,
     'exec-mode': true,
     'exec-budget': false,
+    'exec-quality': false,
     'exec-privacy': false,
     'exp-previews': true,
     'perms-timeline': true,
@@ -1851,6 +1859,157 @@ export function JoyAgentSettingsDialog({
                         </label>
                         <span className="joy-settings-hint-muted">{SETTINGS_BUDGET.hint}</span>
                       </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Quality check: the picture budgets, the switch that keeps pictures here, and the card that says where they go (T-B05) */}
+                <div
+                  className={`agent-settings-section joy-accordion-item ${openAccordions['exec-quality'] ? 'is-open' : ''}`}
+                >
+                  <button
+                    type="button"
+                    className="button-secondary joy-accordion-trigger"
+                    onClick={() => toggleAccordion('exec-quality')}
+                    aria-expanded={openAccordions['exec-quality']}
+                  >
+                    <div className="joy-accordion-trigger-title">
+                      <span className="joy-accordion-icon">
+                        <FlaskIcon />
+                      </span>
+                      <span>{SETTINGS_QUALITY_CHECK.title}</span>
+                    </div>
+                    <div className="joy-accordion-trigger-meta">
+                      <span className="joy-accordion-tag">
+                        {qualityCheckTag(
+                          policy.qualityCheck.framesPerCheck,
+                          policy.qualityCheck.fixRounds,
+                        )}
+                      </span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
+                    </div>
+                  </button>
+
+                  {openAccordions['exec-quality'] && (
+                    <div className="joy-accordion-content">
+                      <span className="joy-settings-hint-muted">
+                        {SETTINGS_QUALITY_CHECK.intro}
+                      </span>
+                      <div className="joy-settings-form-grid">
+                        <div className="joy-settings-field">
+                          <label>
+                            <span>{SETTINGS_QUALITY_CHECK.framesPerCheckLabel}</span>
+                            <input
+                              type="number"
+                              min={QUALITY_CHECK_BUDGET_BOUNDS.framesPerCheck.min}
+                              max={QUALITY_CHECK_BUDGET_BOUNDS.framesPerCheck.max}
+                              step="1"
+                              value={policy.qualityCheck.framesPerCheck}
+                              onChange={(e) =>
+                                onPolicyChange({
+                                  ...policy,
+                                  qualityCheck: {
+                                    ...policy.qualityCheck,
+                                    framesPerCheck: clampQualityCheckBudget(
+                                      'framesPerCheck',
+                                      Number(e.target.value),
+                                    ),
+                                  },
+                                })
+                              }
+                            />
+                          </label>
+                          <span className="joy-settings-hint-muted">
+                            {SETTINGS_QUALITY_CHECK.framesPerCheckHint}
+                          </span>
+                        </div>
+
+                        <div className="joy-settings-field">
+                          <label>
+                            <span>{SETTINGS_QUALITY_CHECK.framesPerRunLabel}</span>
+                            <input
+                              type="number"
+                              min={QUALITY_CHECK_BUDGET_BOUNDS.framesPerRun.min}
+                              max={QUALITY_CHECK_BUDGET_BOUNDS.framesPerRun.max}
+                              step="1"
+                              value={policy.qualityCheck.framesPerRun}
+                              onChange={(e) =>
+                                onPolicyChange({
+                                  ...policy,
+                                  qualityCheck: {
+                                    ...policy.qualityCheck,
+                                    framesPerRun: clampQualityCheckBudget(
+                                      'framesPerRun',
+                                      Number(e.target.value),
+                                    ),
+                                  },
+                                })
+                              }
+                            />
+                          </label>
+                          <span className="joy-settings-hint-muted">
+                            {SETTINGS_QUALITY_CHECK.framesPerRunHint}
+                          </span>
+                        </div>
+
+                        <div className="joy-settings-field">
+                          <label>
+                            <span>{SETTINGS_QUALITY_CHECK.fixRoundsLabel}</span>
+                            <input
+                              type="number"
+                              min={QUALITY_CHECK_BUDGET_BOUNDS.fixRounds.min}
+                              max={QUALITY_CHECK_BUDGET_BOUNDS.fixRounds.max}
+                              step="1"
+                              value={policy.qualityCheck.fixRounds}
+                              onChange={(e) =>
+                                onPolicyChange({
+                                  ...policy,
+                                  qualityCheck: {
+                                    ...policy.qualityCheck,
+                                    fixRounds: clampQualityCheckBudget(
+                                      'fixRounds',
+                                      Number(e.target.value),
+                                    ),
+                                  },
+                                })
+                              }
+                            />
+                          </label>
+                          <span className="joy-settings-hint-muted">
+                            {SETTINGS_QUALITY_CHECK.fixRoundsHint}
+                          </span>
+                        </div>
+
+                        <div className="joy-settings-field-full joy-settings-field">
+                          <label className="joy-settings-cap-item">
+                            <input
+                              type="checkbox"
+                              checked={policy.qualityCheck.neverSendFramesToRemoteModel}
+                              onChange={(e) =>
+                                onPolicyChange({
+                                  ...policy,
+                                  qualityCheck: {
+                                    ...policy.qualityCheck,
+                                    neverSendFramesToRemoteModel: e.target.checked,
+                                  },
+                                })
+                              }
+                            />
+                            <span>{SETTINGS_QUALITY_CHECK.neverRemoteLabel}</span>
+                          </label>
+                          <span className="joy-settings-hint-muted">
+                            {SETTINGS_QUALITY_CHECK.neverRemoteHint}
+                          </span>
+                        </div>
+                      </div>
+                      <QualityCheckConsentCard
+                        {...qualityCheckConsentInput(policy, {
+                          provider: connectionStatus?.provider,
+                          modelId: connectionStatus?.modelId,
+                        })}
+                      />
                     </div>
                   )}
                 </div>

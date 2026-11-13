@@ -1,0 +1,38 @@
+/* The card in Joy Code settings that says where a quality check's pictures go (T-B05).
+   Colours come from the app's tokens only, so the card follows light and dark themes. */
+
+.quality-check-consent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+}
+
+.quality-check-consent__title {
+  margin: 0;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
+  font-weight: 600;
+}
+
+.quality-check-consent__line {
+  margin: 0;
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+  line-height: 1.45;
+}
+
+.quality-check-consent__ask {
+  margin: 0;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  line-height: 1.45;
+}
+
+.quality-check-consent[data-frame-destination='kept-on-pc'] .quality-check-consent__line,
+.quality-check-consent[data-frame-destination='no-model'] .quality-check-consent__line {
+  color: var(--joy-text-secondary);
+}

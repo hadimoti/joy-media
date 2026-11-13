@@ -15,6 +15,7 @@ import {
   SETTINGS_BUDGET,
   SETTINGS_DIAGNOSTICS,
   SETTINGS_DIALOG,
+  SETTINGS_FRAME_CONSENT,
   SETTINGS_LIVE_PREVIEW,
   SETTINGS_MEDIA_CHECK,
   SETTINGS_MESSAGES,
@@ -23,6 +24,7 @@ import {
   SETTINGS_PAGES,
   SETTINGS_PAGE_IDS,
   SETTINGS_PROVIDER_SIGN_IN,
+  SETTINGS_QUALITY_CHECK,
   SETTINGS_STORAGE,
   SETTINGS_TOOLS,
 } from './settings-wording.js';
@@ -57,6 +59,10 @@ const wordingComponentSources = [
   ['JoyAgentSettingsDialog.tsx', dialogSource],
   ['AgentSlotsSection.tsx', readFileSync(resolve(here, 'AgentSlotsSection.tsx'), 'utf8')],
   ['ProviderSignInPanel.tsx', readFileSync(resolve(here, 'ProviderSignInPanel.tsx'), 'utf8')],
+  [
+    'QualityCheckConsentCard.tsx',
+    readFileSync(resolve(here, 'QualityCheckConsentCard.tsx'), 'utf8'),
+  ],
 ] as const;
 const table = readFileSync(resolve(here, '../../../docs/qa/v1.1.1/SETTINGS-WORDING.md'), 'utf8');
 
@@ -246,6 +252,8 @@ function wordingStrings(): readonly string[] {
     pages: SETTINGS_PAGES,
     modes: SETTINGS_MODES,
     budget: SETTINGS_BUDGET,
+    qualityCheck: SETTINGS_QUALITY_CHECK,
+    frameConsent: SETTINGS_FRAME_CONSENT,
     storage: SETTINGS_STORAGE,
     media: SETTINGS_MEDIA_CHECK,
     tools: SETTINGS_TOOLS,
@@ -338,6 +346,8 @@ describe('the Joy Code Settings wording (T-P07)', () => {
       pages: SETTINGS_PAGES,
       modes: SETTINGS_MODES,
       budget: SETTINGS_BUDGET,
+      qualityCheck: SETTINGS_QUALITY_CHECK,
+      frameConsent: SETTINGS_FRAME_CONSENT,
       storage: SETTINGS_STORAGE,
       tools: SETTINGS_TOOLS,
       models: SETTINGS_MODELS,
