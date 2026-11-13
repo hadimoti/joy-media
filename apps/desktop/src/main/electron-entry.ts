@@ -357,6 +357,9 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     if (shuttingDown) return;
+    void assetLibrary.removeInternalEntries().catch((error) => {
+      console.error('Internal asset startup cleanup failed', error);
+    });
     // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
     // Keys are read only after ready: safeStorage is not guaranteed to work before it.
     void checkProfileCredentials(localDatabase, secretStore).catch(() => undefined);
