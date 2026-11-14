@@ -29,6 +29,10 @@ describe('library card layout', () => {
     expect(css).toMatch(/\.library-card-add \{[^}]*color: var\(--joy-accent\);/);
     expect(css).toMatch(/\.library-card-add:disabled \{[^}]*color: var\(--joy-accent\);/);
     expect(css).toMatch(/\.library-card-favorite \{[^}]*color: var\(--joy-accent\);/);
+    // The shared .icon-button rule greyed the star, so a more specific rule sets it too.
+    expect(css).toMatch(
+      /\.joy-panel-root \.library-card-actions \.library-card-favorite,[^{]*\{\s*color: var\(--joy-accent\);/,
+    );
   });
 
   it('shows no clip name inside timeline clips', () => {

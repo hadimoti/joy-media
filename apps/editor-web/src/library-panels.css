@@ -387,6 +387,13 @@
   height: 0.9rem;
 }
 
+/* A shared .icon-button rule greyed the star (measured rgb(169, 171, 180)); this one is more
+   specific, so the star is the theme yellow, outline or filled. */
+.joy-panel-root .library-card-actions .library-card-favorite,
+.joy-panel-root .library-card-actions .library-card-favorite svg {
+  color: var(--joy-accent);
+}
+
 .library-card-favorite[aria-pressed='true'],
 .library-card-favorite:hover,
 .library-card-favorite:focus-visible {
