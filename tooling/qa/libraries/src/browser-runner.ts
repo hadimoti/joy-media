@@ -46,6 +46,7 @@ interface ParamPlan {
   readonly type: string;
   readonly defaultValue: EffectParamValue;
   readonly resetSeed: EffectParamValue;
+  readonly contextParams?: Readonly<Record<string, EffectParamValue>>;
   readonly cases: readonly ParamCase[];
 }
 
@@ -58,6 +59,7 @@ interface KeyframePlan {
   readonly startValue?: number;
   readonly endValue?: number;
   readonly expectedMidValue?: number;
+  readonly contextParams?: Readonly<Record<string, EffectParamValue>>;
 }
 
 interface TestItemInput {
@@ -478,6 +480,15 @@ async function testItem(input: TestItemInput) {
       history.apply({
         label: `Set ${paramPlan.key}=${JSON.stringify(c.value)}`,
         commands: [
+          ...Object.entries(paramPlan.contextParams ?? {}).map(([contextKey, contextValue]) => ({
+            type: 'effect.setParam' as const,
+            payload: {
+              objectId: OBJECT_ID,
+              effectInstanceId: instanceId,
+              paramKey: contextKey,
+              value: contextValue,
+            },
+          })),
           {
             type: 'effect.setParam',
             payload: {
@@ -512,6 +523,15 @@ async function testItem(input: TestItemInput) {
             value: paramPlan.defaultValue,
           },
         },
+        ...Object.keys(paramPlan.contextParams ?? {}).map((contextKey) => ({
+          type: 'effect.setParam' as const,
+          payload: {
+            objectId: OBJECT_ID,
+            effectInstanceId: instanceId,
+            paramKey: contextKey,
+            value: defaultParams[contextKey]!,
+          },
+        })),
       ],
     });
 
@@ -705,7 +725,7 @@ async function testItem(input: TestItemInput) {
             objectId: OBJECT_ID,
             effectId: input.id,
             effectInstanceId: instanceId,
-            params: defaultParamsFor(descriptor),
+            params: { ...defaultParamsFor(descriptor), ...input.keyframePlan.contextParams },
           },
         },
         {

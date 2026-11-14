@@ -101,6 +101,48 @@ describe('library test harness metadata and reporting', () => {
     }
   });
 
+  it('chooses visible parameter contexts and asymmetric angle samples for effect probes', () => {
+    registerBuiltins();
+    const planFor = (id: string, key: string) =>
+      planParameterVariations(effectRegistry.getEffect(id)!).find((plan) => plan.key === key)!;
+
+    expect(planFor('bulge', 'radius').contextParams).toEqual({ amount: 0.65 });
+    expect(planFor('twist', 'radius').contextParams).toEqual({ angle: 1.25 });
+
+    const toneAngle = planFor('tone-geometry', 'angle');
+    expect(toneAngle.contextParams).toEqual({ shape: 3 });
+    expect(toneAngle.cases.map((testCase) => testCase.value)).toEqual([-47, 0, 47]);
+
+    const halftoneAngle = planFor('halftone', 'angle');
+    expect(halftoneAngle.cases.map((testCase) => testCase.value)).toEqual([-24.5, 22.5, 69.5]);
+
+    const twistKeyframes = selectKeyframePlan(effectRegistry.getEffect('twist')!, {
+      keyframesPolicy: 'partly',
+    });
+    expect(twistKeyframes).toMatchObject({ paramKey: 'radius', contextParams: { angle: 1.25 } });
+
+    const toneKeyframes = selectKeyframePlan(effectRegistry.getEffect('tone-geometry')!, {
+      keyframesPolicy: 'partly',
+    });
+    expect(toneKeyframes).toMatchObject({
+      paramKey: 'angle',
+      contextParams: { shape: 3 },
+      startValue: -68,
+      endValue: 50,
+      expectedMidValue: -9,
+    });
+
+    const halftoneKeyframes = selectKeyframePlan(effectRegistry.getEffect('halftone')!, {
+      keyframesPolicy: 'partly',
+    });
+    expect(halftoneKeyframes).toMatchObject({
+      paramKey: 'angle',
+      startValue: -68.5,
+      endValue: 50.5,
+      expectedMidValue: -9,
+    });
+  });
+
   it('computes RGBA diffs, spread, and formats clean Markdown reports', () => {
     const black = new Uint8ClampedArray([0, 0, 0, 255, 0, 0, 0, 255]);
     const gray = new Uint8ClampedArray([30, 60, 90, 255, 0, 0, 0, 255]);
