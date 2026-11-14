@@ -160,6 +160,8 @@ import {
 } from './editor-pointer-dnd.js';
 import { TimelinePropertyLanes } from './TimelinePropertyLanes.js';
 import { TimelineElementGlyph, TimelineElementMedia } from './TimelineElementVisual.js';
+import { TimelineLinkedAudioStrips } from './TimelineLinkedAudio.js';
+import { collectLinkedAudioInputs } from './timeline-linked-audio-source.js';
 import { EditorPanelContext } from './editor-panel-context.js';
 import type { TimelineElementMediaSource } from './timeline-media.js';
 import {
@@ -1281,6 +1283,10 @@ export function TimelinePanel({
     markers.map((marker) => marker.timeUs),
   );
 
+  const linkedAudioInputs = useMemo(
+    () => collectLinkedAudioInputs(composition.tracks, elementKinds),
+    [composition.tracks, elementKinds],
+  );
   const familyIndexes: Record<'visual' | 'audio', number> = { visual: 0, audio: 0 };
   const tracks = sortTracksForTimelineDisplay(composition.tracks, elementKinds).map(
     (track, index) => {
@@ -4157,6 +4163,13 @@ export function TimelinePanel({
                           }}
                         />
                       ))}
+                    {track.id === linkedAudioInputs.a1TrackId && (
+                      <TimelineLinkedAudioStrips
+                        inputs={linkedAudioInputs}
+                        viewport={viewport}
+                        loadAssetBlob={panelContext?.loadProjectAssetBlob}
+                      />
+                    )}
                     {source.clips.map((clip) => (
                       <TimelineClip
                         key={clip.id}
