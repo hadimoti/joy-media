@@ -53,7 +53,7 @@
 
 .joy-panel-root .library-browser {
   display: grid;
-  grid-template-columns: minmax(7.25rem, 8.5rem) minmax(0, 1fr);
+  grid-template-columns: minmax(8.75rem, 10rem) minmax(0, 1fr);
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -82,13 +82,14 @@
 
 .library-rail-item {
   display: grid;
-  grid-template-columns: 1.1rem minmax(0, 1fr) auto;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.38rem;
+  gap: 0.3rem;
   width: 100%;
   min-width: 0;
-  min-height: 2rem;
-  padding: 0.32rem 0.4rem;
+  min-height: 1.9rem;
+  padding: 0.25rem 0.35rem;
+  box-sizing: border-box;
   border: 1px solid transparent;
   border-radius: 0.42rem;
   background: transparent;
@@ -133,9 +134,12 @@
   -webkit-mask-size: contain;
 }
 
+/* One line, always inside its box: a long name is cut with an ellipsis (the full name is in the title). */
 .library-rail-label {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .library-rail-count {
@@ -273,17 +277,9 @@
   line-clamp: 2;
 }
 
+/* Cards show the name only; the description stays in the hover title. */
 .library-card-description {
-  display: -webkit-box;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--joy-text-secondary);
-  font-size: var(--joy-type-xs);
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-  line-clamp: 1;
+  display: none;
 }
 
 .library-card-badges {
@@ -396,7 +392,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.24rem;
-  min-width: 3.5rem;
+  min-width: 1.9rem;
   min-height: 1.7rem;
   padding: 0.22rem 0.45rem;
   border: 1px solid color-mix(in srgb, var(--joy-accent) 56%, var(--joy-border));
@@ -411,8 +407,8 @@
 
 .library-card-add svg {
   flex: none;
-  width: 0.8rem;
-  height: 0.8rem;
+  width: 0.95rem;
+  height: 0.95rem;
 }
 
 .library-card-add:hover,

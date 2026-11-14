@@ -94,12 +94,6 @@ export const EFFECT_LIBRARY: Readonly<Record<string, readonly string[]>> = Objec
   EFFECT_CATEGORIES.map((category) => [category.id, category.effectIds]),
 );
 
-/** The one line each panel shows under its title. */
-export const FILTER_PANEL_RULE =
-  'A Filter changes the look of the picture — colour, softness, grain, glow. The pixels stay where they are.';
-export const EFFECT_PANEL_RULE =
-  'An Effect changes the shape, motion or marks of the picture, adds a glitch, or applies a basic tone tool (Brightness / Contrast, Curves) that needs its own parameters.';
-
 /**
  * The five doubles that move to Effects. Their registry ids do not change, so
  * a project that uses one of them keeps rendering exactly as before.

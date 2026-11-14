@@ -49,7 +49,7 @@ describe('FiltersPanel', () => {
       'Tone &amp; Colour',
     ])
       expect(markup, group).toContain(group);
-    expect(markup).toContain('A Filter changes the look of the picture');
+    expect(markup).not.toContain('A Filter changes the look of the picture');
   });
 
   it('does not offer the five items that moved to Effects', () => {

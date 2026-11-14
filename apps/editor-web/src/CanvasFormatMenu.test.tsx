@@ -130,6 +130,8 @@ describe('the Format control replaces the old export preset menu', () => {
     // The monitor footer is one centred line: no stretch, and no scrollbar that lifts the time controls.
     expect(css).toMatch(/\.monitor-transport \{[^}]*align-items: center;/);
     expect(css).toMatch(/\.monitor-time-controls \{[^}]*scrollbar-width: none;/);
+    // One fixed grid row, so a tall group cannot push the controls below the panel edge.
+    expect(css).toMatch(/\.monitor-transport \{[^}]*grid-template-rows: minmax\(0, 1fr\);/);
   });
 
   it('the header Format button keeps its full read-out as an accessible name at every width', () => {

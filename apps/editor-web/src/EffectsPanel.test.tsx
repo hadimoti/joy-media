@@ -95,11 +95,10 @@ describe('EffectsPanel', () => {
     expect(container!.textContent).not.toContain('No effects match your search.');
   });
 
-  it('states the Filter or Effect rule under the title', async () => {
+  it('shows no explanation text under the title', async () => {
     await mountPanel();
-    expect(container!.querySelector('.library-rule')?.textContent).toMatch(
-      /^An Effect changes the shape, motion or marks of the picture/,
-    );
+    expect(container!.querySelector('.library-rule')).toBeNull();
+    expect(container!.textContent).not.toContain('An Effect changes');
   });
 
   it('shows an item that lives in Filters nowhere in the panel', async () => {

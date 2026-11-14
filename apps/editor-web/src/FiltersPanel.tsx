@@ -17,7 +17,6 @@ import {
   effectEffectIds,
   FILTER_CATEGORIES,
   FILTER_LIBRARY,
-  FILTER_PANEL_RULE,
   filterEffectIds,
   matchesLibraryQuery,
   type FilterCategoryId,
@@ -145,7 +144,6 @@ export function FiltersPanel({
         placeholder: 'Search filters…',
       }}
     >
-      <p className="library-rule">{FILTER_PANEL_RULE}</p>
       {query.trim().length > 0 && (
         <p className="library-search-note">Searching for “{query.trim()}”</p>
       )}

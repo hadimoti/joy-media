@@ -141,7 +141,6 @@ export function LibraryCard({
             }}
           >
             <PlusIcon />
-            <span>Add</span>
           </button>
           {extraActions}
         </div>

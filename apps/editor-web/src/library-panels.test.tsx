@@ -236,13 +236,11 @@ describe('the two library panels (T-V06)', () => {
     expect(panel.querySelector('.filters-grid')?.textContent).toContain('Sepia');
   });
 
-  it('states the rule in one line under each panel’s title', async () => {
+  it('shows no explanation line under either panel’s title', async () => {
     const filters = await render(
       <FiltersPanel canCreate={true} targetLabel="Product" onAddFilter={() => undefined} />,
     );
-    expect(filters.querySelector('.library-rule')?.textContent).toMatch(
-      /^A Filter changes the look of the picture/u,
-    );
+    expect(filters.querySelector('.library-rule')).toBeNull();
 
     const effects = await render(
       <EffectsPanel
@@ -253,8 +251,6 @@ describe('the two library panels (T-V06)', () => {
         showToast={vi.fn()}
       />,
     );
-    expect(effects.querySelector('.library-rule')?.textContent).toMatch(
-      /^An Effect changes the shape, motion or marks of the picture/u,
-    );
+    expect(effects.querySelector('.library-rule')).toBeNull();
   });
 });

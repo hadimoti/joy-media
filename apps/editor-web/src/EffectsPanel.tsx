@@ -30,7 +30,6 @@ import {
   allLibraryEffectIds,
   EFFECT_CATEGORIES,
   EFFECT_LIBRARY,
-  EFFECT_PANEL_RULE,
   effectEffectIds,
   filterEffectIds,
   matchesLibraryQuery,
@@ -264,7 +263,6 @@ export function EffectsPanel({
         placeholder: 'Search effects…',
       }}
     >
-      <p className="library-rule">{EFFECT_PANEL_RULE}</p>
       {query.trim().length > 0 && (
         <p className="library-search-note">Searching for “{query.trim()}”</p>
       )}
@@ -444,7 +442,6 @@ function EffectCard({
             <span id={unavailableReasonId} className="sr-only">
               {unavailableReason}
             </span>
-            <span className="effect-card-preview-state">Preview only — select a clip to add</span>
           </>
         )
       }

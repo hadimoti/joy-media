@@ -2136,6 +2136,9 @@ h2 {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
+  /* One fixed row: without it the row grew to the tallest group (41px in a 29px bar) and the
+     lower half of every control was clipped by the panel edge. */
+  grid-template-rows: minmax(0, 1fr);
   flex: none;
   align-items: center;
   gap: 0.25rem;
@@ -2149,6 +2152,7 @@ h2 {
 .monitor-transport-end,
 .monitor-transport-start {
   height: 100%;
+  min-height: 0;
   align-items: center;
 }
 .monitor-transport-start {
