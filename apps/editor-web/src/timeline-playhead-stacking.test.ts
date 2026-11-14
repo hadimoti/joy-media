@@ -5,8 +5,11 @@ import { describe, expect, it } from 'vitest';
 const css = readFileSync(join(import.meta.dirname, 'app.css'), 'utf8');
 
 function zIndexOf(selector: string): number {
-  const block = new RegExp(`(?:^|\n)${selector.replace(/[.]/g, '\.')} \{([^}]*)\}`).exec(css);
-  const value = block === null ? null : /z-index:\s*(\d+)/.exec(block[1] ?? '');
+  const start = css.indexOf(`
+${selector} {`);
+  if (start < 0) throw new Error(`no rule for ${selector}`);
+  const body = css.slice(start, css.indexOf('}', start));
+  const value = /z-index:s*(d+)/.exec(body);
   if (value === null) throw new Error(`no z-index for ${selector}`);
   return Number(value[1]);
 }
