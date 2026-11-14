@@ -6,6 +6,7 @@ import { handleDoctorCommand } from './commands/doctor-cmd.js';
 import { handleDoctorLocalCommand } from './commands/doctor-local-cmd.js';
 import { ConfigFileError, migrateLegacyProviders } from './utils/config.js';
 import { handleProjectCommand } from './commands/project-cmd.js';
+import { handleQcCommand } from './commands/qc-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
 import { handleTimelineCommand } from './commands/timeline-cmd.js';
 import { handleWorkerCommand } from './commands/worker-cmd.js';
@@ -212,6 +213,16 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--json', 'Newline-delimited JSON progress events'],
     ],
   },
+  qc: {
+    summary: 'Technical quality check of one media file (black, frozen, audio and picture checks)',
+    usage: 'joy-media qc <file> [--json]',
+    options: [['--json', 'One QC report document on stdout (the Worker report shape)']],
+    notes: [
+      'Runs locally with FFmpeg and FFprobe only: no model, no network.',
+      'Exit codes: 0 no faults, 1 findings or a failure, 2 usage error.',
+      'Hard cuts (scene-cut) are listed but do not fail the file.',
+    ],
+  },
   benchmark: {
     summary: 'Diagnostic & benchmark suite',
     usage: 'joy-media benchmark [options]',
@@ -279,6 +290,9 @@ export function printHelp(): void {
   );
   console.log(
     `    ${c('render', 'cyan')} [--project --preset --out --concurrency --json]  Headless batch render`,
+  );
+  console.log(
+    `    ${c('qc', 'cyan')} <file> [--json]                          Technical quality check of one media file`,
   );
   console.log(
     `    ${c('benchmark', 'cyan')} [--system --media-engine --json]                 Diagnostic & benchmark suite`,
@@ -538,6 +552,8 @@ async function dispatch(argv: string[]): Promise<number> {
         return await handleWorkerCommand(subArgs, flags);
       case 'render':
         return await handleRenderCommand(subArgs, flags);
+      case 'qc':
+        return await handleQcCommand(subArgs, flags);
       case 'benchmark':
         return await handleBenchmarkCommand(subArgs, flags);
       case 'doctor':
