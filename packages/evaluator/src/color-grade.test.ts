@@ -134,4 +134,38 @@ describe('evaluateColorGradeAtTime', () => {
       intensity: 1,
     });
   });
+
+  it('holds a look key until the next key, then holds that look too', () => {
+    const grade = createIdentityColorGrade();
+    const binding = colorPropertyBinding('output', 'lut.reference');
+    const animations: NormalizedPropertyAnimationsV2 = {
+      [canonicalBindingKey(binding)]: {
+        binding,
+        value: {
+          kind: 'string',
+          keys: [
+            { timeUs: 0, value: encodeColorLutReference({ builtIn: 'soft-film', intensity: 1 }) },
+            {
+              timeUs: 1_000_000,
+              value: encodeColorLutReference({ builtIn: 'warm-cinema', intensity: 1 }),
+            },
+          ],
+        },
+      },
+    };
+    const lookAt = (compositionTimeUs: number) =>
+      evaluateColorGradeAtTime(
+        grade,
+        animations,
+        { scope: 'output' },
+        { compositionTimeUs },
+        { isLutReferenceAvailable: () => true },
+      ).lut;
+    expect(lookAt(0)).toMatchObject({ builtIn: 'soft-film' });
+    // Between the keys the first look holds; no blend between two looks.
+    expect(lookAt(999_999)).toMatchObject({ builtIn: 'soft-film' });
+    expect(lookAt(1_000_000)).toMatchObject({ builtIn: 'warm-cinema' });
+    // After the last key the second look keeps holding.
+    expect(lookAt(5_000_000)).toMatchObject({ builtIn: 'warm-cinema' });
+  });
 });
