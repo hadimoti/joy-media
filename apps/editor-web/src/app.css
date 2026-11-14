@@ -19753,6 +19753,14 @@ label {
   outline: 1px dashed var(--joy-warning);
   outline-offset: -1px;
 }
+/* T-R03: the filmstrip and waveform cover the whole clip with the type tint, which would hide the grey
+   hatch. A missing file has no picture or peaks to show, so both layers are removed for missing clips only. */
+.timeline-clip.is-missing .timeline-clip-filmstrip {
+  display: none;
+}
+.timeline-clip.is-missing .timeline-clip-waveform {
+  display: none;
+}
 .timeline-clip.is-missing[aria-pressed='true'] {
   outline: 2px solid var(--joy-accent);
   outline-offset: 1px;

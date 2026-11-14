@@ -17,6 +17,17 @@ describe('Missing clip on the timeline (T-R03)', () => {
     expect(rule).not.toMatch(/filter/);
   });
 
+  // This is a CSS-text check only: it proves the rule exists, not how it looks. The live look
+  // (grey and hatched on video, picture and audio clips) needs the desktop driver to confirm.
+  it('hides the filmstrip and waveform of a missing clip so the grey hatch shows', () => {
+    expect(declarationsOf('.timeline-clip.is-missing .timeline-clip-filmstrip')).toContain(
+      'display: none;',
+    );
+    expect(declarationsOf('.timeline-clip.is-missing .timeline-clip-waveform')).toContain(
+      'display: none;',
+    );
+  });
+
   it('keeps the accent outline when the missing clip is selected', () => {
     expect(declarationsOf(".timeline-clip.is-missing[aria-pressed='true']")).toContain(
       'outline: 2px solid var(--joy-accent);',
