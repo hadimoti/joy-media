@@ -4,8 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { applyTransaction } from '@joy-media/commands';
 import type { CommandTransaction } from '@joy-media/commands';
-import { validateSpikeProject } from '@joy-media/project-schema';
-import type { SpikeProject } from '@joy-media/project-schema';
+import {
+  canonicalBindingKey,
+  colorPropertyBinding,
+  createIdentityColorGrade,
+  migrateV0ToV1,
+  validateJoyProjectV1,
+  validateSpikeProject,
+} from '@joy-media/project-schema';
+import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { emptySpikeProject, makeVideoClip } from '@joy-media/test-fixtures';
 import {
   InMemoryProjectStore,
@@ -22,6 +29,13 @@ const adapter: PersistenceAdapter<SpikeProject, CommandTransaction> = {
   schemaVersion: (project) => project.schemaVersion,
   validate: validateSpikeProject,
   apply: (project, transaction) => applyTransaction(project, transaction).project,
+};
+
+const joyProjectAdapter: PersistenceAdapter<JoyProjectV1, CommandTransaction> = {
+  projectId: (project) => project.id,
+  schemaVersion: (project) => project.schemaVersion,
+  validate: validateJoyProjectV1,
+  apply: (project) => project,
 };
 
 function insert(id: string): CommandTransaction {
@@ -102,6 +116,159 @@ describe('local project persistence', () => {
       adapter,
     );
     expect(reopened.recover(initial.id)).toMatchObject({ project: expected, revision: 1 });
+  });
+
+  it('reopens the saved output color grade from a desktop project snapshot', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-color-persistence-'));
+    const filePath = join(directory, 'project-store.json');
+    const identity = createIdentityColorGrade();
+    const grade = {
+      ...identity,
+      adjust: {
+        ...identity.adjust!,
+        temperature: 0.4,
+        tint: -0.2,
+        exposure: 1,
+        contrast: 0.3,
+        pivot: 0.65,
+        highlights: 0.35,
+        shadows: -0.25,
+        whites: 0.45,
+        blacks: -0.4,
+        saturation: 1.4,
+        vibrance: 0.5,
+        hue: 45,
+      },
+      lut: { builtIn: 'warm-cinema' as const, intensity: 0.6 },
+    };
+    const project: JoyProjectV1 = {
+      ...migrateV0ToV1(emptySpikeProject()).project,
+      colorGrade: grade,
+    };
+
+    new LocalProjectPersistence(
+      new JsonFileProjectStore<JoyProjectV1, CommandTransaction>(filePath),
+      joyProjectAdapter,
+    ).initialize(project);
+
+    const reopened = new LocalProjectPersistence(
+      new JsonFileProjectStore<JoyProjectV1, CommandTransaction>(filePath),
+      joyProjectAdapter,
+    ).recover(project.id);
+    expect(reopened.project.colorGrade).toEqual(grade);
+  });
+
+  /** Saves a project to a desktop snapshot file and reads it back through a fresh store. */
+  function reopenDesktopProject(project: JoyProjectV1): JoyProjectV1 {
+    const filePath = join(
+      mkdtempSync(join(tmpdir(), 'joy-media-color-reopen-')),
+      'project-store.json',
+    );
+    new LocalProjectPersistence(
+      new JsonFileProjectStore<JoyProjectV1, CommandTransaction>(filePath),
+      joyProjectAdapter,
+    ).initialize(project);
+    return new LocalProjectPersistence(
+      new JsonFileProjectStore<JoyProjectV1, CommandTransaction>(filePath),
+      joyProjectAdapter,
+    ).recover(project.id).project;
+  }
+
+  it.each(['none', 'clean-contrast', 'soft-film', 'cool-fade', 'monochrome'] as const)(
+    'reopens the %s look of the output grade with the same LUT intensity',
+    (look) => {
+      const grade = {
+        ...createIdentityColorGrade(),
+        lut: { builtIn: look, intensity: 0.7 },
+      };
+      const project: JoyProjectV1 = {
+        ...migrateV0ToV1(emptySpikeProject()).project,
+        colorGrade: grade,
+      };
+      expect(reopenDesktopProject(project).colorGrade).toEqual(grade);
+    },
+  );
+
+  it('reopens clip grades, the saved keyframes and the output grade together', () => {
+    const identity = createIdentityColorGrade();
+    const outputGrade = {
+      ...identity,
+      adjust: { ...identity.adjust!, temperature: 0.4, exposure: -0.5, hue: 30 },
+      lut: { builtIn: 'soft-film' as const, intensity: 0.8 },
+    };
+    const clipGrade = {
+      ...identity,
+      adjust: { ...identity.adjust!, tint: -0.2, saturation: 0.6 },
+      lut: { builtIn: 'monochrome' as const, intensity: 0.4 },
+    };
+    const spike = emptySpikeProject();
+    const root = spike.compositions[spike.rootCompositionId]!;
+    const [firstTrack, ...otherTracks] = root.tracks;
+    const withClip = {
+      ...spike,
+      compositions: {
+        [root.id]: {
+          ...root,
+          tracks: [
+            {
+              ...firstTrack!,
+              clips: [...firstTrack!.clips, makeVideoClip('clip-1', 0, 2_000_000)],
+            },
+            ...otherTracks,
+          ],
+        },
+      },
+    };
+
+    // Keyframes are stored under their canonical binding keys, one per kind the panel writes.
+    const outputTemperature = colorPropertyBinding('output', 'adjust.temperature');
+    const outputHue = colorPropertyBinding('output', 'adjust.hue');
+    const outputLook = colorPropertyBinding('output', 'lut.reference');
+    const clipTint = colorPropertyBinding('clip', 'adjust.tint', 'clip-1');
+    const propertyAnimations: NonNullable<JoyProjectV1['propertyAnimations']> = {
+      [canonicalBindingKey(outputTemperature)]: {
+        binding: outputTemperature,
+        value: {
+          kind: 'scalar',
+          curve: { keyframes: [{ timeUs: 500_000, value: 0.4, interpolation: 'linear' }] },
+        },
+      },
+      [canonicalBindingKey(outputHue)]: {
+        binding: outputHue,
+        value: {
+          kind: 'hue',
+          curve: { keyframes: [{ timeUs: 500_000, value: 30, interpolation: 'linear' }] },
+        },
+      },
+      [canonicalBindingKey(outputLook)]: {
+        binding: outputLook,
+        value: {
+          kind: 'string',
+          keys: [
+            { timeUs: 0, value: 'builtin:none' },
+            { timeUs: 1_000_000, value: 'builtin:soft-film' },
+          ],
+        },
+      },
+      [canonicalBindingKey(clipTint)]: {
+        binding: clipTint,
+        value: {
+          kind: 'scalar',
+          curve: { keyframes: [{ timeUs: 250_000, value: -0.2, interpolation: 'linear' }] },
+        },
+      },
+    };
+    const project: JoyProjectV1 = {
+      ...migrateV0ToV1(withClip).project,
+      colorGrade: outputGrade,
+      clipColorGrades: { 'clip-1': clipGrade },
+      propertyAnimations,
+    };
+
+    const reopened = reopenDesktopProject(project);
+    expect(reopened.colorGrade).toEqual(outputGrade);
+    expect(reopened.clipColorGrades).toEqual({ 'clip-1': clipGrade });
+    expect(reopened.propertyAnimations).toEqual(propertyAnimations);
   });
 
   it('persists a browser-local snapshot plus log across a fresh store instance', () => {

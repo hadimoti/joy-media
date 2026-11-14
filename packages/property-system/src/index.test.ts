@@ -10,7 +10,7 @@ import {
   sharedValue,
 } from './index.js';
 import { createIdentityColorGrade, migrateV0ToV1 } from '@joy-media/project-schema';
-import { emptySpikeProject } from '@joy-media/test-fixtures';
+import { emptySpikeProject, makeVideoClip } from '@joy-media/test-fixtures';
 describe('visual property schemas', () => {
   it('covers transform, opacity, and crop without per-object forms', () => {
     expect(VISUAL_INSPECTOR.map((field) => field.key)).toEqual([
@@ -128,12 +128,28 @@ describe('visual property schemas', () => {
     expect(updated.visualObjects.title!.transform.x).toBe(12);
     expect(project.visualObjects.title!.transform.x).toBe(0);
   });
-  it('applies a reversible output color grade command', () => {
+  it('applies and reverses a full output color grade command', () => {
     const migrated = migrateV0ToV1(emptySpikeProject());
     const project = migrated.project;
+    const identity = createIdentityColorGrade();
     const grade = {
-      ...createIdentityColorGrade(),
-      adjust: { ...createIdentityColorGrade().adjust!, exposure: 1 },
+      ...identity,
+      adjust: {
+        ...identity.adjust!,
+        temperature: 0.4,
+        tint: -0.2,
+        exposure: 1,
+        contrast: 0.3,
+        pivot: 0.65,
+        highlights: 0.35,
+        shadows: -0.25,
+        whites: 0.45,
+        blacks: -0.4,
+        saturation: 1.4,
+        vibrance: 0.5,
+        hue: 45,
+      },
+      lut: { builtIn: 'warm-cinema' as const, intensity: 0.6 },
     };
     const applied = applyVisualObjectProjectCommand(project, {
       type: 'color.setGrade',
@@ -143,5 +159,74 @@ describe('visual property schemas', () => {
     expect(
       applyVisualObjectProjectCommand(applied.project, applied.inverse).project.colorGrade,
     ).toBeUndefined();
+  });
+
+  /** Two grades that both carry values, so the undo has something real to restore. */
+  function gradesWithValues() {
+    const identity = createIdentityColorGrade();
+    const before = {
+      ...identity,
+      adjust: { ...identity.adjust!, temperature: 0.2, saturation: 1.2 },
+      lut: { builtIn: 'cool-fade' as const, intensity: 0.5 },
+    };
+    const after = {
+      ...identity,
+      adjust: { ...identity.adjust!, temperature: -0.3, exposure: 0.8, hue: 30 },
+      lut: { builtIn: 'monochrome' as const, intensity: 0.9 },
+    };
+    return { before, after };
+  }
+
+  it('undoes and redoes an output grade change over a grade that already had values', () => {
+    const { before, after } = gradesWithValues();
+    const start = { ...migrateV0ToV1(emptySpikeProject()).project, colorGrade: before };
+    const changed = applyVisualObjectProjectCommand(start, {
+      type: 'color.setGrade',
+      payload: { target: { scope: 'output' }, grade: after },
+    });
+    expect(changed.project.colorGrade).toEqual(after);
+
+    // Undo restores the grade the colourist had, not the identity grade.
+    const undone = applyVisualObjectProjectCommand(changed.project, changed.inverse);
+    expect(undone.project.colorGrade).toEqual(before);
+
+    // Redo is the inverse of that undo: it puts the changed grade back.
+    const redone = applyVisualObjectProjectCommand(undone.project, undone.inverse);
+    expect(redone.project.colorGrade).toEqual(after);
+  });
+
+  it('undoes and redoes a clip grade change over a clip grade that already had values', () => {
+    const { before, after } = gradesWithValues();
+    const spike = emptySpikeProject();
+    const root = spike.compositions[spike.rootCompositionId]!;
+    const [firstTrack, ...otherTracks] = root.tracks;
+    const withClip = {
+      ...spike,
+      compositions: {
+        [root.id]: {
+          ...root,
+          tracks: [
+            {
+              ...firstTrack!,
+              clips: [...firstTrack!.clips, makeVideoClip('clip-1', 0, 1_000_000)],
+            },
+            ...otherTracks,
+          ],
+        },
+      },
+    };
+    const start = { ...migrateV0ToV1(withClip).project, clipColorGrades: { 'clip-1': before } };
+    const target = { scope: 'clip' as const, clipId: 'clip-1' };
+    const changed = applyVisualObjectProjectCommand(start, {
+      type: 'color.setGrade',
+      payload: { target, grade: after },
+    });
+    expect(changed.project.clipColorGrades?.['clip-1']).toEqual(after);
+
+    const undone = applyVisualObjectProjectCommand(changed.project, changed.inverse);
+    expect(undone.project.clipColorGrades?.['clip-1']).toEqual(before);
+
+    const redone = applyVisualObjectProjectCommand(undone.project, undone.inverse);
+    expect(redone.project.clipColorGrades?.['clip-1']).toEqual(after);
   });
 });

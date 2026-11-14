@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { COLOR_PROPERTY_DESCRIPTORS } from '@joy-media/project-schema';
 import {
   assertPropertyCoverageComplete,
   buildPropertyCoverageReport,
@@ -344,6 +345,68 @@ describe('property coverage manifest', () => {
       const entry = findPropertyCoverage(id) as AnyEntry | undefined;
       expect(entry?.binding).toEqual({ ownerKind, timeDomain });
     });
+  });
+});
+
+describe('keyable color control coverage', () => {
+  it('maps every color property descriptor to a creative output and clip family', () => {
+    for (const descriptor of COLOR_PROPERTY_DESCRIPTORS) {
+      const family =
+        descriptor.id === 'lut.reference'
+          ? 'lut-choice'
+          : descriptor.id === 'lut.intensity'
+            ? 'lut-intensity'
+            : descriptor.id.split('.')[0];
+
+      expect(descriptor.scopes, `${descriptor.id} should support both grade scopes`).toEqual([
+        'output',
+        'clip',
+      ]);
+      for (const target of ['color-output', 'color-clip']) {
+        expect(
+          findPropertyCoverage(`${target}.${family}`)?.classification,
+          `${descriptor.id} should be covered by ${target}.${family}`,
+        ).toBe('creative');
+      }
+    }
+  });
+
+  it('keeps Adjust and LUT animation value kinds explicit', () => {
+    const descriptorById = new Map(COLOR_PROPERTY_DESCRIPTORS.map((entry) => [entry.id, entry]));
+    const scalarAdjustments = [
+      'temperature',
+      'tint',
+      'exposure',
+      'contrast',
+      'pivot',
+      'highlights',
+      'shadows',
+      'whites',
+      'blacks',
+      'saturation',
+      'vibrance',
+    ];
+    for (const property of scalarAdjustments)
+      expect(descriptorById.get(`adjust.${property}`)?.valueKind).toBe('scalar');
+    expect(descriptorById.get('adjust.hue')?.valueKind).toBe('hue');
+    for (const wheel of ['lift', 'gamma', 'gain', 'offset']) {
+      expect(descriptorById.get(`wheels.${wheel}.color`)?.valueKind).toBe('color');
+      expect(descriptorById.get(`wheels.${wheel}.master`)?.valueKind).toBe('scalar');
+    }
+    for (const channel of ['rgb', 'red', 'green', 'blue'])
+      expect(descriptorById.get(`curves.${channel}`)?.valueKind).toBe('curve-snapshot');
+    const hslDescriptors = COLOR_PROPERTY_DESCRIPTORS.filter((entry) =>
+      entry.id.startsWith('hsl.'),
+    );
+    expect(hslDescriptors).toHaveLength(48);
+    for (const descriptor of hslDescriptors) {
+      const property = descriptor.id.split('.').at(-1);
+      expect(descriptor.valueKind).toBe(
+        property === 'hue' || property === 'hueShift' || property === 'hueWidth' ? 'hue' : 'scalar',
+      );
+    }
+    expect(descriptorById.get('lut.reference')?.valueKind).toBe('string');
+    expect(descriptorById.get('lut.intensity')?.valueKind).toBe('scalar');
   });
 });
 
