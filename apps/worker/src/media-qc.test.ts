@@ -173,7 +173,13 @@ describe('ffmpeg output parsers', () => {
 });
 
 describe('picture analysis', () => {
-  const frame = (seconds: number, yavg: number, ymax = 235, uavg = 128, vavg = 128): QcSignalFrame => ({
+  const frame = (
+    seconds: number,
+    yavg: number,
+    ymax = 235,
+    uavg = 128,
+    vavg = 128,
+  ): QcSignalFrame => ({
     timeUs: seconds * SECOND,
     yavg,
     ymax,
@@ -201,13 +207,7 @@ describe('picture analysis', () => {
   it('drops a run shorter than the minimum and finds a bright run', () => {
     // Frames half a second apart: the bright run lasts 2.5 s, the single dark frame only 0.5 s.
     const analysis = analysePicture(
-      [
-        frame(0, 250, 255),
-        frame(1, 252, 255),
-        frame(2, 254, 255),
-        frame(3, 120),
-        frame(4, 30, 90),
-      ],
+      [frame(0, 250, 255), frame(1, 252, 255), frame(2, 254, 255), frame(3, 120), frame(4, 30, 90)],
       500_000,
       DEFAULT_QC_THRESHOLDS,
     );
@@ -367,7 +367,9 @@ describe('QC report', () => {
     });
     expect(Buffer.byteLength(JSON.stringify(report))).toBeLessThanOrEqual(40_000);
     expect(report.findings.some((finding) => finding.type === 'black')).toBe(true);
-    expect(report.findings.filter((finding) => finding.type === 'scene-cut').length).toBeLessThan(800);
+    expect(report.findings.filter((finding) => finding.type === 'scene-cut').length).toBeLessThan(
+      800,
+    );
     expect(report.technical?.truncated.some((reason) => /not listed/.test(reason))).toBe(true);
   });
 
@@ -433,7 +435,9 @@ describe('job payload', () => {
     expect(() => parseMediaQcPayload({ checks: [] })).toThrow('non-empty');
     expect(() => parseMediaQcPayload({ thresholds: { nope: 1 } })).toThrow('unknown setting');
     expect(() => parseMediaQcPayload({ thresholds: { silenceDb: 5 } })).toThrow('silenceDb');
-    expect(() => parseMediaQcPayload({ thresholds: { silenceDb: Number.NaN } })).toThrow('silenceDb');
+    expect(() => parseMediaQcPayload({ thresholds: { silenceDb: Number.NaN } })).toThrow(
+      'silenceDb',
+    );
     expect(() => parseMediaQcPayload({ schemaVersion: 2 })).toThrow('schemaVersion');
     expect(() => parseMediaQcPayload([])).toThrow('JSON object');
     expect(() => parseMediaQcPayload({ maxRunMs: 5 })).toThrow('maxRunMs');
@@ -456,7 +460,12 @@ describe('bounded process runner', () => {
       ['-e', "process.stdout.write('out'); process.stderr.write('err')"],
       limits,
     );
-    expect(outcome).toMatchObject({ state: 'completed', exitCode: 0, stdout: 'out', stderr: 'err' });
+    expect(outcome).toMatchObject({
+      state: 'completed',
+      exitCode: 0,
+      stdout: 'out',
+      stderr: 'err',
+    });
     expect(outcome.truncated).toBe(false);
   });
 
@@ -560,8 +569,7 @@ describe.skipIf(!canRun('ffmpeg') || !canRun('ffprobe'))('media.qc on a generate
   function generateClip(directory: string): string {
     const output = join(directory, 'qc-fixture.mkv');
     const size = 'size=320x240:rate=25';
-    const segment = (index: number): string =>
-      `[${index}:v]format=yuv420p,setsar=1[v${index}]`;
+    const segment = (index: number): string => `[${index}:v]format=yuv420p,setsar=1[v${index}]`;
     const result = spawnSync(
       'ffmpeg',
       [

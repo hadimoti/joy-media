@@ -259,7 +259,8 @@ export function publicJobError(error: string | undefined): string | undefined {
  * so it is safe to hand to the editor. Any other job, or an unreadable result, adds nothing.
  */
 function qcReportOf(job: DispatchJob): { readonly report?: unknown } {
-  if (job.jobType !== 'media.qc' || job.status !== 'done' || job.resultJson === undefined) return {};
+  if (job.jobType !== 'media.qc' || job.status !== 'done' || job.resultJson === undefined)
+    return {};
   try {
     const parsed: unknown = JSON.parse(job.resultJson);
     if (typeof parsed !== 'object' || parsed === null) return {};
