@@ -21,6 +21,13 @@ describe('library card layout', () => {
     expect(css).toMatch(/\.library-card-actions \{[^}]*justify-content: space-between;/);
   });
 
+  it('stops the browser image drag so the editor pointer drag can take over', () => {
+    // A native image drag on the preview dropped the card as a skipped file (found live).
+    expect(card).toContain('onDragStart={(event) => event.preventDefault()}');
+    const preview = readFileSync(join(dir, 'EffectPreviewMedia.tsx'), 'utf8');
+    expect(preview).toContain('draggable={false}');
+  });
+
   it('keeps the description for screen readers only', () => {
     expect(card).toContain('library-card-description sr-only');
   });

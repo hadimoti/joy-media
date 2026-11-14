@@ -90,6 +90,9 @@ export function LibraryCard({
       tabIndex={onKeyDown === undefined ? undefined : 0}
       title={title}
       onPointerDown={onPointerDown}
+      // The card is dragged with the editor's own pointer drag. The browser's native image drag
+      // would start first on the preview picture and drop it as a "skipped file".
+      onDragStart={(event) => event.preventDefault()}
       onDoubleClick={onDoubleClick}
       onKeyDown={onKeyDown}
       onMouseEnter={() => setPreviewActive(true)}

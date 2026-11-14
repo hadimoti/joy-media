@@ -35,6 +35,7 @@ export function EffectPreviewMedia({ effectId, className }: EffectPreviewMediaPr
           className="effect-preview-media-fallback"
           src={effectPreviewUrl(effectId)}
           alt=""
+          draggable={false}
           width="320"
           height="240"
           loading="lazy"

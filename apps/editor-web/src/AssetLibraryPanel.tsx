@@ -1252,6 +1252,9 @@ export function AssetLibraryPanel({
                         );
                       }}
                       title={`${asset.displayName} — ${detailHint}. Drag onto the timeline or Monitor. Ctrl inserts; Alt replaces a clip.`}
+                      // The editor's pointer drag above moves the card; the browser's own image drag
+                      // would start first on the thumbnail and drop it as a skipped file.
+                      onDragStart={(event) => event.preventDefault()}
                       onClick={(event) => {
                         if ((event.target as HTMLElement).closest('button, input, label') !== null)
                           return;
