@@ -4,12 +4,12 @@ import { describe, expect, it } from 'vitest';
 
 const css = readFileSync(join(import.meta.dirname, 'app.css'), 'utf8');
 
+/** The z-index of the one rule that starts with exactly this selector at the beginning of a line. */
 function zIndexOf(selector: string): number {
-  const start = css.indexOf(`
-${selector} {`);
+  const start = css.indexOf(`\n${selector} {`);
   if (start < 0) throw new Error(`no rule for ${selector}`);
   const body = css.slice(start, css.indexOf('}', start));
-  const value = /z-index:s*(d+)/.exec(body);
+  const value = /z-index:\s*(\d+)/.exec(body);
   if (value === null) throw new Error(`no z-index for ${selector}`);
   return Number(value[1]);
 }
