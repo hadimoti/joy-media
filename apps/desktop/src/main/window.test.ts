@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEV_LOADING_BAR_MS,
   DEV_RENDERER_URL,
+  PACKAGED_LOADING_DELAY_MS,
   PACKAGED_RENDERER_ORIGIN,
   buildSecureWebPreferences,
   devLoadingPageHtml,
@@ -52,6 +53,19 @@ describe('devLoadingPageHtml', () => {
     expect(page).toContain('background:#000000');
     expect(page).not.toMatch(/#fff(fff)?\b/i);
     expect(page).not.toMatch(/dev server|not running|pnpm --filter/i);
+  });
+
+  it('makes no network request: a strict policy and no remote URL', () => {
+    const page = devLoadingPageHtml('data:image/png;base64,AAAA');
+    expect(page).toContain(`default-src 'none'`);
+    expect(page).not.toMatch(/https?:\/\//i);
+    expect(page).not.toMatch(/<script/i);
+  });
+});
+
+describe('PACKAGED_LOADING_DELAY_MS', () => {
+  it('waits 300 ms before a packaged start shows the loading window, so a fast start never flashes it', () => {
+    expect(PACKAGED_LOADING_DELAY_MS).toBe(300);
   });
 });
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -10,6 +11,45 @@ console.log('=== JOY Media Installer & Package Verification Suite ===');
 const desktopDistDir = resolve('apps/desktop/dist');
 const standaloneDir = resolve(desktopDistDir, 'joy-media-win32-x64');
 const releasesDir = resolve(desktopDistDir, 'releases');
+
+/**
+ * The entry names of a zip archive, read from its central directory. Nothing is extracted, so the names are
+ * exactly what the archive stores.
+ */
+function zipEntryNames(zipPath) {
+  const data = readFileSync(zipPath);
+  const endRecord = data.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  assert.ok(endRecord >= 0, `${zipPath} has no end-of-central-directory record`);
+  const entryCount = data.readUInt16LE(endRecord + 10);
+  let offset = data.readUInt32LE(endRecord + 16);
+  const names = [];
+  for (let index = 0; index < entryCount; index++) {
+    assert.strictEqual(data.readUInt32LE(offset), 0x02014b50, 'Bad central directory entry');
+    const nameLength = data.readUInt16LE(offset + 28);
+    const extraLength = data.readUInt16LE(offset + 30);
+    const commentLength = data.readUInt16LE(offset + 32);
+    names.push(data.toString('utf8', offset + 46, offset + 46 + nameLength));
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return names;
+}
+
+/** The lowercase SHA-256 of a file's bytes, as SHA256SUMS.txt lists it. */
+function fileSha256(filePath) {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+}
+
+/**
+ * The digest that a SHA256SUMS.txt text lists for one file name, or undefined when it lists that name zero or
+ * more than one time. Lines follow "<64 hex>  <name>"; a name that only ends the same way does not match.
+ */
+function listedSha256(sumsText, fileName) {
+  const digests = sumsText.split(/\r?\n/).flatMap((line) => {
+    const match = /^([a-fA-F0-9]{64}) {2}(.+)$/.exec(line);
+    return match && match[2] === fileName ? [match[1].toLowerCase()] : [];
+  });
+  return digests.length === 1 ? digests[0] : undefined;
+}
 
 // 1. Verify Distribution Layout
 console.log('1. Verifying distribution files in joy-media-win32-x64...');
@@ -58,6 +98,65 @@ const projectResult = spawnSync(joyCmdPath, ['project', 'list'], {
 assert.strictEqual(projectResult.status, 0, `joy.cmd project list failed: ${projectResult.stderr}`);
 assert.ok(projectResult.stdout.includes('Local Projects'), 'Project list output unexpected');
 console.log('✔ Packaged CLI project list passed cleanly.');
+
+// 3b. The release zip uses forward slashes, and the packaged exe names JOY Media at this app version.
+const packageVersion = JSON.parse(
+  readFileSync(resolve('apps/desktop/package.json'), 'utf8'),
+).version;
+const releaseZipPath = resolve(releasesDir, `joy-media-windows-x64-v${packageVersion}.zip`);
+console.log('3b. Testing the release zip entry names and the packaged exe version resource...');
+const zipEntries = zipEntryNames(releaseZipPath);
+assert.ok(zipEntries.length > 0, 'The release zip has no entries');
+assert.deepStrictEqual(
+  zipEntries.filter((name) => name.includes('\\')),
+  [],
+  'The release zip must use forward slashes in every entry name',
+);
+assert.ok(
+  zipEntries.includes('joy-media-win32-x64/joy-media.exe'),
+  'The release zip does not contain joy-media-win32-x64/joy-media.exe',
+);
+console.log(`✔ Release zip has ${zipEntries.length} entries, none with a backslash.`);
+
+const versionInfoRun = spawnSync(
+  'powershell.exe',
+  [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    `$v = (Get-Item -LiteralPath '${resolve(standaloneDir, 'joy-media.exe')}').VersionInfo; ` +
+      '[pscustomobject]@{ ProductName = $v.ProductName; FileDescription = $v.FileDescription; ' +
+      'ProductVersion = $v.ProductVersion; FileVersion = $v.FileVersion } | ConvertTo-Json -Compress',
+  ],
+  { encoding: 'utf8', timeout: 30000, windowsHide: true },
+);
+assert.strictEqual(
+  versionInfoRun.status,
+  0,
+  `Reading joy-media.exe details failed: ${versionInfoRun.stderr}`,
+);
+const exeDetails = JSON.parse(versionInfoRun.stdout);
+assert.strictEqual(
+  exeDetails.ProductName,
+  'JOY Media',
+  'joy-media.exe ProductName is not JOY Media',
+);
+assert.strictEqual(
+  exeDetails.FileDescription,
+  'JOY Media',
+  'joy-media.exe FileDescription is not JOY Media',
+);
+assert.strictEqual(
+  exeDetails.ProductVersion,
+  packageVersion,
+  'joy-media.exe ProductVersion is not the app version',
+);
+assert.strictEqual(
+  exeDetails.FileVersion,
+  `${packageVersion}.0`,
+  'joy-media.exe FileVersion is not the app version',
+);
+console.log('✔ joy-media.exe names JOY Media at the app version.');
 
 // 4. Test Standalone Uninstall Sandbox Isolation
 console.log('4. Testing standalone uninstall.cmd cleanup in an isolated sandbox...');
@@ -475,6 +574,126 @@ console.log(
   console.log('✔ build-installer.ps1 records joy-media-setup.exe in SHA256SUMS.txt.');
 }
 
+// 5d. build-installer.ps1 also lists the setup exe in the release manifest, with its digest. The block runs on a
+// temp folder with a stand-in manifest; a rebuilt setup replaces its entry instead of adding a second one.
+console.log(
+  '5d. Testing that build-installer.ps1 lists joy-media-setup.exe in the release manifest...',
+);
+{
+  const script = readFileSync(resolve('apps/desktop/installer/build-installer.ps1'), 'utf8');
+  const begin = script.indexOf('(MANIFEST-BLOCK-BEGIN)');
+  const end = script.indexOf('(MANIFEST-BLOCK-END)');
+  assert.ok(begin >= 0 && end > begin, 'The manifest block was not found in build-installer.ps1');
+  const block = script.slice(script.indexOf('\n', begin), end);
+  const manifestRoot = mkdtempSync(join(tmpdir(), 'joy-manifest-'));
+  try {
+    const manifestPath = join(manifestRoot, 'joy-media-release-manifest.json');
+    const runBlock = () =>
+      spawnSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `$ErrorActionPreference = 'Stop'; $distReleases = '${manifestRoot}'; $outExe = '${join(manifestRoot, 'joy-media-setup.exe')}'\n${block}`,
+        ],
+        { encoding: 'utf8', timeout: 60000, windowsHide: true },
+      );
+    const stand = {
+      name: 'joy-media',
+      version: '1.1.1',
+      installer: { script: 'Setup-JoyMedia.ps1', environment: { pathRegistered: true } },
+      artifacts: [{ fileName: 'joy-media.exe', type: 'standalone-binary', sha256: 'a'.repeat(64) }],
+    };
+    // The packager's SHA256SUMS.txt lists the manifest with the digest from before this block rewrote it.
+    const sumsPath = join(manifestRoot, 'SHA256SUMS.txt');
+    const otherLine = `${'c'.repeat(64)}  joy-media.exe\n`;
+    const staleLine = `${'b'.repeat(64)}  joy-media-release-manifest.json\n`;
+    writeFileSync(manifestPath, JSON.stringify(stand, null, 2) + '\n', 'utf8');
+
+    // No manifest yet: the block must stop, not invent one.
+    rmSync(manifestPath);
+    assert.notStrictEqual(runBlock().status, 0, 'The block must fail when the manifest is missing');
+
+    writeFileSync(manifestPath, JSON.stringify(stand, null, 2) + '\n', 'utf8');
+    writeFileSync(join(manifestRoot, 'joy-media-setup.exe'), 'setup build 1');
+    // No SHA256SUMS.txt: the block must stop too, not invent one.
+    assert.notStrictEqual(
+      runBlock().status,
+      0,
+      'The block must fail when SHA256SUMS.txt is missing',
+    );
+    writeFileSync(sumsPath, otherLine + staleLine, 'utf8');
+    const first = runBlock();
+    assert.strictEqual(
+      first.status,
+      0,
+      `Recording the setup in the manifest failed: ${first.stderr}`,
+    );
+    const afterFirst = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const setupEntries = afterFirst.artifacts.filter((a) => a.fileName === 'joy-media-setup.exe');
+    assert.strictEqual(setupEntries.length, 1, 'The manifest must list the setup exe once');
+    assert.strictEqual(setupEntries[0].type, 'installer');
+    assert.strictEqual(setupEntries[0].byteSize, 'setup build 1'.length);
+    assert.match(setupEntries[0].sha256, /^[0-9a-f]{64}$/);
+    assert.ok(
+      afterFirst.artifacts.some((a) => a.fileName === 'joy-media.exe'),
+      'The existing manifest artifacts must be kept',
+    );
+    assert.strictEqual(
+      afterFirst.installer.environment.pathRegistered,
+      true,
+      'Other manifest fields must be kept',
+    );
+
+    // The manifest's line in SHA256SUMS.txt is replaced with the manifest's new digest, and the other line stays.
+    const sumsAfterFirst = readFileSync(sumsPath, 'utf8');
+    assert.strictEqual(
+      listedSha256(sumsAfterFirst, 'joy-media-release-manifest.json'),
+      fileSha256(manifestPath),
+      'SHA256SUMS.txt must list the manifest with the digest of the manifest on disk',
+    );
+    assert.ok(sumsAfterFirst.includes(otherLine), 'Other SHA256SUMS.txt lines must be kept');
+    assert.strictEqual(
+      sumsAfterFirst.split('\n').filter((line) => line !== '').length,
+      2,
+      'SHA256SUMS.txt must keep its line count',
+    );
+
+    writeFileSync(join(manifestRoot, 'joy-media-setup.exe'), 'setup build 2');
+    const second = runBlock();
+    assert.strictEqual(second.status, 0, `Re-recording the setup failed: ${second.stderr}`);
+    assert.strictEqual(
+      listedSha256(readFileSync(sumsPath, 'utf8'), 'joy-media-release-manifest.json'),
+      fileSha256(manifestPath),
+      'A rebuilt setup must update the manifest line in SHA256SUMS.txt',
+    );
+    const afterSecond = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const rebuilt = afterSecond.artifacts.filter((a) => a.fileName === 'joy-media-setup.exe');
+    assert.strictEqual(rebuilt.length, 1, 'A rebuilt setup must replace its manifest entry');
+    assert.notStrictEqual(
+      rebuilt[0].sha256,
+      setupEntries[0].sha256,
+      'The rebuilt setup must have a new digest',
+    );
+  } finally {
+    rmSync(manifestRoot, { recursive: true, force: true });
+  }
+  // The digest parser, on text: a listed digest is read back, and a missing, duplicated or look-alike name is not.
+  assert.strictEqual(
+    listedSha256(`${'A'.repeat(64)}  m.json\n`, 'm.json'),
+    'a'.repeat(64),
+    'listedSha256 must read a digest and lower-case it',
+  );
+  assert.strictEqual(listedSha256(`${'a'.repeat(64)}  other.zip\n`, 'm.json'), undefined);
+  assert.strictEqual(listedSha256(`${'a'.repeat(64)}  m.json.bak\n`, 'm.json'), undefined);
+  assert.strictEqual(
+    listedSha256(`${'a'.repeat(64)}  m.json\n${'b'.repeat(64)}  m.json\n`, 'm.json'),
+    undefined,
+  );
+  console.log('✔ build-installer.ps1 lists joy-media-setup.exe in the release manifest.');
+}
+
 // 6. Verify Release Artifacts & Manifest Parity
 console.log('6. Verifying release manifest & SHA256 checksums...');
 const manifestPath = resolve(releasesDir, 'joy-media-release-manifest.json');
@@ -487,6 +706,18 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 assert.strictEqual(manifest.name, 'joy-media');
 assert.strictEqual(manifest.platform, 'windows-x64');
 assert.strictEqual(manifest.installer.environment.pathRegistered, true);
+// The payload is the setup exe, the zip, the app exe, the worker exe, the CLI bundle and this manifest
+// (apps/site/src/release.mjs payloadNames). The manifest lists the setup and the worker.
+for (const fileName of ['joy-media-setup.exe', 'joy-worker.exe']) {
+  assert.ok(
+    existsSync(resolve(releasesDir, fileName)),
+    `${fileName} is missing from the release folder`,
+  );
+  assert.ok(
+    manifest.artifacts.some((artifact) => artifact.fileName === fileName && artifact.sha256),
+    `The release manifest does not list ${fileName}`,
+  );
+}
 
 const shaSums = readFileSync(shaSumsPath, 'utf8');
 for (const artifact of manifest.artifacts) {
@@ -497,6 +728,15 @@ for (const artifact of manifest.artifacts) {
     );
   }
 }
+// The manifest is rewritten by build-installer.ps1 after the packager's checksums step, so its own line in
+// SHA256SUMS.txt must be the digest of the manifest as it is on disk now.
+const manifestLineHash = listedSha256(shaSums, 'joy-media-release-manifest.json');
+assert.ok(manifestLineHash, 'SHA256SUMS.txt has no single line for the release manifest');
+assert.strictEqual(
+  manifestLineHash,
+  fileSha256(manifestPath),
+  'SHA256SUMS.txt hash for joy-media-release-manifest.json does not match the manifest on disk',
+);
 console.log('✔ Release manifest & SHA256 checksums match perfectly.');
 
 // 7. Verify build-installer.ps1 parsing
@@ -524,5 +764,17 @@ assert.strictEqual(
   `build-installer.ps1 syntax parsing failed:\n${parseResult.stderr || parseResult.stdout}`,
 );
 console.log('✔ build-installer.ps1 syntax parse check passed.');
+
+// 8. The release plan for a non-staging build says "unsigned-release", not "blocked". (package-release.mjs runs
+// its work when imported, so the check reads its source.)
+console.log('8. Verifying the release plan status in package-release.mjs...');
+const releaseScript = readFileSync(resolve('apps/desktop/scripts/package-release.mjs'), 'utf8');
+assert.match(
+  releaseScript,
+  /status: 'unsigned-release'/,
+  'The release plan must say unsigned-release',
+);
+assert.doesNotMatch(releaseScript, /status: 'blocked'/, 'The release plan must not say blocked');
+console.log('✔ Release plan status is unsigned-release.');
 
 console.log('\n=== All Installer & Packaging Checks PASSED! ===');

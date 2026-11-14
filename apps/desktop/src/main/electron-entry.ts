@@ -39,6 +39,7 @@ import {
   DEV_LOADING_BAR_MS,
   DEV_RENDERER_RETRY_MS,
   DEV_RENDERER_URL,
+  PACKAGED_LOADING_DELAY_MS,
   PACKAGED_RENDERER_SCHEME,
   buildSecureWebPreferences,
   devLoadingPageHtml,
@@ -76,16 +77,84 @@ const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
 const DROP_FILES_ENDPOINT = 'joy-desktop-drop-files';
 const DROPPED_IMPORT_PROGRESS_CHANNEL = 'joy-desktop-dropped-import-progress';
 
-/** The JOY brand mark the editor shows in its header, for the development loading page (undefined if absent). */
-function readDevLogoDataUrl(): string | undefined {
-  try {
-    const bytes = readFileSync(
-      join(__dirname, '..', '..', '..', 'editor-web', 'public', 'assets', 'JoyCodeNew_128x128.png'),
-    );
-    return `data:image/png;base64,${bytes.toString('base64')}`;
-  } catch {
-    return undefined;
+/**
+ * The JOY brand mark for the loading pages (undefined when no copy is found, so the page shows the wordmark alone).
+ * A packaged app stages the editor build as `renderer/` beside `dist/`, and Vite publishes the editor's public
+ * `assets/` folder inside that build. A development run reads the same file from the editor's public folder.
+ */
+function readLoadingLogoDataUrl(): string | undefined {
+  const candidates = [
+    join(__dirname, '..', '..', 'renderer', 'assets', 'JoyCodeNew_128x128.png'),
+    join(__dirname, '..', '..', '..', 'editor-web', 'public', 'assets', 'JoyCodeNew_128x128.png'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return `data:image/png;base64,${readFileSync(candidate).toString('base64')}`;
+    } catch {
+      // Not at this location; try the next one.
+    }
   }
+  return undefined;
+}
+
+/**
+ * A packaged window stays hidden until its renderer has loaded. If that takes longer than
+ * PACKAGED_LOADING_DELAY_MS, a small JOY Media loading window (a data: page, so no network) shows until then.
+ * A quick start never shows it. The renderer's load is the signal: `did-finish-load` on the packaged page.
+ */
+function showPackagedWindowWhenLoaded(win: BrowserWindow): void {
+  let splash: BrowserWindow | undefined;
+  let loaded = false;
+  const closeSplash = (): void => {
+    if (splash !== undefined && !splash.isDestroyed()) splash.destroy();
+    splash = undefined;
+  };
+  const openSplash = (): void => {
+    if (loaded || win.isDestroyed() || splash !== undefined) return;
+    const loadingWindow = new BrowserWindow({
+      width: 360,
+      height: 240,
+      frame: false,
+      resizable: false,
+      show: false,
+      center: true,
+      backgroundColor: '#000000',
+      // No preload: the loading page is static and must not get the IPC bridge.
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        nodeIntegrationInWorker: false,
+        webviewTag: false,
+      },
+    });
+    splash = loadingWindow;
+    loadingWindow.once('ready-to-show', () => {
+      if (!loadingWindow.isDestroyed() && !loaded) loadingWindow.show();
+    });
+    const page = devLoadingPageHtml(readLoadingLogoDataUrl());
+    void loadingWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
+  };
+  const timer = setTimeout(openSplash, PACKAGED_LOADING_DELAY_MS);
+  const showEditor = (): void => {
+    loaded = true;
+    clearTimeout(timer);
+    closeSplash();
+    if (!win.isDestroyed()) win.show();
+  };
+  win.webContents.once('did-finish-load', showEditor);
+  win.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, _errorDescription, _validatedUrl, isMainFrame) => {
+      // -3 is an aborted navigation. A failed main frame still shows its error page, as it did before the wait.
+      if (errorCode === -3 || !isMainFrame) return;
+      showEditor();
+    },
+  );
+  win.on('closed', () => {
+    clearTimeout(timer);
+    closeSplash();
+  });
 }
 // Automated runtime smoke check (`pnpm --filter @joy-media/desktop test:smoke`, wave 9): a real
 // `electron .` launch that proves app.whenReady, window construction, and IPC registration all
@@ -327,10 +396,10 @@ if (!app.requestSingleInstanceLock()) {
       // Wave 2: forward to the renderer's project-open command once the local project
       // store exists. For now, focusing the existing window is the safe no-op.
     }
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
+    // Focus the main window itself: the loading window may be the first window in the list.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
     }
   });
 
@@ -489,7 +558,8 @@ if (!app.requestSingleInstanceLock()) {
     const win = new BrowserWindow({
       width: 1440,
       height: 900,
-      show: !isSmokeMode,
+      // A packaged window is shown once its renderer has loaded (see showPackagedWindowWhenLoaded).
+      show: isDev && !isSmokeMode,
       frame: false,
       titleBarStyle: 'hidden',
       backgroundColor: '#000000',
@@ -499,11 +569,12 @@ if (!app.requestSingleInstanceLock()) {
     cancelWhenPageGoes(agentRequests, win);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
+    if (!isDev && !isSmokeMode) showPackagedWindowWhenLoaded(win);
     if (isDev) {
       // A development window loads the editor dev server. While it does not answer, the window shows the JOY Media
       // loading page and checks the server every few seconds, then opens the editor as soon as it answers.
       const loadingPage = `data:text/html;charset=utf-8,${encodeURIComponent(
-        devLoadingPageHtml(readDevLogoDataUrl()),
+        devLoadingPageHtml(readLoadingLogoDataUrl()),
       )}`;
       let loadingShownAt = 0;
       let poll: ReturnType<typeof setInterval> | undefined;

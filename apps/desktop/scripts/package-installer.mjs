@@ -3,7 +3,7 @@ import { existsSync, createReadStream, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { setExecutableIcon } from './set-exe-icon.mjs';
+import { setExecutableIcon, setExecutableVersionInfo } from './set-exe-icon.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(desktopRoot, '..', '..');
@@ -65,6 +65,16 @@ if (existsSync(origExe)) {
 const joyIcon = resolve(desktopRoot, 'build', 'joy-media.ico');
 if (!existsSync(joyIcon)) throw new Error(`JOY icon not found at ${joyIcon}`);
 await setExecutableIcon(targetExe, joyIcon);
+// The Properties dialog and Explorer show these details, so they name JOY Media and this build's version,
+// not the Electron binary's (ProductName "Electron", version 44.3.0).
+await setExecutableVersionInfo(targetExe, {
+  version,
+  productName: 'JOY Media',
+  fileDescription: 'JOY Media',
+  companyName: 'JOY Team',
+  internalName: 'joy-media',
+  originalFilename: 'joy-media.exe',
+});
 
 // Remove default_app.asar to ensure Electron loads resources/app
 const defaultAppAsar = resolve(standaloneDir, 'resources', 'default_app.asar');
@@ -78,15 +88,16 @@ await rm(appResourcesDir, { recursive: true, force: true });
 await mkdir(appResourcesDir, { recursive: true });
 await cp(unpackedDir, appResourcesDir, { recursive: true });
 
-// Copy standalone worker executable if present
+// The standalone worker executable is part of the release payload (SHA256SUMS and the manifest list it),
+// so a build without it stops here instead of shipping a release that lacks it.
 const workerExe = resolve(workerBinDir, 'joy-worker.exe');
-let workerSha256 = null;
-if (existsSync(workerExe)) {
-  const destWorkerExe = resolve(appResourcesDir, 'worker', 'joy-worker.exe');
-  await cp(workerExe, destWorkerExe);
-  console.log('Embedded standalone joy-worker.exe into resources/app/worker/');
-  workerSha256 = await computeSha256(destWorkerExe);
+if (!existsSync(workerExe)) {
+  throw new Error(`${workerExe} not found. Run 'pnpm worker:exe' before packaging the installer.`);
 }
+const destWorkerExe = resolve(appResourcesDir, 'worker', 'joy-worker.exe');
+await cp(workerExe, destWorkerExe);
+console.log('Embedded standalone joy-worker.exe into resources/app/worker/');
+const workerSha256 = await computeSha256(destWorkerExe);
 
 // Stage bundled @joy-media/cli into resources/app/cli/
 console.log('Building and staging bundled @joy-media/cli...');
@@ -253,7 +264,9 @@ const releaseZipPath = resolve(releasesDir, releaseZipName);
 
 await rm(releaseZipPath, { force: true });
 
-// Use tar or powershell to create zip
+// tar.exe writes zip entry names with forward slashes, relative to the folder given with -C. The
+// Compress-Archive fallback this replaces writes backslashes on Windows PowerShell 5.1, so it is gone:
+// a failed tar.exe stops the build (tests/desktop/installer-package-check.mjs checks the entry names).
 const zipResult = spawnSync(
   'tar.exe',
   ['-a', '-c', '-f', releaseZipPath, '-C', desktopDistDir, 'joy-media-win32-x64'],
@@ -261,21 +274,8 @@ const zipResult = spawnSync(
     stdio: 'inherit',
   },
 );
-
 if (zipResult.status !== 0 || !existsSync(releaseZipPath)) {
-  console.log('tar.exe exited with error, falling back to PowerShell Compress-Archive...');
-  const psZipResult = spawnSync(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-Command',
-      `Compress-Archive -Path '${standaloneDir}\\*' -DestinationPath '${releaseZipPath}' -Force`,
-    ],
-    { stdio: 'inherit' },
-  );
-  if (psZipResult.status !== 0) {
-    throw new Error(`Failed to create release zip archive: status ${psZipResult.status}`);
-  }
+  throw new Error(`Failed to create release zip archive with tar.exe: status ${zipResult.status}`);
 }
 
 const zipStat = await stat(releaseZipPath);
@@ -296,9 +296,7 @@ await cp(
   resolve(standaloneDir, 'resources', 'app', 'cli', 'joy-media-bundle.mjs'),
   resolve(releasesDir, 'joy-media-bundle.mjs'),
 );
-if (workerSha256) {
-  await cp(workerExe, resolve(releasesDir, 'joy-worker.exe'));
-}
+await cp(workerExe, resolve(releasesDir, 'joy-worker.exe'));
 
 const releaseManifest = {
   name: 'joy-media',
@@ -322,15 +320,11 @@ const releaseManifest = {
       type: 'standalone-binary',
       sha256: exeSha256,
     },
-    ...(workerSha256
-      ? [
-          {
-            fileName: 'joy-worker.exe',
-            type: 'standalone-worker',
-            sha256: workerSha256,
-          },
-        ]
-      : []),
+    {
+      fileName: 'joy-worker.exe',
+      type: 'standalone-worker',
+      sha256: workerSha256,
+    },
     {
       fileName: 'joy-media-bundle.mjs',
       type: 'standalone-cli-bundle',

@@ -25,6 +25,12 @@ export const DEV_RENDERER_RETRY_MS = 1000;
 /** How long the loading bar takes to fill. The editor opens once the bar is full and the editor server has answered. */
 export const DEV_LOADING_BAR_MS = 2800;
 
+/**
+ * How long a packaged start may take before the JOY Media loading window appears. A start that is quicker than this
+ * shows the editor directly, with no loading flash.
+ */
+export const PACKAGED_LOADING_DELAY_MS = 300;
+
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }
@@ -46,8 +52,9 @@ const LOADING_PAGE_CSS = [
 ].join('');
 
 /**
- * The page a development window shows while the editor is not ready yet: the JOY Media logo, a loading line, and a
- * bar that fills over the loading time. There is no button. It is dark, in the app's style, and never mentions a server.
+ * The page a window shows while the editor is not ready yet (the development server, or a packaged start): the JOY
+ * Media logo, a loading line, and a bar that fills over the loading time. There is no button. It is dark, in the app's
+ * style, never mentions a server, and makes no network request (it is a data: page with a strict Content-Security-Policy).
  */
 export function devLoadingPageHtml(logoDataUrl: string | undefined): string {
   const logo =

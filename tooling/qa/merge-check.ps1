@@ -66,8 +66,10 @@ try {
     Invoke-CheckedCommand -Name 'pnpm' -Arguments @('typecheck')
     Invoke-CheckedCommand -Name 'pnpm' -Arguments @('lint')
 
-    if ($changedFiles.Count -gt 0) {
-      Invoke-CheckedCommand -Name 'pnpm' -Arguments (@('exec', 'prettier', '--check', '--ignore-unknown') + $changedFiles)
+    # A sparse checkout may not materialise every changed path (for example preview images); Prettier cannot check what is not on disk.
+    $prettierFiles = @($changedFiles | Where-Object { Test-Path -LiteralPath $_ })
+    if ($prettierFiles.Count -gt 0) {
+      Invoke-CheckedCommand -Name 'pnpm' -Arguments (@('exec', 'prettier', '--check', '--ignore-unknown') + $prettierFiles)
     } else {
       Write-Output 'No changed files for Prettier.'
     }
