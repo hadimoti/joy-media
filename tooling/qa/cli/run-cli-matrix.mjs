@@ -16,7 +16,16 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -284,6 +293,166 @@ function executeCli(args, sandbox, options = {}) {
   };
 }
 
+/**
+ * Spawn the CLI asynchronously, wait until it prints something (or `readyMs`),
+ * send `signal`, and await its close. The child is always killed on the way out.
+ * Only used where a real signal can be delivered (see L-007).
+ */
+function executeCliWithSignal(args, sandbox, signal, readyMs = 400, closeTimeoutMs = 5_000) {
+  return new Promise((resolvePromise) => {
+    const child = spawn(process.execPath, [CLI_BIN, ...args], {
+      env: sandbox.env,
+      cwd: sandbox.workDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let out = '';
+    let sent = false;
+    let settled = false;
+    const timers = [];
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      for (const t of timers) clearTimeout(t);
+      try {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      } catch {
+        // already gone
+      }
+      resolvePromise({ out, signalSent: sent, ...result });
+    };
+    const send = () => {
+      if (sent || settled) return;
+      sent = true;
+      try {
+        child.kill(signal);
+      } catch {
+        // reported through the close result
+      }
+      timers.push(
+        setTimeout(() => finish({ code: null, sig: null, timedOut: true }), closeTimeoutMs),
+      );
+    };
+    child.stdout.on('data', (chunk) => {
+      out += chunk.toString('utf8');
+      // The child printed its prompt: give it a moment to install handlers, then signal.
+      timers.push(setTimeout(send, 100));
+    });
+    child.stderr.on('data', (chunk) => {
+      out += chunk.toString('utf8');
+    });
+    child.on('error', (err) => finish({ code: null, sig: null, error: err.message }));
+    child.on('close', (code, sig) => finish({ code, sig, timedOut: false }));
+    timers.push(setTimeout(send, readyMs));
+  });
+}
+
+/** Last parseable JSON line of an NDJSON stdout (the render `complete` / `error` event). */
+function lastJsonEvent(stdout) {
+  const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      return JSON.parse(lines[i]);
+    } catch {
+      // keep looking
+    }
+  }
+  return null;
+}
+
+function readJsonFile(path) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function listDir(dir) {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** A media file (not a manifest) with the given extension that really has bytes. */
+function findMediaFile(dir, extension) {
+  return listDir(dir).find((name) => {
+    if (!name.endsWith(`.${extension}`) || name.endsWith('.manifest.json')) return false;
+    try {
+      return statSync(join(dir, name)).size > 0;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function readCliVersion() {
+  const pkg = readJsonFile(join(REPO_ROOT, 'apps', 'cli', 'package.json'));
+  return typeof pkg?.version === 'string' ? pkg.version : null;
+}
+
+// 1x1 PNG and a 0.1 s mono 8 kHz WAV: valid inputs for the Worker success path.
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+function tinyWav() {
+  const samples = 800;
+  const data = Buffer.alloc(samples * 2);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write('WAVEfmt ', 8);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(8000, 24);
+  header.writeUInt32LE(16000, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
+}
+
+/** Runs each command; ok only if every one exits 0 and prints a valid JSON document. */
+function checkJsonFamily(commands, sandbox) {
+  const results = commands.map((cmd) => {
+    const res = executeCli(cmd, sandbox);
+    let validJson = true;
+    try {
+      JSON.parse(res.stdout);
+    } catch {
+      validJson = false;
+    }
+    return { command: cmd.join(' '), exitCode: res.status, validJson };
+  });
+  const firstBad = results.find((r) => r.exitCode !== 0 || !r.validJson);
+  return {
+    ok: firstBad === undefined,
+    exitCode: firstBad ? firstBad.exitCode : 0,
+    report: { results },
+  };
+}
+
+/** One readiness record, shaped like the release validator's ScenarioResult plus the measured checks. */
+function scenarioRecord(id, checks, details) {
+  const allPassed = checks.every((c) => c.status === 'passed');
+  const anyFailed = checks.some((c) => c.status === 'failed');
+  const status = allPassed ? 'passed' : anyFailed ? 'failed' : 'skipped';
+  return {
+    id,
+    status,
+    firstAttemptPassed: status === 'passed',
+    retries: 0,
+    timestamp: new Date().toISOString(),
+    checks,
+    details,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Matrix Row Definitions (L-001 through L-051)
 // ---------------------------------------------------------------------------
@@ -414,14 +583,15 @@ export async function runCliMatrix(options = {}) {
   // Row L-003: --version / -v
   {
     const r = executeCli(['--version'], sandbox);
-    const pass = r.status === 0 && /v1\.1\.1/i.test(r.stdout);
-    recordEvidence('L-003.txt', r.stdout);
+    const expectedVersion = readCliVersion();
+    const pass = r.status === 0 && expectedVersion !== null && r.stdout.includes(expectedVersion);
+    recordEvidence('L-003.txt', `${r.stdout}\n[package version: ${expectedVersion}]`);
     rows.push({
       id: 'L-003',
       command: 'joy-media --version',
       status: pass ? 'PASS' : 'FAIL',
       exitCode: r.status,
-      summary: 'CLI prints version on stdout',
+      summary: `CLI prints the package version (${expectedVersion ?? 'unreadable'}) on stdout`,
       evidence: 'T-A13\\L-003.txt',
     });
   }
@@ -441,22 +611,20 @@ export async function runCliMatrix(options = {}) {
     });
   }
 
-  // Row L-005: unknown command (DEFECT: CLI returns exit 1, TEST-MATRIX expects exit 2)
+  // Row L-005: unknown command. The CLI returns 1 by design (reportUnknownCommand; the
+  // existing CLI tests pin it), so the matrix row said 2 in error: a matrix correction.
   {
     const r = executeCli(['nope'], sandbox);
-    const pass = r.status === 2;
+    const pass = r.status === 1 && r.stderr.includes('Unknown command');
     recordEvidence('L-005.txt', `${r.stderr}\n[exit code ${r.status}]`);
     rows.push({
       id: 'L-005',
       command: 'joy-media nope',
-      status: pass ? 'PASS' : 'DEFECT',
+      status: pass ? 'PASS' : 'FAIL',
       exitCode: r.status,
-      summary: 'Unknown command yields usage error',
+      summary: 'Unknown command: message on stderr, exit 1',
       evidence: 'T-A13\\L-005.txt',
-      defectReason:
-        r.status === 1
-          ? 'CLI reportUnknownCommand exits with 1 instead of usage error exit 2'
-          : undefined,
+      note: 'Matrix correction: TEST-MATRIX.md said exit 2; the CLI exits 1 by design (exit 2 is for bad options).',
     });
   }
 
@@ -475,45 +643,39 @@ export async function runCliMatrix(options = {}) {
     });
   }
 
-  // Row L-007: Ctrl+C agent chat (DEFECT: Windows non-TTY cannot deliver SIGINT to child without pty)
+  // Row L-007: Ctrl+C in agent chat. On Windows, child.kill('SIGINT') terminates the child
+  // without running its handlers, so a real Ctrl+C needs a pty or a console-control event:
+  // not testable here, recorded as NOT-TESTED. Elsewhere the signal is really sent (async).
   {
-    const chatProc = spawn(process.execPath, [CLI_BIN, 'agent', 'chat'], {
-      env: sandbox.env,
-      cwd: sandbox.workDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let sigResult = null;
-    chatProc.on('close', (code, sig) => {
-      sigResult = { code, sig };
-    });
-    setTimeout(() => {
-      try {
-        chatProc.kill('SIGINT');
-      } catch {
-        // ignore
-      }
-    }, 400);
-
-    const deadline = Date.now() + 3000;
-    while (sigResult === null && Date.now() < deadline) {
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    if (process.platform === 'win32') {
+      const reason =
+        "Needs a pty or a console-control event: on Windows child.kill('SIGINT') ends the process without running its SIGINT handler, so no exit code could be measured honestly.";
+      recordEvidence('L-007.txt', `NOT-TESTED\n${reason}\n`);
+      rows.push({
+        id: 'L-007',
+        command: 'joy-media agent chat (Ctrl+C)',
+        status: 'NOT-TESTED',
+        exitCode: null,
+        summary: 'Interrupted agent chat exits 130',
+        evidence: 'T-A13\\L-007.txt',
+        note: reason,
+      });
+    } else {
+      const res = await executeCliWithSignal(['agent', 'chat'], sandbox, 'SIGINT');
+      const pass = res.signalSent && !res.timedOut && !res.error && res.code === 130;
+      recordEvidence(
+        'L-007.txt',
+        `signalSent=${res.signalSent} code=${res.code} signal=${res.sig} timedOut=${res.timedOut === true}\n${res.out}`,
+      );
+      rows.push({
+        id: 'L-007',
+        command: 'joy-media agent chat (Ctrl+C)',
+        status: pass ? 'PASS' : 'FAIL',
+        exitCode: res.code,
+        summary: 'Interrupted agent chat exits 130',
+        evidence: 'T-A13\\L-007.txt',
+      });
     }
-    const exit130 = sigResult?.code === 130;
-    recordEvidence(
-      'L-007.txt',
-      `Process close: code=${sigResult?.code}, signal=${sigResult?.sig}\nNote: Windows non-TTY terminates via signal rather than reporting 130.`,
-    );
-    rows.push({
-      id: 'L-007',
-      command: 'joy-media agent chat (Ctrl+C)',
-      status: exit130 ? 'PASS' : 'DEFECT',
-      exitCode: sigResult?.code ?? 130,
-      summary: 'Interrupted agent chat exits 130',
-      evidence: 'T-A13\\L-007.txt',
-      defectReason: !exit130
-        ? 'Interactive agent chat exit 130 requires a terminal pty (TEST-MATRIX.md note 5); non-interactive process receives signal directly'
-        : undefined,
-    });
   }
 
   // Row L-008: agent chat with piped exit
@@ -1074,120 +1236,188 @@ export async function runCliMatrix(options = {}) {
     });
   }
 
+  // Rows L-031 / L-032 share one measurement: the CLI has no Worker daemon to probe. `worker
+  // status` reads local environment folders, so "up" means at least one environment is ready
+  // and "down" means none is. The sandbox starts with no environment installed.
+  const workerStatusRes = executeCli(['worker', 'status', '--json'], sandbox);
+  let workerStatusDoc = null;
+  try {
+    workerStatusDoc = JSON.parse(workerStatusRes.stdout);
+  } catch {
+    workerStatusDoc = null;
+  }
+  const workerShapeOk =
+    workerStatusRes.status === 0 &&
+    workerStatusDoc !== null &&
+    workerStatusDoc.gpu !== undefined &&
+    Array.isArray(workerStatusDoc.environments) &&
+    workerStatusDoc.models !== undefined;
+  const workerEnvReady =
+    workerShapeOk && workerStatusDoc.environments.some((env) => env.ready === true);
+
   // Row L-031: worker status (Worker up)
   {
-    const r = executeCli(['worker', 'status', '--json'], sandbox);
-    let pass = r.status === 0;
-    try {
-      const doc = JSON.parse(r.stdout);
-      pass = pass && doc.gpu !== undefined && Array.isArray(doc.environments);
-    } catch {
-      pass = false;
+    recordEvidence('L-031.json', workerStatusRes.stdout);
+    let status = 'PASS';
+    let note;
+    if (!workerShapeOk) status = 'FAIL';
+    else if (!workerEnvReady) {
+      status = 'NOT-TESTED';
+      note =
+        'No Worker environment is installed in the sandbox (every environment ready:false), so the Worker-up report was not measured. The report shape (gpu, environments, models) was valid.';
     }
-
-    recordEvidence('L-031.json', r.stdout);
     rows.push({
       id: 'L-031',
       command: 'joy-media worker status (running)',
-      status: pass ? 'PASS' : 'FAIL',
-      exitCode: r.status,
+      status,
+      exitCode: workerStatusRes.status,
       summary: 'GPU, environments and weights reported',
       evidence: 'T-A13\\L-031.json',
+      note,
     });
   }
 
-  // Row L-032: worker status (Worker down) (DEFECT: worker-cmd does not probe worker daemon, exits 0)
+  // Row L-032: worker status (Worker down)
   {
-    const r = executeCli(['worker', 'status', '--json'], sandbox);
-    const pass = r.status === 1;
-    recordEvidence('L-032.json', r.stdout);
+    recordEvidence(
+      'L-032.json',
+      `${workerStatusRes.stdout}\n[exit code ${workerStatusRes.status}; any environment ready: ${workerEnvReady}]`,
+    );
+    let status;
+    let defectReason;
+    if (!workerShapeOk) status = 'FAIL';
+    else if (workerEnvReady) {
+      status = 'NOT-TESTED';
+    } else if (workerStatusRes.status === 1) status = 'PASS';
+    else {
+      status = 'DEFECT';
+      defectReason = `Measured: no Worker environment ready and exit ${workerStatusRes.status}, but the matrix expects a "not running" report with exit 1. The CLI has no Worker daemon probe; it reports local environments and exits 0.`;
+    }
     rows.push({
       id: 'L-032',
-      command: 'joy-media worker status (stopped)',
-      status: pass ? 'PASS' : 'DEFECT',
-      exitCode: r.status,
+      command: 'joy-media worker status (no environment ready)',
+      status,
+      exitCode: workerStatusRes.status,
       summary: 'Worker missing returns exit 1',
       evidence: 'T-A13\\L-032.json',
-      defectReason:
-        r.status === 0
-          ? 'CLI worker status reports local environment metadata and exits 0 instead of exit 1 when worker daemon is down'
-          : undefined,
+      defectReason,
     });
   }
 
-  // Row L-033: worker upscale
-  {
-    const rMissing = executeCli(['worker', 'upscale', 'nonexistent.png', '--scale', '2'], sandbox);
-    const rBadScale = executeCli(['worker', 'upscale', 'nonexistent.png', '--scale', '0'], sandbox);
-    const pass = rMissing.status === 1 && rBadScale.status === 2;
-    recordEvidence('L-033.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  // Rows L-033 / L-034: error paths are measured; the success path (an output file) needs a
+  // ready Worker environment. Without one the row is NOT-TESTED, never passed.
+  function workerOperationRow(id, operation, inputName, inputBytes, extraArgs, outName) {
+    const missingArgs = ['worker', operation, `nonexistent-${inputName}`, ...extraArgs];
+    const rMissing = executeCli(missingArgs, sandbox);
+    const rBad =
+      operation === 'upscale'
+        ? executeCli(['worker', 'upscale', `nonexistent-${inputName}`, '--scale', '0'], sandbox)
+        : null;
+    const errorPathsOk = rMissing.status === 1 && (rBad === null || rBad.status === 2);
+
+    let successStatus = null;
+    let successOutput = null;
+    if (workerEnvReady) {
+      const input = join(sandbox.workDir, inputName);
+      const output = join(sandbox.workDir, outName);
+      writeFileSync(input, inputBytes);
+      const rOk = executeCli(
+        ['worker', operation, input, ...extraArgs, '--output', output],
+        sandbox,
+        { timeoutMs: 120_000 },
+      );
+      successStatus = rOk.status;
+      successOutput = existsSync(output) && statSync(output).size > 0 ? output : null;
+    }
+
+    recordEvidence(
+      `${id}.txt`,
+      [
+        `missing input: exit ${rMissing.status}\n${rMissing.stderr}`,
+        rBad ? `bad scale 0: exit ${rBad.status}\n${rBad.stderr}` : '',
+        workerEnvReady
+          ? `success path: exit ${successStatus}, output file written: ${successOutput !== null}`
+          : 'success path: not run (no Worker environment ready in the sandbox)',
+      ].join('\n'),
+    );
+
+    let status;
+    let note;
+    if (!errorPathsOk) status = 'FAIL';
+    else if (!workerEnvReady) {
+      status = 'NOT-TESTED';
+      note =
+        'Error paths measured and as expected; the success path (an output file written) needs a ready Worker environment, none is installed in the sandbox.';
+    } else status = successStatus === 0 && successOutput !== null ? 'PASS' : 'FAIL';
+
     rows.push({
-      id: 'L-033',
-      command: 'joy-media worker upscale',
-      status: pass ? 'PASS' : 'FAIL',
+      id,
+      command: `joy-media worker ${operation}`,
+      status,
       exitCode: rMissing.status,
-      summary: 'Upscale missing input exits 1; bad scale exits 2',
-      evidence: 'T-A13\\L-033.png',
+      summary:
+        operation === 'upscale'
+          ? 'Upscale writes a file; missing input exits 1; bad scale exits 2'
+          : 'Denoise writes a file; missing input exits 1',
+      evidence: `T-A13\\${id}.txt`,
+      note,
     });
   }
+  workerOperationRow('L-033', 'upscale', 'in.png', TINY_PNG, ['--scale', '2'], 'out.png');
+  workerOperationRow('L-034', 'denoise', 'in.wav', tinyWav(), [], 'out.wav');
 
-  // Row L-034: worker denoise
-  {
-    const rMissing = executeCli(['worker', 'denoise', 'nonexistent.wav'], sandbox);
-    const pass = rMissing.status === 1;
-    recordEvidence('L-034.wav', Buffer.from('RIFF....WAVEfmt '));
-    rows.push({
-      id: 'L-034',
-      command: 'joy-media worker denoise',
-      status: pass ? 'PASS' : 'FAIL',
-      exitCode: rMissing.status,
-      summary: 'Denoise missing input exits 1',
-      evidence: 'T-A13\\L-034.wav',
-    });
-  }
-
-  // Row L-035: render (mp4) (DEFECT: CLI render produces manifest only, does not produce media)
+  // Rows L-035 / L-036: classified from what was measured (exit code, manifest content,
+  // a real non-empty media file in the output folder). PASS only if media was produced;
+  // DEFECT only if the render succeeded but the manifest says mediaProduced:false and no
+  // media file exists; FAIL for anything else.
   const renderOutDir = join(sandbox.workDir, 'renders');
   mkdirSync(renderOutDir, { recursive: true });
+  function classifyRender(r, preset, extension) {
+    const manifestFile = join(renderOutDir, `${defaultProjectId}.${extension}.manifest.json`);
+    const manifestExists = existsSync(manifestFile);
+    const manifest = manifestExists ? readJsonFile(manifestFile) : null;
+    const event = lastJsonEvent(r.stdout);
+    const mediaFile = findMediaFile(renderOutDir, extension);
+    const mediaProduced = mediaFile !== undefined && manifest?.mediaProduced === true;
+    let status = 'FAIL';
+    let defectReason;
+    if (r.status === 0 && manifestExists && mediaProduced) status = 'PASS';
+    else if (
+      r.status === 0 &&
+      manifestExists &&
+      manifest?.mediaProduced === false &&
+      mediaFile === undefined
+    ) {
+      status = 'DEFECT';
+      defectReason = `Measured: exit 0, manifest written, manifest mediaProduced:false, no .${extension} file in the output folder; the matrix expects a playable ${preset} file.`;
+    }
+    return { status, defectReason, manifestExists, manifest, event, mediaFile, mediaProduced };
+  }
+
+  let renderMp4 = null;
+  // Row L-035: render (mp4)
   {
     const r = executeCli(
       ['render', '--project', defaultProjectId, '--preset', 'mp4', '--out', renderOutDir, '--json'],
       sandbox,
     );
-    const manifestFile = join(renderOutDir, `${defaultProjectId}.mp4.manifest.json`);
-    const manifestExists = existsSync(manifestFile);
-    recordEvidence('L-035.json', manifestExists ? readFileSync(manifestFile, 'utf8') : r.stdout);
-
-    // Record readiness evidence for cli.render.playable
-    readinessRecords.push({
-      id: 'cli.render.playable',
-      status: 'passed',
-      firstAttemptPassed: true,
-      retries: 0,
-      timestamp: new Date().toISOString(),
-      details: {
-        command: `joy-media render --project ${defaultProjectId} --preset mp4`,
-        exitCode: r.status,
-        manifestWritten: manifestExists,
-        mediaProduced: false,
-        note: 'Render entrypoint completed successfully and produced verified manifest.',
-      },
-    });
-
+    renderMp4 = { r, ...classifyRender(r, 'mp4', 'mp4') };
+    recordEvidence(
+      'L-035.json',
+      renderMp4.manifest ? JSON.stringify(renderMp4.manifest, null, 2) : r.stdout,
+    );
     rows.push({
       id: 'L-035',
       command: 'joy-media render (mp4)',
-      status: 'DEFECT',
+      status: renderMp4.status,
       exitCode: r.status,
-      summary:
-        'Headless render writes manifest only (mediaProduced: false); video encoding not implemented',
+      summary: 'A headless render writes a playable mp4 and a manifest',
       evidence: 'T-A13\\L-035.json',
-      defectReason:
-        'CLI render is manifest-only (mediaProduced: false) and does not encode playable media file',
+      defectReason: renderMp4.defectReason,
     });
   }
 
-  // Row L-036: render --preset webm (DEFECT: manifest-only)
+  // Row L-036: render --preset webm
   {
     const r = executeCli(
       [
@@ -1202,19 +1432,57 @@ export async function runCliMatrix(options = {}) {
       ],
       sandbox,
     );
-    const manifestFile = join(renderOutDir, `${defaultProjectId}.webm.manifest.json`);
-    const manifestExists = existsSync(manifestFile);
-    recordEvidence('L-036.json', manifestExists ? readFileSync(manifestFile, 'utf8') : r.stdout);
+    const c = classifyRender(r, 'webm', 'webm');
+    recordEvidence('L-036.json', c.manifest ? JSON.stringify(c.manifest, null, 2) : r.stdout);
     rows.push({
       id: 'L-036',
       command: 'joy-media render --preset webm',
-      status: 'DEFECT',
+      status: c.status,
       exitCode: r.status,
-      summary: 'WebM preset renders manifest only (mediaProduced: false)',
+      summary: 'The WebM preset writes a playable webm',
       evidence: 'T-A13\\L-036.json',
-      defectReason: 'CLI render is manifest-only, does not encode playable webm video',
+      defectReason: c.defectReason,
     });
   }
+
+  // Readiness record cli.render.playable, derived from the mp4 measurement above.
+  readinessRecords.push(
+    scenarioRecord(
+      'cli.render.playable',
+      [
+        { name: 'render-exit-zero', status: renderMp4.r.status === 0 ? 'passed' : 'failed' },
+        { name: 'manifest-written', status: renderMp4.manifestExists ? 'passed' : 'failed' },
+        { name: 'media-produced', status: renderMp4.mediaProduced ? 'passed' : 'failed' },
+      ],
+      {
+        command: `joy-media render --project ${defaultProjectId} --preset mp4`,
+        exitCode: renderMp4.r.status,
+        manifestWritten: renderMp4.manifestExists,
+        mediaProduced: renderMp4.mediaProduced,
+        manifestSaysMediaProduced: renderMp4.manifest?.mediaProduced ?? null,
+        mediaFile: renderMp4.mediaFile ?? null,
+      },
+    ),
+  );
+  // Readiness record cli.render.windows-entrypoints. The matrix runs the node entrypoint in
+  // a scratch profile; the installed joy.cmd / joy-media.cmd shims are not exercised, so
+  // those two checks are not-run (the record is "skipped", never passed).
+  readinessRecords.push(
+    scenarioRecord(
+      'cli.render.windows-entrypoints',
+      [
+        { name: 'joy-cmd-version-reported', status: 'not-run' },
+        { name: 'joy-media-cmd-version-reported', status: 'not-run' },
+        {
+          name: 'render-entrypoint-wrote-manifest',
+          status: renderMp4.r.status === 0 && renderMp4.manifestExists ? 'passed' : 'failed',
+        },
+      ],
+      {
+        note: 'Only the node entrypoint ran; installed .cmd shims are covered by I-005 in the installed lifecycle.',
+      },
+    ),
+  );
 
   // Row L-037: render --preset prores
   {
@@ -1242,19 +1510,26 @@ export async function runCliMatrix(options = {}) {
       existsSync(manifestFile) ? readFileSync(manifestFile, 'utf8') : rGood.stdout,
     );
 
-    // Record readiness evidence for cli.render.unsupported-features
-    readinessRecords.push({
-      id: 'cli.render.unsupported-features',
-      status: 'passed',
-      firstAttemptPassed: true,
-      retries: 0,
-      timestamp: new Date().toISOString(),
-      details: {
-        command: `joy-media render --project ${defaultProjectId} --preset bad-preset`,
-        exitCode: rBad.status,
-        note: 'Unsupported preset correctly rejected with usage error exit 2.',
-      },
-    });
+    // Readiness record cli.render.unsupported-features, derived from the bad-preset run.
+    readinessRecords.push(
+      scenarioRecord(
+        'cli.render.unsupported-features',
+        [
+          {
+            name: 'unsupported-preset-exit-2',
+            status: rBad.status === 2 ? 'passed' : 'failed',
+          },
+          {
+            name: 'unsupported-preset-message-on-stderr',
+            status: rBad.stderr.trim().length > 0 ? 'passed' : 'failed',
+          },
+        ],
+        {
+          command: `joy-media render --project ${defaultProjectId} --preset bad-preset`,
+          exitCode: rBad.status,
+        },
+      ),
+    );
 
     rows.push({
       id: 'L-037',
@@ -1308,13 +1583,18 @@ export async function runCliMatrix(options = {}) {
     };
     writeFileSync(missingProjFile, JSON.stringify(missingProjDoc, null, 2), 'utf8');
 
+    const manifestsBefore = new Set(listDir(renderOutDir));
     const rFail = executeCli(
       ['render', '--project', missingProjFile, '--out', renderOutDir, '--json'],
       sandbox,
     );
+    const manifestsAfterFail = listDir(renderOutDir).filter((n) => !manifestsBefore.has(n));
     const rRecover = executeCli(
       ['render', '--project', missingProjFile, '--allow-missing', '--out', renderOutDir, '--json'],
       sandbox,
+    );
+    const manifestsAfterRecover = listDir(renderOutDir).filter(
+      (n) => !manifestsBefore.has(n) && n.endsWith('.manifest.json'),
     );
     const pass = rFail.status === 1 && rRecover.status === 0;
 
@@ -1323,27 +1603,38 @@ export async function runCliMatrix(options = {}) {
       `Run 1 (missing media, exit ${rFail.status}):\n${rFail.stdout}\n${rFail.stderr}\n\nRun 2 (recovery with --allow-missing, exit ${rRecover.status}):\n${rRecover.stdout}`,
     );
 
-    // Record readiness evidence for cli.render.failure-recovery
-    readinessRecords.push({
-      id: 'cli.render.failure-recovery',
-      status: 'passed',
-      firstAttemptPassed: true,
-      retries: 0,
-      timestamp: new Date().toISOString(),
-      details: {
-        failureAttempt: {
-          command: `joy-media render --project ${missingProjFile}`,
-          exitCode: rFail.status,
-          error: 'missing-media',
+    // Readiness record cli.render.failure-recovery, derived from both runs.
+    const failEvent = lastJsonEvent(rFail.stdout);
+    readinessRecords.push(
+      scenarioRecord(
+        'cli.render.failure-recovery',
+        [
+          { name: 'missing-media-exit-1', status: rFail.status === 1 ? 'passed' : 'failed' },
+          {
+            name: 'failed-run-wrote-no-manifest',
+            status: manifestsAfterFail.length === 0 ? 'passed' : 'failed',
+          },
+          { name: 'allow-missing-exit-0', status: rRecover.status === 0 ? 'passed' : 'failed' },
+          {
+            name: 'recovery-wrote-manifest',
+            status: manifestsAfterRecover.length > 0 ? 'passed' : 'failed',
+          },
+        ],
+        {
+          failureAttempt: {
+            command: `joy-media render --project <missing-asset project>`,
+            exitCode: rFail.status,
+            finalEventType: failEvent?.type ?? null,
+            filesWritten: manifestsAfterFail,
+          },
+          recoveryAttempt: {
+            command: `joy-media render --project <missing-asset project> --allow-missing`,
+            exitCode: rRecover.status,
+            manifestsWritten: manifestsAfterRecover,
+          },
         },
-        recoveryAttempt: {
-          command: `joy-media render --project ${missingProjFile} --allow-missing`,
-          exitCode: rRecover.status,
-          manifestWritten: true,
-        },
-        note: 'Render failure on missing media followed by successful recovery with --allow-missing.',
-      },
-    });
+      ),
+    );
 
     rows.push({
       id: 'L-038',
@@ -1535,24 +1826,13 @@ export async function runCliMatrix(options = {}) {
       ['agent', 'slot', 'list', '--json'],
       ['agent', 'models', '--url', stubServer.baseUrl, '--api-key', 'dummy-key', '--json'],
     ];
-    let allValid = true;
-    for (const cmd of agentCmds) {
-      const res = executeCli(cmd, sandbox);
-      try {
-        JSON.parse(res.stdout);
-      } catch {
-        allValid = false;
-      }
-    }
-    recordEvidence(
-      'L-048.json',
-      JSON.stringify({ verifiedCommands: agentCmds.length, validJson: allValid }),
-    );
+    const jsonFamily = checkJsonFamily(agentCmds, sandbox);
+    recordEvidence('L-048.json', JSON.stringify(jsonFamily.report, null, 2));
     rows.push({
       id: 'L-048',
       command: 'agent --json shape',
-      status: allValid ? 'PASS' : 'FAIL',
-      exitCode: 0,
+      status: jsonFamily.ok ? 'PASS' : 'FAIL',
+      exitCode: jsonFamily.exitCode,
       summary: 'Agent subcommands accept --json and emit valid JSON documents',
       evidence: 'T-A13\\L-048.json',
     });
@@ -1565,24 +1845,13 @@ export async function runCliMatrix(options = {}) {
       ['project', 'show', defaultProjectId, '--json'],
       ['project', 'create', 'qa-json-check', '--json'],
     ];
-    let allValid = true;
-    for (const cmd of projCmds) {
-      const res = executeCli(cmd, sandbox);
-      try {
-        JSON.parse(res.stdout);
-      } catch {
-        allValid = false;
-      }
-    }
-    recordEvidence(
-      'L-049.json',
-      JSON.stringify({ verifiedCommands: projCmds.length, validJson: allValid }),
-    );
+    const jsonFamily = checkJsonFamily(projCmds, sandbox);
+    recordEvidence('L-049.json', JSON.stringify(jsonFamily.report, null, 2));
     rows.push({
       id: 'L-049',
       command: 'project --json shape',
-      status: allValid ? 'PASS' : 'FAIL',
-      exitCode: 0,
+      status: jsonFamily.ok ? 'PASS' : 'FAIL',
+      exitCode: jsonFamily.exitCode,
       summary: 'Project subcommands accept --json and emit valid JSON documents',
       evidence: 'T-A13\\L-049.json',
     });
@@ -1595,24 +1864,13 @@ export async function runCliMatrix(options = {}) {
       ['assets', 'list', '--kind', 'image', '--json'],
       ['assets', 'show', 'asset-sample-img', '--json'],
     ];
-    let allValid = true;
-    for (const cmd of assetCmds) {
-      const res = executeCli(cmd, sandbox);
-      try {
-        JSON.parse(res.stdout);
-      } catch {
-        allValid = false;
-      }
-    }
-    recordEvidence(
-      'L-050.json',
-      JSON.stringify({ verifiedCommands: assetCmds.length, validJson: allValid }),
-    );
+    const jsonFamily = checkJsonFamily(assetCmds, sandbox);
+    recordEvidence('L-050.json', JSON.stringify(jsonFamily.report, null, 2));
     rows.push({
       id: 'L-050',
       command: 'assets --json shape',
-      status: allValid ? 'PASS' : 'FAIL',
-      exitCode: 0,
+      status: jsonFamily.ok ? 'PASS' : 'FAIL',
+      exitCode: jsonFamily.exitCode,
       summary: 'Assets subcommands accept --json and emit valid JSON documents',
       evidence: 'T-A13\\L-050.json',
     });
@@ -1671,6 +1929,7 @@ export async function runCliMatrix(options = {}) {
     totalRows: rows.length,
     passedCount: rows.filter((r) => r.status === 'PASS').length,
     defectCount: rows.filter((r) => r.status === 'DEFECT').length,
+    notTestedCount: rows.filter((r) => r.status === 'NOT-TESTED').length,
     failedCount: rows.filter((r) => r.status === 'FAIL').length,
     readinessRecords,
     matrix: rows,
@@ -1708,11 +1967,17 @@ function printMatrixTable(rows, summary) {
         ? '\x1b[32mPASS  \x1b[0m'
         : row.status === 'DEFECT'
           ? '\x1b[33mDEFECT\x1b[0m'
-          : '\x1b[31mFAIL  \x1b[0m';
+          : row.status === 'NOT-TESTED'
+            ? '\x1b[36mNOTEST\x1b[0m'
+            : '\x1b[31mFAIL  \x1b[0m';
     const id = row.id.padEnd(5);
-    const exitStr = String(row.exitCode).padStart(4);
+    const exitStr = String(row.exitCode ?? '-').padStart(4);
     const cmd = row.command.slice(0, 44).padEnd(44);
-    const note = row.defectReason ? `[DEFECT] ${row.defectReason}` : row.summary;
+    const note = row.defectReason
+      ? `[DEFECT] ${row.defectReason}`
+      : row.note
+        ? `${row.summary} [${row.note}]`
+        : row.summary;
     console.log(`${id} | ${statusCol} | ${exitStr} | ${cmd} | ${note}`);
   }
 
@@ -1720,11 +1985,11 @@ function printMatrixTable(rows, summary) {
     '----------------------------------------------------------------------------------------',
   );
   console.log(
-    `Summary: Total: ${summary.totalRows} | Passed: ${summary.passedCount} | Defects: ${summary.defectCount} | Failed: ${summary.failedCount}`,
+    `Summary: Total: ${summary.totalRows} | Passed: ${summary.passedCount} | Defects: ${summary.defectCount} | Not tested: ${summary.notTestedCount} | Failed: ${summary.failedCount}`,
   );
   console.log('Readiness records emitted:');
   for (const rec of summary.readinessRecords) {
-    console.log(`  ✔ ${rec.id} (${rec.status})`);
+    console.log(`  ${rec.status === 'passed' ? 'ok ' : '-- '} ${rec.id} (${rec.status})`);
   }
   console.log(
     '========================================================================================\n',
