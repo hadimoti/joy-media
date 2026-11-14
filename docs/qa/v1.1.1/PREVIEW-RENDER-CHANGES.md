@@ -181,3 +181,7 @@ and is not blank. Whether each matches the intended look was not checked.
 - The shader digest covers four files. It does not cover the pixi, ffmpeg or libwebp versions.
 - On the transitions sheet, `gl:CircleCrop` shows a solid black mid-frame. The review asked
   whether that is correct. It was not checked.
+
+## Bloom (T-V04, 14 Nov 2026)
+
+Bloom used to blur the whole picture and brighten it; its Threshold slider was never read, so it did nothing. It is now a single-pass bright-pass bloom shader (BLOOM_FRAG in packages/renderer-pixi/src/effects-pixi.ts): only pixels brighter than the threshold feed a 7 by 7 Gaussian-weighted blur that is added back onto the sharp picture. This fixes a control that did not work; saved projects that use Bloom render differently (a soft glow around highlights instead of a blurred picture). Bloom has no ffmpeg or headless path, so exports use the same Pixi render.

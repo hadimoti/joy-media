@@ -83,6 +83,41 @@ uniform vec4 uInputSize;
 uniform vec4 uOutputFrame;
 `;
 
+/**
+ * Bloom (T-V04): a bright-pass blur added back onto the picture. Only pixels brighter than the
+ * threshold feed the glow, so the Threshold slider changes the result (before this the slider did
+ * nothing and the whole picture was blurred). One pass, a 7 by 7 Gaussian-weighted tap grid whose
+ * spread grows with the intensity.
+ */
+const BLOOM_FRAG = `${EFFECT_FRAG_HEADER}
+uniform float uAmount;
+uniform float uThreshold;
+
+void main()
+{
+    vec4 base = texture(uTexture, vTextureCoord);
+    vec2 px = uInputSize.zw;
+    float radius = 2.0 + uAmount * 14.0;
+    vec3 glow = vec3(0.0);
+    float weightSum = 0.0;
+    for (int y = -3; y <= 3; y++)
+    {
+        for (int x = -3; x <= 3; x++)
+        {
+            vec2 o = vec2(float(x), float(y));
+            float w = exp(-dot(o, o) / 6.0);
+            vec3 c = texture(uTexture, vTextureCoord + o * px * (radius / 3.0)).rgb;
+            float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+            float bright = smoothstep(uThreshold, uThreshold + 0.15, luma);
+            glow += c * bright * w;
+            weightSum += w;
+        }
+    }
+    glow /= weightSum;
+    finalColor = vec4(min(base.rgb + glow * (uAmount * 2.5), vec3(1.0)), base.a);
+}
+`;
+
 const COLOR_OVERLAY_FRAG = `${EFFECT_FRAG_HEADER}
 uniform float uR;
 uniform float uG;
@@ -838,11 +873,13 @@ function filterForEffect(effect: EffectInstanceIR): Filter[] | undefined {
     }
     case 'bloom': {
       const amount = effect.params.amount ?? 0.4;
-      const blur = new BlurFilter({ strength: Math.max(4, amount * 20), quality: 3 });
-      const tint = new ColorMatrixFilter();
-      tint.brightness(1 + amount * 0.3, false);
-      tint.contrast(1 + amount * 0.2, false);
-      return [blur, tint];
+      const threshold = effect.params.threshold ?? 0.6;
+      return [
+        createShaderEffectFilter('joy-bloom-filter', BLOOM_FRAG, {
+          uAmount: amount,
+          uThreshold: threshold,
+        }),
+      ];
     }
     case 'posterize': {
       const filter = createCreativeEffectFilter(effect);

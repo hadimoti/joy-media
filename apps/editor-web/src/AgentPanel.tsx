@@ -104,6 +104,12 @@ import {
   type JoyAgentHostToolName,
 } from './joy-agent/host-tool-contract.js';
 import {
+  isQcCheckRequest,
+  isQcHostToolName,
+  QC_HOST_TOOL_NAMES,
+} from './joy-agent/qc-request-intent.js';
+import { createEditorQcAdapter, type QcHostAdapter } from './joy-agent/qc-host-adapter.js';
+import {
   createJoyAgentComposerHostLease,
   interruptJoyAgentComposerHostLease,
   isJoyAgentComposerHostLeaseCurrent,
@@ -218,22 +224,21 @@ const LEGACY_JOY_AGENT_TOOL_NAMES = Object.freeze([
 ] as const satisfies readonly JoyAgentHostToolName[]);
 
 /**
- * Generation (T-C04) and QC review (T-B04) tools are in the shared catalog, but
- * this panel does not pass their host dependencies into
- * createJoyAgentHostRpcMethodsForSnapshot. Offering them would let the model
- * call a tool that no host answers. Drop a name here only in the same change
- * that registers its host method.
+/**
+ * Generation (T-C04) tools are in the shared catalog, but this panel does not pass their host
+ * dependencies into createJoyAgentHostRpcMethodsForSnapshot. Offering them would let the model call a
+ * tool that no host answers. Drop a name here only in the same change that registers its host method.
+ *
+ * The three QC tools (T-B04) are left out of an observation run for a different reason: they are
+ * offered only to a run that asked for a quality check and has a QC adapter (T-B04b).
  */
 const HOST_UNREGISTERED_TOOL_NAMES: ReadonlySet<JoyAgentHostToolName> =
-  new Set<JoyAgentHostToolName>([
-    'generate_media',
-    'attach_generated_media',
-    'qc_report_read',
-    'media_frames_view',
-    'media_contact_sheet',
-  ]);
-const OBSERVATION_OFFERED_TOOL_NAMES: readonly JoyAgentHostToolName[] =
-  JOY_AGENT_HOST_TOOL_NAMES.filter((name) => !HOST_UNREGISTERED_TOOL_NAMES.has(name));
+  new Set<JoyAgentHostToolName>(['generate_media', 'attach_generated_media']);
+const OBSERVATION_JOY_AGENT_TOOL_NAMES: readonly JoyAgentHostToolName[] = Object.freeze(
+  JOY_AGENT_HOST_TOOL_NAMES.filter(
+    (name) => !isQcHostToolName(name) && !HOST_UNREGISTERED_TOOL_NAMES.has(name),
+  ),
+);
 
 /** A Worker approval event held until the staged preview has actually rendered. */
 interface DeferredPreviewApproval {
@@ -713,6 +718,23 @@ export function AgentPanel({
   // The lease and candidate remain in private refs. React receives only a
   // redacted count/range/status, never frame IDs, a prompt, bytes, endpoint,
   // or BYOK material.
+  // The QC host adapter of the current quality-check run, if any. A new run or an
+  // unmount disposes the previous one so its report and frame store do not outlive it.
+  const qcAdapterRef = useRef<QcHostAdapter | undefined>(undefined);
+  /** The cached image probe of the connected model. It never starts a probe itself. */
+  const qcImageSupported = useCallback((): boolean => {
+    const media = joyAgentEngineClient?.getMediaCapabilities();
+    return (
+      media !== undefined &&
+      media.modelId === (joyAgentEngineClient?.getStatus()?.modelId ?? '') &&
+      media.image === 'supported' &&
+      media.modalities.includes('image')
+    );
+  }, [joyAgentEngineClient]);
+  const qcPrivacyAllowed = useCallback(
+    (): boolean => latestSettingsRef.current.privacyMode !== 'local-only',
+    [],
+  );
   const observationReviewLeaseRef = useRef<PrivateObservationReviewLease | undefined>(undefined);
   const observationReviewControllerRef = useRef<ObservationReviewController | undefined>(undefined);
   const observationReviewRegistrationRef = useRef(0);
@@ -1247,6 +1269,8 @@ export function AgentPanel({
       observationReviewControllerRef.current?.dispose();
       observationReviewControllerRef.current = undefined;
       observationReviewLeaseRef.current = undefined;
+      qcAdapterRef.current?.dispose();
+      qcAdapterRef.current = undefined;
       settleObservationReviewWaiter(new Error('JOY observation review was interrupted.'));
       preparedChangesRef.current.clear();
     };
@@ -1553,6 +1577,18 @@ export function AgentPanel({
         if (recipeRunScopeRef.current?.runId === scope.runId)
           recipeStagedChangeSetRef.current = changeSetId;
       },
+      createQcAdapter: (scope) =>
+        createEditorQcAdapter({
+          runId: scope.runId,
+          projectId: latestSessionRef.current.visualProject.id,
+          revision: scope.revision,
+          modelId: joyAgentEngineClient.getStatus()?.modelId ?? '',
+          promptPolicyDigest: digestJoyAgentPolicy(latestSettingsRef.current),
+          isCurrent: () => isRecipeAuthorityCurrent(scope),
+          getTimeline: () => latestSessionRef.current.timelineProject,
+          isCachedImageSupported: qcImageSupported,
+          isPrivacyModeAllowed: qcPrivacyAllowed,
+        }),
     });
     // currentPreparedAuthority closes over live session; the recipe deps read it
     // through the accessors above, so it is intentionally not a dependency.
@@ -1568,6 +1604,8 @@ export function AgentPanel({
     conversation.messages,
     registerObservationReviewCandidate,
     waitForObservationReview,
+    qcImageSupported,
+    qcPrivacyAllowed,
   ]);
 
   const isRecipeRunnerReady = isEditReady && creativeSkillDeps !== undefined;
@@ -2147,6 +2185,29 @@ export function AgentPanel({
               observationBridge = undefined;
             }
           }
+          // Only a run that asked for a quality check gets the QC tools. The
+          // adapter keeps every gate (image probe, privacy, consent, frame cap);
+          // frames are loaded on demand so ordinary edits never pull in the sampler.
+          qcAdapterRef.current?.dispose();
+          qcAdapterRef.current = undefined;
+          let qcAdapter: QcHostAdapter | undefined;
+          if (structured && isQcCheckRequest(body)) {
+            qcAdapter = createEditorQcAdapter({
+              runId,
+              projectId: contextInput.projectId,
+              revision: baseRevision,
+              modelId: capturedModelId ?? '',
+              promptPolicyDigest: capturedPolicyDigest,
+              isCurrent: () =>
+                activeModelRunIdRef.current === runId &&
+                latestSessionRef.current.visualProject.id === contextInput.projectId &&
+                latestSessionRef.current.projectRevisionId === baseRevision,
+              getTimeline: () => latestSessionRef.current.timelineProject,
+              isCachedImageSupported: qcImageSupported,
+              isPrivacyModeAllowed: qcPrivacyAllowed,
+            });
+            qcAdapterRef.current = qcAdapter;
+          }
           let stagedChangeSetId: string | undefined;
           revokeStagedChange = (): void => {
             if (stagedChangeSetId === undefined) return;
@@ -2235,12 +2296,18 @@ export function AgentPanel({
                     const catalog = await getDesktopAssetLibraryCatalog();
                     return catalog.assets.map((asset) => asset as JoyAgentLibraryEntry);
                   },
+                  qcAdapter,
                 ),
-                allowedToolNames:
-                  observationBridge === undefined
+                allowedToolNames: [
+                  ...(observationBridge === undefined
                     ? LEGACY_JOY_AGENT_TOOL_NAMES
-                    : OBSERVATION_OFFERED_TOOL_NAMES,
-                onCancelled: revokeStagedChange,
+                    : OBSERVATION_JOY_AGENT_TOOL_NAMES),
+                  ...(qcAdapter === undefined ? [] : QC_HOST_TOOL_NAMES),
+                ],
+                onCancelled: () => {
+                  revokeStagedChange();
+                  qcAdapter?.dispose();
+                },
               };
           const contextSnapshot = structured
             ? undefined

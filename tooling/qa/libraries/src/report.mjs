@@ -59,7 +59,7 @@ export function buildLibraryMarkdownReport(report) {
 
   for (const item of report.items) {
     const previewCell = item.preview.passed
-      ? `PASS Δ=${fmtNum(item.preview.vsBeforeMeanDiff)}`
+      ? `PASS${item.preview.neutralDefault ? ' (neutral default, visible when adjusted)' : ''} Δ=${fmtNum(item.preview.vsBeforeMeanDiff)}`
       : `FAIL Δ=${fmtNum(item.preview.vsBeforeMeanDiff)}`;
     const undoCell = item.resetUndoRedo.passed
       ? 'PASS'

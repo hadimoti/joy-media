@@ -70,6 +70,8 @@ export interface CreativeSkillEditorAppGraph {
   /** Records the change-set id a recipe run staged, so the caller can wire it
    * into the existing preview-approval UI. */
   readonly onStaged?: (scope: CreativeSkillRunScope, changeSetId: string) => void;
+  /** Builds the QC adapter for a recipe whose allow-list names a QC tool. */
+  readonly createQcAdapter?: RecipeScopedEditRunDeps['createQcAdapter'];
   /** Bounded wait for the renderer to acknowledge a staged preview. */
   readonly previewAckTimeoutMs?: number;
 }
@@ -207,6 +209,7 @@ export function createCreativeSkillEditorPrimitiveDeps(
       return graph.onObservationCompleted?.(scope, bridge, result.observationId);
     },
     ...(graph.onStaged === undefined ? {} : { onStaged: graph.onStaged }),
+    ...(graph.createQcAdapter === undefined ? {} : { createQcAdapter: graph.createQcAdapter }),
   };
 
   return {
