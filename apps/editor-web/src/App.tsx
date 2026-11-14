@@ -336,7 +336,11 @@ import {
   importProjectPackage,
   parseProjectPackage,
 } from './project-package.js';
-import { withCaptionBurnInNodes } from './caption-burn-in.js';
+import {
+  CAPTION_BURN_IN_KEY,
+  withCaptionBurnIn,
+  withCaptionBurnInNodes,
+} from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { TextPanel } from './TextPanel.js';
 import {
@@ -3324,9 +3328,15 @@ function EditorWorkspace({
         project: session.visualProject,
         token: Date.now().toString(36),
       });
+      // A new caption track is visible in the Monitor and the export at once; the CC panel's burn-in
+      // switch still turns it off. (Without this a caption exists but nothing draws it.)
+      const document =
+        insertion.project.pluginData[CAPTION_BURN_IN_KEY] === undefined
+          ? withCaptionBurnIn(insertion.project, true)
+          : insertion.project;
       session.dispatchCompound(insertion.label, {
         timeline: insertion.timeline,
-        document: insertion.project,
+        document,
       });
       resyncTimelineMedia();
       setState((current) => ({ ...current, selectedIds: [insertion.clipId] }));
@@ -7190,6 +7200,7 @@ function EditorWorkspace({
               ],
             });
           }}
+          onImportFiles={handleDroppedFiles}
           onRemoveMarker={(id) =>
             context.dispatchProject({
               label: `Remove marker ${id}`,

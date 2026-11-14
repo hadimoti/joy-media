@@ -46,6 +46,7 @@ import {
   FilterIcon,
   UploadIcon,
   CheckIcon,
+  GridDenseIcon,
   GridUiIcon,
   ListIcon,
   TrashIcon,
@@ -845,9 +846,7 @@ export function AssetLibraryPanel({
                 writeAssetViewMode(storage, 'large');
               }}
             >
-              <span className="asset-view-glyph asset-view-glyph--large" aria-hidden>
-                ▦
-              </span>
+              <GridUiIcon />
             </button>
             <button
               type="button"
@@ -861,7 +860,7 @@ export function AssetLibraryPanel({
                 writeAssetViewMode(storage, 'medium');
               }}
             >
-              <GridUiIcon />
+              <GridDenseIcon />
             </button>
             <button
               type="button"

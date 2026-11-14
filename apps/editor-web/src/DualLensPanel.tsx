@@ -44,6 +44,7 @@ import {
 } from './dual-lens-reveal.js';
 import { isTraversalKey, traverseGraph, type TraversalKey } from './graph-traversal.js';
 import { TimelineCanvas, type TimelineCanvasTrack } from './TimelineCanvas.js';
+import type { DroppedFilesTarget } from './timeline-media-import.js';
 import { timelineContentWidthPx } from './timeline-layout.js';
 import { nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
@@ -96,6 +97,8 @@ export interface DualLensPanelProps {
   readonly transitions?: readonly TransitionV1[];
   /** Root writer-gated adapter for child UI preferences. */
   readonly storage?: BrowserKeyValueStore;
+  /** Files dropped from the desktop or a folder onto the Time view. */
+  readonly onImportFiles?: (files: readonly File[], target: DroppedFilesTarget) => void;
 }
 
 export function DualLensPanel({
@@ -122,6 +125,7 @@ export function DualLensPanel({
   specialistReview,
   transitions = [],
   storage,
+  onImportFiles,
 }: DualLensPanelProps) {
   const [mode, setMode] = useState<LensMode>('time');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -223,6 +227,7 @@ export function DualLensPanel({
             {...(onRemoveMarker === undefined ? {} : { onRemoveMarker })}
             markers={markers}
             transitions={transitions}
+            {...(onImportFiles === undefined ? {} : { onImportFiles })}
           />
         )}
         {(mode === 'flow' || mode === 'split') && (
@@ -335,7 +340,9 @@ function TimeProjection({
   onRemoveMarker,
   markers,
   transitions,
+  onImportFiles,
 }: {
+  readonly onImportFiles?: (files: readonly File[], target: DroppedFilesTarget) => void;
   readonly lanes: readonly DualLensLane[];
   readonly durationUs: number;
   readonly playheadUs: number;
@@ -553,6 +560,17 @@ function TimeProjection({
         markers={markers}
         transitions={transitions}
         {...(onRemoveMarker === undefined ? {} : { onRemoveMarker })}
+        {...(onImportFiles === undefined
+          ? {}
+          : {
+              onFilesDrop: (files, target) =>
+                onImportFiles(files, {
+                  surface: 'timeline',
+                  timeUs: target.timeUs,
+                  ...(target.trackId === undefined ? {} : { trackId: target.trackId }),
+                  newTrack: target.newTrack,
+                }),
+            })}
       />
     </section>
   );

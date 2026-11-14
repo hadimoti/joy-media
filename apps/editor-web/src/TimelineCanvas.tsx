@@ -4,10 +4,11 @@
  * geometry so zoom/fit and clip widths stay one source of truth.
  */
 
-import { useContext, useEffect, useMemo, useRef } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildRulerTicks,
   fitPixelsPerSecond,
+  pixelToTime,
   timeToPixel,
   type TimelineViewport,
 } from '@joy-media/timeline-engine';
@@ -99,6 +100,11 @@ export interface TimelineCanvasProps {
   readonly markers?: readonly TimelineCanvasMarker[];
   readonly onRemoveMarker?: (id: string) => void;
   readonly transitions?: readonly TransitionV1[];
+  /** Files dropped from the desktop or a folder: on a lane (that track) or below the tracks (a new track). */
+  readonly onFilesDrop?: (
+    files: readonly File[],
+    target: { readonly trackId?: string; readonly timeUs: number; readonly newTrack: boolean },
+  ) => void;
 }
 
 function ItemGlyph({ icon }: { readonly icon: TimelineCanvasIcon | undefined }) {
@@ -327,8 +333,10 @@ export function TimelineCanvas({
   markers = [],
   onRemoveMarker,
   transitions = [],
+  onFilesDrop,
 }: TimelineCanvasProps) {
   const panelContext = useContext(EditorPanelContext);
+  const [fileDropTarget, setFileDropTarget] = useState<string | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
   const { selectedMarkerId, selectMarker, removeMarker } = useTimelineMarkerSelection(markers, {
@@ -375,7 +383,49 @@ export function TimelineCanvas({
   const playheadLeft = timelineOriginStyle(timeToPixel(playheadUs, { ...viewport, originUs: 0 }));
 
   return (
-    <div className={['timeline-tracks', className].filter(Boolean).join(' ')} ref={scrollRef}>
+    <div
+      className={['timeline-tracks', className].filter(Boolean).join(' ')}
+      ref={scrollRef}
+      {...(onFilesDrop === undefined
+        ? {}
+        : {
+            onDragOver: (event: React.DragEvent<HTMLDivElement>) => {
+              if (!event.dataTransfer.types.includes('Files')) return;
+              if ((event.target as HTMLElement).closest('.timeline-lane') !== null) return;
+              // Below the tracks (or on the ruler or a header): the files go on a new track.
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'copy';
+              setFileDropTarget('new');
+            },
+            onDragLeave: (event: React.DragEvent<HTMLDivElement>) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node))
+                setFileDropTarget((current) => (current === 'new' ? undefined : current));
+            },
+            onDrop: (event: React.DragEvent<HTMLDivElement>) => {
+              if (
+                !event.dataTransfer.types.includes('Files') &&
+                event.dataTransfer.files.length === 0
+              )
+                return;
+              if ((event.target as HTMLElement).closest('.timeline-lane') !== null) return;
+              event.preventDefault();
+              setFileDropTarget(undefined);
+              const rect =
+                laneMeasureRef.current?.getBoundingClientRect() ??
+                event.currentTarget.getBoundingClientRect();
+              onFilesDrop(Array.from(event.dataTransfer.files), {
+                timeUs: Math.max(
+                  0,
+                  pixelToTime(event.clientX - rect.left - 0, {
+                    originUs: 0,
+                    pixelsPerSecond: viewport.pixelsPerSecond,
+                  }),
+                ),
+                newTrack: true,
+              });
+            },
+          })}
+    >
       <div className="timeline-scrub-row" style={{ minWidth: timelineMinWidthStyle(laneWidthPx) }}>
         <div className="timeline-scrub-gutter">
           <output className="timeline-timecode" aria-live="polite">
@@ -426,7 +476,51 @@ export function TimelineCanvas({
                 controls={track.controls}
               />
             </div>
-            <div className="timeline-lane" style={{ minWidth: laneWidthPx }}>
+            <div
+              className={`timeline-lane${fileDropTarget === track.id ? ' is-file-drop' : ''}`}
+              style={{ minWidth: laneWidthPx }}
+              {...(onFilesDrop === undefined || track.advanced === true
+                ? {}
+                : {
+                    onDragOver: (event: React.DragEvent<HTMLDivElement>) => {
+                      if (!event.dataTransfer.types.includes('Files')) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      event.dataTransfer.dropEffect =
+                        track.controls?.locked === true ? 'none' : 'copy';
+                      setFileDropTarget(track.id);
+                    },
+                    onDragLeave: (event: React.DragEvent<HTMLDivElement>) => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node))
+                        setFileDropTarget((current) =>
+                          current === track.id ? undefined : current,
+                        );
+                    },
+                    onDrop: (event: React.DragEvent<HTMLDivElement>) => {
+                      if (
+                        !event.dataTransfer.types.includes('Files') &&
+                        event.dataTransfer.files.length === 0
+                      )
+                        return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setFileDropTarget(undefined);
+                      if (track.controls?.locked === true) return;
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      onFilesDrop(Array.from(event.dataTransfer.files), {
+                        trackId: track.id,
+                        timeUs: Math.max(
+                          0,
+                          pixelToTime(event.clientX - rect.left, {
+                            originUs: 0,
+                            pixelsPerSecond: viewport.pixelsPerSecond,
+                          }),
+                        ),
+                        newTrack: false,
+                      });
+                    },
+                  })}
+            >
               {index === 0 &&
                 markers.map((marker) => {
                   const selected = selectedMarkerId === marker.id;

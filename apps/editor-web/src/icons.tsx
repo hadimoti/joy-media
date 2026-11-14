@@ -329,6 +329,23 @@ export function GridUiIcon() {
   return <PngMaskIcon src={UI_ICONS.grid} />;
 }
 
+/** Nine small squares: the compact grid. */
+export function GridDenseIcon() {
+  return (
+    <Svg>
+      <rect x="2.5" y="2.5" width="3" height="3" />
+      <rect x="6.5" y="2.5" width="3" height="3" />
+      <rect x="10.5" y="2.5" width="3" height="3" />
+      <rect x="2.5" y="6.5" width="3" height="3" />
+      <rect x="6.5" y="6.5" width="3" height="3" />
+      <rect x="10.5" y="6.5" width="3" height="3" />
+      <rect x="2.5" y="10.5" width="3" height="3" />
+      <rect x="6.5" y="10.5" width="3" height="3" />
+      <rect x="10.5" y="10.5" width="3" height="3" />
+    </Svg>
+  );
+}
+
 export function ImageIcon() {
   return (
     <Svg>

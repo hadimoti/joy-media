@@ -20163,3 +20163,10 @@ label {
   background: #7d7f89;
   border-radius: var(--radius-xs);
 }
+
+/* A file dragged from the desktop over a lane: the lane shows where it will land. */
+.timeline-lane.is-file-drop {
+  outline: 1px dashed var(--joy-accent);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--joy-accent) 12%, transparent);
+}
