@@ -62,19 +62,26 @@ export function buildDerivedClipPresentation(
   audio: AudioState,
   originalClipId: string,
   derivedClipIds: readonly string[],
-  options: { readonly removeOriginal?: boolean; readonly splitLocalUs?: number } = {},
+  options: {
+    readonly removeOriginal?: boolean;
+    readonly splitLocalUs?: number;
+    /** False when the caller restores the animations from a clipboard snapshot instead. */
+    readonly copyPropertyAnimations?: boolean;
+  } = {},
 ): SpeedRampPresentationResult {
   let propertyProject = project;
-  for (const clipId of derivedClipIds) {
-    propertyProject =
-      options.splitLocalUs === undefined
-        ? duplicateClipPropertyAnimations(propertyProject, originalClipId, clipId)
-        : splitClipPropertyAnimations(
-            propertyProject,
-            originalClipId,
-            clipId,
-            options.splitLocalUs,
-          );
+  if (options.copyPropertyAnimations !== false) {
+    for (const clipId of derivedClipIds) {
+      propertyProject =
+        options.splitLocalUs === undefined
+          ? duplicateClipPropertyAnimations(propertyProject, originalClipId, clipId)
+          : splitClipPropertyAnimations(
+              propertyProject,
+              originalClipId,
+              clipId,
+              options.splitLocalUs,
+            );
+    }
   }
   if (options.removeOriginal) {
     propertyProject = removeClipPropertyAnimations(propertyProject, originalClipId);

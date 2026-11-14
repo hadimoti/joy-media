@@ -112,6 +112,67 @@ export function removeClipPropertyAnimations(project: JoyProjectV1, clipId: stri
   return removePropertyAnimations(project, clipPropertyAnimationOwners(clipId));
 }
 
+/**
+ * Clones the clip-owned animations of one clip, plus the animations owned by its
+ * bound visual object when `objectId` is given, for a clipboard snapshot. The
+ * entries keep their owner ids, so a cut can take them before it removes them.
+ */
+export function snapshotClipPropertyAnimations(
+  project: JoyProjectV1,
+  clipId: string,
+  objectId?: string,
+): readonly PropertyAnimationV2[] {
+  if (project.propertyAnimations === undefined) return [];
+  const owners: PropertyAnimationOwner[] = [
+    ...clipPropertyAnimationOwners(clipId),
+    ...(objectId === undefined ? [] : [{ ownerKind: 'visual-object' as const, ownerId: objectId }]),
+  ];
+  const ownerSet = new Set(owners.map(ownerKey));
+  return Object.values(normalized(project))
+    .filter((animation) => ownerSet.has(ownerKey(animation.binding)))
+    .map((animation) => cloneAnimation(animation));
+}
+
+/**
+ * Re-creates snapshot entries for a new clip. Clip-owned entries move to `clipId`;
+ * visual-object entries move to `objectId` and are skipped when no object is given
+ * (a shared, already-owned object must not gain copies). Other owner kinds are
+ * skipped. Throws when a target key already exists.
+ */
+export function restoreClipPropertyAnimations(
+  project: JoyProjectV1,
+  entries: readonly PropertyAnimationV2[],
+  target: { readonly clipId: string; readonly objectId?: string },
+): JoyProjectV1 {
+  if (entries.length === 0) return project;
+  const animations = normalized(project);
+  let changed = false;
+  for (const entry of entries) {
+    const ownerId =
+      entry.binding.ownerKind === 'visual-object'
+        ? target.objectId
+        : (CLIP_OWNER_KINDS as readonly string[]).includes(entry.binding.ownerKind)
+          ? target.clipId
+          : undefined;
+    if (ownerId === undefined) continue;
+    const binding = { ...entry.binding, ownerId };
+    const id = canonicalBindingKey(binding);
+    if (animations[id] !== undefined) {
+      throw new RangeError(`property animation target "${id}" already exists`);
+    }
+    animations[id] = {
+      binding,
+      value: JSON.parse(JSON.stringify(entry.value)) as AnimationValueV2,
+    };
+    changed = true;
+  }
+  return changed ? withAnimations(project, animations) : project;
+}
+
+function cloneAnimation(animation: PropertyAnimationV2): PropertyAnimationV2 {
+  return JSON.parse(JSON.stringify(animation)) as PropertyAnimationV2;
+}
+
 /** Clones selected owner-bound entries to new owners; source entries remain unchanged. */
 export function clonePropertyAnimations(
   project: JoyProjectV1,

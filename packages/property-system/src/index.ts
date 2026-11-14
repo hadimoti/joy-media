@@ -719,6 +719,8 @@ export {
   duplicateClipPropertyAnimations,
   removeClipPropertyAnimations,
   removePropertyAnimations,
+  restoreClipPropertyAnimations,
+  snapshotClipPropertyAnimations,
   splitClipPropertyAnimations,
   benchmarkScalarChannelSampling,
 } from './property-animation-lifecycle.js';

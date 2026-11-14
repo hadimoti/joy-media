@@ -17,7 +17,13 @@ import {
   type TimelineViewport,
 } from '@joy-media/timeline-engine';
 import type { CommandTransaction } from '@joy-media/commands';
-import type { Clip, SpikeProject, TransitionV1, VisualObjectV1 } from '@joy-media/project-schema';
+import type {
+  Clip,
+  JoyProjectV1,
+  SpikeProject,
+  TransitionV1,
+  VisualObjectV1,
+} from '@joy-media/project-schema';
 import { normalizePlaybackRate } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import type { TimelineTrackView } from '@joy-media/timeline-engine';
@@ -855,6 +861,7 @@ export function TimelinePanel({
   onMediaPlaced,
   onMediaPlacement,
   onPasteClips,
+  visualProject,
   assetDisplayNames,
   showToast,
   trackFlags: trackFlagsProp,
@@ -924,6 +931,8 @@ export function TimelinePanel({
   ) => void;
   /** Pastes the clipboard at the playhead (the App binds pasted media and copies clip state). */
   readonly onPasteClips?: () => void;
+  /** The visual project, so toolbar Copy and Cut keep each clip's controller and animations. */
+  readonly visualProject?: JoyProjectV1;
   /** Human labels from the creative asset catalog, keyed by opaque asset id. */
   readonly assetDisplayNames?: Readonly<Record<string, string>>;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
@@ -1460,7 +1469,7 @@ export function TimelinePanel({
     selectedIds.includes(clipId) ? selectedIds : [clipId];
   const copyClipIds = (ids: readonly string[]) => {
     if (ids.length === 0) return;
-    const copied = copyTimelineClips(composition, ids);
+    const copied = copyTimelineClips(composition, ids, visualProject);
     if (copied) {
       showToast?.(
         `Copied ${copied.items.length} clip${copied.items.length === 1 ? '' : 's'}.`,
@@ -1474,6 +1483,7 @@ export function TimelinePanel({
       composition,
       selectedClipIds: ids,
       tracks,
+      ...(visualProject === undefined ? {} : { visualProject }),
     });
     if (plan.ok) {
       onDispatch(plan.transaction);

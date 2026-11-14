@@ -4,8 +4,11 @@ import type {
   Clip,
   Composition,
   JoyProjectV1,
+  PropertyAnimationV2,
   SpikeProject,
+  VisualObjectV1,
 } from '@joy-media/project-schema';
+import { snapshotClipPropertyAnimations } from '@joy-media/property-system';
 import {
   buildTimelineDeletePlan,
   type TimelineDeleteTrackState,
@@ -20,10 +23,40 @@ import {
 import { sortTracksForTimelineDisplay } from './timeline-track-family.js';
 import { timelineTrackKind, type TimelineTrackKind } from './timeline-track-kind.js';
 
+/**
+ * What a clip carries beyond its Clip record. Captured when the clip is copied or
+ * cut, before a cut removes its animations, so a paste can rebuild them even after
+ * the source clip is gone.
+ */
+export interface TimelineClipStateSnapshot {
+  /** The clip's bound visual object (its media controller), cloned. Absent when unbound. */
+  readonly object?: VisualObjectV1;
+  /** Clip-owned and bound-object-owned property animations, cloned with their owner ids. */
+  readonly animations: readonly PropertyAnimationV2[];
+}
+
+export function captureTimelineClipState(
+  project: JoyProjectV1,
+  clipId: string,
+): TimelineClipStateSnapshot {
+  const objectId = readClipObjectMap(project)[clipId];
+  const bound = objectId === undefined ? undefined : project.visualObjects[objectId];
+  return {
+    ...(bound === undefined ? {} : { object: JSON.parse(JSON.stringify(bound)) as VisualObjectV1 }),
+    animations: snapshotClipPropertyAnimations(
+      project,
+      clipId,
+      bound === undefined ? undefined : objectId,
+    ),
+  };
+}
+
 export interface TimelineClipboardClip {
   readonly trackId: string;
   readonly clip: Clip;
   readonly offsetUs: number; // Offset relative to the earliest clip in the selection
+  /** Present when the copy or cut had the project to read the clip's state from. */
+  readonly state?: TimelineClipStateSnapshot;
 }
 
 export interface TimelineClipClipboardData {
@@ -42,6 +75,7 @@ let activeClipboard: TimelineClipClipboardData | undefined;
 function clipboardFromSelection(
   composition: Composition,
   selectedClipIds: readonly string[],
+  visualProject?: JoyProjectV1,
 ): TimelineClipClipboardData | undefined {
   if (selectedClipIds.length === 0) return undefined;
   const selectedSet = new Set(selectedClipIds);
@@ -62,6 +96,9 @@ function clipboardFromSelection(
     trackId: m.trackId,
     clip: JSON.parse(JSON.stringify(m.clip)) as Clip,
     offsetUs: m.clip.startUs - minStartUs,
+    ...(visualProject === undefined
+      ? {}
+      : { state: captureTimelineClipState(visualProject, m.clip.id) }),
   }));
 
   return { items };
@@ -70,12 +107,15 @@ function clipboardFromSelection(
 /**
  * Copies the currently selected clips from the given composition to clipboard.
  * Preserves the original track ID and the relative temporal offset between clips.
+ * Pass the visual project to keep each clip's controller and animations too; a
+ * paste then matches Duplicate, which no longer needs the source clip to exist.
  */
 export function copyTimelineClips(
   composition: Composition,
   selectedClipIds: readonly string[],
+  visualProject?: JoyProjectV1,
 ): TimelineClipClipboardData | undefined {
-  const data = clipboardFromSelection(composition, selectedClipIds);
+  const data = clipboardFromSelection(composition, selectedClipIds, visualProject);
   if (data !== undefined) activeClipboard = data;
   return data;
 }
@@ -110,6 +150,8 @@ export function buildTimelineCutPlan(input: {
   readonly composition: Composition;
   readonly selectedClipIds: readonly string[];
   readonly tracks?: readonly TimelineDeleteTrackState[];
+  /** The visual project; read before the cut removes the clips' animations. */
+  readonly visualProject?: JoyProjectV1;
 }): TimelineCutPlan {
   if (input.selectedClipIds.length === 0) {
     return { ok: false, reason: 'Select one or more clips to cut.' };
@@ -129,7 +171,11 @@ export function buildTimelineCutPlan(input: {
     return { ok: false, reason: deletePlan.reason };
   }
 
-  const clipboard = clipboardFromSelection(input.composition, input.selectedClipIds);
+  const clipboard = clipboardFromSelection(
+    input.composition,
+    input.selectedClipIds,
+    input.visualProject,
+  );
   if (!clipboard || clipboard.items.length === 0) {
     return { ok: false, reason: 'Select one or more clips to cut.' };
   }
@@ -173,6 +219,7 @@ export interface TimelinePastedClip {
   readonly sourceClipId: string;
   readonly trackId: string;
   readonly clip: Clip;
+  readonly state?: TimelineClipStateSnapshot;
 }
 
 export type TimelinePastePlan =
@@ -324,6 +371,7 @@ export function buildTimelinePastePlan(input: TimelinePasteInput): TimelinePaste
         id: clipId,
         startUs: basePlayheadUs + item.offsetUs,
       },
+      ...(item.state === undefined ? {} : { state: item.state }),
     };
   });
 

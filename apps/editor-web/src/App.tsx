@@ -3795,7 +3795,7 @@ function EditorWorkspace({
     const composition =
       session.timelineProject.compositions[session.timelineProject.rootCompositionId];
     if (composition === undefined || current.selectedIds.length === 0) return;
-    const data = copyTimelineClips(composition, current.selectedIds);
+    const data = copyTimelineClips(composition, current.selectedIds, session.visualProject);
     if (data && data.items.length > 0) {
       showToast(`Copied ${data.items.length} clip${data.items.length === 1 ? '' : 's'}.`, 'info');
     }
@@ -3810,6 +3810,7 @@ function EditorWorkspace({
       composition,
       selectedClipIds: current.selectedIds,
       tracks: timelineTrackFlags,
+      visualProject: session.visualProject,
     });
     if (!plan.ok) {
       showToast(plan.reason, 'info');
@@ -3849,7 +3850,11 @@ function EditorWorkspace({
         height: composition.height,
       }),
       plan.transaction,
-      plan.pastes.map((paste) => ({ sourceClipId: paste.sourceClipId, clipId: paste.clipId })),
+      plan.pastes.map((paste) => ({
+        sourceClipId: paste.sourceClipId,
+        clipId: paste.clipId,
+        ...(paste.state === undefined ? {} : { state: paste.state }),
+      })),
     );
     setState((active) => ({ ...active, selectedIds: plan.pastedClipIds }));
     showToast(
@@ -6880,6 +6885,7 @@ function EditorWorkspace({
           snapping={snapping}
           onSnappingChange={setSnappingPersisted}
           onPasteClips={pasteClipsAtPlayhead}
+          visualProject={visualProject}
           markers={activeTimelineMarkers}
           onRevealInFlow={context.revealInFlow}
           {...(context.dataLanes === undefined || context.artifacts === undefined

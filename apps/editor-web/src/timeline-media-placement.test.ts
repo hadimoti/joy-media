@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
+import { canonicalBindingKey } from '@joy-media/project-schema';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
 import {
@@ -10,10 +11,12 @@ import {
 } from './sticker-bindings.js';
 import { buildTimelineClipReplaceTransaction } from './timeline-clip-interaction.js';
 import {
+  buildTimelineCutPlan,
   buildTimelinePastePlan,
   copyTimelineClips,
   projectIdsInUse,
   timelinePastePlacements,
+  type TimelineClipClipboardData,
 } from './timeline-clip-clipboard.js';
 import { audioStateFromProject } from './timeline-presentation.js';
 import { applyTimelineMediaPlacement } from './timeline-media-placement.js';
@@ -258,5 +261,190 @@ describe('timeline paste history', () => {
     const placements = timelinePastePlacements(pastes, assets, { width: 1920, height: 1080 });
     expect(placements.map((placement) => placement.clipId)).toEqual(['p-image']);
     expect(placements[0]?.frame).toEqual({ width: 1920, height: 1080 });
+  });
+});
+
+describe('timeline clip state paste (look and keyframes)', () => {
+  const look = {
+    x: 120,
+    y: -40,
+    scaleX: 0.5,
+    scaleY: 0.75,
+    rotationDeg: 15,
+    opacity: 0.6,
+    crop: { left: 0.1, top: 0.05, right: 0, bottom: 0.2 },
+  };
+
+  /** A product clip whose controller has a non-default look and one opacity keyframe curve. */
+  function lookFixture() {
+    const timeline = buildReferenceSpikeProject();
+    const root = timeline.compositions.root!;
+    const sourceClip = root.tracks
+      .flatMap((track) => track.clips)
+      .find((clip) => clip.id === 'product')!;
+    expect(sourceClip.kind).toBe('video');
+    const assetId = sourceClip.kind === 'video' ? sourceClip.assetId : 'unused';
+    const sourceControllerId = `media-controller-${sourceClip.id}`;
+    const animation = {
+      binding: {
+        ownerKind: 'clip' as const,
+        ownerId: sourceClip.id,
+        propertyId: 'opacity',
+        timeDomain: 'clip-local' as const,
+      },
+      value: {
+        kind: 'scalar' as const,
+        curve: {
+          keyframes: [
+            { timeUs: 0, value: 0, interpolation: 'linear' as const },
+            { timeUs: 1_000_000, value: 1, interpolation: 'linear' as const },
+          ],
+        },
+      },
+    };
+    const visual = writeClipMediaKind(
+      bindClipToObject(
+        {
+          ...INITIAL_EDITOR_PROJECT,
+          assets: {
+            ...INITIAL_EDITOR_PROJECT.assets,
+            [assetId]: { id: assetId, kind: 'image', displayName: 'Product still' },
+          },
+          visualObjects: {
+            ...INITIAL_EDITOR_PROJECT.visualObjects,
+            [sourceControllerId]: {
+              ...INITIAL_EDITOR_PROJECT.visualObjects['product-image']!,
+              id: sourceControllerId,
+              assetId,
+              transform: look,
+            },
+          },
+          propertyAnimations: { [canonicalBindingKey(animation.binding)]: animation },
+        },
+        sourceClip.id,
+        sourceControllerId,
+      ),
+      sourceClip.id,
+      'image',
+    );
+    return { timeline, root, visual, sourceClip, sourceControllerId };
+  }
+
+  const clipAnimations = (session: EditorSession, clipId: string) =>
+    Object.values(session.visualProject.propertyAnimations ?? {}).filter(
+      (animation) => animation.binding.ownerKind === 'clip' && animation.binding.ownerId === clipId,
+    );
+
+  /** The animations of one clip, re-owned to another clip id. */
+  const retargeted = (animations: ReturnType<typeof clipAnimations>, clipId: string) =>
+    animations.map((animation) => ({
+      binding: { ...animation.binding, ownerId: clipId },
+      value: animation.value,
+    }));
+
+  /** Pastes a clipboard at the playhead through the same path the App uses. */
+  function pasteClipboard(
+    session: EditorSession,
+    clipboard: TimelineClipClipboardData,
+    playheadUs: number,
+    id: string,
+  ): string {
+    const root = session.timelineProject.compositions.root!;
+    const plan = buildTimelinePastePlan({
+      composition: root,
+      clipboard,
+      playheadUs,
+      reservedIds: projectIdsInUse(session.timelineProject, session.visualProject),
+      idGenerator: () => id,
+    });
+    if (!plan.ok) throw new Error(plan.reason);
+    applyTimelineMediaPlacement(
+      session,
+      audioStateFromProject(session.visualProject),
+      plan.transaction,
+      timelinePastePlacements(plan.pastes, session.visualProject.assets, {
+        width: root.width,
+        height: root.height,
+      }),
+      plan.pastes.map((paste) => ({
+        sourceClipId: paste.sourceClipId,
+        clipId: paste.clipId,
+        ...(paste.state === undefined ? {} : { state: paste.state }),
+      })),
+    );
+    return plan.pastedClipIds[0]!;
+  }
+
+  it('gives the pasted controller the source transform, crop and opacity, and re-creates its keyframes', () => {
+    const { timeline, root, visual, sourceClip, sourceControllerId } = lookFixture();
+    const session = new EditorSession(memoryStorage(), timeline, visual);
+    const sourceAnimations = clipAnimations(session, sourceClip.id);
+    expect(sourceAnimations).toHaveLength(1);
+
+    const clipboard = copyTimelineClips(root, [sourceClip.id], visual)!;
+    const pastedId = pasteClipboard(session, clipboard, root.durationUs + 1_000_000, 'pasted-look');
+    const controllerId = `media-controller-${pastedId}`;
+
+    expect(readClipObjectMap(session.visualProject)[pastedId]).toBe(controllerId);
+    expect(session.visualProject.visualObjects[controllerId]?.transform).toEqual(
+      session.visualProject.visualObjects[sourceControllerId]?.transform,
+    );
+    expect(session.visualProject.visualObjects[controllerId]?.transform).toEqual(look);
+    expect(clipAnimations(session, pastedId)).toEqual(retargeted(sourceAnimations, pastedId));
+    expect(clipAnimations(session, sourceClip.id)).toEqual(sourceAnimations);
+  });
+
+  it('keeps the keyframes and the controller look when a cut clip is pasted', () => {
+    const { timeline, root, visual, sourceClip } = lookFixture();
+    const session = new EditorSession(memoryStorage(), timeline, visual);
+    const sourceAnimations = clipAnimations(session, sourceClip.id);
+
+    const cut = buildTimelineCutPlan({
+      composition: root,
+      selectedClipIds: [sourceClip.id],
+      visualProject: visual,
+    });
+    if (!cut.ok) throw new Error(cut.reason);
+    applyTimelineMediaPlacement(session, audioStateFromProject(visual), cut.transaction, []);
+    expect(clipAnimations(session, sourceClip.id)).toHaveLength(0);
+
+    const pastedId = pasteClipboard(
+      session,
+      cut.clipboard,
+      root.durationUs + 1_000_000,
+      'pasted-cut',
+    );
+    const controllerId = `media-controller-${pastedId}`;
+
+    expect(session.visualProject.visualObjects[controllerId]?.transform).toEqual(look);
+    expect(clipAnimations(session, pastedId)).toEqual(retargeted(sourceAnimations, pastedId));
+  });
+
+  it('undoes a media paste as one step: the clip, its controller and its keyframes', () => {
+    const { timeline, root, visual, sourceClip } = lookFixture();
+    const session = new EditorSession(memoryStorage(), timeline, visual);
+    const clipboard = copyTimelineClips(root, [sourceClip.id], visual)!;
+    const pastedId = pasteClipboard(session, clipboard, root.durationUs + 1_000_000, 'pasted-undo');
+    const controllerId = `media-controller-${pastedId}`;
+    const clipIds = () =>
+      session.timelineProject.compositions
+        .root!.tracks.flatMap((track) => track.clips)
+        .map((clip) => clip.id);
+    expect(clipIds()).toContain(pastedId);
+    expect(clipAnimations(session, pastedId)).toHaveLength(1);
+
+    session.undo();
+
+    expect(clipIds()).not.toContain(pastedId);
+    expect(session.visualProject.visualObjects[controllerId]).toBeUndefined();
+    expect(readClipObjectMap(session.visualProject)[pastedId]).toBeUndefined();
+    expect(clipAnimations(session, pastedId)).toHaveLength(0);
+    expect(clipAnimations(session, sourceClip.id)).toHaveLength(1);
+
+    session.redo();
+
+    expect(clipIds()).toContain(pastedId);
+    expect(session.visualProject.visualObjects[controllerId]?.transform).toEqual(look);
+    expect(clipAnimations(session, pastedId)).toHaveLength(1);
   });
 });
