@@ -104,6 +104,19 @@ function readLoadingLogoDataUrl(): string | undefined {
 }
 
 /**
+ * The JOY mark as a Windows icon for every window (title bar, taskbar, Alt+Tab), so Electron's own icon never shows when
+ * the app runs from electron.exe. `copy-static.mjs` puts the file in `dist/assets`; a development run reads the build folder.
+ */
+function windowIconOption(): { icon?: string } {
+  const candidates = [
+    join(__dirname, '..', 'assets', 'joy-media.ico'),
+    join(__dirname, '..', '..', 'build', 'joy-media.ico'),
+  ];
+  const icon = candidates.find((candidate) => existsSync(candidate));
+  return icon === undefined ? {} : { icon };
+}
+
+/**
  * A packaged window stays hidden until its renderer has loaded. If that takes longer than
  * PACKAGED_LOADING_DELAY_MS, a small JOY Media loading window (a data: page, so no network) shows until then.
  * A quick start never shows it. The renderer's load is the signal: `did-finish-load` on the packaged page.
@@ -125,6 +138,7 @@ function showPackagedWindowWhenLoaded(win: BrowserWindow): void {
       show: false,
       center: true,
       backgroundColor: '#000000',
+      ...windowIconOption(),
       // No preload: the loading page is static and must not get the IPC bridge.
       webPreferences: {
         sandbox: true,
@@ -141,24 +155,34 @@ function showPackagedWindowWhenLoaded(win: BrowserWindow): void {
     const page = devLoadingPageHtml(readLoadingLogoDataUrl());
     void loadingWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
   };
+  const startedAt = Date.now();
   const timer = setTimeout(openSplash, PACKAGED_LOADING_DELAY_MS);
+  let editorTimer: ReturnType<typeof setTimeout> | undefined;
   const showEditor = (): void => {
     loaded = true;
     clearTimeout(timer);
     closeSplash();
     if (!win.isDestroyed()) win.show();
   };
-  win.webContents.once('did-finish-load', showEditor);
+  // Like the development start: the editor opens once its page has loaded AND the loading bar is full.
+  const showEditorWhenBarIsFull = (): void => {
+    const rest = DEV_LOADING_BAR_MS - (Date.now() - startedAt);
+    if (rest <= 0) showEditor();
+    else editorTimer = setTimeout(showEditor, rest);
+  };
+  win.webContents.once('did-finish-load', showEditorWhenBarIsFull);
   win.webContents.on(
     'did-fail-load',
     (_event, errorCode, _errorDescription, _validatedUrl, isMainFrame) => {
       // -3 is an aborted navigation. A failed main frame still shows its error page, as it did before the wait.
       if (errorCode === -3 || !isMainFrame) return;
+      clearTimeout(editorTimer);
       showEditor();
     },
   );
   win.on('closed', () => {
     clearTimeout(timer);
+    clearTimeout(editorTimer);
     closeSplash();
   });
 }
@@ -587,6 +611,7 @@ if (!app.requestSingleInstanceLock()) {
       frame: false,
       titleBarStyle: 'hidden',
       backgroundColor: '#000000',
+      ...windowIconOption(),
       webPreferences: {
         ...buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
         ...(testApiBaseUrl === undefined

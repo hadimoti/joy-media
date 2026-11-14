@@ -64,8 +64,8 @@ describe('devLoadingPageHtml', () => {
 });
 
 describe('PACKAGED_LOADING_DELAY_MS', () => {
-  it('waits 300 ms before a packaged start shows the loading window, so a fast start never flashes it', () => {
-    expect(PACKAGED_LOADING_DELAY_MS).toBe(300);
+  it('shows the loading window at once, so a packaged start looks like the development start', () => {
+    expect(PACKAGED_LOADING_DELAY_MS).toBe(0);
   });
 });
 

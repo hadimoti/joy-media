@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 
@@ -52,3 +52,13 @@ await writeFile(
   await readFile(resolve(srcPreloadDir, 'ipc-channels.cjs')),
 );
 process.stdout.write(`Wrote self-contained preload bridge into ${distPreloadDir}\n`);
+
+// The JOY mark as a window icon (electron-entry.ts reads dist/assets/joy-media.ico for every window).
+const distAssetsDir = resolve(desktopRoot, 'dist', 'assets');
+await mkdir(distAssetsDir, { recursive: true });
+await copyFile(
+  resolve(desktopRoot, 'build', 'joy-media.ico'),
+  resolve(distAssetsDir, 'joy-media.ico'),
+);
+process.stdout.write(`Copied the JOY window icon into ${distAssetsDir}
+`);
