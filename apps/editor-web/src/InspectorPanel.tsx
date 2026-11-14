@@ -1009,7 +1009,7 @@ export function InspectorPanel({
         </div>
       </div>
       {selectedSourceMissing === true && (
-        <div className="inspector-missing-source" role="alert">
+        <div className="inspector-missing-source" role="status">
           <span>The source file is missing</span>
           {onRelinkSelectedSource !== undefined && (
             <button

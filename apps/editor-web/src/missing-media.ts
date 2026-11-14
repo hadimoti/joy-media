@@ -1,4 +1,4 @@
-import type { AssetRecordV1, SpikeProject } from '@joy-media/project-schema';
+import type { AssetRecordV1, Clip, SpikeProject } from '@joy-media/project-schema';
 import { verifyReplacementMedia, type RelinkCache } from './media-relink.js';
 import { flattenRootTimelineVideoClips } from './timeline-nested-playback.js';
 
@@ -57,22 +57,30 @@ export function missingAssetIdSet(missing: readonly MissingMediaEntry[]): Readon
 }
 
 /**
- * The display name of the missing file that the Program Monitor cannot draw at `timeUs`, or
- * undefined when every video clip playing then has its file. The monitor shows a "Media offline"
- * frame with this name instead of a black or stale picture (T-R03).
+ * True when a timeline clip's file is missing. A clip is marked exactly when its asset id is in the
+ * set, so only the clips that use the missing file are marked (T-R03). Composition clips have no file.
  */
-export function missingClipNameAt(
+export function isClipMissing(clip: Clip, missingAssetIds: ReadonlySet<string>): boolean {
+  return 'assetId' in clip && missingAssetIds.has(clip.assetId);
+}
+
+/**
+ * The Program Monitor's "Media offline" lookup for one project. For a playhead time it returns the
+ * asset id of the first playing video clip whose file is missing, or undefined. The root timeline is
+ * flattened here, once per project and missing set, so a playhead tick only scans the missing clips
+ * (T-R03).
+ */
+export function createMissingClipLookup(
   project: SpikeProject,
   missingAssetIds: ReadonlySet<string>,
-  timeUs: number,
-  nameOf: (assetId: string) => string,
-): string | undefined {
-  if (missingAssetIds.size === 0) return undefined;
-  const playing = flattenRootTimelineVideoClips(project).filter(
-    (clip) => timeUs >= clip.startUs && timeUs < clip.startUs + clip.durationUs,
+): (timeUs: number) => string | undefined {
+  if (missingAssetIds.size === 0) return () => undefined;
+  const missingClips = flattenRootTimelineVideoClips(project).filter((clip) =>
+    missingAssetIds.has(clip.assetId),
   );
-  const missingClip = playing.find((clip) => missingAssetIds.has(clip.assetId));
-  return missingClip === undefined ? undefined : nameOf(missingClip.assetId);
+  return (timeUs) =>
+    missingClips.find((clip) => timeUs >= clip.startUs && timeUs < clip.startUs + clip.durationUs)
+      ?.assetId;
 }
 
 /**

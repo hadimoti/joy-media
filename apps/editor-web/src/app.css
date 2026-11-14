@@ -19744,17 +19744,22 @@ label {
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
 }
-/* T-R03: a clip whose file is missing is hatched and greyed, with a "!" badge that opens the relink step. */
+/* T-R03: a clip whose file is missing is neutral grey and hatched, with a "!" badge that opens the relink
+   step. No filter: the accent selection outline and the badge keep their own colours. */
 .timeline-clip.is-missing {
-  background-image: repeating-linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.1) 0 6px,
-    rgba(0, 0, 0, 0.18) 6px 12px
-  );
-  filter: grayscale(1);
-  opacity: 0.78;
+  background:
+    repeating-linear-gradient(135deg, rgb(255 255 255 / 10%) 0 6px, rgb(0 0 0 / 18%) 6px 12px),
+    #3b3c42;
   outline: 1px dashed var(--joy-warning);
   outline-offset: -1px;
+}
+.timeline-clip.is-missing[aria-pressed='true'] {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 1px;
+}
+.timeline-clip.is-missing:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 1px;
 }
 .timeline-clip-missing-badge {
   position: absolute;
@@ -19771,30 +19776,31 @@ label {
   font: 700 12px/18px var(--font-ui, system-ui, sans-serif);
   cursor: pointer;
 }
-.timeline-clip-missing-badge:focus-visible {
-  outline: 2px solid var(--joy-text);
-  outline-offset: 1px;
-}
+/* T-R03: a small corner note, not a cover. It never hides the picture, the layers beneath it or the
+   monitor handles, so pointer events pass through. */
 .monitor-media-offline {
   position: absolute;
-  inset: 0;
+  top: 12px;
+  left: 12px;
   z-index: 3;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 16px;
-  background: #15161a;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgb(21 22 26 / 80%);
   color: var(--joy-text-secondary);
-  text-align: center;
+  font-size: var(--joy-type-xs);
+  pointer-events: none;
 }
 .monitor-media-offline strong {
+  flex: none;
   color: var(--joy-warning);
   font-weight: 600;
 }
 .monitor-media-offline span {
-  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

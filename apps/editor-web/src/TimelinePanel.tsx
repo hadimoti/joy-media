@@ -131,6 +131,7 @@ import {
   type TimelineRect,
 } from './timeline-marquee-selection.js';
 import { timelineGapsForClips, type TimelineGap } from './timeline-gaps.js';
+import { isClipMissing } from './missing-media.js';
 import { nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { AgentTimelineOverlay, hasRenderableAgentTimelineOverlay } from './AgentTimelineOverlay.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
@@ -671,21 +672,22 @@ function TimelineClip({
         </span>
       )}
       {missingName !== undefined && (
-        <button
-          type="button"
+        // Not a button: a button inside the clip's role="button" is nested-interactive. Keyboard users
+        // reach Relink from the Inspector alert and the clip's context menu; the clip's aria-label
+        // already says the media is missing.
+        <span
           className="timeline-clip-missing-badge"
-          aria-label={`Relink missing media: ${missingName}`}
+          aria-hidden="true"
           title={`Media is missing: ${missingName}. Click to relink`}
           onPointerDown={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => {
-            event.preventDefault();
             event.stopPropagation();
             onRelinkMissing?.();
           }}
         >
           !
-        </button>
+        </span>
       )}
     </div>
   );
@@ -2247,7 +2249,7 @@ export function TimelinePanel({
             action: () => undefined,
             disabled: true,
           };
-    const clipMissing = 'assetId' in clip && missingAssetIds?.has(clip.assetId) === true;
+    const clipMissing = missingAssetIds !== undefined && isClipMissing(clip, missingAssetIds);
     const relinkItems: ContextMenuItem[] =
       clipMissing && onRelinkMissing !== undefined
         ? [
@@ -3605,7 +3607,8 @@ export function TimelinePanel({
                         ? { displayName: assetDisplayNames[clip.assetId] }
                         : {})}
                       {...(clip.kind !== 'composition' &&
-                      missingAssetIds?.has(clip.assetId) === true
+                      missingAssetIds !== undefined &&
+                      isClipMissing(clip, missingAssetIds)
                         ? {
                             missingName: assetDisplayNames?.[clip.assetId] ?? 'this file',
                             ...(onRelinkMissing === undefined ? {} : { onRelinkMissing }),

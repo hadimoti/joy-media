@@ -61,6 +61,7 @@ import { usePopup, type PopupControl } from '../popup-manager.js';
 import { POPUP_IDS } from '../popup-ids.js';
 import { MonitorTransport } from './MonitorTransport.js';
 import { MonitorOverlays } from './MonitorOverlays.js';
+import { MediaOfflineNote } from './MediaOfflineNote.js';
 import { useMonitorViewOptions } from './MonitorViewMenu.js';
 import { createMonitorPerformanceTracker, recordMonitorFrame } from './monitor-performance.js';
 import { monitorZoomLabel } from './monitor-view.js';
@@ -948,12 +949,7 @@ function MonitorPanelContent({
         background={viewOptions.background}
       >
         <div ref={containerRef} className="monitor-canvas" />
-        {mediaOfflineName !== undefined && (
-          <div className="monitor-media-offline" role="status" data-monitor-media-offline="">
-            <strong>Media offline</strong>
-            <span dir="ltr">{mediaOfflineName}</span>
-          </div>
-        )}
+        {mediaOfflineName !== undefined && <MediaOfflineNote name={mediaOfflineName} />}
         <MonitorOverlays
           view={monitorView.view}
           frame={frameSize}

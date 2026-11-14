@@ -271,7 +271,11 @@ import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions, selectedClipSupportsSpeed } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { createMissingMediaHost, type MissingMediaHost } from './missing-media-host.js';
-import { missingAssetIdSet, missingClipNameAt, type MissingMediaEntry } from './missing-media.js';
+import {
+  createMissingClipLookup,
+  missingAssetIdSet,
+  type MissingMediaEntry,
+} from './missing-media.js';
 import type { ProjectWriterHandle } from './project-writer.js';
 import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js';
 import { prepareTimelinePresentation } from './timeline-presentation.js';
@@ -1577,6 +1581,12 @@ function EditorWorkspace({
   const missingAssetIds = useMemo(
     () => missingAssetIdSet(missingMediaEntries),
     [missingMediaEntries],
+  );
+  // The monitor's offline lookup flattens the root timeline once per project, not on every playhead
+  // tick (T-R03). Only the interval scan runs per frame.
+  const missingClipAt = useMemo(
+    () => createMissingClipLookup(session.timelineProject, missingAssetIds),
+    [session.timelineProject, missingAssetIds],
   );
   const rootComposition =
     session.visualProject.compositions[session.visualProject.rootCompositionId];
@@ -7142,13 +7152,11 @@ function EditorWorkspace({
           onCancelDroppedImport={cancelDroppedImport}
           formatMenu={formatMenu}
           {...(() => {
-            const offlineName = missingClipNameAt(
-              context.timelineProject,
-              missingAssetIds,
-              state.playheadUs,
-              (assetId) => visualProject.assets[assetId]?.displayName ?? assetId,
-            );
-            return offlineName === undefined ? {} : { mediaOfflineName: offlineName };
+            const offlineAssetId = missingClipAt(state.playheadUs);
+            if (offlineAssetId === undefined) return {};
+            return {
+              mediaOfflineName: visualProject.assets[offlineAssetId]?.displayName ?? offlineAssetId,
+            };
           })()}
         />
       );
