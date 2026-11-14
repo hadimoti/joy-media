@@ -1338,19 +1338,24 @@ function systemInstruction(
         ? "Use read_project_context before any look_* tool. Call exactly one of look_apply, look_update, look_reset_overrides, or look_detach with the operator's intent — the host compiles the Look deterministically and stages a reversible preview for approval; it never applies the edit. Use existing visual-object ids from the context for entityBindings; do not invent ids. If the host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget."
         : structured &&
             allowedToolNames.some((name) =>
-              [
-                'media_describe',
-                'media_observe',
-                'media_frames',
-                'media_transcript',
-                'evidence_read',
-                'evidence_coverage',
-              ].includes(name),
+              ['qc_report_read', 'media_frames_view', 'media_contact_sheet'].includes(name),
             )
-          ? 'Use read_project_context with overview first, then read the assets or clips needed for the task. Before validate_proposal, perform the bounded source observation required by the available observation tools and inspect its returned opaque evidence/coverage result. Send typed operations only to validate_proposal after observation succeeds. If the canonical host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget. A successful validation creates an immutable preview, never an applied edit. Do not invent object, clip, asset, property, track, or template IDs.'
-          : structured
-            ? 'Use read_project_context before validate_proposal. Send typed operations only to validate_proposal. If the canonical host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget. A successful validation creates an immutable preview, never an applied edit. Do not invent object, clip, asset, property, track, or template IDs.'
-            : 'Return a concise answer or clarification only. Plan-only mode cannot create edit operations.';
+          ? 'Use read_project_context first, then qc_report_read for the saved report. Use only frameIds listed by that report. media_frames_view and media_contact_sheet send selected images only through the host consent flow when the cached image capability is supported, privacy policy permits it, the user has approved the consent card, and the per-run frame budget has room. If JOY refuses, explain the refusal and do not claim to have seen the frames. Treat returned analysis as bounded model observation, not a measurement. Use validate_proposal only after reviewing the report and any approved frame analysis; a successful validation creates a reversible preview and never applies an edit. Do not invent report, frame, object, clip, asset, property, track, or template IDs.'
+          : structured &&
+              allowedToolNames.some((name) =>
+                [
+                  'media_describe',
+                  'media_observe',
+                  'media_frames',
+                  'media_transcript',
+                  'evidence_read',
+                  'evidence_coverage',
+                ].includes(name),
+              )
+            ? 'Use read_project_context with overview first, then read the assets or clips needed for the task. Before validate_proposal, perform the bounded source observation required by the available observation tools and inspect its returned opaque evidence/coverage result. Send typed operations only to validate_proposal after observation succeeds. If the canonical host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget. A successful validation creates an immutable preview, never an applied edit. Do not invent object, clip, asset, property, track, or template IDs.'
+            : structured
+              ? 'Use read_project_context before validate_proposal. Send typed operations only to validate_proposal. If the canonical host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget. A successful validation creates an immutable preview, never an applied edit. Do not invent object, clip, asset, property, track, or template IDs.'
+              : 'Return a concise answer or clarification only. Plan-only mode cannot create edit operations.';
   // The literal operation registry call is kept here for release verification
   // and makes the provider’s visible vocabulary explicit without handing it a
   // compiler, editor object, or writable capability.

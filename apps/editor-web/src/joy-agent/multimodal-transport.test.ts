@@ -128,6 +128,38 @@ describe('multimodal direct-provider transport', () => {
     expect(result).toMatchObject({ requestBytes: new TextEncoder().encode(init.body).byteLength });
   });
 
+  it('puts exactly the consented image count in the stub provider request', async () => {
+    const evidence = ['frame-1', 'frame-2', 'frame-3'].map((evidenceId, index) => ({
+      evidenceId,
+      modality: 'image' as const,
+      mimeType: 'image/jpeg',
+      data: new Uint8Array([index + 1, index + 2, index + 3]),
+    }));
+    const evidenceIds = evidence.map((item) => item.evidenceId);
+    const fetcher = successfulFetch();
+    const transport = createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) });
+    transport.grant(
+      issue(
+        { evidenceIds, modalities: ['image'], runId: 'exact-image-count-run' },
+        imageCapability,
+      ),
+    );
+
+    const result = await transport.send(
+      request({ runId: 'exact-image-count-run', evidence, mediaCapability: imageCapability }),
+    );
+
+    expect(result).toMatchObject({ ok: true, analysis: { submittedEvidenceIds: evidenceIds } });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const [, init] = fetcher.mock.calls[0] ?? [];
+    if (typeof init?.body !== 'string') throw new Error('Expected a JSON provider body');
+    const body = JSON.parse(init.body) as {
+      readonly messages: readonly { readonly content: readonly { readonly type: string }[] }[];
+    };
+    const content = body.messages[0]?.content ?? [];
+    expect(content.filter((part) => part.type === 'image_url')).toHaveLength(evidenceIds.length);
+  });
+
   it('refuses a reply the call returns above the bounded analysis size', async () => {
     const oversized = JSON.stringify({
       choices: [{ message: { content: 'x'.repeat(MAX_MULTIMODAL_RESPONSE_BYTES + 1) } }],

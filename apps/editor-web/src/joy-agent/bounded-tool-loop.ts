@@ -73,6 +73,9 @@ const MAX_OBSERVATION_FRAMES = 512;
 const MAX_OBSERVATION_METADATA_BYTES = 32 * 1024;
 const MAX_OBSERVATION_PAGE_SIZE = 128;
 const MAX_OBSERVATION_CURSOR = 2_097_152;
+const MAX_QC_FRAMES_PER_TOOL_CALL = 16;
+const DEFAULT_MAX_QC_FRAMES_PER_RUN = 16;
+const MAX_QC_FRAMES_PER_RUN = 48;
 const SAFE_OBSERVATION_IDENTIFIER_PATTERN =
   '^[A-Za-z0-9][A-Za-z0-9._:@=-]*(?:/[A-Za-z0-9][A-Za-z0-9._:@=-]*)*$';
 
@@ -340,13 +343,112 @@ const EVIDENCE_COVERAGE_TOOL: BrowserAgentToolDefinition = {
   },
 };
 
+const QC_REPORT_READ_TOOL: BrowserAgentToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'qc_report_read',
+    description:
+      'Read an owner-saved QC report. Use its reportId and listed frameIds as the only authority for later frame review. This tool never sends media.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['reportId', 'includeFindings'],
+      properties: {
+        reportId: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          pattern: SAFE_OBSERVATION_IDENTIFIER_PATTERN,
+        },
+        includeFindings: { type: 'boolean' },
+      },
+    },
+  },
+};
+
+const MEDIA_FRAMES_VIEW_TOOL: BrowserAgentToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'media_frames_view',
+    description:
+      'Ask JOY to privately send selected frames already listed by a QC report through one consented image review. Returns bounded analysis text, never pixels, data URLs, or paths.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['reportId', 'frameIds', 'reason'],
+      properties: {
+        reportId: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          pattern: SAFE_OBSERVATION_IDENTIFIER_PATTERN,
+        },
+        frameIds: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_QC_FRAMES_PER_TOOL_CALL,
+          uniqueItems: true,
+          items: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+            pattern: SAFE_OBSERVATION_IDENTIFIER_PATTERN,
+          },
+        },
+        reason: { type: 'string', maxLength: 280 },
+      },
+    },
+  },
+};
+
+const MEDIA_CONTACT_SHEET_TOOL: BrowserAgentToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'media_contact_sheet',
+    description:
+      'Ask JOY to privately send one contact sheet made from selected frames already listed by a QC report. Returns bounded analysis text, never pixels, data URLs, or paths.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['reportId', 'frameIds', 'columns'],
+      properties: {
+        reportId: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          pattern: SAFE_OBSERVATION_IDENTIFIER_PATTERN,
+        },
+        frameIds: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_QC_FRAMES_PER_TOOL_CALL,
+          uniqueItems: true,
+          items: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+            pattern: SAFE_OBSERVATION_IDENTIFIER_PATTERN,
+          },
+        },
+        columns: { type: 'integer', minimum: 1, maximum: MAX_QC_FRAMES_PER_TOOL_CALL },
+      },
+    },
+  },
+};
+
 type ObservationToolName =
   | 'media_describe'
   | 'media_observe'
   | 'media_frames'
   | 'media_transcript'
   | 'evidence_read'
-  | 'evidence_coverage';
+  | 'evidence_coverage'
+  | 'qc_report_read'
+  | 'media_frames_view'
+  | 'media_contact_sheet';
 
 const OBSERVATION_TOOLS: Readonly<Record<ObservationToolName, BrowserAgentToolDefinition>> = {
   media_describe: MEDIA_DESCRIBE_TOOL,
@@ -355,6 +457,9 @@ const OBSERVATION_TOOLS: Readonly<Record<ObservationToolName, BrowserAgentToolDe
   media_transcript: MEDIA_TRANSCRIPT_TOOL,
   evidence_read: EVIDENCE_READ_TOOL,
   evidence_coverage: EVIDENCE_COVERAGE_TOOL,
+  qc_report_read: QC_REPORT_READ_TOOL,
+  media_frames_view: MEDIA_FRAMES_VIEW_TOOL,
+  media_contact_sheet: MEDIA_CONTACT_SHEET_TOOL,
 };
 
 /**
@@ -546,6 +651,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isQcImageToolName(name: JoyAgentHostToolName): boolean {
+  return name === 'media_frames_view' || name === 'media_contact_sheet';
+}
+
+function requestedQcFrameCount(args: HostRpcJson): number | undefined {
+  if (!isRecord(args) || !Array.isArray(args.frameIds)) return undefined;
+  const frameIds = args.frameIds;
+  if (
+    frameIds.length < 1 ||
+    frameIds.length > MAX_QC_FRAMES_PER_TOOL_CALL ||
+    frameIds.some(
+      (frameId) =>
+        typeof frameId !== 'string' ||
+        frameId.length > 512 ||
+        !new RegExp(SAFE_OBSERVATION_IDENTIFIER_PATTERN).test(frameId),
+    ) ||
+    new Set(frameIds).size !== frameIds.length
+  )
+    return undefined;
+  return frameIds.length;
+}
+
+function qcFrameRefusal(code: string, message: string): HostRpcJson {
+  return { ok: false, code, message };
+}
+
 function boundedJson(value: unknown): string {
   const serialized = JSON.stringify(value);
   if (
@@ -663,6 +794,8 @@ export async function runBoundedToolExchange(
     readonly signal?: AbortSignal;
     /** The Worker passes its parsed V1 run budget; callers cannot expand it. */
     readonly maxToolCalls?: number;
+    /** Per-run QC frame budget; it never exceeds the ADR's hard ceiling. */
+    readonly maxObservationFrames?: number;
     /**
      * Exact host-approved subset for this exchange. Pass the same list to
      * `createBrowserAgentToolCatalog` when preparing the provider request.
@@ -673,12 +806,19 @@ export async function runBoundedToolExchange(
   } = {},
 ): Promise<BrowserToolExchangeOutcome> {
   const maxToolCalls = options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
+  const maxObservationFrames = options.maxObservationFrames ?? DEFAULT_MAX_QC_FRAMES_PER_RUN;
   if (
     !Number.isSafeInteger(maxToolCalls) ||
     maxToolCalls < 0 ||
     maxToolCalls > MAX_JOY_AGENT_RUN_BUDGET_V1.maxToolSteps
   )
     throw new Error('JOY_AGENT_INVALID_RUN_BUDGET');
+  if (
+    !Number.isSafeInteger(maxObservationFrames) ||
+    maxObservationFrames < 0 ||
+    maxObservationFrames > MAX_QC_FRAMES_PER_RUN
+  )
+    throw new Error('JOY_AGENT_INVALID_QC_FRAME_BUDGET');
   const allowedToolNames = validateAllowedToolNames(
     options.allowedToolNames,
     DEFAULT_BROWSER_AGENT_ALLOWED_TOOL_NAMES,
@@ -688,6 +828,7 @@ export async function runBoundedToolExchange(
   let toolCount = 0;
   let contextRead = false;
   let contextReadStep = -1;
+  let qcFramesUsed = 0;
   const callIds = new Set<string>();
   for (let step = 0; step < MAX_PARSER_MODEL_EXCHANGES; step += 1) {
     options.signal?.throwIfAborted();
@@ -739,6 +880,26 @@ export async function runBoundedToolExchange(
         const args = JSON.parse(call.function!.arguments as string) as HostRpcJson;
         if (name !== 'read_project_context' && (!contextRead || contextReadStep === step))
           throw new Error('JOY_AGENT_CONTEXT_REQUIRED');
+        const requestedFrames = isQcImageToolName(name) ? requestedQcFrameCount(args) : undefined;
+        if (isQcImageToolName(name) && requestedFrames === undefined) {
+          result = qcFrameRefusal(
+            'JOY_AGENT_INVALID_QC_FRAME_REQUEST',
+            'JOY could not use that frame selection. Choose 1 to 16 unique frames listed by the QC report.',
+          );
+          messages.push({ role: 'tool', tool_call_id: call.id, content: boundedJson(result) });
+          continue;
+        }
+        if (
+          requestedFrames !== undefined &&
+          qcFramesUsed + requestedFrames > maxObservationFrames
+        ) {
+          result = qcFrameRefusal(
+            'JOY_AGENT_QC_FRAME_BUDGET_EXCEEDED',
+            `JOY did not send those frames because the ${maxObservationFrames}-frame run budget is full.`,
+          );
+          messages.push({ role: 'tool', tool_call_id: call.id, content: boundedJson(result) });
+          continue;
+        }
         const hostResult = await callHost(name, args);
         options.signal?.throwIfAborted();
         if (name === 'read_project_context') {
@@ -752,7 +913,25 @@ export async function runBoundedToolExchange(
           // replace it.
           return { kind: 'prepared', proposal: parsePreparedProposal(hostResult) };
         } else {
-          result = { ok: true, evidence: hostResult, applied: false };
+          if (requestedFrames !== undefined && isRecord(hostResult)) {
+            // QC review results are already a deliberately small host contract.
+            // Preserve refusals verbatim so the model can explain why no frame
+            // was sent; never nest a refusal under a success-shaped wrapper.
+            result = hostResult;
+            const framesSent =
+              Number.isSafeInteger(hostResult.framesSent) &&
+              typeof hostResult.framesSent === 'number' &&
+              hostResult.framesSent >= 0
+                ? hostResult.framesSent
+                : hostResult.ok === true
+                  ? requestedFrames
+                  : 0;
+            qcFramesUsed += Math.min(requestedFrames, framesSent);
+          } else if (name === 'qc_report_read') {
+            result = hostResult;
+          } else {
+            result = { ok: true, evidence: hostResult, applied: false };
+          }
         }
       } catch (error) {
         // A cancellation is terminal: never convert it into a repairable
