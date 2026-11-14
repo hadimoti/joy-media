@@ -22,6 +22,71 @@ export interface DriftMeasurement {
   readonly maxAbsoluteDriftUs: number;
 }
 
+/**
+ * Incremental min/max peaks for decoded audio chunks. Samples are mapped by
+ * absolute source-sample offset, so callers can stream large files without
+ * retaining the full decoded PCM buffer.
+ */
+export class WaveformPeakAccumulator {
+  readonly #min: Float32Array;
+  readonly #max: Float32Array;
+  readonly #seen: Uint8Array;
+
+  constructor(
+    readonly sampleCount: number,
+    readonly bucketCount: number,
+  ) {
+    if (!Number.isSafeInteger(sampleCount) || sampleCount < 1) {
+      throw new AudioSpikeError('AUDIO_WAVEFORM_INVALID', 'sampleCount must be a positive integer');
+    }
+    if (!Number.isSafeInteger(bucketCount) || bucketCount < 1) {
+      throw new AudioSpikeError('AUDIO_WAVEFORM_INVALID', 'bucketCount must be a positive integer');
+    }
+    this.#min = new Float32Array(bucketCount);
+    this.#min.fill(Number.POSITIVE_INFINITY);
+    this.#max = new Float32Array(bucketCount);
+    this.#max.fill(Number.NEGATIVE_INFINITY);
+    this.#seen = new Uint8Array(bucketCount);
+  }
+
+  /** Add one channel or chunk beginning at its absolute sample offset. */
+  add(samples: Float32Array, sampleOffset: number): void {
+    if (!Number.isSafeInteger(sampleOffset) || sampleOffset < 0) {
+      throw new AudioSpikeError(
+        'AUDIO_WAVEFORM_INVALID',
+        'sampleOffset must be a non-negative safe integer',
+      );
+    }
+    for (let index = 0; index < samples.length; index += 1) {
+      const absoluteIndex = sampleOffset + index;
+      if (absoluteIndex >= this.sampleCount) break;
+      const value = samples[index]!;
+      if (!Number.isFinite(value)) continue;
+      const bucket = Math.min(
+        this.#min.length - 1,
+        Math.floor((absoluteIndex * this.#min.length) / this.sampleCount),
+      );
+      if (this.#seen[bucket] === 0) {
+        this.#min[bucket] = value;
+        this.#max[bucket] = value;
+        this.#seen[bucket] = 1;
+      } else {
+        this.#min[bucket] = Math.min(this.#min[bucket]!, value);
+        this.#max[bucket] = Math.max(this.#max[bucket]!, value);
+      }
+    }
+  }
+
+  /** Empty buckets represent decoded silence or gaps between source chunks. */
+  finish(): readonly WaveformBucket[] {
+    return Array.from({ length: this.#min.length }, (_, index) =>
+      this.#seen[index] === 0
+        ? { min: 0, max: 0 }
+        : { min: this.#min[index]!, max: this.#max[index]! },
+    );
+  }
+}
+
 export class AudioSpikeError extends Error {
   readonly code: string;
 

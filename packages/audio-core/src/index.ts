@@ -8,6 +8,7 @@ export {
   sampleStartUs,
   buildWaveform,
   buildWaveformDirect,
+  WaveformPeakAccumulator,
   mixAudioTracks,
   AudioPreviewClock,
   exportPcm16Wav,
