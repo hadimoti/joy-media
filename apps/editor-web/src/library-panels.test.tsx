@@ -155,7 +155,7 @@ describe('the two library panels (T-V06)', () => {
       <FiltersPanel canCreate={true} targetLabel="Product" onAddFilter={() => undefined} />,
     );
     await act(async () => {
-      panel.querySelector<HTMLButtonElement>('button[data-panel-tab-id="favorites"]')?.click();
+      panel.querySelector<HTMLButtonElement>('button[data-library-category="favorites"]')?.click();
     });
     await search(panel, 'gaussian');
     expect(panel.querySelector('.filters-grid')?.textContent).not.toContain('Gaussian Blur');
@@ -173,7 +173,7 @@ describe('the two library panels (T-V06)', () => {
       <FiltersPanel canCreate={true} targetLabel="Product" onAddFilter={() => undefined} />,
     );
     await act(async () => {
-      panel.querySelector<HTMLButtonElement>('button[data-panel-tab-id="favorites"]')?.click();
+      panel.querySelector<HTMLButtonElement>('button[data-library-category="favorites"]')?.click();
     });
     await search(panel, 'gaussian');
 
@@ -228,7 +228,7 @@ describe('the two library panels (T-V06)', () => {
     );
 
     const favorites = panel.querySelector<HTMLButtonElement>(
-      'button[data-panel-tab-id="favorites"]',
+      'button[data-library-category="favorites"]',
     );
     await act(async () => {
       favorites?.click();

@@ -1,4 +1,12 @@
-import { useState, useMemo, useCallback, useRef, useEffect, type ComponentType } from 'react';
+import {
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  useEffect,
+  useId,
+  type ComponentType,
+} from 'react';
 import { confirmDialog, promptDialog } from './app-dialogs.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
@@ -7,6 +15,7 @@ import {
   LibraryIcon,
   LowerThirdIcon,
   SocialIcon,
+  StarIcon,
   TextTabIcon,
   ToolsIcon,
   UserIcon,
@@ -16,6 +25,9 @@ import { listTemplates, type TemplateCatalogEntry } from './template-catalog.js'
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import { authorTemplateCopy, deleteTemplateWithConfirmation } from './template-catalog-ui.js';
 import { TemplateCatalogCardActions } from './TemplateCatalogCardActions.js';
+import { LibraryCard } from './LibraryCard.js';
+import { LibraryRail, libraryTabPanelProps, type LibraryRailItem } from './LibraryRail.js';
+import { readTemplateFavorites, toggleTemplateFavorite } from './template-favorites.js';
 import type {
   SeededContentTemplate,
   ContentTemplateV1,
@@ -31,6 +43,7 @@ import {
   findFirstPartyScene,
   type FirstPartyScenePackage,
 } from '@joy-media/html-scene-runtime/first-party';
+import './library-panels.css';
 
 interface TemplatesPanelProps {
   readonly onApplyTemplate: (seeded: SeededContentTemplate) => void;
@@ -40,7 +53,7 @@ interface TemplatesPanelProps {
 }
 
 type TemplateView =
-  'library' | 'mine' | 'Titles' | 'Lower Thirds' | 'Utility' | 'Effects' | 'Social';
+  'library' | 'mine' | 'favorites' | 'Titles' | 'Lower Thirds' | 'Utility' | 'Effects' | 'Social';
 
 const SIDEBAR_VIEWS: readonly {
   readonly id: TemplateView;
@@ -49,6 +62,7 @@ const SIDEBAR_VIEWS: readonly {
 }[] = [
   { id: 'library', label: 'Library', icon: LibraryIcon },
   { id: 'mine', label: 'My Templates', icon: UserIcon },
+  { id: 'favorites', label: 'Favorites', icon: StarIcon },
   { id: 'Titles', label: 'Titles', icon: TextTabIcon },
   { id: 'Lower Thirds', label: 'Lower Thirds', icon: LowerThirdIcon },
   { id: 'Social', label: 'Social', icon: SocialIcon },
@@ -57,9 +71,16 @@ const SIDEBAR_VIEWS: readonly {
 ];
 
 export function TemplatesPanel({ onApplyTemplate, showToast, storage }: TemplatesPanelProps) {
+  const railPanelId = useId();
   const [view, setView] = useState<TemplateView>('library');
   const [catalogRevision, setCatalogRevision] = useState(0);
+  const [query, setQuery] = useState('');
+  const [favorites, setFavorites] = useState<Set<string>>(() => readTemplateFavorites(storage));
   const catalogStorage = storage;
+
+  useEffect(() => {
+    setFavorites(readTemplateFavorites(catalogStorage));
+  }, [catalogStorage]);
 
   const handleApplyLibraryTemplate = useCallback(
     (templateId: string) => {
@@ -123,52 +144,93 @@ export function TemplatesPanel({ onApplyTemplate, showToast, storage }: Template
   );
 
   void catalogRevision;
-  const filteredTemplates = (() => {
-    if (view === 'library') return CONTENT_TEMPLATES;
-    if (view === 'mine') return listTemplates(catalogStorage);
-    return CONTENT_TEMPLATES.filter((tpl) => tpl.category === view);
-  })();
+  const builtInTemplates = CONTENT_TEMPLATES.map((template) => ({ template, isMine: false }));
+  const savedTemplates = listTemplates(catalogStorage).map((template) => ({
+    template,
+    isMine: true,
+  }));
+  const allTemplates = [...builtInTemplates, ...savedTemplates];
+  const needle = query.trim().toLowerCase();
+  const inView =
+    view === 'favorites'
+      ? allTemplates.filter(({ template }) => favorites.has(template.id))
+      : needle.length > 0
+        ? allTemplates
+        : view === 'library'
+          ? builtInTemplates
+          : view === 'mine'
+            ? savedTemplates
+            : builtInTemplates.filter(({ template }) => template.category === view);
+  const filteredTemplates = inView.filter(({ template }) =>
+    needle.length === 0
+      ? true
+      : [template.id, template.label, template.description, template.category].some((value) =>
+          value.toLowerCase().includes(needle),
+        ),
+  );
 
-  const isMine = view === 'mine';
+  const toggleFavorite = useCallback(
+    (templateId: string) => {
+      setFavorites((current) => toggleTemplateFavorite(catalogStorage, current, templateId));
+    },
+    [catalogStorage],
+  );
+
+  const railItems: readonly LibraryRailItem[] = SIDEBAR_VIEWS.map((item) => {
+    const ViewIcon = item.icon;
+    return { id: item.id, label: item.label, icon: <ViewIcon /> };
+  });
 
   const body = useMemo(() => {
     if (filteredTemplates.length === 0) {
       return (
-        <p className="empty-hint">{isMine ? 'No saved templates yet.' : 'No templates found.'}</p>
+        <p className="empty-hint">
+          {view === 'mine' ? 'No saved templates yet.' : 'No templates found.'}
+        </p>
       );
     }
     return (
-      <div className="templates-grid">
-        {filteredTemplates.map((tpl: (typeof CONTENT_TEMPLATES)[number] | TemplateCatalogEntry) => (
-          <div
-            key={tpl.id}
+      <div className="templates-grid library-card-grid">
+        {filteredTemplates.map(({ template, isMine }) => (
+          <LibraryCard
+            key={template.id}
+            id={template.id}
+            name={template.label}
+            description={template.description ?? template.category}
+            preview={<TemplatePreviewThumb template={template} />}
+            isFavorite={favorites.has(template.id)}
+            onToggleFavorite={() => toggleFavorite(template.id)}
+            onAdd={() => {
+              if (isMine) handleApplyCatalogTemplate(template as TemplateCatalogEntry);
+              else handleApplyLibraryTemplate(template.id);
+            }}
+            addAriaLabel={`Add ${template.label}`}
             className="template-card"
-            data-template-id={tpl.id}
-            title={'description' in tpl ? tpl.description : undefined}
-          >
-            <TemplatePreviewThumb template={tpl} />
-            <span className="template-card-name">{tpl.label}</span>
-            <span className="template-card-category">{tpl.category}</span>
-            <TemplateCatalogCardActions
-              label={tpl.label}
-              isMine={isMine}
-              onApply={() => {
-                if (isMine) {
-                  handleApplyCatalogTemplate(tpl as TemplateCatalogEntry);
-                } else {
-                  handleApplyLibraryTemplate(tpl.id);
-                }
-              }}
-              onSave={() => handleAuthorTemplate(tpl as ContentTemplateV1)}
-              onDelete={() => handleDeleteTemplate(tpl as TemplateCatalogEntry)}
-            />
-          </div>
+            title={template.description}
+            badges={
+              <span className="library-card-badge library-card-category-badge">
+                {template.category}
+              </span>
+            }
+            extraActions={
+              <TemplateCatalogCardActions
+                label={template.label}
+                isMine={isMine}
+                hideApply={true}
+                onApply={() => undefined}
+                onSave={() => handleAuthorTemplate(template as ContentTemplateV1)}
+                onDelete={() => handleDeleteTemplate(template as TemplateCatalogEntry)}
+              />
+            }
+          />
         ))}
       </div>
     );
   }, [
     filteredTemplates,
-    isMine,
+    view,
+    favorites,
+    toggleFavorite,
     handleApplyLibraryTemplate,
     handleApplyCatalogTemplate,
     handleDeleteTemplate,
@@ -179,33 +241,23 @@ export function TemplatesPanel({ onApplyTemplate, showToast, storage }: Template
     <PanelShell
       title="Templates"
       iconUrl={panelTabIconUrl('templates')}
-      className="templates-panel"
+      className="templates-panel library-panel"
+      search={{ value: query, onChange: setQuery, placeholder: 'Search templates…' }}
     >
-      <div className="templates-content">
-        <aside className="templates-sidebar" aria-label="Template views">
-          <div className="templates-sidebar-tabs" role="tablist" aria-label="Template views">
-            {SIDEBAR_VIEWS.map((item) => {
-              const ViewIcon = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  role="tab"
-                  className="templates-sidebar-tab"
-                  aria-label={item.label}
-                  title={item.label}
-                  aria-selected={view === item.id}
-                  onClick={() => setView(item.id)}
-                >
-                  <span className="templates-sidebar-tab-svg" aria-hidden="true">
-                    <ViewIcon />
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </aside>
-        <div className="templates-main">{body}</div>
+      <div className="templates-content library-browser">
+        <LibraryRail
+          label="Template categories"
+          panelId={railPanelId}
+          selectedId={view}
+          onSelect={(id) => setView(id as TemplateView)}
+          items={railItems}
+        />
+        <div
+          className="templates-main library-browser-main"
+          {...libraryTabPanelProps(railPanelId, view)}
+        >
+          {body}
+        </div>
       </div>
     </PanelShell>
   );

@@ -8,13 +8,15 @@
  * five that draw over the picture moved to Effects. See `library-homes.ts`.
  */
 
-import { useState, useMemo, useCallback, useContext, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useContext, useEffect, useId, useRef } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { effectRegistry, registerBuiltins, type EffectDescriptor } from '@joy-media/visual-effects';
 import { beginEditorPointerDrag } from './editor-pointer-dnd.js';
+import { LibraryCard } from './LibraryCard.js';
+import { LibraryRail, libraryTabPanelProps } from './LibraryRail.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
-import { BoltIcon, LayersIcon, PlusIcon, StarFilledIcon, StarIcon, WarningIcon } from './icons.js';
+import { BoltIcon, LayersIcon, PlusIcon, StarIcon, WarningIcon } from './icons.js';
 import { effectCategoryIconUrl } from './effect-category-icons.js';
 import { EditorPanelContext } from './editor-panel-context.js';
 import { EffectPreviewMedia } from './EffectPreviewMedia.js';
@@ -96,6 +98,7 @@ export function EffectsPanel({
   const editorContext = useContext(EditorPanelContext);
   const storage = editorContext?.storage;
   const { query, linkedId, linkedPanel, linkToken } = useLibrarySearch();
+  const railPanelId = useId();
   const [category, setCategory] = useState(DEFAULT_EFFECT_CATEGORY);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [builtinsReady, setBuiltinsReady] = useState(false);
@@ -231,7 +234,7 @@ export function EffectsPanel({
     <PanelShell
       title="Effects"
       iconUrl={panelTabIconUrl('effects')}
-      className="effects-panel"
+      className="effects-panel library-panel"
       actions={
         <>
           <button
@@ -265,49 +268,27 @@ export function EffectsPanel({
       {query.trim().length > 0 && (
         <p className="library-search-note">Searching for “{query.trim()}”</p>
       )}
-      <div className="effects-panel-content">
-        <aside className="effects-panel-sidebar" aria-label="Effect categories">
-          <span className="effects-panel-sidebar-title">Categories</span>
-          <div className="effects-panel-categories" role="tablist" aria-label="Effect categories">
-            {CATEGORIES.map((entry) => {
-              const iconUrl = effectCategoryIconUrl(entry.id);
-              return (
-                <button
-                  key={entry.id}
-                  type="button"
-                  role="tab"
-                  className="effects-panel-category-tab"
-                  data-release-observer-category="true"
-                  aria-label={`${entry.label} (${categoryCounts[entry.id] ?? 0})`}
-                  title={`${entry.label} (${categoryCounts[entry.id] ?? 0})`}
-                  aria-selected={category === entry.id}
-                  onClick={() => setCategory(entry.id)}
-                >
-                  {entry.id === 'favorites' ? (
-                    <span
-                      className="effects-panel-category-tab-icon effects-panel-category-tab-icon--star"
-                      aria-hidden="true"
-                    >
-                      <StarIcon />
-                    </span>
-                  ) : (
-                    iconUrl !== undefined && (
-                      <span
-                        className="effects-panel-category-tab-icon"
-                        style={{
-                          maskImage: `url(${iconUrl})`,
-                          WebkitMaskImage: `url(${iconUrl})`,
-                        }}
-                        aria-hidden="true"
-                      />
-                    )
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </aside>
-        <div className="effects-panel-main">
+      <div className="effects-panel-content library-browser">
+        <LibraryRail
+          label="Effect categories"
+          panelId={railPanelId}
+          selectedId={category}
+          onSelect={setCategory}
+          items={CATEGORIES.map((entry) => {
+            const iconUrl = entry.id === 'favorites' ? undefined : effectCategoryIconUrl(entry.id);
+            return {
+              id: entry.id,
+              label: entry.label,
+              icon: entry.id === 'favorites' ? <StarIcon /> : undefined,
+              ...(iconUrl === undefined ? {} : { iconUrl }),
+              count: categoryCounts[entry.id] ?? 0,
+            };
+          })}
+        />
+        <div
+          className="effects-panel-main library-browser-main"
+          {...libraryTabPanelProps(railPanelId, category)}
+        >
           {category === 'recipes' ? (
             <div className={`effect-recipes-list${recipes.length === 0 ? ' is-empty' : ''}`}>
               {recipes.length === 0 ? (
@@ -340,7 +321,9 @@ export function EffectsPanel({
             </div>
           ) : (
             <>
-              <div className={`effects-grid${filtered.length === 0 ? ' is-empty' : ''}`}>
+              <div
+                className={`effects-grid library-card-grid${filtered.length === 0 ? ' is-empty' : ''}`}
+              >
                 {filtered.length === 0 ? (
                   <p className="empty-hint">{emptyHint}</p>
                 ) : (
@@ -399,91 +382,72 @@ function EffectCard({
   const unavailableReason = canApply
     ? undefined
     : 'Select a video clip to apply this effect, or drag it onto a timeline clip.';
+  const weightLabel =
+    descriptor.cost === 'high' ? 'Very heavy' : descriptor.cost === 'medium' ? 'Heavy' : undefined;
 
   return (
-    <div
-      className={`effect-card${canApply ? '' : ' is-unavailable'}${linked ? ' is-linked' : ''}`}
-      data-effect-id={descriptor.id}
-      role="group"
-      tabIndex={0}
-      aria-label={`${descriptor.label} effect`}
-      aria-keyshortcuts="Enter Space"
-      data-library-linked={linked ? 'true' : undefined}
-      {...(unavailableReason === undefined
-        ? {}
-        : {
-            'aria-describedby': unavailableReasonId,
-          })}
+    <LibraryCard
+      id={descriptor.id}
+      name={descriptor.label}
+      description={descriptor.description ?? descriptor.category}
+      preview={<EffectPreviewMedia effectId={descriptor.id} label={descriptor.label} />}
+      isFavorite={isFavorite}
+      onToggleFavorite={onToggleFavorite}
+      onAdd={onAdd}
+      addAriaLabel={`Add ${descriptor.label}`}
+      disabled={!canApply}
+      {...(unavailableReason === undefined ? {} : { disabledTitle: unavailableReason })}
+      active={false}
+      linked={linked}
+      className="effect-card"
+      title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost}). Drag onto a timeline clip or the Monitor.${unavailableReason === undefined ? '' : ` ${unavailableReason}`}`}
+      {...(unavailableReason === undefined ? {} : { ariaDescribedBy: unavailableReasonId })}
+      ariaKeyShortcuts="Enter Space"
       onPointerDown={(event) => {
         beginEditorPointerDrag(event.nativeEvent, event.currentTarget, {
           kind: 'effect',
           effectId: descriptor.id,
         });
       }}
-      onDoubleClick={canApply ? onAdd : undefined}
+      {...(canApply ? { onDoubleClick: onAdd } : {})}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
         onAdd();
       }}
-      title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost}). Drag onto a timeline clip or the Monitor.${unavailableReason === undefined ? '' : ` ${unavailableReason}`}`}
-    >
-      {unavailableReason !== undefined && (
-        <span id={unavailableReasonId} className="sr-only">
-          {unavailableReason}
-        </span>
-      )}
-      <div className="effect-card-thumb">
-        <EffectPreviewMedia effectId={descriptor.id} className="effect-card-preview-media" />
-        {!canApply && <span className="effect-card-preview-state">Preview only</span>}
-      </div>
-      <div className="effect-card-header">
-        <div className="effect-card-icon">
-          {descriptor.cost !== 'low' && (
-            <span className="effect-card-cost" data-cost={descriptor.cost}>
-              {descriptor.cost === 'high' ? <WarningIcon /> : <BoltIcon />}
+      badges={
+        <>
+          {weightLabel !== undefined && (
+            <span
+              className="library-card-badge library-card-weight-badge"
+              data-cost={descriptor.cost}
+              title="May slow the preview on long clips"
+            >
+              {weightLabel === 'Very heavy' ? <WarningIcon /> : <BoltIcon />}
+              <span>{weightLabel}</span>
             </span>
           )}
-          <span className="effect-card-label">{descriptor.label}</span>
-        </div>
-        <div className="effect-card-actions">
-          <button
-            type="button"
-            className="icon-button card-fav-btn"
-            data-release-observer-favorite="true"
-            aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleFavorite();
-            }}
-            title={isFavorite ? 'Remove favorite' : 'Add favorite'}
-          >
-            {isFavorite ? <StarFilledIcon /> : <StarIcon />}
-          </button>
-          <button
-            type="button"
-            className="icon-button effect-add-btn"
-            aria-label={`Add ${descriptor.label}`}
-            {...(unavailableReason === undefined
-              ? {}
-              : { 'aria-describedby': unavailableReasonId })}
-            disabled={!canApply}
-            onClick={(e) => {
-              e.stopPropagation();
-              onAdd();
-            }}
-            title={unavailableReason ?? 'Add effect'}
-          >
-            <PlusIcon />
-          </button>
-        </div>
-      </div>
-      {!descriptor.backend.pixiPreview && (
-        <div className="effect-card-warning" title="Preview may differ from export">
-          Preview-only
-        </div>
-      )}
-    </div>
+          {!descriptor.backend.pixiPreview && (
+            <span
+              className="library-card-badge library-card-preview-only"
+              title="Preview may differ from export"
+            >
+              Preview only
+            </span>
+          )}
+        </>
+      }
+      status={
+        unavailableReason === undefined ? undefined : (
+          <>
+            <span id={unavailableReasonId} className="sr-only">
+              {unavailableReason}
+            </span>
+            <span className="effect-card-preview-state">Preview only — select a clip to add</span>
+          </>
+        )
+      }
+    />
   );
 }
