@@ -173,4 +173,46 @@ describe('property animation ownership lifecycle', () => {
     // The input is not changed.
     expect(entries[0]!.value).toEqual({ kind: 'scalar', curve: curve([2_000_000, 4_000_000]) });
   });
+
+  it('moves audio-timeline keys (audio clip gain) with the clip, forward and rebased', () => {
+    const audioGain = {
+      ownerKind: 'audio-clip' as const,
+      ownerId: 'clip-audio',
+      propertyId: 'gain',
+      timeDomain: 'audio-timeline' as const,
+    };
+    const curve = (times: readonly number[]) => ({
+      keyframes: times.map((timeUs, index) => ({
+        timeUs,
+        value: index + 1,
+        interpolation: 'linear' as const,
+      })),
+    });
+    const entries: PropertyAnimationV2[] = [
+      { binding: audioGain, value: { kind: 'scalar', curve: curve([2_000_000, 4_000_000]) } },
+    ];
+
+    // Pasted 8 s later: the absolute playhead keys move by the same 8 s.
+    const forward = shiftCompositionPropertyAnimations(entries, 8_000_000);
+    expect(forward[0]!.value).toEqual({
+      kind: 'scalar',
+      curve: curve([10_000_000, 12_000_000]),
+    });
+    expect(forward[0]!.binding).toEqual(audioGain);
+
+    // Pasted 1 s earlier: rebased at the cut, as for composition keys.
+    const backward = shiftCompositionPropertyAnimations(entries, -1_000_000);
+    expect(backward[0]!.value).toEqual({
+      kind: 'scalar',
+      curve: {
+        keyframes: [
+          { timeUs: 0, value: 1, interpolation: 'linear' },
+          { timeUs: 1_000_000, value: 1, interpolation: 'linear' },
+          { timeUs: 3_000_000, value: 2, interpolation: 'linear' },
+        ],
+      },
+    });
+    // The input is not changed.
+    expect(entries[0]!.value).toEqual({ kind: 'scalar', curve: curve([2_000_000, 4_000_000]) });
+  });
 });

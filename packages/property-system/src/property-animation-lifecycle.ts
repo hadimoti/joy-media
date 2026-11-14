@@ -170,8 +170,10 @@ export function restoreClipPropertyAnimations(
 }
 
 /**
- * Moves the composition-domain entries of a snapshot by `shiftUs`, the distance the
- * clip moved, so their keys stay in the clip's window. A positive shift moves every
+ * Moves the timeline-time entries of a snapshot by `shiftUs`, the distance the
+ * clip moved, so their keys stay in the clip's window. Timeline time is the
+ * `composition` domain and the `audio-timeline` domain (audio clip gain, pan and
+ * mute, which the evaluator reads as playhead time). A positive shift moves every
  * key. A negative shift rebases each curve at the cut, so its value at time 0 is
  * the value the original curve had there. Clip-local entries are only cloned.
  */
@@ -181,7 +183,7 @@ export function shiftCompositionPropertyAnimations(
 ): PropertyAnimationV2[] {
   if (!Number.isSafeInteger(shiftUs)) throw new RangeError('shiftUs must be a safe integer');
   return entries.map((entry) =>
-    entry.binding.timeDomain !== 'composition' || shiftUs === 0
+    !isTimelineTimeDomain(entry.binding.timeDomain) || shiftUs === 0
       ? cloneAnimation(entry)
       : {
           binding: { ...entry.binding },
@@ -346,6 +348,10 @@ function rebaseCurve(curve: AnimationCurveV1, offsetUs: number, sampled: number)
 
 function isClipLocalDomain(domain: AnimationTimeDomainV2): boolean {
   return domain === 'clip-local' || domain === 'caption-clip-local';
+}
+
+function isTimelineTimeDomain(domain: AnimationTimeDomainV2): boolean {
+  return domain === 'composition' || domain === 'audio-timeline';
 }
 
 function normalized(project: JoyProjectV1): Record<string, PropertyAnimationV2> {

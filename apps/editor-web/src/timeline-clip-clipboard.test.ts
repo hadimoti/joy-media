@@ -1,9 +1,17 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import type { Composition, SpikeProject } from '@joy-media/project-schema';
+import {
+  audioClipPropertyBinding,
+  canonicalBindingKey,
+  type Composition,
+  type JoyProjectV1,
+  type SpikeProject,
+  type VisualObjectV1,
+} from '@joy-media/project-schema';
+import { restoreClipPropertyAnimations } from '@joy-media/property-system';
 import { applyTransaction } from '@joy-media/commands';
 import { emptySpikeProject } from '@joy-media/test-fixtures';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
-import { bindClipToObject } from './sticker-bindings.js';
+import { bindClipToObject, readClipObjectMap } from './sticker-bindings.js';
 import {
   buildTimelineCutPlan,
   buildTimelinePastePlan,
@@ -11,6 +19,7 @@ import {
   copyTimelineClips,
   getTimelineClipClipboard,
   projectIdsInUse,
+  shiftTimelineClipState,
 } from './timeline-clip-clipboard.js';
 
 describe('timeline-clip-clipboard', () => {
@@ -554,6 +563,94 @@ describe('timeline-clip-clipboard', () => {
         expect(plan.transaction.commands).toHaveLength(3);
         expect(plan.transaction.label).toBe('Cut 3 clips');
       }
+    });
+  });
+
+  describe('timeline-time keys in a pasted clip state', () => {
+    const scalarCurve = (times: readonly number[]) => ({
+      keyframes: times.map((timeUs, index) => ({
+        timeUs,
+        value: index + 1,
+        interpolation: 'linear' as const,
+      })),
+    });
+
+    it('moves an audio clip gain key by the paste offset, and the restored key lands there', () => {
+      const { comp } = createSampleComposition();
+      // clip-a1-a starts at 1.5 s on A1. Its gain keys are audio-timeline (playhead) times.
+      const gain = audioClipPropertyBinding('clip-a1-a', 'gain');
+      const visual: JoyProjectV1 = {
+        ...INITIAL_EDITOR_PROJECT,
+        propertyAnimations: {
+          [canonicalBindingKey(gain)]: {
+            binding: gain,
+            value: { kind: 'scalar', curve: scalarCurve([2_000_000, 4_000_000]) },
+          },
+        },
+      };
+      const clipboard = copyTimelineClips(comp, ['clip-a1-a'], visual)!;
+      expect(clipboard.items[0]!.state?.animations).toHaveLength(1);
+
+      const plan = buildTimelinePastePlan({
+        composition: comp,
+        clipboard,
+        playheadUs: 9_000_000,
+        idGenerator: (orig) => `${orig}-p`,
+      });
+      expect(plan.ok).toBe(true);
+      if (!plan.ok) return;
+
+      // Shift = 9 s - 1.5 s = 7.5 s, so both gain keys move by the same offset.
+      const pasted = plan.pastes[0]!;
+      expect(pasted.state?.animations[0]?.binding).toEqual(gain);
+      expect(pasted.state?.animations[0]?.value).toEqual({
+        kind: 'scalar',
+        curve: scalarCurve([9_500_000, 11_500_000]),
+      });
+
+      const restored = restoreClipPropertyAnimations(visual, pasted.state!.animations, {
+        clipId: pasted.clipId,
+      });
+      const key = canonicalBindingKey(audioClipPropertyBinding(pasted.clipId, 'gain'));
+      expect(restored.propertyAnimations?.[key]?.value).toEqual({
+        kind: 'scalar',
+        curve: scalarCurve([9_500_000, 11_500_000]),
+      });
+    });
+
+    it('collapses object curve and spatial path keys below 0 on a negative shift', () => {
+      const bound = bindClipToObject(INITIAL_EDITOR_PROJECT, 'clip-a1-a', 'product-image');
+      const base = bound.visualObjects[readClipObjectMap(bound)['clip-a1-a']!]!;
+      const object: VisualObjectV1 = {
+        ...base,
+        animations: {
+          opacity: scalarCurve([1_000_000, 3_000_000, 6_000_000]),
+        },
+        spatialPath: {
+          keyframes: [
+            { timeUs: 2_000_000, point: { x: 10, y: 0 }, interpolation: 'linear' },
+            { timeUs: 5_000_000, point: { x: 20, y: 0 }, interpolation: 'linear' },
+            { timeUs: 9_000_000, point: { x: 30, y: 0 }, interpolation: 'linear' },
+          ],
+        },
+      };
+
+      const shifted = shiftTimelineClipState({ object, animations: [] }, -4_000_000);
+
+      // 1 s and 3 s both fall below 0 after the 4 s shift; the latest (3 s, value 2) is kept.
+      expect(shifted.object?.animations?.opacity?.keyframes).toEqual([
+        { timeUs: 0, value: 2, interpolation: 'linear' },
+        { timeUs: 2_000_000, value: 3, interpolation: 'linear' },
+      ]);
+      // The spatial key at 2 s collapses onto 0 and keeps its point; the others move by -4 s.
+      expect(shifted.object?.spatialPath?.keyframes).toEqual([
+        { timeUs: 0, point: { x: 10, y: 0 }, interpolation: 'linear' },
+        { timeUs: 1_000_000, point: { x: 20, y: 0 }, interpolation: 'linear' },
+        { timeUs: 5_000_000, point: { x: 30, y: 0 }, interpolation: 'linear' },
+      ]);
+      // The input object is not changed.
+      expect(object.animations?.opacity?.keyframes[0]?.timeUs).toBe(1_000_000);
+      expect(object.spatialPath?.keyframes[0]?.timeUs).toBe(2_000_000);
     });
   });
 });

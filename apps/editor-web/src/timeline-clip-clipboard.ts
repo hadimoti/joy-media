@@ -56,10 +56,11 @@ export function captureTimelineClipState(
 
 /**
  * Moves a captured clip state by `shiftUs`, the distance from the source clip's start
- * to the pasted clip's start. Composition-domain keys (the controller's animations,
- * its keyframe curves and its spatial path) are composition times, so they move with
- * the clip. Clip-local keys are untouched. Keys pushed below 0 by a negative shift
- * collapse onto 0, keeping the latest of them.
+ * to the pasted clip's start. Timeline-time keys move with the clip: composition-domain
+ * keys (the controller's animations, its keyframe curves and its spatial path) and
+ * audio-timeline keys (the audio clip's gain, pan and mute). Clip-local keys are
+ * untouched. Keys pushed below 0 by a negative shift collapse onto 0, keeping the
+ * latest of them.
  */
 export function shiftTimelineClipState(
   state: TimelineClipStateSnapshot,
