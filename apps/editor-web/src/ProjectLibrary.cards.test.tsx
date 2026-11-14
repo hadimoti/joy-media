@@ -174,9 +174,7 @@ describe('ProjectLibrary project cards', () => {
   });
 
   it('never loads a cover that is not a small image data URL', async () => {
-    await render(
-      storeWith([entry('Evil', { coverDataUrl: 'https://example.com/tracker.png' })]),
-    );
+    await render(storeWith([entry('Evil', { coverDataUrl: 'https://example.com/tracker.png' })]));
     const card = cardFor('Evil');
     expect(card.querySelector('img')).toBeNull();
     expect(card.querySelector('.project-library-card-placeholder')).not.toBeNull();
