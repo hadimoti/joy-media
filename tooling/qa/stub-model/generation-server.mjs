@@ -8,6 +8,7 @@
  * the bearer key was right, never the key itself. Plain Node, no dependencies, so it runs under vitest and node --test.
  */
 import { createServer } from 'node:http';
+import { URLSearchParams } from 'node:url';
 
 /** The route labels a test queues replies for. `download` is the media host's file route. */
 export const GENERATION_ROUTES = Object.freeze([
