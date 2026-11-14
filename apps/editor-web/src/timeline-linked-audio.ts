@@ -84,3 +84,33 @@ export function linkedAudioStrips(input: LinkedAudioInput): readonly LinkedAudio
   }
   return strips;
 }
+
+export interface StackedLinkedAudioStrip {
+  readonly strip: LinkedAudioStrip;
+  /** 0-based band the strip is drawn in; strips that overlap in time never share a band. */
+  readonly layer: number;
+}
+
+/**
+ * Gives every strip a band so that strips overlapping in time (two video clips playing together on different
+ * rows) sit one above the other instead of hiding each other. `layerCount` is how many bands the lane needs.
+ */
+export function stackLinkedAudioStrips(strips: readonly LinkedAudioStrip[]): {
+  readonly stacked: readonly StackedLinkedAudioStrip[];
+  readonly layerCount: number;
+} {
+  const ordered = [...strips].sort(
+    (left, right) =>
+      left.startUs - right.startUs ||
+      left.endUs - right.endUs ||
+      left.clipId.localeCompare(right.clipId),
+  );
+  const layerEnds: number[] = [];
+  const stacked = ordered.map((strip) => {
+    let layer = layerEnds.findIndex((endUs) => endUs <= strip.startUs);
+    if (layer === -1) layer = layerEnds.length;
+    layerEnds[layer] = strip.endUs;
+    return { strip, layer };
+  });
+  return { stacked, layerCount: Math.max(1, layerEnds.length) };
+}

@@ -6,6 +6,7 @@ import type { Track } from '@joy-media/project-schema';
 import { emptySpikeProject, makeVideoClip } from '@joy-media/test-fixtures';
 import { EditorPanelContext, type EditorPanelContextValue } from './editor-panel-context.js';
 import { TimelinePanel } from './TimelinePanel.js';
+import { TimelineLinkedAudioStrips } from './TimelineLinkedAudio.js';
 import { clearTimelineMediaCaches } from './timeline-media-cache.js';
 
 // A blob whose type says whether the fake decoder finds an audio stream in it.
@@ -192,5 +193,92 @@ describe('the audio of a video clip shown on the A1 lane', () => {
     const host = await mountPanel(documentProject);
     expect(stripsIn(host).length).toBeGreaterThan(0);
     expect(documentProject).toEqual(before);
+  });
+});
+
+async function mountStrips(
+  videoClips: readonly {
+    readonly clipId: string;
+    readonly assetId: string;
+    readonly startUs: number;
+    readonly durationUs: number;
+    readonly sourceInUs: number;
+  }[],
+  options: {
+    readonly visibleRangeUs?: { readonly startUs: number; readonly endUs: number };
+    readonly load: (assetId: string) => Promise<Blob | undefined>;
+  },
+) {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () => {
+    root?.render(
+      <TimelineLinkedAudioStrips
+        inputs={{ a1TrackId: 'a1', a1Clips: [], videoClips }}
+        viewport={{ originUs: 0, pixelsPerSecond: PX_PER_SECOND }}
+        loadAssetBlob={options.load}
+        {...(options.visibleRangeUs === undefined
+          ? {}
+          : { visibleRangeUs: options.visibleRangeUs })}
+      />,
+    );
+  });
+  for (let round = 0; round < 8; round += 1) await act(async () => Promise.resolve());
+  return container;
+}
+
+describe('strips of overlapping clips and the probe range', () => {
+  const clip = (clipId: string, assetId: string, startUs: number, durationUs: number) => ({
+    clipId,
+    assetId,
+    startUs,
+    durationUs,
+    sourceInUs: 0,
+  });
+
+  it('draws two video clips that play together in two bands, not on top of each other', async () => {
+    const host = await mountStrips(
+      [
+        clip('one', 'asset-sound', 0, 6 * SECOND_US),
+        clip('two', 'asset-sound', 2 * SECOND_US, 6 * SECOND_US),
+      ],
+      { load: loadProjectAssetBlob },
+    );
+    const strips = stripsIn(host);
+    expect(strips).toHaveLength(2);
+    const tops = strips.map((strip) => strip.style.top);
+    expect(new Set(tops).size).toBe(2);
+    for (const strip of strips) expect(strip.style.height).not.toBe('');
+  });
+
+  it('keeps one band at full height when nothing overlaps', async () => {
+    const host = await mountStrips(
+      [
+        clip('one', 'asset-sound', 0, 3 * SECOND_US),
+        clip('two', 'asset-sound', 4 * SECOND_US, 3 * SECOND_US),
+      ],
+      { load: loadProjectAssetBlob },
+    );
+    for (const strip of stripsIn(host)) expect(strip.style.height).toBe('');
+  });
+
+  it('probes only the clips in or near the visible span', async () => {
+    const asked: string[] = [];
+    await mountStrips(
+      [
+        clip('near', 'asset-sound', 0, 5 * SECOND_US),
+        clip('far', 'asset-far', 200 * SECOND_US, 5 * SECOND_US),
+      ],
+      {
+        visibleRangeUs: { startUs: 0, endUs: 10 * SECOND_US },
+        load: async (assetId) => {
+          asked.push(assetId);
+          return loadProjectAssetBlob(assetId);
+        },
+      },
+    );
+    expect(asked).toContain('asset-sound');
+    expect(asked).not.toContain('asset-far');
   });
 });

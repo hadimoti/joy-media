@@ -1287,6 +1287,19 @@ export function TimelinePanel({
     () => collectLinkedAudioInputs(composition.tracks, elementKinds),
     [composition.tracks, elementKinds],
   );
+  // The span on screen, so only the clips in or near it are probed for audio (nothing is known before the first measure).
+  const linkedAudioVisibleRange = useMemo(
+    () =>
+      tracksViewportWidthPx > 0 && viewport.pixelsPerSecond > 0
+        ? {
+            startUs: Math.floor((tracksScrollLeft / viewport.pixelsPerSecond) * 1_000_000),
+            endUs: Math.ceil(
+              ((tracksScrollLeft + tracksViewportWidthPx) / viewport.pixelsPerSecond) * 1_000_000,
+            ),
+          }
+        : undefined,
+    [tracksScrollLeft, tracksViewportWidthPx, viewport.pixelsPerSecond],
+  );
   const familyIndexes: Record<'visual' | 'audio', number> = { visual: 0, audio: 0 };
   const tracks = sortTracksForTimelineDisplay(composition.tracks, elementKinds).map(
     (track, index) => {
@@ -4168,6 +4181,7 @@ export function TimelinePanel({
                         inputs={linkedAudioInputs}
                         viewport={viewport}
                         loadAssetBlob={panelContext?.loadProjectAssetBlob}
+                        visibleRangeUs={linkedAudioVisibleRange}
                       />
                     )}
                     {source.clips.map((clip) => (

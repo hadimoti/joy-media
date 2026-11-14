@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { linkedAudioStrips, type LinkedAudioSourceClip } from './timeline-linked-audio.js';
+import {
+  linkedAudioStrips,
+  stackLinkedAudioStrips,
+  type LinkedAudioSourceClip,
+} from './timeline-linked-audio.js';
 
 const withAudio = (assetId: string) => assetId === 'with-audio';
 
@@ -95,5 +99,41 @@ describe('linkedAudioStrips', () => {
     expect(result.map((strip) => strip.clipId)).toEqual(['early', 'late']);
     expect(videoClips.map((clip) => clip.clipId)).toEqual(['late', 'early']);
     expect(a1Clips).toHaveLength(1);
+  });
+});
+
+describe('stackLinkedAudioStrips (overlapping strips get their own band)', () => {
+  const strip = (clipId: string, startUs: number, endUs: number) => ({
+    clipId,
+    assetId: `asset-${clipId}`,
+    startUs,
+    endUs,
+  });
+
+  it('keeps strips that do not overlap in one band', () => {
+    const { stacked, layerCount } = stackLinkedAudioStrips([
+      strip('a', 0, 1_000),
+      strip('b', 1_000, 2_000),
+    ]);
+    expect(layerCount).toBe(1);
+    expect(stacked.map((entry) => entry.layer)).toEqual([0, 0]);
+  });
+
+  it('puts overlapping strips in separate bands and reuses a freed band', () => {
+    const { stacked, layerCount } = stackLinkedAudioStrips([
+      strip('a', 0, 4_000),
+      strip('b', 1_000, 3_000),
+      strip('c', 3_500, 6_000),
+    ]);
+    expect(layerCount).toBe(2);
+    expect(stacked.map((entry) => [entry.strip.clipId, entry.layer])).toEqual([
+      ['a', 0],
+      ['b', 1],
+      ['c', 1],
+    ]);
+  });
+
+  it('reports one band for no strips', () => {
+    expect(stackLinkedAudioStrips([]).layerCount).toBe(1);
   });
 });

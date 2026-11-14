@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { timeToPixel, type TimelineViewport } from '@joy-media/timeline-engine';
 import { TimelineElementMedia } from './TimelineElementVisual.js';
-import { linkedAudioStrips } from './timeline-linked-audio.js';
+import { linkedAudioStrips, stackLinkedAudioStrips } from './timeline-linked-audio.js';
 import { linkedStripMedia, type LinkedAudioLaneInputs } from './timeline-linked-audio-source.js';
 import {
   decodeTimelineWaveform,
@@ -49,6 +49,17 @@ export function useAssetsWithAudio(
   return known;
 }
 
+/** A clip counts as near when it touches the visible span or lies within one screen width of it. */
+function clipIsNearRange(
+  startUs: number,
+  durationUs: number,
+  range: { readonly startUs: number; readonly endUs: number } | undefined,
+): boolean {
+  if (range === undefined) return true;
+  const margin = Math.max(0, range.endUs - range.startUs);
+  return startUs + durationUs >= range.startUs - margin && startUs <= range.endUs + margin;
+}
+
 /**
  * Display-only strips on the A1 lane: the audio of each video clip that has an
  * audio stream, under the clip's time span. They read the timeline and write
@@ -58,15 +69,25 @@ export function TimelineLinkedAudioStrips({
   inputs,
   viewport,
   loadAssetBlob,
+  visibleRangeUs,
 }: {
   readonly inputs: LinkedAudioLaneInputs;
   readonly viewport: TimelineViewport;
   readonly loadAssetBlob?: ((assetId: string) => Promise<Blob | undefined>) | undefined;
+  /** The time span on screen. Only clips in (or near) it are probed; undefined probes every clip. */
+  readonly visibleRangeUs?: { readonly startUs: number; readonly endUs: number } | undefined;
 }) {
-  const assetIds = useMemo(
-    () => inputs.videoClips.map((clip) => clip.assetId),
-    [inputs.videoClips],
-  );
+  const rangeStartUs = visibleRangeUs?.startUs;
+  const rangeEndUs = visibleRangeUs?.endUs;
+  const assetIds = useMemo(() => {
+    const range =
+      rangeStartUs === undefined || rangeEndUs === undefined
+        ? undefined
+        : { startUs: rangeStartUs, endUs: rangeEndUs };
+    return inputs.videoClips
+      .filter((clip) => clipIsNearRange(clip.startUs, clip.durationUs, range))
+      .map((clip) => clip.assetId);
+  }, [inputs.videoClips, rangeStartUs, rangeEndUs]);
   const withAudio = useAssetsWithAudio(assetIds, loadAssetBlob);
   const strips = useMemo(
     () =>
@@ -77,6 +98,7 @@ export function TimelineLinkedAudioStrips({
       }),
     [inputs.videoClips, inputs.a1Clips, withAudio],
   );
+  const { stacked, layerCount } = useMemo(() => stackLinkedAudioStrips(strips), [strips]);
   const clipsById = useMemo(
     () => new Map(inputs.videoClips.map((clip) => [clip.clipId, clip] as const)),
     [inputs.videoClips],
@@ -84,7 +106,7 @@ export function TimelineLinkedAudioStrips({
 
   return (
     <>
-      {strips.map((strip) => {
+      {stacked.map(({ strip, layer }) => {
         const clip = clipsById.get(strip.clipId);
         if (clip === undefined) return null;
         const leftPx = timeToPixel(strip.startUs, { ...viewport, originUs: 0 });
@@ -100,7 +122,17 @@ export function TimelineLinkedAudioStrips({
             data-start-us={strip.startUs}
             data-end-us={strip.endUs}
             aria-hidden="true"
-            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+            style={{
+              left: `${leftPx}px`,
+              width: `${widthPx}px`,
+              ...(layerCount > 1
+                ? {
+                    top: `calc(0.2rem + (100% - 0.4rem) * ${layer} / ${layerCount})`,
+                    height: `calc((100% - 0.4rem) / ${layerCount})`,
+                    bottom: 'auto',
+                  }
+                : {}),
+            }}
           >
             <TimelineElementMedia
               kind="audio"
