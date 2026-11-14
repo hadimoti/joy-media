@@ -195,6 +195,8 @@ type MovePlan =
       readonly ok: true;
       readonly landings: readonly ClipLanding[];
       readonly transaction: CommandTransaction;
+      /** Every clip would land where it already is: nothing to do, and no undo step. */
+      readonly unchanged: boolean;
     }
   | { readonly ok: false; readonly message: string };
 
@@ -1930,7 +1932,14 @@ export function TimelinePanel({
     if (transaction === undefined) {
       return { ok: false, message: 'There is no room for the clip there.' };
     }
-    return { ok: true, landings, transaction };
+    const unchanged = landings.every(
+      (landing) =>
+        landing.targetTrackId === landing.sourceTrackId &&
+        composition.tracks
+          .find((candidate) => candidate.id === landing.sourceTrackId)
+          ?.clips.find((candidate) => candidate.id === landing.clipId)?.startUs === landing.startUs,
+    );
+    return { ok: true, landings, transaction, unchanged };
   };
 
   const moveClip =
@@ -1944,6 +1953,7 @@ export function TimelinePanel({
           showToast?.(plan.message, 'info');
           return false;
         }
+        if (plan.unchanged) return false;
         onDispatch(plan.transaction);
         return true;
       } catch {
