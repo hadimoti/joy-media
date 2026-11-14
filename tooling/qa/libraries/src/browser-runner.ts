@@ -4,15 +4,9 @@ import type { EffectParamValue } from '@joy-media/visual-effects';
 import { VisualObjectProjectHistory } from '@joy-media/property-system';
 import type { VisualObjectCommand } from '@joy-media/property-system';
 import { canonicalBindingKey, migrateV0ToV1 } from '@joy-media/project-schema';
-import type { JoyProjectV1, TransitionV1 } from '@joy-media/project-schema';
+import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { applyCrossfade } from '@joy-media/audio-core';
-import {
-  getTransitionShader,
-  listTransitionShaders,
-  mergeTransitionParams,
-  resolveTransitionUniforms,
-} from '@joy-media/transition-shaders';
-import type { TransitionCatalogEntry, TransitionParamValue } from '@joy-media/transition-shaders';
+import { getTransitionShader, listTransitionShaders } from '@joy-media/transition-shaders';
 import { emptySpikeProject } from '@joy-media/test-fixtures';
 import {
   buildRenderFrameIRFromProject,
@@ -1017,6 +1011,9 @@ const CATEGORY_REPRESENTATIVES: Readonly<Record<string, string>> = {
   creative: 'gl:ButterflyWaveScrawler',
 };
 
+/** Intermediate frames (progress 1/N .. (N-1)/N) checked against both clips. */
+const TRANSITION_SWEEP_STEPS = 20;
+
 const TRANSITION_IMAGE_SIZES_540 = {
   'clip-a': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
   'clip-b': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
@@ -1214,7 +1211,8 @@ function runCategoryEdgeCases(
     renderer.render(frameShort, bitmaps540);
     const px = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
     shorterPassed = px !== undefined && px.data.length > 0;
-    shorterDetails = 'Rendered safely with left clip (400ms) < transition (1000ms), clamped progress';
+    shorterDetails =
+      'Rendered safely with left clip (400ms) < transition (1000ms), clamped progress';
   } catch (err) {
     shorterDetails = `Failed: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -1313,8 +1311,11 @@ function runCategoryEdgeCases(
     renderer.render(frameLast, multiBitmaps);
     const pxLast = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
 
-    firstLastPassed = Boolean(pxFirst && pxLast && pxFirst.data.length > 0 && pxLast.data.length > 0);
-    firstLastDetails = 'First cut (0-2s) and last cut (2-4s, 4-6s) both rendered active transitions';
+    firstLastPassed = Boolean(
+      pxFirst && pxLast && pxFirst.data.length > 0 && pxLast.data.length > 0,
+    );
+    firstLastDetails =
+      'First cut (0-2s) and last cut (2-4s, 4-6s) both rendered active transitions';
   } catch (err) {
     firstLastDetails = `Failed: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -1368,14 +1369,16 @@ function runCategoryEdgeCases(
       };
     };
     const afterDrop = onTransitionDrop(transitionId, 'clip-a', 'clip-b', 'track-v1');
-    if ((afterDrop.transitions?.length ?? 0) !== 2) throw new Error('Drag and drop simulation failed');
+    if ((afterDrop.transitions?.length ?? 0) !== 2)
+      throw new Error('Drag and drop simulation failed');
 
     const replaceType = 'gl:fade';
     const replaced = {
       ...project,
       transitions: (project.transitions ?? []).map((t) => ({ ...t, type: replaceType })),
     };
-    if (replaced.transitions?.[0]?.type !== replaceType) throw new Error('Replace transition failed');
+    if (replaced.transitions?.[0]?.type !== replaceType)
+      throw new Error('Replace transition failed');
 
     const removed = {
       ...project,
@@ -1451,16 +1454,6 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
       { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
     );
     currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
-    console.log(
-      'TRANSITION DEBUG:',
-      input.id,
-      'timeUs:',
-      timeUs,
-      'nodes:',
-      frame.nodes.length,
-      'transitionNode:',
-      JSON.stringify(frame.nodes.find((n) => n.kind === 'transition')),
-    );
     const px = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
     if (!px) throw new Error(`readPixels failed at time ${timeUs}`);
     const b64 = rgbaToPngBase64(
@@ -1477,10 +1470,34 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
     const diffB = computeRgbaDiffMetrics(px.data, currentState.clipBBitmap540.data);
     diffsVsA.push(diffA.meanAbsDiff);
     diffsVsB.push(diffB.meanAbsDiff);
-    if (timeUs === 1_500_000) {
-      console.log('DIFF AT 1.5s:', input.id, 'diffA:', diffA.meanAbsDiff, 'diffB:', diffB.meanAbsDiff, 'px[0..10]:', Array.from(px.data.slice(0, 10)), 'clipA[0..10]:', Array.from(currentState.clipABitmap540.data.slice(0, 10)));
-    }
   }
+
+  // Some effects hold the outgoing picture for most of the range (Zoom Circles
+  // only reveals clip B after 80 per cent), so the five fixed points can all
+  // equal clip A or clip B. A sweep of intermediate frames proves the effect
+  // really draws something that is neither clip.
+  const sweepDiffsVsA: number[] = [];
+  const sweepDiffsVsB: number[] = [];
+  for (let step = 1; step < TRANSITION_SWEEP_STEPS; step += 1) {
+    const frame = buildRenderFrameIRFromProject(
+      project,
+      compId,
+      1_000_000 + Math.round((step * 1_000_000) / TRANSITION_SWEEP_STEPS),
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+    );
+    currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
+    const px = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    if (!px) throw new Error(`readPixels failed at sweep step ${step}`);
+    sweepDiffsVsA.push(
+      computeRgbaDiffMetrics(px.data, currentState.clipABitmap540.data).meanAbsDiff,
+    );
+    sweepDiffsVsB.push(
+      computeRgbaDiffMetrics(px.data, currentState.clipBBitmap540.data).meanAbsDiff,
+    );
+  }
+  const midFrameDiff = Math.max(...sweepDiffsVsA.map((a, i) => Math.min(a, sweepDiffsVsB[i] ?? 0)));
 
   // 2. Export offline MP4 (or frames fallback)
   const exportFps = 20;
@@ -1717,7 +1734,8 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
     category: entry.category,
     optionsDeclared: entry.options,
     preview: {
-      passed: diffsVsA[0]! < 1.0 && diffsVsB[4]! < 1.0 && diffsVsA[2]! > 1.0,
+      passed: diffsVsA[0]! < 1.0 && diffsVsB[4]! < 1.0 && midFrameDiff > 1.0,
+      midFrameDiff,
       p0Base64: previewFramesBase64[0]!,
       p25Base64: previewFramesBase64[1]!,
       p50Base64: previewFramesBase64[2]!,

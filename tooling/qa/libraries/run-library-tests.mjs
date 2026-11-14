@@ -179,10 +179,7 @@ async function main() {
   const auditMap = parseLibraryAuditMarkdown(readFileSync(AUDIT_MD_PATH, 'utf8'));
   const faceDataUrl = readImageDataUrl(options.facePath);
 
-  const OWNER_ASSETS_DIR = resolve(
-    REPO_ROOT,
-    '../joy-media-temps/fable-plan/assets-from-owner',
-  );
+  const OWNER_ASSETS_DIR = resolve(REPO_ROOT, '../joy-media-temps/fable-plan/assets-from-owner');
   const altOwnerAssets = 'C:/Users/HadiMoti/Desktop/joy-media-temps/fable-plan/assets-from-owner';
   const defaultPic1 = existsSync(join(OWNER_ASSETS_DIR, 'transition-preview-pic1.jpg'))
     ? join(OWNER_ASSETS_DIR, 'transition-preview-pic1.jpg')
@@ -228,10 +225,11 @@ async function main() {
     });
     settledStartup = true;
 
-    const initResult = await page.evaluate(
-      (arg) => window.__JOY_LIBRARY_HARNESS__.init(arg),
-      { faceDataUrl, pic1DataUrl, pic2DataUrl },
-    );
+    const initResult = await page.evaluate((arg) => window.__JOY_LIBRARY_HARNESS__.init(arg), {
+      faceDataUrl,
+      pic1DataUrl,
+      pic2DataUrl,
+    });
 
     const knownFramePath = join(outDir, 'known-test-frame-1080p.png');
     writeFileSync(knownFramePath, Buffer.from(initResult.knownChartPngBase64, 'base64'));
@@ -382,7 +380,9 @@ async function main() {
 
         const failureReasons = [];
         if (!browserResult.preview.passed) {
-          failureReasons.push('Preview frames did not properly transition from clip A to clip B');
+          failureReasons.push(
+            'Preview frames did not properly transition from clip A to clip B (frame 0 must equal A, frame 100 must equal B, and an intermediate frame must differ from both)',
+          );
         }
         if (!exportComparison.ok) {
           failureReasons.push(`Export comparison failed: ${exportComparison.error}`);
@@ -492,7 +492,10 @@ async function main() {
           };
         } else {
           if (browserResult.exportArtifact.mp4Base64) {
-            writeFileSync(exportPath, Buffer.from(browserResult.exportArtifact.mp4Base64, 'base64'));
+            writeFileSync(
+              exportPath,
+              Buffer.from(browserResult.exportArtifact.mp4Base64, 'base64'),
+            );
           } else if (browserResult.exportArtifact.framesPngBase64) {
             const framesDir = join(itemDir, 'frames');
             mkdirSync(framesDir, { recursive: true });

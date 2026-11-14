@@ -636,6 +636,57 @@ describe('transition timing', () => {
     expect(node.params).toEqual({ intensity: 0.5 });
   });
 
+  it('clamps the transition-local range start at 0 when the right clip starts before the duration', () => {
+    const animated: TransitionV1 = {
+      ...transition,
+      id: 't-short',
+      type: 'gl:fadegrayscale',
+      durationUs: 1_000_000,
+      params: { intensity: 0.2 },
+    };
+    const shortTimes = clipTimesFromTracks([
+      {
+        clips: [
+          { id: 'left', startUs: 0 },
+          { id: 'right', startUs: 200_000 },
+        ],
+      },
+    ]);
+    const binding = {
+      ownerKind: 'transition' as const,
+      ownerId: animated.id,
+      propertyId: 'intensity',
+      timeDomain: 'transition-local' as const,
+    };
+    const propertyAnimations = {
+      [canonicalBindingKey(binding)]: {
+        binding,
+        value: {
+          kind: 'scalar' as const,
+          curve: {
+            keyframes: [
+              { timeUs: 0, value: 0.2, interpolation: 'linear' as const },
+              { timeUs: 1_000_000, value: 0.8, interpolation: 'linear' as const },
+            ],
+          },
+        },
+      },
+    };
+    // The unclamped start would be -800_000, which the time domain rejects.
+    expect(() =>
+      sampleTransitionParams(animated, 100_000, shortTimes, propertyAnimations),
+    ).not.toThrow();
+    expect(sampleTransitionParams(animated, 100_000, shortTimes, propertyAnimations)).toEqual({
+      intensity: expect.closeTo(0.26, 6),
+    });
+    const frame = buildRenderFrameIR('c', 100_000, 100, 100, [], {
+      transitions: [animated],
+      clipTimes: shortTimes,
+      propertyAnimations,
+    });
+    expect(frame.nodes.some((n) => n.kind === 'transition')).toBe(true);
+  });
+
   it('automatically resolves transitions and clipTimes in buildRenderFrameIRFromProject', () => {
     const project = {
       rootCompositionId: 'comp-1',

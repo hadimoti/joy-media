@@ -147,7 +147,7 @@ export function buildTransitionsMarkdownReport(report) {
 
   for (const item of report.items) {
     const previewCell = item.preview.passed
-      ? `PASS (Δ0=0, Δ50=${fmtNum(item.preview.diffVsA[2])}, Δ100=0)`
+      ? `PASS (Δ0=${fmtNum(item.preview.diffVsA[0])}, Δ50=${fmtNum(item.preview.diffVsA[2])}, Δ100=${fmtNum(item.preview.diffVsB[4])}, mid=${fmtNum(item.preview.midFrameDiff)})`
       : `FAIL`;
     const exportCell = formatTransitionExportCell(item);
     const optionsCell = formatTransitionOptionsCell(item);
@@ -173,10 +173,18 @@ export function buildTransitionsMarkdownReport(report) {
     );
     for (const item of edgeCaseItems) {
       const ec = item.edgeCases;
-      const shortCell = ec.clipShorterThanDuration.passed ? 'PASS' : `FAIL (${escapeMd(ec.clipShorterThanDuration.details)})`;
-      const firstLastCell = ec.firstAndLastClip.passed ? 'PASS' : `FAIL (${escapeMd(ec.firstAndLastClip.details)})`;
-      const diffSizeCell = ec.differentSizeAndFramerate.passed ? 'PASS' : `FAIL (${escapeMd(ec.differentSizeAndFramerate.details)})`;
-      const lifecycleCell = ec.lifecycle.passed ? 'PASS' : `FAIL (${escapeMd(ec.lifecycle.details)})`;
+      const shortCell = ec.clipShorterThanDuration.passed
+        ? 'PASS'
+        : `FAIL (${escapeMd(ec.clipShorterThanDuration.details)})`;
+      const firstLastCell = ec.firstAndLastClip.passed
+        ? 'PASS'
+        : `FAIL (${escapeMd(ec.firstAndLastClip.details)})`;
+      const diffSizeCell = ec.differentSizeAndFramerate.passed
+        ? 'PASS'
+        : `FAIL (${escapeMd(ec.differentSizeAndFramerate.details)})`;
+      const lifecycleCell = ec.lifecycle.passed
+        ? 'PASS'
+        : `FAIL (${escapeMd(ec.lifecycle.details)})`;
       const ecPassed =
         ec.clipShorterThanDuration.passed &&
         ec.firstAndLastClip.passed &&

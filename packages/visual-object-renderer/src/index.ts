@@ -67,9 +67,8 @@ export interface BuildRenderFrameOptions {
   /** Universal property animation map used for frame-local effect sampling. */
   readonly propertyAnimations?: JoyProjectV1['propertyAnimations'] | undefined;
   /** Intrinsic pixel size for image stickers when real bitmaps are available. */
-  readonly imageSizesByObjectId?: Readonly<
-    Record<string, { readonly width: number; readonly height: number }>
-  > | undefined;
+  readonly imageSizesByObjectId?:
+    Readonly<Record<string, { readonly width: number; readonly height: number }>> | undefined;
   /** Optional evaluator-provided layer order for universal timeline tracks. */
   readonly zIndexByObjectId?: Readonly<Record<string, number>> | undefined;
 }
