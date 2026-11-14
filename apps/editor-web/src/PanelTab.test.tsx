@@ -9,6 +9,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { IDockviewPanelHeaderProps } from 'dockview';
 import { LABELLED_TAB_STRIP_WIDTH, PanelTab, stripHasRoomForLabels } from './PanelTab.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
+import {
+  AgentPresenceProvider,
+  createAgentPresenceStore,
+  type AgentPresenceStore,
+  type JoyAgentPresenceEvent,
+} from './agent-presence.js';
 import { PANEL_IDS } from './workspace.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -72,6 +78,108 @@ describe('PanelTab', () => {
     expect(cubeUrl).toBeTruthy();
     expect(markup).toContain(cubeUrl as string);
     expect(cubeUrl).not.toBe(panelTabIconUrl('motion'));
+  });
+});
+
+describe('the Joy Code tab close guard (T-A03)', () => {
+  let root: Root | undefined;
+  let host: HTMLDivElement | undefined;
+  const closed: string[] = [];
+
+  beforeEach(() => {
+    closed.length = 0;
+  });
+
+  afterEach(async () => {
+    if (root !== undefined) await act(async () => root?.unmount());
+    host?.remove();
+    root = undefined;
+    host = undefined;
+  });
+
+  const runEvent = (
+    store: AgentPresenceStore,
+    seq: number,
+    kind: JoyAgentPresenceEvent['kind'],
+  ): void => {
+    const common = {
+      protocolVersion: 1,
+      runId: 'run-close-guard',
+      seq,
+      at: '2026-11-14T00:00:00.000Z',
+      revision: 1,
+      kind,
+    } as const;
+    const event: JoyAgentPresenceEvent =
+      kind === 'completed'
+        ? { ...common, phase: 'completed' }
+        : { ...common, phase: 'thinking', targets: [{ panelId: 'agent' }] };
+    store.dispatch(event);
+  };
+
+  async function renderJoyCodeTab(store: AgentPresenceStore): Promise<HTMLButtonElement> {
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    const props = {
+      api: { id: 'agent', close: () => closed.push('agent') },
+    } as unknown as IDockviewPanelHeaderProps;
+    await act(async () => {
+      root?.render(
+        <AgentPresenceProvider store={store}>
+          <PanelTab {...props} />
+        </AgentPresenceProvider>,
+      );
+    });
+    const button = host.querySelector<HTMLButtonElement>('button.panel-tab-close');
+    expect(button, 'the Joy Code tab has a close control').toBeTruthy();
+    return button as HTMLButtonElement;
+  }
+
+  it('disables the close control while a run is active and does not close the tab', async () => {
+    const store = createAgentPresenceStore();
+    store.beginRun('run-close-guard', 1);
+    runEvent(store, 0, 'activity');
+
+    const button = await renderJoyCodeTab(store);
+    expect(button.disabled, 'a live run disables the close control').toBe(true);
+    expect(button.title).toBe('Stop Joy Code before closing it');
+
+    await act(async () => {
+      button.click();
+    });
+    expect(closed, 'a disabled control never closes the tab').toEqual([]);
+  });
+
+  it('keeps the guard through the green completion marker, then closes once the hand-off ends', async () => {
+    const store = createAgentPresenceStore();
+    store.beginRun('run-close-guard', 1);
+    runEvent(store, 0, 'activity');
+
+    const button = await renderJoyCodeTab(store);
+    expect(button.disabled).toBe(true);
+
+    await act(async () => {
+      runEvent(store, 1, 'completed');
+    });
+    // The completed run keeps its terminal target for the confirmation marker, so the tab still counts as active.
+    expect(button.disabled, 'the completion marker keeps the control disabled').toBe(true);
+
+    await act(async () => {
+      store.completeHandoff();
+    });
+    expect(button.disabled, 'after the hand-off the control is enabled').toBe(false);
+
+    await act(async () => {
+      button.click();
+    });
+    expect(closed).toEqual(['agent']);
+  });
+
+  it('enables the close control when no run is active', async () => {
+    const button = await renderJoyCodeTab(createAgentPresenceStore());
+    expect(button.disabled).toBe(false);
+    expect(button.title).toBe('Close Joy Code');
   });
 });
 

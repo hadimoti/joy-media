@@ -5,6 +5,7 @@
 // desktop host, so it is kept out of the tsc/NodeNext ESM build entirely rather than risk a
 // silent loader fallback. Keep it small and dependency-free.
 'use strict';
+/* global process */
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const {
@@ -15,6 +16,7 @@ const {
 
 const IPC_ENDPOINT = 'joy-desktop-ipc';
 const DROP_AUTH_WINDOW_MS = 2000;
+const TEST_API_BASE_ARGUMENT = '--joy-media-test-api-base-url=';
 let authorizedDrop;
 
 /** @param {unknown} file */
@@ -125,6 +127,19 @@ contextBridge.exposeInMainWorld('joyDesktop', {
     return () => ipcRenderer.removeListener(DROPPED_IMPORT_PROGRESS_CHANNEL, handler);
   },
 });
+
+// The main process adds this argument only in explicit test mode after loopback-only
+// endpoint validation. Do not read renderer-controlled location state to pick an API.
+const testApiArgument =
+  typeof process === 'object' && Array.isArray(process.argv)
+    ? process.argv.find((argument) => argument.startsWith(TEST_API_BASE_ARGUMENT))
+    : undefined;
+if (testApiArgument !== undefined) {
+  contextBridge.exposeInMainWorld(
+    '__JOY_MEDIA_API_BASE__',
+    testApiArgument.slice(TEST_API_BASE_ARGUMENT.length),
+  );
+}
 
 module.exports = {
   IPC_CHANNELS,
