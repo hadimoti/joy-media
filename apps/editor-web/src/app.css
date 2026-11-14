@@ -16370,18 +16370,31 @@ label {
   flex: none;
 }
 
+/* The wheel zooms and a drag pans, so the canvas never scrolls; the graph is drawn in a transformed
+   group that fills the canvas. */
 .dual-flow-canvas {
+  position: relative;
+  flex: 1 1 auto;
   min-height: 235px;
-  overflow: auto;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   background-color: #101218;
   background-image: radial-gradient(rgba(255, 255, 255, 0.09) 0.7px, transparent 0.7px);
   background-size: 14px 14px;
 }
 
+.dual-flow-canvas:active {
+  cursor: grabbing;
+}
+
 .dual-flow-canvas svg {
+  position: absolute;
+  inset: 0;
   display: block;
-  min-width: 760px;
   width: 100%;
+  height: 100%;
 }
 
 .dual-flow-edge {
@@ -16391,9 +16404,9 @@ label {
 }
 
 .dual-flow-edge.is-traced {
-  stroke: #9d8cff;
+  stroke: var(--joy-accent);
   stroke-width: 2.5;
-  filter: drop-shadow(0 0 3px rgba(110, 87, 255, 0.7));
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--joy-accent) 70%, transparent));
 }
 
 #dual-flow-arrow path {
@@ -16418,9 +16431,9 @@ label {
 
 .dual-flow-node.is-traced rect {
   fill: #292442;
-  stroke: #9d8cff;
+  stroke: var(--joy-accent);
   stroke-width: 2;
-  filter: drop-shadow(0 0 4px rgba(110, 87, 255, 0.45));
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--joy-accent) 45%, transparent));
 }
 
 .dual-flow-kind {
@@ -16470,7 +16483,7 @@ label {
 }
 
 .dual-flow-minimap-node.is-traced {
-  fill: #9d8cff;
+  fill: var(--joy-accent);
 }
 
 .dual-flow-minimap-node.is-focused {
@@ -16578,10 +16591,10 @@ label {
   bottom: 3px;
   overflow: hidden;
   padding: 0 6px;
-  border: 1px solid rgba(150, 130, 255, 0.5);
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 50%, transparent);
   border-radius: 4px;
   color: #ece9ff;
-  background: rgba(110, 87, 255, 0.26);
+  background: color-mix(in srgb, var(--joy-accent) 26%, transparent);
   font-size: var(--joy-type-xs);
   text-align: left;
   white-space: nowrap;
@@ -16592,8 +16605,8 @@ label {
 .data-lane-item.is-script,
 .data-lane-item.is-transcript,
 .data-lane-item.is-captions {
-  border-color: rgba(168, 140, 255, 0.6);
-  background: rgba(140, 110, 255, 0.24);
+  border-color: color-mix(in srgb, var(--joy-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--joy-accent) 24%, transparent);
 }
 
 .data-lane-item.is-analysis {
@@ -16820,7 +16833,7 @@ label {
 .specialist-edits code {
   padding: 0 4px;
   border-radius: 3px;
-  background: rgba(110, 87, 255, 0.22);
+  background: color-mix(in srgb, var(--joy-accent) 22%, transparent);
   font-size: var(--joy-type-xs);
 }
 
@@ -16832,7 +16845,7 @@ label {
   border: 1px solid var(--color-joy);
   border-radius: 5px;
   color: #fff;
-  background: rgba(110, 87, 255, 0.3);
+  background: color-mix(in srgb, var(--joy-accent) 30%, transparent);
   font-size: var(--joy-type-xs);
   cursor: pointer;
 }
@@ -16860,7 +16873,7 @@ label {
   gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--joy-border);
-  background: rgba(110, 87, 255, 0.06);
+  background: color-mix(in srgb, var(--joy-accent) 6%, transparent);
 }
 
 .workflow-templates-label {
@@ -16873,10 +16886,10 @@ label {
 
 .workflow-template-button {
   padding: 4px 10px;
-  border: 1px solid rgba(150, 130, 255, 0.5);
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 50%, transparent);
   border-radius: 999px;
   color: #ece9ff;
-  background: rgba(110, 87, 255, 0.18);
+  background: color-mix(in srgb, var(--joy-accent) 18%, transparent);
   font-size: var(--joy-type-xs);
   cursor: pointer;
   /* Continuity cue when a template lands; see the reduced-motion block below. */
@@ -16912,10 +16925,10 @@ label {
 .workflow-hint {
   margin: 8px 10px 0;
   padding: 7px 10px;
-  border: 1px dashed rgba(150, 130, 255, 0.45);
+  border: 1px dashed color-mix(in srgb, var(--joy-accent) 45%, transparent);
   border-radius: 5px;
   color: var(--joy-text-secondary);
-  background: rgba(110, 87, 255, 0.07);
+  background: color-mix(in srgb, var(--joy-accent) 7%, transparent);
   font-size: var(--joy-type-xs);
 }
 

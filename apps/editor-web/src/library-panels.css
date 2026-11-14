@@ -339,6 +339,11 @@
    empty row under the title. */
 .library-card-media {
   position: relative;
+  /* Some cards (transitions) centre their children: without a full width this wrapper shrank to
+     nothing and the preview picture vanished. */
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
 }
 
 .library-card-media > .library-card-preview {

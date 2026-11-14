@@ -17,6 +17,8 @@ describe('library card layout', () => {
     expect(actions).toBeGreaterThan(media);
     expect(actions).toBeLessThan(content);
     expect(css).toMatch(/\.library-card-media \{[^}]*position: relative;/);
+    // Cards that centre their children (transitions) must not shrink the picture to nothing.
+    expect(css).toMatch(/\.library-card-media \{[^}]*align-self: stretch;[^}]*width: 100%;/);
     expect(css).toMatch(/\.library-card-actions \{[^}]*position: absolute;[^}]*bottom: /);
     expect(css).toMatch(/\.library-card-actions \{[^}]*justify-content: space-between;/);
   });

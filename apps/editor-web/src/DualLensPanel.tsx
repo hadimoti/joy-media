@@ -1,5 +1,22 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { FLOW_ZOOM_DEFAULT, scrollKeepingPointer, zoomAfterWheel } from './flow-zoom.js';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react';
+import {
+  centeredOnPoint,
+  centeredView,
+  defaultFlowZoom,
+  FLOW_ZOOM_DEFAULT,
+  visibleFractions,
+  zoomAfterWheel,
+  zoomAtPointer,
+  type FlowView,
+} from './flow-zoom.js';
 import type { TransitionV1, WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { CommandTransaction, GraphTransaction } from '@joy-media/commands';
 import {
@@ -545,7 +562,7 @@ const NODE_HEIGHT = 56;
 const COLUMN_PITCH = 230;
 const ROW_PITCH = 78;
 
-function FlowProjection({
+export function FlowProjection({
   nodes,
   edges,
   traceNodeIds,
@@ -572,73 +589,138 @@ function FlowProjection({
   const width = 900;
   const height = Math.max(250, graph.height);
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const [viewport, setViewport] = useState({ left: 0, top: 0, width: 1, height: 1 });
-  // The mouse wheel zooms the whole flowchart (it does not scroll); the scrollbars still pan.
-  const [zoom, setZoom] = useState(FLOW_ZOOM_DEFAULT);
-  const zoomRef = useRef(zoom);
-  zoomRef.current = zoom;
-  const pendingScroll = useRef<{ left: number; top: number } | undefined>(undefined);
+  // The view is a zoom plus a translation. The wheel zooms around the pointer, a drag pans, and
+  // until the user touches the view the graph stays centred in the canvas (also when it resizes).
+  const [view, setView] = useState<FlowView>({ zoom: FLOW_ZOOM_DEFAULT, tx: 0, ty: 0 });
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const userMovedView = useRef(false);
+  const panRef = useRef<{ x: number; y: number; tx: number; ty: number } | undefined>(undefined);
 
-  const readViewport = () => {
+  // The box the nodes actually occupy, so "centred" means the graph and not the drawing margin.
+  // Plain numbers, not an object: `layoutGraph` builds a new Map on every render, so anything
+  // derived from it by identity would re-run the centring effect on every render (an update loop).
+  let boxMinX = Infinity;
+  let boxMinY = Infinity;
+  let boxMaxX = -Infinity;
+  let boxMaxY = -Infinity;
+  for (const position of graph.positions.values()) {
+    boxMinX = Math.min(boxMinX, position.x);
+    boxMinY = Math.min(boxMinY, position.y);
+    boxMaxX = Math.max(boxMaxX, position.x + NODE_WIDTH);
+    boxMaxY = Math.max(boxMaxY, position.y + NODE_HEIGHT);
+  }
+  const hasBox = Number.isFinite(boxMinX);
+  const boxX = hasBox ? boxMinX : 0;
+  const boxY = hasBox ? boxMinY : 0;
+  const boxWidth = hasBox ? boxMaxX - boxMinX : width;
+  const boxHeight = hasBox ? boxMaxY - boxMinY : height;
+
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
-    setViewport({
-      left: canvas.scrollLeft / Math.max(1, canvas.scrollWidth),
-      top: canvas.scrollTop / Math.max(1, canvas.scrollHeight),
-      width: canvas.clientWidth / Math.max(1, canvas.scrollWidth),
-      height: canvas.clientHeight / Math.max(1, canvas.scrollHeight),
-    });
-  };
-  useEffect(readViewport, [nodes]);
+    const measure = () => {
+      const next = { width: canvas.clientWidth, height: canvas.clientHeight };
+      // Keep the old object when nothing changed, so an equal size never causes a render.
+      setCanvasSize((current) =>
+        current.width === next.width && current.height === next.height ? current : next,
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (userMovedView.current || canvasSize.width === 0) return;
+    // The small default, or smaller when the whole graph would not fit the canvas height: the
+    // first sight of the chart is all of it, centred.
+    const box = { x: boxX, y: boxY, width: boxWidth, height: boxHeight };
+    const next = centeredView(
+      box,
+      canvasSize.width,
+      canvasSize.height,
+      defaultFlowZoom(box, canvasSize.width, canvasSize.height),
+    );
+    setView((current) =>
+      current.zoom === next.zoom && current.tx === next.tx && current.ty === next.ty
+        ? current
+        : next,
+    );
+  }, [boxX, boxY, boxWidth, boxHeight, canvasSize.width, canvasSize.height]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      const oldZoom = zoomRef.current;
-      const newZoom = zoomAfterWheel(oldZoom, event.deltaY);
-      if (newZoom === oldZoom) return;
+      const current = viewRef.current;
+      const newZoom = zoomAfterWheel(current.zoom, event.deltaY);
+      if (newZoom === current.zoom) return;
       const rect = canvas.getBoundingClientRect();
-      pendingScroll.current = {
-        left: scrollKeepingPointer(canvas.scrollLeft, event.clientX - rect.left, oldZoom, newZoom),
-        top: scrollKeepingPointer(canvas.scrollTop, event.clientY - rect.top, oldZoom, newZoom),
-      };
-      zoomRef.current = newZoom;
-      setZoom(newZoom);
+      userMovedView.current = true;
+      setView(zoomAtPointer(current, event.clientX - rect.left, event.clientY - rect.top, newZoom));
     };
-    // Not passive: the wheel must not also scroll the canvas.
+    // Not passive: the wheel must zoom the graph and must not scroll anything behind it.
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
   }, []);
 
-  useLayoutEffect(() => {
-    const canvas = canvasRef.current;
-    const target = pendingScroll.current;
-    if (canvas !== null && target !== undefined) {
-      canvas.scrollLeft = target.left;
-      canvas.scrollTop = target.top;
-      pendingScroll.current = undefined;
+  const onCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    if ((event.target as Element).closest('.dual-flow-node') !== null) return;
+    panRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      tx: viewRef.current.tx,
+      ty: viewRef.current.ty,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    if (pan === undefined) return;
+    userMovedView.current = true;
+    setView({
+      zoom: viewRef.current.zoom,
+      tx: pan.tx + (event.clientX - pan.x),
+      ty: pan.ty + (event.clientY - pan.y),
+    });
+  };
+  const onCanvasPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    panRef.current = undefined;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    readViewport();
-  }, [zoom]);
+  };
 
-  // Scroll a revealed node into view. `positions` is read through a ref because
-  // it is rebuilt on every projection change, and re-scrolling on each playhead
-  // tick would fight the user panning the canvas.
+  const viewport = visibleFractions(view, canvasSize.width, canvasSize.height, width, height);
+
+  // Bring a revealed node to the middle of the canvas. `positions` is read through a ref because
+  // it is rebuilt on every projection change, and re-centring on each playhead tick would fight
+  // the user panning the canvas.
   const positionsRef = useRef(graph.positions);
   positionsRef.current = graph.positions;
-  useEffect(() => {
-    if (focusedNodeId === undefined) return;
+  const centerOnNode = (nodeId: string) => {
     const canvas = canvasRef.current;
-    const position = positionsRef.current.get(focusedNodeId);
+    const position = positionsRef.current.get(nodeId);
     if (canvas === null || position === undefined) return;
-    const scale = zoomRef.current;
-    canvas.scrollTo({
-      left: Math.max(0, (position.x + NODE_WIDTH / 2) * scale - canvas.clientWidth / 2),
-      top: Math.max(0, position.y * scale - canvas.clientHeight / 2),
-      behavior: 'smooth',
-    });
+    userMovedView.current = true;
+    setView(
+      centeredOnPoint(
+        viewRef.current,
+        position.x + NODE_WIDTH / 2,
+        position.y + NODE_HEIGHT / 2,
+        canvas.clientWidth,
+        canvas.clientHeight,
+      ),
+    );
+  };
+  useEffect(() => {
+    if (focusedNodeId !== undefined) centerOnNode(focusedNodeId);
+    // centerOnNode reads refs only; re-centring follows the focused node, not every render.
   }, [focusedNodeId]);
 
   // Arrow keys follow edges and columns, so the connections are reachable
@@ -650,16 +732,7 @@ function FlowProjection({
     const element = nodeElements.current.get(nextId);
     if (element === undefined) return false;
     element.focus();
-    const canvas = canvasRef.current;
-    const position = graph.positions.get(nextId);
-    if (canvas !== null && position !== undefined) {
-      const scale = zoomRef.current;
-      canvas.scrollTo({
-        left: Math.max(0, (position.x + NODE_WIDTH / 2) * scale - canvas.clientWidth / 2),
-        top: Math.max(0, position.y * scale - canvas.clientHeight / 2),
-        behavior: 'smooth',
-      });
-    }
+    centerOnNode(nextId);
     return true;
   };
 
@@ -687,14 +760,15 @@ function FlowProjection({
         Use the left and right arrow keys to follow a connection, up and down to move within a
         column, Home and End for the first and last node, and Enter to select.
       </p>
-      <div className="dual-flow-canvas" ref={canvasRef} onScroll={readViewport}>
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          style={{ width: `${width * zoom}px`, height: `${height * zoom}px`, minWidth: 0 }}
-          role="img"
-          aria-label="Media and data flow graph"
-          aria-describedby="dual-flow-keys"
-        >
+      <div
+        className="dual-flow-canvas"
+        ref={canvasRef}
+        onPointerDown={onCanvasPointerDown}
+        onPointerMove={onCanvasPointerMove}
+        onPointerUp={onCanvasPointerUp}
+        onPointerCancel={onCanvasPointerUp}
+      >
+        <svg role="img" aria-label="Media and data flow graph" aria-describedby="dual-flow-keys">
           <defs>
             <marker
               id="dual-flow-arrow"
@@ -708,71 +782,73 @@ function FlowProjection({
               <path d="M 0 0 L 10 5 L 0 10 z" />
             </marker>
           </defs>
-          {edges.map((edge) => {
-            const from = graph.positions.get(edge.from);
-            const to = graph.positions.get(edge.to);
-            if (from === undefined || to === undefined) return null;
-            return (
-              <path
-                key={edge.id}
-                className={
-                  traceEdgeIds.has(edge.id) ? 'dual-flow-edge is-traced' : 'dual-flow-edge'
-                }
-                d={`M ${from.x + NODE_WIDTH} ${from.y + 28} C ${from.x + 185} ${from.y + 28}, ${to.x - 35} ${to.y + 28}, ${to.x} ${to.y + 28}`}
-                markerEnd="url(#dual-flow-arrow)"
-              />
-            );
-          })}
-          {nodes.map((node) => {
-            const position = graph.positions.get(node.id);
-            if (position === undefined) return null;
-            const classes = ['dual-flow-node'];
-            if (traceNodeIds.has(node.id)) classes.push('is-traced');
-            if (selectedNodeIds.has(node.id)) classes.push('is-selected');
-            if (node.id === focusedNodeId) classes.push('is-focused');
-            return (
-              <g
-                key={node.id}
-                ref={(element) => {
-                  if (element === null) nodeElements.current.delete(node.id);
-                  else nodeElements.current.set(node.id, element);
-                }}
-                className={classes.join(' ')}
-                role="button"
-                tabIndex={0}
-                aria-pressed={selectedNodeIds.has(node.id)}
-                aria-label={`${node.label}, ${node.detail}`}
-                transform={`translate(${position.x} ${position.y})`}
-                onClick={() => onSelectNode(node)}
-                onDoubleClick={() => {
-                  if (node.startUs !== undefined) onSeek(node.startUs);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    onSelectNode(node);
-                    return;
+          <g transform={`translate(${view.tx} ${view.ty}) scale(${view.zoom})`}>
+            {edges.map((edge) => {
+              const from = graph.positions.get(edge.from);
+              const to = graph.positions.get(edge.to);
+              if (from === undefined || to === undefined) return null;
+              return (
+                <path
+                  key={edge.id}
+                  className={
+                    traceEdgeIds.has(edge.id) ? 'dual-flow-edge is-traced' : 'dual-flow-edge'
                   }
-                  if (!isTraversalKey(event.key)) return;
-                  // Only swallow the key when it actually moved somewhere, so a
-                  // leaf still lets the canvas scroll rather than trapping it.
-                  if (moveFocus(node.id, event.key)) event.preventDefault();
-                }}
-              >
-                <rect width={NODE_WIDTH} height={NODE_HEIGHT} rx="8" />
-                <text className="dual-flow-kind" x="10" y="16">
-                  {node.kind.toUpperCase()}
-                </text>
-                <text className="dual-flow-label" x="10" y="34">
-                  {truncate(node.label, 20)}
-                </text>
-                <text className="dual-flow-detail" x="10" y="48">
-                  {truncate(node.detail, 25)}
-                </text>
-                <title>{`${node.label} — ${node.detail}`}</title>
-              </g>
-            );
-          })}
+                  d={`M ${from.x + NODE_WIDTH} ${from.y + 28} C ${from.x + 185} ${from.y + 28}, ${to.x - 35} ${to.y + 28}, ${to.x} ${to.y + 28}`}
+                  markerEnd="url(#dual-flow-arrow)"
+                />
+              );
+            })}
+            {nodes.map((node) => {
+              const position = graph.positions.get(node.id);
+              if (position === undefined) return null;
+              const classes = ['dual-flow-node'];
+              if (traceNodeIds.has(node.id)) classes.push('is-traced');
+              if (selectedNodeIds.has(node.id)) classes.push('is-selected');
+              if (node.id === focusedNodeId) classes.push('is-focused');
+              return (
+                <g
+                  key={node.id}
+                  ref={(element) => {
+                    if (element === null) nodeElements.current.delete(node.id);
+                    else nodeElements.current.set(node.id, element);
+                  }}
+                  className={classes.join(' ')}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={selectedNodeIds.has(node.id)}
+                  aria-label={`${node.label}, ${node.detail}`}
+                  transform={`translate(${position.x} ${position.y})`}
+                  onClick={() => onSelectNode(node)}
+                  onDoubleClick={() => {
+                    if (node.startUs !== undefined) onSeek(node.startUs);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelectNode(node);
+                      return;
+                    }
+                    if (!isTraversalKey(event.key)) return;
+                    // Only swallow the key when it actually moved somewhere, so a
+                    // leaf still lets the canvas scroll rather than trapping it.
+                    if (moveFocus(node.id, event.key)) event.preventDefault();
+                  }}
+                >
+                  <rect width={NODE_WIDTH} height={NODE_HEIGHT} rx="8" />
+                  <text className="dual-flow-kind" x="10" y="16">
+                    {node.kind.toUpperCase()}
+                  </text>
+                  <text className="dual-flow-label" x="10" y="34">
+                    {truncate(node.label, 20)}
+                  </text>
+                  <text className="dual-flow-detail" x="10" y="48">
+                    {truncate(node.detail, 25)}
+                  </text>
+                  <title>{`${node.label} — ${node.detail}`}</title>
+                </g>
+              );
+            })}
+          </g>
         </svg>
       </div>
       <FlowMinimap
