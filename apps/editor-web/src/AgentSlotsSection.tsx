@@ -12,6 +12,11 @@ import {
   type DesktopProviderProfile,
 } from './desktop-client.js';
 import { profileLabel } from './provider-labels.js';
+import {
+  effortFromSettings,
+  settingsForEffort,
+  type AgentSlotEffort,
+} from './agent-slot-effort.js';
 import { SETTINGS_AGENT_SLOTS } from './settings-wording.js';
 
 /** Providers that JOY Media no longer runs (PLAN-v4 §9a). A slot cannot name them. */
@@ -239,8 +244,7 @@ function AgentSlotCard({
   const [profileId, setProfileId] = useState(slot.profileId ?? '');
   const [model, setModel] = useState(slot.model ?? '');
   const [instructions, setInstructions] = useState(slot.instructions);
-  const [temperature, setTemperature] = useState(numberText(slot.settings.temperature));
-  const [maxOutputTokens, setMaxOutputTokens] = useState(numberText(slot.settings.maxOutputTokens));
+  const [effort, setEffort] = useState<AgentSlotEffort>(effortFromSettings(slot.settings));
   const [status, setStatus] = useState<string>();
   const [busy, setBusy] = useState(false);
   // The models read for one profile. A list read for another profile is never offered here.
@@ -257,8 +261,7 @@ function AgentSlotCard({
     setProfileId(slot.profileId ?? '');
     setModel(slot.model ?? '');
     setInstructions(slot.instructions);
-    setTemperature(numberText(slot.settings.temperature));
-    setMaxOutputTokens(numberText(slot.settings.maxOutputTokens));
+    setEffort(effortFromSettings(slot.settings));
   }, [slot]);
 
   const chosenProfile = profiles.find((item) => item.id === profileId);
@@ -299,10 +302,7 @@ function AgentSlotCard({
         profileId: profileId === '' ? undefined : profileId,
         model: model.trim() === '' ? undefined : model.trim(),
         instructions,
-        settings: {
-          temperature: parseOptionalNumber(temperature),
-          maxOutputTokens: parseOptionalNumber(maxOutputTokens),
-        },
+        settings: settingsForEffort(effort, slot.settings),
       };
       const next = await saveDesktopAgentSlot(slot.id, draft);
       onSaved(next);
@@ -341,7 +341,10 @@ function AgentSlotCard({
       aria-label={SETTINGS_AGENT_SLOTS.slotLabel.replace('{label}', () => label)}
     >
       <header className="joy-card-head">
-        <h4>{label}</h4>
+        <h4 className="agent-slot-title">
+          <SlotIcon id={slot.id} />
+          {label}
+        </h4>
       </header>
       <div className="joy-card-grid">
         <label className="agent-slot-field agent-slot-field-full">
@@ -404,44 +407,35 @@ function AgentSlotCard({
                   : SETTINGS_AGENT_SLOTS.typeModelId}
               </button>
             )}
-            <button
-              type="button"
-              className="button-secondary"
-              disabled={busy || listingBusy || profileId === ''}
-              onClick={() => void refreshModels()}
-            >
-              {SETTINGS_AGENT_SLOTS.refreshModels}
-            </button>
           </div>
           {hint !== undefined && <p className="agent-slot-note">{hint}</p>}
         </div>
-        <label className="agent-slot-field">
-          <span>{SETTINGS_AGENT_SLOTS.temperatureLabel}</span>
-          <input
-            type="number"
-            aria-label={SETTINGS_AGENT_SLOTS.temperatureAriaLabel.replace('{label}', () => label)}
-            min={0}
-            max={2}
-            step={0.1}
-            value={temperature}
-            onChange={(event) => setTemperature(event.target.value)}
-          />
-        </label>
-        <label className="agent-slot-field">
-          <span>{SETTINGS_AGENT_SLOTS.maxOutputTokensLabel}</span>
-          <input
-            type="number"
-            aria-label={SETTINGS_AGENT_SLOTS.maxOutputTokensAriaLabel.replace(
-              '{label}',
-              () => label,
-            )}
-            min={1}
-            max={32000}
-            step={1}
-            value={maxOutputTokens}
-            onChange={(event) => setMaxOutputTokens(event.target.value)}
-          />
-        </label>
+        <div className="agent-slot-effort-row agent-slot-field-full">
+          <label className="agent-slot-field">
+            <span>{SETTINGS_AGENT_SLOTS.effortLabel}</span>
+            <select
+              aria-label={SETTINGS_AGENT_SLOTS.effortAriaLabel.replace('{label}', () => label)}
+              value={effort}
+              onChange={(event) => setEffort(event.target.value as AgentSlotEffort)}
+            >
+              <option value="auto">{SETTINGS_AGENT_SLOTS.effortAuto}</option>
+              <option value="low">{SETTINGS_AGENT_SLOTS.effortLow}</option>
+              <option value="medium">{SETTINGS_AGENT_SLOTS.effortMedium}</option>
+              <option value="high">{SETTINGS_AGENT_SLOTS.effortHigh}</option>
+              {effort === 'custom' && (
+                <option value="custom">{SETTINGS_AGENT_SLOTS.effortCustom}</option>
+              )}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="button-secondary"
+            disabled={busy || listingBusy || profileId === ''}
+            onClick={() => void refreshModels()}
+          >
+            {SETTINGS_AGENT_SLOTS.refreshModels}
+          </button>
+        </div>
         <label className="agent-slot-field agent-slot-field-full">
           <span>{SETTINGS_AGENT_SLOTS.instructionsLabel}</span>
           <textarea
@@ -485,16 +479,30 @@ function AgentSlotCard({
   );
 }
 
-function numberText(value: number | undefined): string {
-  return value === undefined ? '' : String(value);
-}
-
-/** Undefined for a blank field. A value that is not a number is kept as NaN, so the desktop refuses it. */
-function parseOptionalNumber(text: string): number | undefined {
-  if (text.trim() === '') return undefined;
-  return Number(text);
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** A small line icon at the left of a slot's name: a wrench for the Workhorse, sparks for the Creative Brain. */
+function SlotIcon({ id }: { readonly id: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {id === 'creative' ? (
+        <>
+          <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+          <path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z" />
+        </>
+      ) : (
+        <path d="M14.7 6.3a4 4 0 0 0 5 5L21 12.6 12.6 21a2.1 2.1 0 0 1-3-3L18 9.6zM3 21l3-3" />
+      )}
+    </svg>
+  );
 }

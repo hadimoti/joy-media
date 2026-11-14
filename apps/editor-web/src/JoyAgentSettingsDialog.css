@@ -71,7 +71,10 @@
 
 /* Body: the left list and the page beside it. */
 .joy-agent-settings-body {
-  display: flex;
+  /* A grid with a zero-minimum row: the page scrolls inside this frame, so its last field is never under the footer. */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   overflow: clip;
@@ -238,6 +241,7 @@
   display: flex;
   flex: 1;
   flex-direction: column;
+  min-height: 0;
   gap: var(--joy-gap-card);
   min-width: 0;
   padding: var(--joy-gap-card);
@@ -670,15 +674,18 @@
 .joy-provider-route-accordions {
   display: flex;
   flex-direction: column;
+  gap: 8px;
   width: 100%;
 }
 
-.joy-provider-route-accordions .joy-accordion-item {
-  border-top: 1px solid var(--joy-border-subtle);
-}
-
-.joy-provider-route-accordions .joy-accordion-item:first-child {
-  border-top: 0;
+/* Each route is framed by a 1px stroke of its own; no divider lines between or below them. */
+.joy-connections-card .joy-provider-route-accordions .joy-accordion-item {
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  overflow: hidden;
 }
 
 .joy-provider-route-accordions .joy-accordion-trigger {
@@ -692,7 +699,7 @@
 }
 
 .joy-provider-route-accordions .joy-accordion-content {
-  padding: var(--joy-gap-field) 0;
+  padding: var(--joy-gap-field) 0 12px;
   border-top: 0;
   background: transparent;
 }
@@ -787,7 +794,7 @@
 
 .joy-provider-route-accordions + .joy-own-key {
   padding-top: var(--joy-gap-field);
-  border-top: 1px solid var(--joy-border-subtle);
+  border-top: 0;
 }
 
 .joy-own-key-head {
@@ -1347,6 +1354,32 @@
   flex: none;
   min-height: var(--joy-control-height);
   white-space: nowrap;
+}
+
+/* The model on its own line; below it the effort level and Refresh models on one line. */
+.agent-slot-effort-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.agent-slot-effort-row > button {
+  min-height: var(--joy-control-height);
+  white-space: nowrap;
+}
+
+.agent-slot-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-slot-title svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--joy-accent);
 }
 
 .agent-slot-actions {

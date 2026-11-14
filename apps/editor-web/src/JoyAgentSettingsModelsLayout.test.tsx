@@ -171,27 +171,23 @@ describe('the AI models page layout', () => {
       const fields = [...card.querySelectorAll('.joy-card-grid [aria-label]')].map((control) =>
         control.getAttribute('aria-label'),
       );
-      // Profile, model, then temperature beside max tokens, then instructions.
+      // Profile, model, then the effort level (beside Refresh models), then instructions.
       expect(fields).toEqual([
         `${label} profile`,
         `${label} model`,
-        `${label} temperature`,
-        `${label} max output tokens`,
+        `${label} effort level`,
         `${label} instructions`,
       ]);
 
-      // Refresh models stands beside the model on the same line.
+      // The model has its own line; Refresh models stands beside the effort level on the next line.
       const modelRow = card.querySelector('.agent-slot-model-row');
       expect(modelRow?.querySelector(`[aria-label="${label} model"]`)).not.toBeNull();
-      expect(modelRow?.textContent).toContain(SETTINGS_AGENT_SLOTS.refreshModels);
+      const effortRow = card.querySelector('.agent-slot-effort-row');
+      expect(effortRow?.querySelector(`[aria-label="${label} effort level"]`)).not.toBeNull();
+      expect(effortRow?.textContent).toContain(SETTINGS_AGENT_SLOTS.refreshModels);
 
-      // Temperature and max tokens are the two half-width fields; the others take the full width.
-      const halves = [...card.querySelectorAll('.joy-card-grid > .agent-slot-field')].filter(
-        (field) => !field.classList.contains('agent-slot-field-full'),
-      );
-      expect(
-        halves.map((field) => field.querySelector('input')?.getAttribute('aria-label')),
-      ).toEqual([`${label} temperature`, `${label} max output tokens`]);
+      // The slot's name has a small icon at its left.
+      expect(card.querySelector('h4 svg')).not.toBeNull();
 
       // The footer row holds the actions; the primary one is last.
       const footerButtons = [...card.querySelectorAll('.joy-card-footer button')];

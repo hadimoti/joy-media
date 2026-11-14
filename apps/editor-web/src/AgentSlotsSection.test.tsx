@@ -120,7 +120,7 @@ describe('AgentSlotsSection', () => {
           profileProvider: 'custom',
           model: 'llama3',
           instructions: 'Be brief.',
-          settings: { temperature: 0.4 },
+          settings: { temperature: 0.7, maxOutputTokens: 4096 },
           ready: true,
         });
       }
@@ -137,7 +137,7 @@ describe('AgentSlotsSection', () => {
       typeInto(panel.querySelector('[aria-label="Workhorse profile"]'), 'profile-1');
       typeInto(panel.querySelector('[aria-label="Workhorse model"]'), 'llama3');
       typeInto(panel.querySelector('[aria-label="Workhorse instructions"]'), 'Be brief.');
-      typeInto(panel.querySelector('[aria-label="Workhorse temperature"]'), '0.4');
+      typeInto(panel.querySelector('[aria-label="Workhorse effort level"]'), 'medium');
     });
     const save = Array.from(panel.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent === 'Save Workhorse',
@@ -153,7 +153,7 @@ describe('AgentSlotsSection', () => {
         profileId: 'profile-1',
         model: 'llama3',
         instructions: 'Be brief.',
-        settings: { temperature: 0.4, maxOutputTokens: undefined },
+        settings: { temperature: 0.7, maxOutputTokens: 4096 },
       },
     });
     expect(panel.textContent).toContain('Workhorse saved.');
