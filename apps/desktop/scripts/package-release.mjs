@@ -310,7 +310,7 @@ if (isStagingUnpacked) {
 } else {
   const certificatePath = process.env.JOY_MEDIA_WINDOWS_CERTIFICATE_PATH;
   const releasePublicKey = process.env.JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY;
-  const blockedReasons = [
+  const missingReasons = [
     ...(certificatePath === undefined
       ? ['JOY_MEDIA_WINDOWS_CERTIFICATE_PATH is not configured']
       : []),
@@ -319,16 +319,21 @@ if (isStagingUnpacked) {
       : []),
     'owner-approved Windows packaging/signing toolchain is not enabled by this scaffold',
   ];
+  // The owner chose to ship unsigned (no signing certificate exists for this build), so the plan says
+  // "unsigned-release" rather than "blocked". This script still produces no release files: the installer
+  // and the portable zip come from package-installer.mjs, so the exit code stays non-zero.
   const plan = {
     format: 'joy-media-release-plan/v1',
     appId: 'ir.joyteam.joy-media',
     platform: 'windows-x64',
-    status: 'blocked',
-    signing: 'owner-gated',
-    reasons: blockedReasons,
+    status: 'unsigned-release',
+    signing: 'unsigned',
+    reasons: [...missingReasons, 'unsigned release: the Windows binaries carry no code signature'],
   };
   await mkdir(dirname(output), { recursive: true });
   await writeFile(output, `${JSON.stringify(plan, null, 2)}\n`, 'utf8');
-  process.stderr.write(`Release packaging is blocked; wrote evidence plan to ${output}\n`);
+  process.stderr.write(
+    `Release plan is unsigned-release (no release files produced here); wrote plan to ${output}\n`,
+  );
   process.exitCode = 2;
 }
