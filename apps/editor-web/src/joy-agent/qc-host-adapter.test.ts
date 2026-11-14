@@ -601,7 +601,7 @@ describe('QC request intent', () => {
     for (const prompt of [
       'Run a quality check on my film',
       'Check the cut for problems',
-      'please review the timeline frames',
+      'Review the film frame by frame for problems',
       'QC this export',
       'are there any issues in the video?',
       'Find problems in the timeline',
@@ -609,12 +609,22 @@ describe('QC request intent', () => {
       'Spot mistakes in the film',
       'Does the cut have errors?',
       'کنترل کیفیت فیلم را انجام بده',
+      'کیفیت ویدیو را بررسی کن',
+      'ویدیو مشکل دارد؟',
     ])
       expect(isQcCheckRequest(prompt), prompt).toBe(true);
     for (const prompt of [
       'Trim the first clip by two seconds',
       'Add a title that says Hello',
       'Make the music quieter',
+      'trim the video and fix the error in the title',
+      'Check the video track volume',
+      'check the frame rate',
+      'review my timeline pacing and tighten the cut',
+      'watch the export progress',
+      'Please proofread the captions',
+      'Is there a way to export the video as a gif?',
+      'ویدیو را کوتاه کن',
     ])
       expect(isQcCheckRequest(prompt), prompt).toBe(false);
   });
