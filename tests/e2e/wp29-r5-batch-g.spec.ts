@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import {
+  answerAppDialog,
   authenticate,
   importMediaFixture,
   installMediaImportBridge,
@@ -39,11 +40,11 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
 
     await openPanel(page, 'Assets');
     await targetCard.getByRole('checkbox', { name: `Select ${imageName}` }).check();
-    page.once('dialog', (dialog) => dialog.accept());
     await page
       .getByRole('toolbar', { name: 'Bulk asset actions' })
       .getByRole('button', { name: 'Delete selected assets' })
       .click();
+    await answerAppDialog(page);
     await expect(page.locator(`.asset-card[data-asset-id="${assetId}"]`)).toHaveCount(0);
     await expect(page.locator('.asset-card', { hasText: untouchedImageName })).toHaveCount(1);
     await expect(page.locator('.asset-library .joy-panel-note')).toContainText(

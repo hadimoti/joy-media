@@ -121,7 +121,13 @@ test('an upgraded install can reselect its previous library and restore its cata
   await expect(dialog.locator('.asset-library-storage-chip.is-ready')).toContainText(
     'Connected & Ready',
   );
-  await expect(dialog.locator('.asset-library-storage-count-value')).toHaveText(['2', '1', '1']);
+  // Video, Images, Audio, Total: the upgraded catalog holds one image and one audio file.
+  await expect(dialog.locator('.asset-library-storage-count-value')).toHaveText([
+    '0',
+    '1',
+    '1',
+    '2',
+  ]);
   await expect
     .poll(() => page.evaluate(() => window.__JOY_ASSET_UPGRADE_FIXTURE__?.selectedDirectory))
     .toBe('fixture-assets/previous-library');

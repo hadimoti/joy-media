@@ -1,10 +1,29 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   authenticate,
   openPanel,
   openReferenceWorkspace,
   selectFirstTimelineClip,
 } from './wp29-r5-harness.js';
+
+/** Picks a canvas shape. A project with clips first asks how to reframe them; "Keep positions" moves nothing. */
+async function pickCanvasShape(page: Page, shape: string): Promise<void> {
+  await page
+    .getByRole('group', { name: 'Canvas shape' })
+    .getByRole('button', { name: shape, exact: true })
+    .click();
+  const reframe = page.getByRole('dialog', { name: 'Reframe clips for the new canvas?' });
+  if (
+    await reframe.waitFor({ state: 'visible', timeout: 3_000 }).then(
+      () => true,
+      () => false,
+    )
+  ) {
+    await reframe.getByRole('radio', { name: /Keep positions/ }).check();
+    await reframe.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(reframe).toBeHidden();
+  }
+}
 
 test.describe('Timeline editing features — aspect ratio, merge, and speed', () => {
   test.beforeEach(async ({ page }) => authenticate(page));
@@ -13,19 +32,21 @@ test.describe('Timeline editing features — aspect ratio, merge, and speed', ()
     page,
   }) => {
     await openReferenceWorkspace(page);
-    const selector = page.getByRole('button', { name: /Canvas aspect ratio/ });
+    // The monitor's canvas-format trigger reads "Canvas format: <readout>"; its shapes are buttons in
+    // the Format popover, grouped as "Canvas shape".
+    const selector = page.getByRole('button', { name: /^Canvas format:/ });
     await expect(selector).toBeVisible();
     await selector.click();
-    await page.getByRole('menuitemradio', { name: '1:1' }).click();
-    await expect(selector).toHaveAccessibleName('Canvas aspect ratio (1:1)');
+    await pickCanvasShape(page, '1:1');
+    await expect(selector).toHaveAccessibleName(/Canvas format:.*1:1/);
 
     await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(selector).toHaveAccessibleName('Canvas aspect ratio (9:16)');
+    await expect(selector).toHaveAccessibleName(/Canvas format:.*9:16/);
 
     await selector.click();
-    await page.getByRole('menuitemradio', { name: '1:1' }).click();
+    await pickCanvasShape(page, '1:1');
     await page.reload();
-    await expect(page.getByRole('button', { name: 'Canvas aspect ratio (1:1)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Canvas format:.*1:1/ })).toBeVisible();
   });
 
   test('merges contiguous clips from the context menu, drills in, and returns with Back', async ({

@@ -1,6 +1,13 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -176,10 +183,11 @@ export async function startDesktopJobHarness(
         if (path === undefined) throw new Error('Unknown local asset');
         return (await stat(path)).size;
       },
-      readSource: async (refId) => {
+      // The app's job API streams a registered source to the Worker instead of reading it whole.
+      openSource: (refId) => {
         const path = database.localAssets.storedPath(refId);
         if (path === undefined) throw new Error('Unknown local asset');
-        return readFile(path);
+        return createReadStream(path);
       },
       onWarning: (message) => console.warn(`[desktop-job-harness] ${message}`),
     });

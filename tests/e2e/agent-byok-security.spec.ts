@@ -36,7 +36,7 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
     await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
     const reopened = page.getByRole('dialog', { name: 'Joy Code Settings' });
     await reopened.getByRole('button', { name: 'Clear connection' }).click();
-    await expect(reopened.getByText('No Active Model Connected')).toBeVisible();
+    await expect(reopened.getByText('No model connected', { exact: true })).toBeVisible();
     await expect(
       reopened.getByText('Connection cleared. Your API key was removed from this page session.'),
     ).toBeVisible();
@@ -96,9 +96,10 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
     const composer = page.getByLabel('Message Joy Code');
     await composer.fill('Update the selected caption style');
     await composer.press('Enter');
-    await expect(page.getByText('JOY could not validate this proposal safely')).toBeVisible({
-      timeout: 20_000,
-    });
+    // An invalid provider proposal is shown on the failure card, with the nothing-applied sentence.
+    await expect(
+      page.getByText('Joy Code could not check this change safely. No edits were applied.'),
+    ).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText('Provider returned invalid proposal JSON')).toHaveCount(0);
     expect(provider.stages.slice(0, 3)).toEqual([
       'forced-probe',

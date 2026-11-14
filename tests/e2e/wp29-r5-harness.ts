@@ -290,6 +290,18 @@ export async function openReferenceWorkspace(page: Page): Promise<void> {
   await activateTimeline(page);
 }
 
+/**
+ * Answers the app's own confirm or prompt dialog (AppDialogs.tsx). The app no longer uses the
+ * browser's native dialogs, so `page.once('dialog')` never fires. `value` fills a prompt first.
+ */
+export async function answerAppDialog(page: Page, value?: string): Promise<void> {
+  const dialog = page.locator('.app-dialog');
+  await expect(dialog).toBeVisible();
+  if (value !== undefined) await dialog.locator('.app-dialog-input').fill(value);
+  await dialog.locator('.app-dialog-button-primary').click();
+  await expect(dialog).toBeHidden();
+}
+
 export async function openTimelineShowcaseWorkspace(page: Page): Promise<void> {
   await openReadyProjectSelector(page);
   await page

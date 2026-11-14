@@ -54,8 +54,8 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
       .textContent())!.trim();
     const parameter = rows.nth(0).locator('input[type="range"]').first();
     if (await parameter.isVisible()) await parameter.press('ArrowRight');
-    await rows.nth(0).getByRole('button', { name: 'On' }).click();
-    await expect(rows.nth(0).getByRole('button', { name: 'Off' })).toBeVisible();
+    await rows.nth(0).getByRole('button', { name: 'On', exact: true }).click();
+    await expect(rows.nth(0).getByRole('button', { name: 'Off', exact: true })).toBeVisible();
     await page.getByRole('button', { name: `Move ${firstLabel} down` }).click();
     await expect(rows.nth(1)).toHaveAttribute('data-effect-instance-id', firstId!);
     await page.getByRole('button', { name: `Remove ${secondLabel}` }).click();
@@ -180,14 +180,15 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     await page.getByText('Red', { exact: true }).click();
     for (const property of [
       'Red Hue',
-      'Red Range',
+      'Red Width',
       'Red Softness',
       'Red Saturation',
       'Red Luminance',
     ]) {
-      await expect(page.getByRole('slider', { name: property })).toBeVisible();
+      // Exact: "Red Hue" also matches the "Red Hue shift" slider.
+      await expect(page.getByRole('slider', { name: property, exact: true })).toBeVisible();
       await expect(
-        page.getByRole('button', { name: `Add ${property} keyframe at playhead` }),
+        page.getByRole('button', { name: `Add ${property} keyframe at playhead`, exact: true }),
       ).toBeVisible();
     }
     await page.getByRole('tab', { name: 'Looks' }).click();

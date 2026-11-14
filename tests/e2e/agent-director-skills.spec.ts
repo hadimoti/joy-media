@@ -409,11 +409,12 @@ test.describe('JOY Live Director creative recipes', () => {
     await dialog.getByRole('button', { name: 'Done' }).click();
 
     await openRecipes(page);
-    const assistantMessages = page.locator('.joy-code-message.is-assistant');
-    const before = await assistantMessages.count();
     await page.getByRole('button', { name: 'Run Build Rough Cut', exact: true }).click();
-    const runReply = assistantMessages.nth(before);
-    await expect(runReply).toContainText(/failed|could not validate/i, { timeout: 40_000 });
+    // A refused recipe run is reported on the Joy Code failure card, not as an assistant message.
+    await expect(page.locator('.joy-code-failure-card')).toContainText(
+      /could not check this change safely/i,
+      { timeout: 40_000 },
+    );
     await expect(page.getByRole('region', { name: 'JOY Agent live proposal' })).toHaveCount(0);
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
     expect(provider.stages).toContain('structured-validate');

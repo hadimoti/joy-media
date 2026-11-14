@@ -533,38 +533,36 @@ export async function configureJoyAgent(
   await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Joy Code Settings' });
   await expect(dialog).toBeVisible();
-  // The dialog defaults to the Dual-Brain Studio preset; explicitly select Custom BYOK
-  // so this fixture configures one custom provider with deterministic values.
-  await dialog.getByRole('button', { name: /Custom BYOK/ }).click();
+  // The dialog opens on the "Your own API key" preset, which is already active, so no preset is clicked.
+  // A loopback fake provider is a custom OpenAI-compatible endpoint: it is configured in the dialog's own
+  // connection form (SETTINGS_MODELS in apps/editor-web/src/settings-wording.ts). The sign-in panel
+  // (ProviderSignInPanel) only lists registry providers, so it is not used here.
   await dialog
-    .getByRole('combobox', { name: 'Provider Platform' })
+    .getByRole('combobox', { name: 'Provider', exact: true })
     .selectOption('openai-compatible');
-  await dialog.getByRole('textbox', { name: 'Base URL / Endpoint' }).fill(FAKE_PROVIDER_BASE_URL);
   await dialog
-    .getByRole('textbox', { name: /Model ID/ })
+    .getByRole('textbox', { name: 'Service address (base URL)', exact: true })
+    .fill(FAKE_PROVIDER_BASE_URL);
+  await dialog
+    .getByRole('textbox', { name: 'Model ID', exact: true })
     .fill(options.modelId ?? FAKE_PROVIDER_MODEL);
   await dialog
     .getByRole('checkbox', {
       name: 'I understand that custom endpoints may log requests according to their own policy.',
     })
     .check();
-  await dialog.getByLabel('API Secret Key').fill(apiKey);
-  await dialog.getByRole('button', { name: /Connect model|Test & use/ }).click();
+  await dialog.getByLabel('Your API key', { exact: true }).fill(apiKey);
+  await dialog.getByRole('button', { name: 'Connect model', exact: true }).click();
+  // The connection notice: "Connected successfully. ..." for a tool loop, "Connected successfully in plan-only
+  // mode. ..." for a brief-only model, and "Connection failed: <reason>" when the provider cannot be used.
+  // Anchored: the form's status line "Connection failed. See the details below." must not match.
   const expectedConnectionNotice = options.allowFailure
-    ? [
-        'Tool loop ready',
-        'Plan-only ready',
-        'authentication failed',
-        'CORS or network error',
-        'response too large',
-        'Connection timed out',
-      ]
-    : ['Tool loop ready', 'Plan-only ready'];
+    ? ['^Connected successfully', '^Connection failed:']
+    : ['^Connected successfully'];
   await expect(dialog.getByText(new RegExp(expectedConnectionNotice.join('|')))).toBeVisible({
     timeout: options.noticeTimeoutMs ?? 20_000,
   });
-  if (!options.allowFailure) await expect(dialog.getByText(/Connected successfully/)).toBeVisible();
-  await expect(dialog.getByLabel('API Secret Key')).toHaveValue('');
+  await expect(dialog.getByLabel('Your API key', { exact: true })).toHaveValue('');
   return dialog;
 }
 

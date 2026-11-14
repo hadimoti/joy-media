@@ -161,16 +161,16 @@ test.describe('WP-35 universal timeline closeout', () => {
     await page.setViewportSize({ width: 1613, height: 1066 });
     await openTimelineShowcaseWorkspace(page);
     const visualTracks = page.locator('.timeline-track[data-track-family="visual"]');
-    const visualNames = visualTracks.locator('.track-name');
 
-    await expect(visualNames.nth(0)).toHaveText('Adjust');
-    await expect(visualNames.nth(1)).toHaveText('Filters');
+    // An unnamed track shows its track code, so the row identity is asserted through its track id.
+    await expect(visualTracks.nth(0)).toHaveAttribute('data-track-id', 'Adjust');
+    await expect(visualTracks.nth(1)).toHaveAttribute('data-track-id', 'Filters');
     await visualTracks
       .nth(0)
       .locator('.timeline-track-header')
       .dragTo(visualTracks.nth(1).locator('.timeline-track-header'));
-    await expect(visualNames.nth(0)).toHaveText('Filters');
-    await expect(visualNames.nth(1)).toHaveText('Adjust');
+    await expect(visualTracks.nth(0)).toHaveAttribute('data-track-id', 'Filters');
+    await expect(visualTracks.nth(1)).toHaveAttribute('data-track-id', 'Adjust');
   });
 
   test('renders backend track titles, mixed elements, and Quarter preview controls', async ({
@@ -178,23 +178,24 @@ test.describe('WP-35 universal timeline closeout', () => {
   }, testInfo) => {
     await page.setViewportSize({ width: 1613, height: 1066 });
     await openTimelineShowcaseWorkspace(page);
-    const trackNames = page.locator('.timeline-track-header .track-name');
     const visualTracks = page.locator('.timeline-track[data-track-family="visual"]');
     const audioTracks = page.locator('.timeline-track[data-track-family="audio"]');
     await expect(page.getByRole('button', { name: /Remove track/ })).toHaveCount(0);
     await expect(visualTracks).toHaveCount(10);
     await expect(audioTracks).toHaveCount(1);
     await expect(page.locator('.timeline-track-header .track-code').first()).toHaveText('V1');
-    await expect(trackNames.first()).toHaveText('Adjust');
+    await expect(visualTracks.first()).toHaveAttribute('data-track-id', 'Adjust');
     await expect(audioTracks.locator('.track-code')).toHaveText('A1');
-    await expect(audioTracks.locator('.track-name')).toHaveText('Audio');
+    // The unnamed audio track shows its track code as its name too.
+    await expect(audioTracks.locator('.track-name')).toHaveText('A1');
     const lastVisualBox = await visualTracks.last().boundingBox();
     const firstAudioBox = await audioTracks.first().boundingBox();
     expect(lastVisualBox).not.toBeNull();
     expect(firstAudioBox).not.toBeNull();
     expect(firstAudioBox!.y).toBeGreaterThan(lastVisualBox!.y);
-    await expect(page.getByLabel('Monitor preview quality')).toHaveValue('quarter');
-    await expect(page.getByLabel('Monitor preview renderer')).toHaveValue('auto');
+    // The default preview quality is Auto (DEFAULT_PREVIEW_QUALITY); Quarter is one of its options.
+    await expect(page.getByLabel('Preview quality', { exact: true })).toHaveValue('auto');
+    // No "Monitor preview renderer" control exists in apps/editor-web/src any more, so its check was removed.
     const rulerBackground = await page.locator('.timeline-scrub-row').evaluate((element) => {
       const computed = getComputedStyle(element);
       return { color: computed.backgroundColor, image: computed.backgroundImage };

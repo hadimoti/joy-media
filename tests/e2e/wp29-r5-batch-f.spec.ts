@@ -1,8 +1,9 @@
 import { expect, test, type TestInfo } from '@playwright/test';
 import {
+  answerAppDialog,
   authenticate,
   openPanel,
-  openReferenceWorkspace,
+  openTimelineShowcaseWorkspace,
   recordEvidence,
   type R5Evidence,
 } from './wp29-r5-harness.js';
@@ -56,7 +57,8 @@ async function selectReferenceClip(page: Parameters<typeof openPanel>[0]): Promi
   // B-roll clips in the seeded timeline are intentionally media-only and do
   // not have a visual-object target. Motion/Spatial authoring needs the
   // object-backed Intro clip.
-  const introClip = page.locator('.timeline-clip').filter({ hasText: 'Intro' }).first();
+  // Compact clips draw no label text; the clip's label is its title (the element's accessible text).
+  const introClip = page.locator('.timeline-clip[title*="Intro"]').first();
   await expect(introClip).toBeVisible();
   await introClip.click();
   await expect(introClip).toHaveAttribute('aria-pressed', 'true');
@@ -78,7 +80,8 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
   test.beforeEach(async ({ page }) => {
     await authenticate(page);
     try {
-      await openReferenceWorkspace(page);
+      // The showcase project has the object-backed "Intro" clip that the motion cases select.
+      await openTimelineShowcaseWorkspace(page);
     } catch (error) {
       if (!(await page.getByRole('button', { name: 'File' }).isVisible())) throw error;
       // Dockview occasionally restores the sibling Flow tab as active even in
@@ -161,8 +164,8 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         const renamed = 'R5 Motion 80';
         await expect(motion.getByRole('button', { name: `Open ${original}` })).toBeVisible();
 
-        page.once('dialog', (dialog) => void dialog.accept(renamed));
         await motion.getByRole('button', { name: `Rename ${original}` }).click();
+        await answerAppDialog(page, renamed);
         await expect(motion.getByRole('button', { name: `Open ${renamed}` })).toBeVisible();
 
         await motion.getByRole('button', { name: `Duplicate ${renamed}` }).click();
@@ -170,8 +173,8 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         await expect(motion.getByRole('button', { name: `Open ${copy}` })).toBeVisible();
         await expect(motion.getByRole('listitem')).toHaveCount(2);
 
-        page.once('dialog', (dialog) => void dialog.accept());
         await motion.getByRole('button', { name: `Delete ${renamed}`, exact: true }).click();
+        await answerAppDialog(page);
         await expect(
           motion.getByRole('button', { name: `Open ${renamed}`, exact: true }),
         ).toHaveCount(0);
@@ -449,8 +452,8 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         ]);
 
         const customName = 'R5 Template 85';
-        page.once('dialog', (dialog) => void dialog.accept(customName));
         await templates.getByRole('button', { name: 'Save JOY Title to My Templates' }).click();
+        await answerAppDialog(page, customName);
         await expect(templates.getByRole('tab', { name: 'My Templates' })).toHaveAttribute(
           'aria-selected',
           'true',
@@ -465,8 +468,8 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
           initialClipCount + 1,
         );
 
-        page.once('dialog', (dialog) => void dialog.accept());
         await templates.getByRole('button', { name: `Delete ${customName}` }).click();
+        await answerAppDialog(page);
         await expect(templates.locator('.template-card', { hasText: customName })).toHaveCount(0);
         await expect(templates.getByText('No saved templates yet.', { exact: true })).toBeVisible();
 

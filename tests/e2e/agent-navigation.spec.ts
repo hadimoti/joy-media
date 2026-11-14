@@ -113,7 +113,7 @@ test.describe('JOY Agent navigation', () => {
     await expect(page.getByRole('status', { name: 'Edit readiness' })).toBeVisible();
   });
 
-  test('explains the Recipes model prerequisite and hides runs while disconnected', async ({
+  test('explains the Recipes model prerequisite and disables runs while disconnected', async ({
     page,
   }) => {
     await authenticate(page);
@@ -128,8 +128,9 @@ test.describe('JOY Agent navigation', () => {
     await expect(readiness).toContainText('Joy Code is optional.');
     await expect(readiness.getByRole('button', { name: 'Connect a model' })).toBeVisible();
 
-    // Recipe runs stay hidden until a model is connected.
-    await expect(page.getByRole('button', { name: /^Run / })).toHaveCount(0);
+    // Recipe runs are shown but disabled until a model is connected; the connect step replaces them.
+    await expect(page.getByRole('button', { name: /^Run / }).first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: /^Run /, disabled: false })).toHaveCount(0);
 
     await readiness.getByRole('button', { name: 'Connect a model' }).click();
     await expect(page.getByRole('dialog', { name: 'Joy Code Settings' })).toBeVisible();
@@ -187,7 +188,7 @@ test.describe('JOY Agent navigation', () => {
     const settings = page.getByRole('dialog', { name: 'Joy Code Settings' });
     await expect(settings).toBeVisible();
 
-    await settings.getByRole('button', { name: 'Browse models & API connections' }).click();
+    await settings.getByRole('button', { name: 'Browse models and connections' }).click();
     const modelDrawer = page.getByRole('dialog', { name: 'Model Drawer & API Connections' });
     await expect(modelDrawer).toBeVisible();
     await expect(settings).toBeHidden();
