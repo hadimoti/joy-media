@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global window */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -53,12 +54,7 @@ function readFaceDataUrl(facePath) {
     throw new Error(`--face file not found: ${resolved}`);
   }
   const ext = extname(resolved).toLowerCase();
-  const mime =
-    ext === '.png'
-      ? 'image/png'
-      : ext === '.webp'
-        ? 'image/webp'
-        : 'image/jpeg';
+  const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
   const base64 = readFileSync(resolved).toString('base64');
   return `data:${mime};base64,${base64}`;
 }
@@ -188,12 +184,7 @@ async function main() {
 
   const browser = await chromium.launch({
     headless: true,
-    args: [
-      '--use-gl=angle',
-      '--use-angle=swiftshader',
-      '--enable-webgl',
-      '--ignore-gpu-blocklist',
-    ],
+    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'],
   });
 
   try {
@@ -399,7 +390,9 @@ async function main() {
     const { jsonPath, markdownPath } = writeLibraryReports(outDir, options.kind, reportPayload);
     const failed = itemReports.filter((item) => !item.passed);
     console.log('');
-    console.log(`Library test run finished: ${itemReports.length - failed.length}/${itemReports.length} passed.`);
+    console.log(
+      `Library test run finished: ${itemReports.length - failed.length}/${itemReports.length} passed.`,
+    );
     console.log(`Markdown report: ${markdownPath}`);
     console.log(`JSON report:     ${jsonPath}`);
 

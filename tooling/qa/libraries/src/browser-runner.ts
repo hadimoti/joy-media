@@ -1,16 +1,15 @@
 /* global window, document, Image, ImageData, FileReader, performance, Uint8ClampedArray */
-import {
-  effectRegistry,
-  effectToFfmpegFilter,
-  registerBuiltins,
-} from '@joy-media/visual-effects';
+import { effectRegistry, effectToFfmpegFilter, registerBuiltins } from '@joy-media/visual-effects';
 import type { EffectParamValue } from '@joy-media/visual-effects';
 import { VisualObjectProjectHistory } from '@joy-media/property-system';
 import type { VisualObjectCommand } from '@joy-media/property-system';
 import { canonicalBindingKey, migrateV0ToV1 } from '@joy-media/project-schema';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { emptySpikeProject } from '@joy-media/test-fixtures';
-import { buildRenderFrameIRFromProject } from '@joy-media/visual-object-renderer';
+import {
+  buildRenderFrameIRFromProject,
+  evaluateEffectInstances,
+} from '@joy-media/visual-object-renderer';
 import { createBrowserPixiRenderer } from '@joy-media/renderer-pixi/browser';
 import type {
   BrowserPixiRenderer,
@@ -209,13 +208,32 @@ function renderProjectFrame(
     imageSizesByObjectId: { [OBJECT_ID]: { width, height } },
   });
   renderer.render(frame, bitmaps);
-  const pixels = renderer.readPixels();
+  // readPixels defaults to a 640x360 cap; ask for the full authored size.
+  const pixels = renderer.readPixels(width, height);
+  if (pixels === undefined) {
+    throw new Error(`readPixels returned nothing for ${width}x${height} frame`);
+  }
   if (pixels.data.length !== width * height * 4) {
     throw new Error(
       `readPixels mismatch: expected ${width}x${height} (${width * height * 4} bytes), got ${pixels.width}x${pixels.height} (${pixels.data.length} bytes)`,
     );
   }
   return new Uint8ClampedArray(pixels.data);
+}
+
+/**
+ * The app's EffectsPanel adds an effect with its descriptor defaults as `params`
+ * (EffectsPanel.tsx:196-202). Without them the evaluator has no keys to animate,
+ * so the harness must add effects the same way.
+ */
+function defaultParamsFor(descriptor: {
+  readonly params: readonly { readonly key: string; readonly defaultValue: unknown }[];
+}): Record<string, EffectParamValue> {
+  const defaults: Record<string, EffectParamValue> = {};
+  for (const p of descriptor.params) {
+    defaults[p.key] = p.defaultValue as EffectParamValue;
+  }
+  return defaults;
 }
 
 function valuesEqual(a: unknown, b: unknown): boolean {
@@ -349,6 +367,7 @@ async function testItem(input: TestItemInput) {
           objectId: OBJECT_ID,
           effectId: input.id,
           effectInstanceId: instanceId,
+          params: defaultParamsFor(descriptor),
         },
       },
     ],
@@ -409,11 +428,18 @@ async function testItem(input: TestItemInput) {
             timeUs,
             PREVIEW_WIDTH,
             PREVIEW_HEIGHT,
-            { imageSizesByObjectId: { [OBJECT_ID]: { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT } } },
+            {
+              imageSizesByObjectId: {
+                [OBJECT_ID]: { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+              },
+            },
           );
           currentState.previewRenderer.render(frame, currentState.bitmaps540);
         },
       });
+      if (exported.blob === undefined) {
+        throw new Error('Offline MP4 export returned no blob');
+      }
       exportMp4Base64 = await blobToBase64(exported.blob);
     } else {
       exportMode = 'pixi-frames-ffmpeg';
@@ -492,7 +518,11 @@ async function testItem(input: TestItemInput) {
     const lowVsDef = computeRgbaDiffMetrics(renderedByTag.low!, renderedByTag.default!);
     const highVsDef = computeRgbaDiffMetrics(renderedByTag.high!, renderedByTag.default!);
     const highVsLow = computeRgbaDiffMetrics(renderedByTag.high!, renderedByTag.low!);
-    const maxMeanDelta = Math.max(lowVsDef.meanAbsDiff, highVsDef.meanAbsDiff, highVsLow.meanAbsDiff);
+    const maxMeanDelta = Math.max(
+      lowVsDef.meanAbsDiff,
+      highVsDef.meanAbsDiff,
+      highVsLow.meanAbsDiff,
+    );
     const maxChangedPixels = Math.max(
       lowVsDef.changedPixels,
       highVsDef.changedPixels,
@@ -640,6 +670,12 @@ async function testItem(input: TestItemInput) {
       resetParamsOk,
       undoParamsOk,
       redoParamsOk,
+      // Diagnostics: the exact param records that were compared.
+      defaultParams,
+      mutatedParams,
+      resetParams,
+      afterUndoParams,
+      afterRedoParams,
     };
   }
 
@@ -669,6 +705,7 @@ async function testItem(input: TestItemInput) {
             objectId: OBJECT_ID,
             effectId: input.id,
             effectInstanceId: instanceId,
+            params: defaultParamsFor(descriptor),
           },
         },
         {
@@ -756,6 +793,16 @@ async function testItem(input: TestItemInput) {
       midVsStartMeanDiff: midVsStart.meanAbsDiff,
       midVsEndMeanDiff: midVsEnd.meanAbsDiff,
       passed: kfPassed,
+      // Diagnostics: what the evaluator sees at 0s, 1s and 2s.
+      animationKey: animKey,
+      animationPresent: animPresent,
+      sampledParams: [0, SAMPLE_TIME_US, EXPORT_DURATION_US].map((t) =>
+        evaluateEffectInstances(
+          keyProjectHistory.present.visualObjects[OBJECT_ID]?.effects,
+          t,
+          keyProjectHistory.present.propertyAnimations,
+        ),
+      ),
     };
   }
 
@@ -770,6 +817,7 @@ async function testItem(input: TestItemInput) {
           objectId: OBJECT_ID,
           effectId: input.id,
           effectInstanceId: instanceId,
+          params: defaultParamsFor(descriptor),
         },
       },
     ],
@@ -784,13 +832,14 @@ async function testItem(input: TestItemInput) {
   );
   for (let i = 0; i < 2; i += 1) {
     currentState.benchRenderer.render(frame1080, currentState.bitmaps1080);
-    currentState.benchRenderer.readPixels({ x: 0, y: 0, width: 1, height: 1 });
+    // A 1x1 read-back forces the GPU to finish the frame (sync point).
+    currentState.benchRenderer.readPixels(1, 1);
   }
   const timingsMs: number[] = [];
   for (let i = 0; i < 6; i += 1) {
     const start = performance.now();
     currentState.benchRenderer.render(frame1080, currentState.bitmaps1080);
-    currentState.benchRenderer.readPixels({ x: 0, y: 0, width: 1, height: 1 });
+    currentState.benchRenderer.readPixels(1, 1);
     timingsMs.push(performance.now() - start);
   }
   const meanMsPerFrame = timingsMs.reduce((a, b) => a + b, 0) / timingsMs.length;
