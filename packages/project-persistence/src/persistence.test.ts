@@ -259,7 +259,7 @@ describe('local project persistence', () => {
       },
     };
     const project: JoyProjectV1 = {
-      ...migrateV0ToV1(spike).project,
+      ...migrateV0ToV1(withClip).project,
       colorGrade: outputGrade,
       clipColorGrades: { 'clip-1': clipGrade },
       propertyAnimations,
