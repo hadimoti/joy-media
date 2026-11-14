@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { FLOW_ZOOM_DEFAULT, scrollKeepingPointer, zoomAfterWheel } from './flow-zoom.js';
 import type { TransitionV1, WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { CommandTransaction, GraphTransaction } from '@joy-media/commands';
 import {
@@ -572,6 +573,11 @@ function FlowProjection({
   const height = Math.max(250, graph.height);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState({ left: 0, top: 0, width: 1, height: 1 });
+  // The mouse wheel zooms the whole flowchart (it does not scroll); the scrollbars still pan.
+  const [zoom, setZoom] = useState(FLOW_ZOOM_DEFAULT);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const pendingScroll = useRef<{ left: number; top: number } | undefined>(undefined);
 
   const readViewport = () => {
     const canvas = canvasRef.current;
@@ -585,6 +591,38 @@ function FlowProjection({
   };
   useEffect(readViewport, [nodes]);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas === null) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const oldZoom = zoomRef.current;
+      const newZoom = zoomAfterWheel(oldZoom, event.deltaY);
+      if (newZoom === oldZoom) return;
+      const rect = canvas.getBoundingClientRect();
+      pendingScroll.current = {
+        left: scrollKeepingPointer(canvas.scrollLeft, event.clientX - rect.left, oldZoom, newZoom),
+        top: scrollKeepingPointer(canvas.scrollTop, event.clientY - rect.top, oldZoom, newZoom),
+      };
+      zoomRef.current = newZoom;
+      setZoom(newZoom);
+    };
+    // Not passive: the wheel must not also scroll the canvas.
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    const target = pendingScroll.current;
+    if (canvas !== null && target !== undefined) {
+      canvas.scrollLeft = target.left;
+      canvas.scrollTop = target.top;
+      pendingScroll.current = undefined;
+    }
+    readViewport();
+  }, [zoom]);
+
   // Scroll a revealed node into view. `positions` is read through a ref because
   // it is rebuilt on every projection change, and re-scrolling on each playhead
   // tick would fight the user panning the canvas.
@@ -595,9 +633,10 @@ function FlowProjection({
     const canvas = canvasRef.current;
     const position = positionsRef.current.get(focusedNodeId);
     if (canvas === null || position === undefined) return;
+    const scale = zoomRef.current;
     canvas.scrollTo({
-      left: Math.max(0, position.x - canvas.clientWidth / 2 + NODE_WIDTH / 2),
-      top: Math.max(0, position.y - canvas.clientHeight / 2),
+      left: Math.max(0, (position.x + NODE_WIDTH / 2) * scale - canvas.clientWidth / 2),
+      top: Math.max(0, position.y * scale - canvas.clientHeight / 2),
       behavior: 'smooth',
     });
   }, [focusedNodeId]);
@@ -614,9 +653,10 @@ function FlowProjection({
     const canvas = canvasRef.current;
     const position = graph.positions.get(nextId);
     if (canvas !== null && position !== undefined) {
+      const scale = zoomRef.current;
       canvas.scrollTo({
-        left: Math.max(0, position.x - canvas.clientWidth / 2 + NODE_WIDTH / 2),
-        top: Math.max(0, position.y - canvas.clientHeight / 2),
+        left: Math.max(0, (position.x + NODE_WIDTH / 2) * scale - canvas.clientWidth / 2),
+        top: Math.max(0, position.y * scale - canvas.clientHeight / 2),
         behavior: 'smooth',
       });
     }
@@ -650,6 +690,7 @@ function FlowProjection({
       <div className="dual-flow-canvas" ref={canvasRef} onScroll={readViewport}>
         <svg
           viewBox={`0 0 ${width} ${height}`}
+          style={{ width: `${width * zoom}px`, height: `${height * zoom}px`, minWidth: 0 }}
           role="img"
           aria-label="Media and data flow graph"
           aria-describedby="dual-flow-keys"
