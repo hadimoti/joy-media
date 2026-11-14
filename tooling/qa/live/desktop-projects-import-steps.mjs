@@ -18,7 +18,8 @@ import { importThroughLeftPanel, newProject, openMenu } from './steps.mjs';
 import { FIXTURE_ROOT, clipsOf, readDocument, rowsById } from './matrix-core.mjs';
 
 const EDITOR_PROJECT = 'Local editor project';
-const EXPORT_BUTTON = { name: 'Export MP4', exact: true };
+// The accessible name gains a warning suffix when a preset warns, and reads "Exporting" while busy.
+const EXPORT_BUTTON = { name: /^Export MP4/u };
 
 /** One row per fixture type of T-A04: the file, and the kind the Media panel should show. */
 export const IMPORT_FIXTURES = Object.freeze([
@@ -437,6 +438,17 @@ rows.push({
     await projectCard(page, EDITOR_PROJECT).click();
     await page.getByRole('button', { name: 'File', exact: true }).waitFor({ state: 'visible' });
     await page.getByRole('button', EXPORT_BUTTON).click();
+    // The button is idle before the click, so "not busy" is already true: wait for the export to start first,
+    // then for it to finish, and require a message. Without this the row passed on an empty page.
+    await page
+      .waitForFunction(
+        () => document.querySelector('.header-export-btn')?.getAttribute('aria-busy') === 'true',
+        undefined,
+        { timeout: 15_000 },
+      )
+      .catch(() => {
+        throw new Error('the export did not start (the button never became busy)');
+      });
     await page.waitForFunction(
       () => document.querySelector('.header-export-btn')?.getAttribute('aria-busy') !== 'true',
       undefined,
@@ -444,8 +456,10 @@ rows.push({
     );
     const toast = await page
       .locator('.export-toast')
-      .innerText()
-      .catch(() => '');
+      .innerText({ timeout: 10_000 })
+      .catch(() => {
+        throw new Error('the export ended but no export message appeared');
+      });
     const first = toast.split('\n')[0] ?? '';
     const shot = await ctx.shot('D-A05-60', 'export');
     if (/cannot resolve visual asset/iu.test(toast)) {

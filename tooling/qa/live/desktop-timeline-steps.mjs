@@ -1,3 +1,4 @@
+/* global document */
 /**
  * T-A06 matrix rows D-A06-xx: every timeline command of packages/commands/src/commands.ts
  * (SpikeCommand, lines 196-227) that has a UI path is done through the UI, read back through
@@ -418,9 +419,20 @@ commandRow({
 commandRow({
   id: 'D-A06-16',
   command: 'timeline.removeTrack',
-  title: 'Remove Track from the header menu removes the last track',
+  title: 'Remove Track from the header menu removes an empty track',
   async act(page) {
-    await page.locator('.timeline-track-header').last().click({ button: 'right' });
+    // The product refuses to remove a track that holds clips (the menu item is disabled), so aim at an empty one.
+    const trackId = await page.evaluate(() => {
+      const empty = [...document.querySelectorAll('.timeline-track')].find(
+        (track) => track.querySelector('.timeline-clip') === null,
+      );
+      return empty?.getAttribute('data-track-id') ?? null;
+    });
+    if (trackId === null)
+      throw new Error('no empty track to remove (a track with clips cannot be removed)');
+    await page
+      .locator('.timeline-track-header[data-track-id="' + trackId + '"]')
+      .click({ button: 'right' });
     await contextItem(page, 'Remove Track');
   },
   check: (before, after) =>
@@ -510,6 +522,7 @@ const TAB_LABELS = {
   Visual: 'Visual (Transform)',
   Enhance: 'AI upscaling',
   Mask: 'Mask and background removal',
+  Adjust: 'Adjustment layer',
   Effects: 'Effects',
   Audio: 'Audio',
   Speed: 'Speed',

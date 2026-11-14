@@ -108,7 +108,12 @@ export function createBridge(page, log) {
       let outcome;
       try {
         const reply = await page.evaluate(
-          ([name, body]) => window.joyDesktop.invoke(name, body),
+          // Calls the original bridge, never the tap wrapper, so a step's own call is logged once (as "driver").
+          ([name, body]) =>
+            (window.__joyBridgeOriginalInvoke ?? window.joyDesktop.invoke.bind(window.joyDesktop))(
+              name,
+              body,
+            ),
           [channel, payload],
         );
         outcome = { ok: true, reply };
@@ -146,6 +151,7 @@ export function createBridge(page, log) {
             },
           });
           window.__joyBridgeTap = tap;
+          window.__joyBridgeOriginalInvoke = original;
           return true;
         } catch {
           return false;
