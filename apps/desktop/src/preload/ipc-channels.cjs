@@ -56,6 +56,7 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.media.project.document.get',
   'desktop.media.project.document.put',
   'desktop.media.render.enqueue',
+  'desktop.media.qc.run',
   'desktop.media.job.status',
   'desktop.media.job.cancel',
   'desktop.media.derivative.bytes',

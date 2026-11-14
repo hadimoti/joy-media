@@ -5,6 +5,8 @@ export const WORKER_PROTOCOL_VERSION = 1 as const;
 export type WorkerCapability =
   | 'asset.thumbnail'
   | 'render.export'
+  /** Technical quality check of one file with ffmpeg filters (ADR-0045 layer 1). */
+  | 'media.qc'
   /** Ephemeral current-frame rendering; never a durable job type. */
   | 'render.preview.gpu'
   | 'image.comfy'

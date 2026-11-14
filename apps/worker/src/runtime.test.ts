@@ -177,7 +177,7 @@ describe('Worker runtime', () => {
       first,
       detectMediaTools((tool) => tool === 'ffmpeg' || tool === 'ffprobe'),
     );
-    expect(runtime.hello('win32', 'x64').capabilities).toEqual(['asset.thumbnail']);
+    expect(runtime.hello('win32', 'x64').capabilities).toEqual(['asset.thumbnail', 'media.qc']);
   });
   it('bounds logs and cooperatively cancels jobs', async () => {
     const log = new BoundedLog(2);
@@ -407,6 +407,59 @@ describe('Worker runtime', () => {
     ).rejects.toThrow('local source unavailable');
   });
 
+  it('advertises media.qc only with FFmpeg and FFprobe, and refuses it without them or an asset', async () => {
+    const identity = { workerId: 'worker-qc', createdAt: '2026-11-14T00:00:00.000Z' };
+    const without = new WorkerRuntime(identity, {
+      ffmpeg: true,
+      ffprobe: false,
+      comfy: false,
+      mlDenoise: false,
+      aiBroker: false,
+    });
+    expect(without.hello('win32', 'x64').capabilities).not.toContain('media.qc');
+    await expect(
+      without.run(
+        { id: 'job-qc-1', type: 'media.qc', assetId: 'asset-1' },
+        { cancelled: () => false, progress: async () => undefined },
+      ),
+    ).rejects.toThrow('FFmpeg and FFprobe are required for media.qc');
+
+    const withTools = new WorkerRuntime(identity, {
+      ffmpeg: true,
+      ffprobe: true,
+      comfy: false,
+      mlDenoise: false,
+      aiBroker: false,
+    });
+    expect(withTools.hello('win32', 'x64').capabilities).toContain('media.qc');
+    await expect(
+      withTools.run(
+        { id: 'job-qc-2', type: 'media.qc' },
+        { cancelled: () => false, progress: async () => undefined },
+      ),
+    ).rejects.toThrow('media.qc requires an input asset');
+    await expect(
+      withTools.run(
+        { id: 'job-qc-3', type: 'media.qc', assetId: 'asset-1' },
+        { cancelled: () => false, progress: async () => undefined },
+      ),
+    ).rejects.toThrow('asset asset-1 is not available on this Worker');
+  });
+
+  it('cancels a media.qc job before it runs anything', async () => {
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-qc-cancel', createdAt: '2026-11-14T00:00:00.000Z' },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiBroker: false },
+      { sources: new StaticLocalAssetSourceRegistry({ 'asset-1': 'unused-source.mp4' }) },
+    );
+    await expect(
+      runtime.run(
+        { id: 'job-qc-4', type: 'media.qc', assetId: 'asset-1' },
+        { cancelled: () => true, progress: async () => undefined },
+      ),
+    ).resolves.toEqual({ state: 'canceled' });
+  });
+
   it('advertises GPU capabilities only when local env is set', () => {
     const previous = process.env.JOY_MEDIA_LOCAL_ML_DENOISE;
     const previousModel = process.env.JOY_MEDIA_RNNOISE_MODEL;
@@ -419,6 +472,7 @@ describe('Worker runtime', () => {
     try {
       expect(runtime.hello('linux', 'x64').capabilities).toEqual([
         'asset.thumbnail',
+        'media.qc',
         'image.comfy',
       ]);
     } finally {

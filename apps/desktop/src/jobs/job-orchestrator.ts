@@ -37,6 +37,7 @@ const JOB_REQUIREMENTS: Readonly<Record<string, JobRequirement>> = {
     capability: 'render.export',
     missing: 'FFmpeg, FFprobe and the export source downloader on the local Worker',
   },
+  'media.qc': { capability: 'media.qc', missing: 'FFmpeg and FFprobe on the local Worker' },
   'mask.image': { capability: 'mask.image', missing: 'local masking models for mask.image' },
   'mask.video': { capability: 'mask.video', missing: 'local masking models for mask.video' },
   'upscale.image': { capability: 'upscale.image', missing: 'the installed upscaling model' },
@@ -44,9 +45,18 @@ const JOB_REQUIREMENTS: Readonly<Record<string, JobRequirement>> = {
 };
 
 /** Job types the desktop submits and the Worker can lease. */
-const DISPATCHABLE_JOB_TYPES = ['asset.thumbnail', 'render.export', 'upscale.image'] as const;
+const DISPATCHABLE_JOB_TYPES = [
+  'asset.thumbnail',
+  'render.export',
+  'upscale.image',
+  'media.qc',
+] as const;
 /** Job types whose Worker needs a payload. The desktop stores it at submit and sends it with the lease. */
-const PAYLOAD_JOB_TYPES: ReadonlySet<string> = new Set(['render.export', 'upscale.image']);
+const PAYLOAD_JOB_TYPES: ReadonlySet<string> = new Set([
+  'render.export',
+  'upscale.image',
+  'media.qc',
+]);
 /** A payload is stored as JSON in the local database and handed to the Worker whole, so it is capped. */
 const MAX_PAYLOAD_BYTES = 64 * 1024;
 

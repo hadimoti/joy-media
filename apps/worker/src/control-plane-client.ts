@@ -35,8 +35,11 @@ export interface WorkerJobResult {
     | 'mask.image'
     | 'mask.video'
     | 'text'
-    | 'image';
+    | 'image'
+    | 'media.qc';
   readonly assetId?: string;
+  /** The QC report of a `media.qc` job (ADR-0045). It travels in the result, not as a derivative file. */
+  readonly report?: unknown;
   readonly sha256?: string;
   readonly bytes?: number;
   readonly localRef?: string;

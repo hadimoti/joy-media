@@ -99,7 +99,8 @@ describe('publicJobError', () => {
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {
     expect(new Set(MEDIA_CHANNELS).size).toBe(MEDIA_CHANNELS.length);
-    expect(MEDIA_CHANNELS).toHaveLength(20);
+    expect(MEDIA_CHANNELS).toHaveLength(21);
+    expect(MEDIA_CHANNELS).toContain('desktop.media.qc.run');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.remove-internal');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-chunk');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-finish');
@@ -493,6 +494,48 @@ describe('desktop.media channels', () => {
     expect(handlers['desktop.media.audio.denoise']({ refId: 'ref-1', payload: {} })).toMatchObject({
       ok: false,
       error: expect.stringContaining('not available'),
+    });
+  });
+
+  it('refuses a QC run before the Worker has reported media.qc, then queues it once it has', () => {
+    const { orchestrator, handlers } = setup();
+    expect(handlers['desktop.media.qc.run']({ refId: 'asset-1', payload: {} })).toEqual({
+      ok: false,
+      error: expect.stringContaining('Worker has not reported its capabilities'),
+    });
+    orchestrator.hello('w-1', ['media.qc']);
+    expect(handlers['desktop.media.qc.run']({ refId: 'asset-1', payload: {} })).toEqual({
+      ok: true,
+      data: { jobId: 'job-1' },
+    });
+    expect(handlers['desktop.media.job.status']({ jobId: 'job-1' })).toMatchObject({
+      ok: true,
+      data: { id: 'job-1', jobType: 'media.qc', status: 'queued' },
+    });
+    expect(handlers['desktop.media.qc.run']({ payload: {} })).toEqual({
+      ok: false,
+      error: 'Invalid media request',
+    });
+  });
+
+  it('returns the QC report in job status once the job is done, and nothing for a queued one', () => {
+    const { db, orchestrator, handlers } = setup();
+    orchestrator.hello('w-1', ['media.qc']);
+    handlers['desktop.media.qc.run']({ refId: 'asset-1', payload: {} });
+    expect(handlers['desktop.media.job.status']({ jobId: 'job-1' })).not.toHaveProperty(
+      'data.report',
+    );
+    const queued = db.jobDispatch.get('job-1');
+    if (queued === undefined) throw new Error('job-1 was not stored');
+    const report = { version: 1, reportId: 'qc-report-job-1', findings: [] };
+    db.jobDispatch.save({
+      ...queued,
+      status: 'done',
+      resultJson: JSON.stringify({ kind: 'media.qc', assetId: 'asset-1', report }),
+    });
+    expect(handlers['desktop.media.job.status']({ jobId: 'job-1' })).toMatchObject({
+      ok: true,
+      data: { id: 'job-1', status: 'done', report },
     });
   });
 

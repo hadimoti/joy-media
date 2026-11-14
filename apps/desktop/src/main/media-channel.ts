@@ -53,6 +53,7 @@ export const MEDIA_CHANNELS = [
   'desktop.media.project.document.get',
   'desktop.media.project.document.put',
   'desktop.media.render.enqueue',
+  'desktop.media.qc.run',
   'desktop.media.job.status',
   'desktop.media.job.cancel',
   'desktop.media.derivative.bytes',
@@ -253,6 +254,22 @@ export function publicJobError(error: string | undefined): string | undefined {
   return /[\\/]/.test(error) ? 'The job failed. Its details are not shown here.' : error;
 }
 
+/**
+ * The report of a finished `media.qc` job. It holds numbers, time ranges and plain sentences, never a path,
+ * so it is safe to hand to the editor. Any other job, or an unreadable result, adds nothing.
+ */
+function qcReportOf(job: DispatchJob): { readonly report?: unknown } {
+  if (job.jobType !== 'media.qc' || job.status !== 'done' || job.resultJson === undefined) return {};
+  try {
+    const parsed: unknown = JSON.parse(job.resultJson);
+    if (typeof parsed !== 'object' || parsed === null) return {};
+    const { kind, report } = parsed as { kind?: unknown; report?: unknown };
+    return kind === 'media.qc' && typeof report === 'object' && report !== null ? { report } : {};
+  } catch {
+    return {};
+  }
+}
+
 /** The job as the editor may see it: never the lease token, the worker ID, or any path. */
 function publicJob(job: DispatchJob): Record<string, unknown> {
   return {
@@ -265,6 +282,7 @@ function publicJob(job: DispatchJob): Record<string, unknown> {
     cancelRequested: job.cancelRequested,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
+    ...qcReportOf(job),
     ...(job.derivative === undefined
       ? {}
       : {
@@ -779,6 +797,8 @@ export function createMediaChannelHandlers(
     'desktop.media.project.document.put': putDocument,
     'desktop.media.preview.frame': notAvailable,
     'desktop.media.render.enqueue': (payload) => submitJob('render.export', payload),
+    // The technical quality check of one file (ADR-0045 layer 1). The report comes back in job status.
+    'desktop.media.qc.run': (payload) => submitJob('media.qc', payload),
     // The orchestrator does not dispatch audio.ml-denoise yet (only asset.thumbnail, render.export
     // and upscale.image), so denoise is refused rather than queued.
     'desktop.media.audio.denoise': notAvailable,
