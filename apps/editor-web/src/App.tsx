@@ -1105,6 +1105,10 @@ function EditorWorkspace({
   const paletteOpen = openPopupId === POPUP_IDS.commandPalette;
   const paletteMenu = usePopup(POPUP_IDS.commandPalette);
   const [query, setQuery] = useState('');
+  // The palette opens empty every time: its last search is not kept (LTP-064).
+  useEffect(() => {
+    if (!paletteOpen) setQuery('');
+  }, [paletteOpen]);
   const [transcriptionError, setTranscriptionError] = useState<string>();
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | undefined>(undefined);
