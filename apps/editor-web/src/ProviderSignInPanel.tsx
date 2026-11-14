@@ -155,6 +155,20 @@ export function ProviderSignInPanel({
   );
 }
 
+/** The "Get a key" and "API docs" links of one region. They open only on an explicit click. */
+function ProviderKeyLinks({ region }: { readonly region: ProviderRegion }) {
+  return (
+    <span className="joy-settings-hint-muted joy-provider-key-link">
+      <a href={region.keyUrl} target="_blank" rel="noreferrer">
+        {SETTINGS_PROVIDER_SIGN_IN.getKey}
+      </a>{' '}
+      <a href={region.docsUrl} target="_blank" rel="noreferrer">
+        {SETTINGS_PROVIDER_SIGN_IN.apiDocs}
+      </a>
+    </span>
+  );
+}
+
 function ProviderRouteAccordion({
   provider,
   signInBusy,
@@ -191,6 +205,9 @@ function ProviderRouteAccordion({
   // Only the ChatGPT sign-in card says this: the sign-in cannot make pictures (T-C07).
   const cannotMakePictures =
     provider.signInOnly === true && !generationSupport(provider.id, 'image').supported;
+  // The ChatGPT card has no key form of its own: its key links point to the OpenAI provider (T-F09).
+  const openAiKeyRegion =
+    provider.id === 'chatgpt' ? findRegistryProvider('openai')?.regions[0] : undefined;
 
   const toggle = (): void => {
     if (open && apiKeyRef.current !== null) apiKeyRef.current.value = '';
@@ -261,46 +278,6 @@ function ProviderRouteAccordion({
           )}
           <section
             className="joy-provider-route"
-            aria-label={SETTINGS_PROVIDER_SIGN_IN.oauthRouteLabel.replace(
-              '{provider}',
-              () => label,
-            )}
-          >
-            <h4 className="joy-provider-route-title">
-              {SETTINGS_PROVIDER_SIGN_IN.oauthRouteTitle}
-            </h4>
-            <button
-              type="button"
-              className="button-primary"
-              disabled={signInDisabled || saving}
-              onClick={onSignIn}
-            >
-              {(signInBusy
-                ? SETTINGS_PROVIDER_SIGN_IN.signInButtonBusy
-                : SETTINGS_PROVIDER_SIGN_IN.signInButton
-              ).replace('{provider}', () => label)}
-            </button>
-            {signInBusy && signInRemainingMs !== undefined && (
-              <div className="joy-provider-sign-in-waiting">
-                <p role="status">
-                  {SETTINGS_PROVIDER_SIGN_IN.waitingForBrowser.replace('{time}', () =>
-                    formatSignInCountdown(signInRemainingMs),
-                  )}
-                </p>
-                <button type="button" className="button-secondary" onClick={onReopenSignIn}>
-                  {SETTINGS_PROVIDER_SIGN_IN.openSignInPageAgain}
-                </button>
-                <button type="button" className="button-secondary" onClick={onCancelSignIn}>
-                  {SETTINGS_PROVIDER_SIGN_IN.cancelSignIn}
-                </button>
-              </div>
-            )}
-            <p className="joy-provider-risk-notice">{SETTINGS_PROVIDER_SIGN_IN.oauthRiskNotice}</p>
-            {signInMessage !== undefined && <p role="status">{signInMessage}</p>}
-          </section>
-
-          <section
-            className="joy-provider-route"
             aria-label={SETTINGS_PROVIDER_SIGN_IN.apiKeyRouteLabel.replace(
               '{provider}',
               () => label,
@@ -313,9 +290,12 @@ function ProviderRouteAccordion({
               <>
                 <p>{SETTINGS_PROVIDER_SIGN_IN.noApiKeyEndpoint}</p>
                 {provider.id === 'chatgpt' && (
-                  <p className="joy-provider-capability-note">
-                    {SETTINGS_PROVIDER_SIGN_IN.chatGptApiKeyBilling}
-                  </p>
+                  <>
+                    <p className="joy-provider-capability-note">
+                      {SETTINGS_PROVIDER_SIGN_IN.chatGptApiKeyBilling}
+                    </p>
+                    {openAiKeyRegion !== undefined && <ProviderKeyLinks region={openAiKeyRegion} />}
+                  </>
                 )}
               </>
             ) : (
@@ -408,12 +388,8 @@ function ProviderRouteAccordion({
                 </div>
 
                 <div className="joy-settings-field-full joy-card-footer joy-card-footer-split">
-                  <span className="joy-settings-hint-muted joy-provider-key-link">
-                    {SETTINGS_PROVIDER_SIGN_IN.apiKeyLabel}{' '}
-                    <a href={selectedRegion.keyUrl} target="_blank" rel="noreferrer">
-                      {SETTINGS_PROVIDER_SIGN_IN.createApiKey}
-                    </a>
-                  </span>
+                  <ProviderKeyLinks region={selectedRegion} />
+
                   <button
                     type="button"
                     className="button-primary button-sm"
@@ -430,6 +406,46 @@ function ProviderRouteAccordion({
                 )}
               </div>
             )}
+          </section>
+
+          <section
+            className="joy-provider-route"
+            aria-label={SETTINGS_PROVIDER_SIGN_IN.oauthRouteLabel.replace(
+              '{provider}',
+              () => label,
+            )}
+          >
+            <h4 className="joy-provider-route-title">
+              {SETTINGS_PROVIDER_SIGN_IN.oauthRouteTitle}
+            </h4>
+            <button
+              type="button"
+              className="button-secondary"
+              disabled={signInDisabled || saving}
+              onClick={onSignIn}
+            >
+              {(signInBusy
+                ? SETTINGS_PROVIDER_SIGN_IN.signInButtonBusy
+                : SETTINGS_PROVIDER_SIGN_IN.signInButton
+              ).replace('{provider}', () => label)}
+            </button>
+            {signInBusy && signInRemainingMs !== undefined && (
+              <div className="joy-provider-sign-in-waiting">
+                <p role="status">
+                  {SETTINGS_PROVIDER_SIGN_IN.waitingForBrowser.replace('{time}', () =>
+                    formatSignInCountdown(signInRemainingMs),
+                  )}
+                </p>
+                <button type="button" className="button-secondary" onClick={onReopenSignIn}>
+                  {SETTINGS_PROVIDER_SIGN_IN.openSignInPageAgain}
+                </button>
+                <button type="button" className="button-secondary" onClick={onCancelSignIn}>
+                  {SETTINGS_PROVIDER_SIGN_IN.cancelSignIn}
+                </button>
+              </div>
+            )}
+            <p className="joy-provider-risk-notice">{SETTINGS_PROVIDER_SIGN_IN.oauthRiskNotice}</p>
+            {signInMessage !== undefined && <p role="status">{signInMessage}</p>}
           </section>
         </div>
       )}
