@@ -5,7 +5,7 @@ Run on integration `10e53cec` (plus the two changes below) with `node tooling/qa
 ## Result
 
 - 15 Filters are in the panel (`apps/editor-web/src/library-homes.ts`). The task text says 20: five former Filters doubles (halftone, scatter-mosaic, contour-map, glyph-matrix, pixel-sort) now live only in Effects (T-V06), so they are covered in `EFFECTS.md` (T-V05). Their first live run is below.
-- **15 of 15 pass** after the two changes below (run1 before the changes: 12 of 15).
+- **15 of 15 pass** after the two changes below: run3f (all 15 after the harness change) passed 14 and its one failure, Bloom, passes in run4 (Bloom and Glow only, after the shader fix). Run1, before both changes, passed 12 of 15. A final single run of all 15 is part of the T-A10 regression.
 
 ## Defects found and fixed
 

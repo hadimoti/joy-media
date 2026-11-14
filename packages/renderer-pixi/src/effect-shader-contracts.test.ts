@@ -44,6 +44,7 @@ const PIXI_SHADER_KINDS = [
   'emboss',
   'unsharp-mask',
   'vignette',
+  'bloom',
 ] as const;
 
 const IDENTITY_5X4 = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];

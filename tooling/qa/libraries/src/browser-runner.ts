@@ -23,6 +23,7 @@ import {
 import type { OfflineMp4Capability } from '../../../../apps/editor-web/src/offline-mp4-export.js';
 import { paintKnownTestChart } from './test-chart.mjs';
 import { computeRgbaDiffMetrics, computeRgbaSpread } from './pixel-metrics.mjs';
+import { previewAccepted } from './preview-rule.js';
 
 const PREVIEW_WIDTH = 960;
 const PREVIEW_HEIGHT = 540;
@@ -400,7 +401,6 @@ async function testItem(input: TestItemInput) {
   const previewVsBefore = computeRgbaDiffMetrics(defaultPreviewRgba, currentState.beforeRgba);
   const previewSpread = computeRgbaSpread(defaultPreviewRgba);
   const isBlankFrame = previewSpread.maxChannelRange <= 10;
-  const previewPassed = !isBlankFrame && previewVsBefore.meanAbsDiff > 0.1;
 
   // 2. Export 2s MP4 (offline WebCodecs if supported, else collect Pixi PNG frames for ffmpeg x264)
   let exportMp4Base64: string | undefined;
@@ -844,13 +844,15 @@ async function testItem(input: TestItemInput) {
   }
   const meanMsPerFrame = timingsMs.reduce((a, b) => a + b, 0) / timingsMs.length;
 
-  // A neutral default (hue 0, saturation 0, vibrance 0) legitimately renders like the Before frame.
-  // It passes when it is not blank and some adjusted value of a parameter does change the picture.
-  const neutralDefault = !isBlankFrame && previewVsBefore.meanAbsDiff <= 0.1;
-  const adjustedVisible = paramChecks.some(
-    (p) => p.passed && Math.max(p.lowVsDefaultMeanDiff, p.highVsDefaultMeanDiff) > 0.1,
-  );
-  const previewAccepted = previewPassed || (neutralDefault && adjustedVisible);
+  const previewDecision = previewAccepted({
+    isBlankFrame,
+    defaultVsBeforeMeanDiff: previewVsBefore.meanAbsDiff,
+    adjustedVsDefaultMeanDiffs: paramChecks
+      .filter((p) => p.passed)
+      .map((p) => Math.max(p.lowVsDefaultMeanDiff, p.highVsDefaultMeanDiff)),
+  });
+  const previewOk = previewDecision.accepted;
+  const neutralDefault = previewDecision.neutralDefault;
 
   return {
     id: input.id,
@@ -859,7 +861,7 @@ async function testItem(input: TestItemInput) {
     ffmpegBackendNative: descriptor.backend.ffmpeg,
     ffmpegFilterGraphPresent: ffmpegFilterGraph !== undefined,
     preview: {
-      passed: previewAccepted,
+      passed: previewOk,
       neutralDefault,
       isBlankFrame,
       vsBeforeMeanDiff: previewVsBefore.meanAbsDiff,
