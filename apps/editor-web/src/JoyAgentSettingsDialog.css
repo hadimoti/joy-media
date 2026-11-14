@@ -1375,6 +1375,11 @@
   gap: 8px;
 }
 
+/* The app's generic label margin would lift the select above the button; both sit on one baseline of 36 px. */
+.agent-slot-effort-row > .agent-slot-field {
+  margin: 0;
+}
+
 .agent-slot-effort-row > button {
   min-height: var(--joy-control-height);
   white-space: nowrap;
