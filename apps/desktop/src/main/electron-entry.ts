@@ -71,6 +71,12 @@ import {
   createPinnedGenerationDownloader,
   probeGeneratedMedia,
 } from './generation-jobs.js';
+import {
+  DESKTOP_TEST_API_BASE_ARGUMENT,
+  DESKTOP_TEST_MODE_FLAG,
+  resolveTestApiBaseUrl,
+  resolveTestDownloadDirectory,
+} from './test-api-override.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
@@ -162,6 +168,16 @@ function showPackagedWindowWhenLoaded(win: BrowserWindow): void {
 // docs/joy-media-final-migration-progress.md (no prior session ever opened a real Electron
 // window). Never shows a window and never touches production data.
 const isSmokeMode = process.argv.includes('--smoke');
+// Packaged acceptance only: both values stay undefined unless --joy-media-test-mode is passed
+// together with its environment variable (see test-api-override.ts).
+const testApiBaseUrl = resolveTestApiBaseUrl({ argv: process.argv, env: process.env });
+const testDownloadDirectory = process.argv.includes(DESKTOP_TEST_MODE_FLAG)
+  ? resolveTestDownloadDirectory({
+      argv: process.argv,
+      env: process.env,
+      userDataDirectory: app.getPath('userData'),
+    })
+  : undefined;
 
 // Privileged so the packaged renderer behaves like https:// (fetch, CSP, secure context)
 // instead of the restricted "file://"-style origin Electron gives unregistered schemes.
@@ -555,6 +571,14 @@ if (!app.requestSingleInstanceLock()) {
       callback(false);
     });
 
+    // Test mode only: a Save dialog writes straight into the disposable download folder.
+    // Without test mode this listener is not registered and Electron's normal Save path applies.
+    if (testDownloadDirectory !== undefined) {
+      session.defaultSession.on('will-download', (_event, item) => {
+        item.setSavePath(join(testDownloadDirectory, path.basename(item.getFilename())));
+      });
+    }
+
     const win = new BrowserWindow({
       width: 1440,
       height: 900,
@@ -563,7 +587,12 @@ if (!app.requestSingleInstanceLock()) {
       frame: false,
       titleBarStyle: 'hidden',
       backgroundColor: '#000000',
-      webPreferences: buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
+      webPreferences: {
+        ...buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
+        ...(testApiBaseUrl === undefined
+          ? {}
+          : { additionalArguments: [`${DESKTOP_TEST_API_BASE_ARGUMENT}${testApiBaseUrl}`] }),
+      },
     });
     mainWindow = win;
     cancelWhenPageGoes(agentRequests, win);

@@ -210,6 +210,34 @@ Tabs are from the review's screenshot 07: Visual / Enhance / Mask / Effects / Au
 | D-090 | Execution modes                   | A run can be previewed, approved, cancelled and undone                | manual | Run the same instruction in each of the four execution modes | Preview does not write; approve writes; cancel stops; Undo takes it back   | `T-A11\D-090.json` | T-A11 |
 | D-091 | Public endpoint consent           | Consent is required, can be declined, and clears when the URL changes | manual | Enter an https URL, decline, accept, edit the URL            | Declining sends nothing; editing the URL clears the consent                | `T-A11\D-091.png`  | T-A11 |
 
+### 3.8 Packaged acceptance specs (T-A03)
+
+The packaged specs run on the unpacked app with `--joy-media-test-mode`. That flag does nothing without its environment variables (`JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY` for Save dialogs, `JOY_MEDIA_TEST_API_BASE_URL` for the API base); see `apps/desktop/src/main/test-api-override.ts`.
+
+Specs that were on the branch before this card, and the rows that replace them:
+
+| Old spec (commit)                                    | What it covered                                                                       | Replaced by                | Note                                                                                             |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------ |
+| `editor-acceptance.spec.ts` (`befc442b`)             | Import, play, save, restart and export a playable project                             | D-046, D-081, D-121        | Restart and playback are not separate rows; D-081 and D-121 are attended or manual               |
+| `fresh-process-persistence.spec.ts` (`c748eb6d`)     | Save in one process, reopen from a fresh profile in a new process, render             | D-083, D-081               | D-083 is the cross-profile round trip; the render check has no row of its own                    |
+| `export-semantics.spec.ts` (`4ad043df`, 1,167 lines) | Decoded picture, stereo tones, timing, dissolve, caption glyph bounds, Monitor parity | **No row replaces it yet** | D-121 proves a playable export only. The decoded-frame and audio checks need a T-A10 compare row |
+
+The nine tests of this card map to rows as follows (nearest row; "none" means no row exists yet):
+
+| Spec and test                                                                             | Row               |
+| ----------------------------------------------------------------------------------------- | ----------------- |
+| `missing-media`: exact relink restores the media and it persists across a restart         | D-085             |
+| `missing-media`: wrong hash or wrong size refused, original stays missing                 | D-085             |
+| `missing-media`: Use Different File creates a separate asset; Undo restores the reference | D-085             |
+| `missing-media`: cancelling the picker has no side effects                                | D-085             |
+| `project-package-integrity`: cross-device round trip restores project, clip and media     | D-083             |
+| `project-package-integrity`: import of a package without media bytes asks for relinking   | D-084             |
+| `project-package-integrity`: importing the same package twice creates a distinct project  | none              |
+| `project-package-integrity`: a truncated package is rejected and the library is unchanged | none              |
+| `joy-code-panel`: the tab closes from its own control and reopens from the menu           | D-012 (open only) |
+
+The Joy Code tab close guard while a run is active is a unit test, not a packaged one: `apps/editor-web/src/PanelTab.test.tsx`, "the Joy Code tab close guard (T-A03)". No row covers it yet; D-012 is the nearest.
+
 ---
 
 ## 4. Desktop — every timeline command
