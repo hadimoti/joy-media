@@ -6954,6 +6954,10 @@ function EditorWorkspace({
         }
 
         if (importedAssets.length > 0) {
+          // A file the library already holds (same content, same id) is not new: the toast must not count it as added.
+          const alreadyInLibrary = importedAssets.filter(
+            (asset) => context.visualProject.assets[asset.id] !== undefined,
+          ).length;
           let nextVisualProject = context.visualProject;
           const timelineAssets: TimelineMediaAsset[] = [];
           const clipIds: string[] = [];
@@ -7052,11 +7056,17 @@ function EditorWorkspace({
               ),
             );
           }
+          const plural = (count: number) => `${count} file${count === 1 ? '' : 's'}`;
+          const newCount = importedAssets.length - alreadyInLibrary;
           context.showToast(
-            target.surface === 'media'
-              ? `${importedAssets.length} file${importedAssets.length === 1 ? '' : 's'} added to the media library.`
-              : `${importedAssets.length} file${importedAssets.length === 1 ? '' : 's'} added to the timeline.`,
-            'success',
+            target.surface !== 'media'
+              ? `${plural(importedAssets.length)} added to the timeline.`
+              : newCount === 0
+                ? `${plural(alreadyInLibrary)} already in the media library.`
+                : alreadyInLibrary === 0
+                  ? `${plural(newCount)} added to the media library.`
+                  : `${plural(newCount)} added to the media library, ${alreadyInLibrary} already there.`,
+            newCount === 0 && target.surface === 'media' ? 'info' : 'success',
           );
         }
         for (const failure of failures) {

@@ -144,7 +144,8 @@ import {
   buildTimelineClipReplaceTransaction,
   hasExceededDragThreshold,
   keyboardTrimTimeUs,
-  nearestFreeStartUs,
+  planClipLandings,
+  type ClipLanding,
 } from './timeline-clip-interaction.js';
 import { scopedKeyTable } from './keyboard-shortcuts.js';
 import {
@@ -188,6 +189,21 @@ import { diffAgentTimeline, type AgentPreviewTimeline } from './agent-timeline-p
 const DRAG_THRESHOLD_PX = 4;
 
 /** History entries name a clip by its media name, never by its id. */
+/** The outcome of a clip or group move: where every clip lands, or why it is refused. */
+type MovePlan =
+  | {
+      readonly ok: true;
+      readonly landings: readonly ClipLanding[];
+      readonly transaction: CommandTransaction;
+    }
+  | { readonly ok: false; readonly message: string };
+
+/** The ghost shown while dragging: the landing spots, and the refusal when the drop would not be accepted. */
+interface MovePreview {
+  readonly landings: readonly ClipLanding[];
+  readonly refusal: string | undefined;
+}
+
 function clipHistoryName(
   tracks: readonly { readonly clips: readonly Clip[] }[],
   clipId: string,
@@ -285,6 +301,7 @@ function TimelineClip({
   onSplitAt,
   snapClipStartUs,
   onDragMove,
+  onMovePreview,
   onRestoreSelection,
   missingName,
   onRelinkMissing,
@@ -318,6 +335,12 @@ function TimelineClip({
   readonly onSplitAt: (atUs: number) => void;
   readonly snapClipStartUs: (clipId: string, rawStartUs: number) => number;
   readonly onDragMove: (clientX: number, clientY: number) => number | undefined;
+  /** Shows (or, with `undefined`, clears) the ghost of where a drag would land. */
+  readonly onMovePreview: (
+    clipId: string,
+    newStartUs: number | undefined,
+    targetTrackId?: string,
+  ) => void;
   readonly onRestoreSelection: () => void;
 }) {
   const mediaSource = useMemo<TimelineElementMediaSource | undefined>(
@@ -367,6 +390,20 @@ function TimelineClip({
     const localX = clientX - rect.left;
     const rawUs = clip.startUs + localX / pxPerUs;
     return snapSplitUs(rawUs, clip.startUs, clip.durationUs, frameUs);
+  };
+
+  const trackIdAtPoint = (clientX: number, clientY: number): string | undefined => {
+    const hitTrack = document
+      .elementsFromPoint(clientX, clientY)
+      .map((element) => element.closest<HTMLElement>('[data-track-id]'))
+      .find((element): element is HTMLElement => element?.dataset.trackId !== undefined);
+    const fallbackTrack = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-track-id]'),
+    ).find((element) => {
+      const rect = element.getBoundingClientRect();
+      return clientY >= rect.top && clientY <= rect.bottom;
+    });
+    return (hitTrack ?? fallbackTrack)?.dataset.trackId;
   };
 
   const dropTimeUs = (deltaPx: number): number => {
@@ -584,6 +621,7 @@ function TimelineClip({
           stopAutoScroll();
           setDragPx(undefined);
           setTrimPreview(undefined);
+          onMovePreview(clip.id, undefined);
           onRestoreSelection();
           suppressClickRef.current = true;
           if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId);
@@ -630,6 +668,11 @@ function TimelineClip({
             stopAutoScroll();
           }
           setDragPx(deltaPx + drag.scrollDeltaPx);
+          onMovePreview(
+            clip.id,
+            dropTimeUs(deltaPx + drag.scrollDeltaPx),
+            trackIdAtPoint(event.clientX, event.clientY),
+          );
         }
       }}
       onPointerUp={(event) => {
@@ -652,17 +695,8 @@ function TimelineClip({
         stopAutoScroll();
         setDragPx(undefined);
         if (drag === null || !drag.moved) return;
-        const hitTrack = document
-          .elementsFromPoint(event.clientX, event.clientY)
-          .map((element) => element.closest<HTMLElement>('[data-track-id]'))
-          .find((element): element is HTMLElement => element?.dataset.trackId !== undefined);
-        const fallbackTrack = Array.from(
-          document.querySelectorAll<HTMLElement>('[data-track-id]'),
-        ).find((element) => {
-          const rect = element.getBoundingClientRect();
-          return event.clientY >= rect.top && event.clientY <= rect.bottom;
-        });
-        const targetTrackId = (hitTrack ?? fallbackTrack)?.dataset.trackId;
+        const targetTrackId = trackIdAtPoint(event.clientX, event.clientY);
+        onMovePreview(clip.id, undefined);
         onMove(
           clip.id,
           dropTimeUs(event.clientX - drag.originX + drag.scrollDeltaPx),
@@ -670,6 +704,7 @@ function TimelineClip({
         );
       }}
       onPointerCancel={() => {
+        onMovePreview(clip.id, undefined);
         dragRef.current?.cleanupEscape();
         stopAutoScroll();
         setDragPx(undefined);
@@ -1093,6 +1128,7 @@ export function TimelinePanel({
     }
   };
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
+  const [movePreview, setMovePreview] = useState<MovePreview | undefined>(undefined);
   const [tracksViewportWidthPx, setTracksViewportWidthPx] = useState(0);
   const [tracksScrollLeft, setTracksScrollLeft] = useState(0);
   // The track titles column width the user asked for (remembered per profile)
@@ -1801,110 +1837,161 @@ export function TimelinePanel({
     [assetDisplayNames, composition.id, composition.tracks, onDispatch],
   );
 
+  /**
+   * One rule for a clip or group move, shared by the drop and by the ghost shown while dragging: the clips land
+   * together at the nearest free spot. Only a locked track or the wrong track family refuses, and says why.
+   */
+  const planMove = (
+    trackId: string,
+    clipId: string,
+    newStartUs: number,
+    targetTrackId = trackId,
+  ): MovePlan | undefined => {
+    const source = composition.tracks.find((candidate) => candidate.id === trackId);
+    const clip = source?.clips.find((candidate) => candidate.id === clipId);
+    const target = composition.tracks.find((candidate) => candidate.id === targetTrackId);
+    const targetView = tracks.find((candidate) => candidate.id === targetTrackId);
+    if (source === undefined || clip === undefined || target === undefined) return undefined;
+    if (source.locked === true) return { ok: false, message: 'That track is locked.' };
+    if (targetView?.locked === true) return { ok: false, message: 'That track is locked.' };
+    const elementKind = timelineElementKindForClip(clip, elementKinds);
+    if (!canPlaceTimelineElement(elementKind, target, elementKinds)) {
+      return {
+        ok: false,
+        message: `${elementKind === 'audio' ? 'Audio' : 'Visual'} elements can only move to compatible ${trackFamilyForElement(elementKind)} tracks.`,
+      };
+    }
+    const selectedIdSet = new Set(selectedIds);
+    const selectedEntries = composition.tracks.flatMap((candidateTrack) =>
+      candidateTrack.clips
+        .filter((candidateClip) => selectedIdSet.has(candidateClip.id))
+        .map((candidateClip) => ({ track: candidateTrack, clip: candidateClip })),
+    );
+    const movingEntries =
+      selectedIds.includes(clipId) && selectedEntries.length > 1
+        ? selectedEntries
+        : [{ track: source, clip }];
+    if (movingEntries.some((entry) => tracks.find((view) => view.id === entry.track.id)?.locked)) {
+      return { ok: false, message: 'Unlock every selected track before moving the selection.' };
+    }
+    const verticalMove = targetTrackId !== trackId;
+    if (verticalMove && movingEntries.some((entry) => entry.track.id !== trackId)) {
+      return {
+        ok: false,
+        message:
+          'Move clips from one source row vertically, or move a multi-row selection horizontally.',
+      };
+    }
+    if (
+      verticalMove &&
+      movingEntries.some(
+        (entry) =>
+          !canPlaceTimelineElement(
+            timelineElementKindForClip(entry.clip, elementKinds),
+            target,
+            elementKinds,
+          ),
+      )
+    ) {
+      return { ok: false, message: 'A selected group cannot cross the visual/audio boundary.' };
+    }
+    const landings = planClipLandings({
+      members: movingEntries.map((entry) => ({
+        clip: entry.clip,
+        sourceTrackId: entry.track.id,
+        targetTrackId: verticalMove ? targetTrackId : entry.track.id,
+      })),
+      tracks: composition.tracks,
+      anchorClipId: clipId,
+      desiredStartUs: newStartUs,
+    });
+    if (landings === undefined) {
+      return { ok: false, message: 'There is no room for the clip there.' };
+    }
+    const transaction =
+      movingEntries.length > 1
+        ? buildTimelineClipGroupMoveTransaction({
+            compositionId: composition.id,
+            moves: landings.map((landing) => ({
+              sourceTrackId: landing.sourceTrackId,
+              targetTrackId: landing.targetTrackId,
+              clipId: landing.clipId,
+              newStartUs: landing.startUs,
+            })),
+          })
+        : buildTimelineClipMoveTransaction({
+            compositionId: composition.id,
+            sourceTrackId: trackId,
+            targetTrackId,
+            clip,
+            targetClips: target.clips,
+            newStartUs: landings[0]?.startUs ?? newStartUs,
+          });
+    if (transaction === undefined) {
+      return { ok: false, message: 'There is no room for the clip there.' };
+    }
+    return { ok: true, landings, transaction };
+  };
+
   const moveClip =
     (trackId: string) =>
     (clipId: string, newStartUs: number, targetTrackId = trackId): boolean => {
       try {
-        const source = composition.tracks.find((candidate) => candidate.id === trackId);
-        if (source?.locked === true) return false;
-        const clip = source?.clips.find((candidate) => candidate.id === clipId);
-        const target = composition.tracks.find((candidate) => candidate.id === targetTrackId);
-        const targetView = tracks.find((candidate) => candidate.id === targetTrackId);
-        if (
-          source === undefined ||
-          clip === undefined ||
-          target === undefined ||
-          targetView?.locked === true
-        )
-          return false;
-        const elementKind = timelineElementKindForClip(clip, elementKinds);
-        if (!canPlaceTimelineElement(elementKind, target, elementKinds)) {
-          showToast?.(
-            `${elementKind === 'audio' ? 'Audio' : 'Visual'} elements can only move to compatible ${trackFamilyForElement(elementKind)} tracks.`,
-            'info',
-          );
+        const plan = planMove(trackId, clipId, newStartUs, targetTrackId);
+        setMovePreview(undefined);
+        if (plan === undefined) return false;
+        if (!plan.ok) {
+          showToast?.(plan.message, 'info');
           return false;
         }
-        const selectedIdSet = new Set(selectedIds);
-        const selectedEntries = composition.tracks.flatMap((candidateTrack) =>
-          candidateTrack.clips
-            .filter((candidateClip) => selectedIdSet.has(candidateClip.id))
-            .map((candidateClip) => ({ track: candidateTrack, clip: candidateClip })),
-        );
-        const movingEntries =
-          selectedIds.includes(clipId) && selectedEntries.length > 1
-            ? selectedEntries
-            : [{ track: source, clip }];
-        if (
-          movingEntries.some((entry) => tracks.find((view) => view.id === entry.track.id)?.locked)
-        ) {
-          showToast?.('Unlock every selected track before moving the selection.', 'info');
-          return false;
-        }
-        const verticalMove = targetTrackId !== trackId;
-        if (verticalMove && movingEntries.some((entry) => entry.track.id !== trackId)) {
-          showToast?.(
-            'Move clips from one source row vertically, or move a multi-row selection horizontally.',
-            'info',
-          );
-          return false;
-        }
-        if (
-          verticalMove &&
-          movingEntries.some(
-            (entry) =>
-              !canPlaceTimelineElement(
-                timelineElementKindForClip(entry.clip, elementKinds),
-                target,
-                elementKinds,
-              ),
-          )
-        ) {
-          showToast?.('A selected group cannot cross the visual/audio boundary.', 'info');
-          return false;
-        }
-        if (movingEntries.length > 1) {
-          const deltaUs = newStartUs - clip.startUs;
-          const groupTransaction = buildTimelineClipGroupMoveTransaction({
-            compositionId: composition.id,
-            moves: movingEntries.map((entry) => ({
-              sourceTrackId: entry.track.id,
-              targetTrackId: verticalMove ? targetTrackId : entry.track.id,
-              clipId: entry.clip.id,
-              newStartUs: entry.clip.startUs + deltaUs,
-            })),
-          });
-          if (groupTransaction === undefined) {
-            showToast?.('There is no room for the selected clips there.', 'info');
-            return false;
-          }
-          onDispatch(groupTransaction);
-          return true;
-        }
-        // A drop on a taken spot lands at the nearest free spot of that track, never silently nowhere.
-        const transaction = buildTimelineClipMoveTransaction({
-          compositionId: composition.id,
-          sourceTrackId: trackId,
-          targetTrackId,
-          clip,
-          targetClips: target.clips,
-          newStartUs: nearestFreeStartUs({
-            clips: target.clips,
-            durationUs: clip.durationUs,
-            desiredStartUs: newStartUs,
-            ...(trackId === targetTrackId ? { ignoreClipId: clip.id } : {}),
-          }),
-        });
-        if (transaction === undefined) {
-          showToast?.('There is no room for the clip there.', 'info');
-          return false;
-        }
-        onDispatch(transaction);
+        onDispatch(plan.transaction);
         return true;
       } catch {
         return false;
       }
     };
+
+  /** The ghost drawn while a clip is dragged: where it will land, or where it is refused. */
+  const previewMove = (
+    trackId: string,
+    clipId: string,
+    newStartUs: number | undefined,
+    targetTrackId = trackId,
+  ): void => {
+    if (newStartUs === undefined) {
+      setMovePreview(undefined);
+      return;
+    }
+    try {
+      const plan = planMove(trackId, clipId, newStartUs, targetTrackId);
+      if (plan === undefined) {
+        setMovePreview(undefined);
+      } else if (plan.ok) {
+        setMovePreview({ landings: plan.landings, refusal: undefined });
+      } else {
+        const clip = composition.tracks
+          .find((candidate) => candidate.id === trackId)
+          ?.clips.find((candidate) => candidate.id === clipId);
+        setMovePreview({
+          landings:
+            clip === undefined
+              ? []
+              : [
+                  {
+                    clipId,
+                    sourceTrackId: trackId,
+                    targetTrackId,
+                    startUs: Math.max(0, Math.round(newStartUs)),
+                    durationUs: clip.durationUs,
+                  },
+                ],
+          refusal: plan.message,
+        });
+      }
+    } catch {
+      setMovePreview(undefined);
+    }
+  };
 
   const trimClip =
     (trackId: string) =>
@@ -4037,6 +4124,21 @@ export function TimelinePanel({
                           </div>
                         );
                       })}
+                    {movePreview?.landings
+                      .filter((landing) => landing.targetTrackId === track.id)
+                      .map((landing) => (
+                        <div
+                          key={`ghost-${landing.clipId}`}
+                          className={`timeline-move-ghost${movePreview.refusal === undefined ? '' : ' is-refused'}`}
+                          data-move-ghost={landing.clipId}
+                          data-start-us={landing.startUs}
+                          role="presentation"
+                          style={{
+                            left: `${timeToPixel(landing.startUs, { ...viewport, originUs: 0 })}px`,
+                            width: `${Math.max(6, (landing.durationUs * viewport.pixelsPerSecond) / 1_000_000 - 1)}px`,
+                          }}
+                        />
+                      ))}
                     {source.clips.map((clip) => (
                       <TimelineClip
                         key={clip.id}
@@ -4089,6 +4191,9 @@ export function TimelinePanel({
                         }}
                         snapClipStartUs={snapClipStartUs}
                         onDragMove={scrollTimelineNearPointer}
+                        onMovePreview={(clipId, startUs, targetId) =>
+                          previewMove(track.id, clipId, startUs, targetId)
+                        }
                         onRestoreSelection={() => {
                           if (onSelectClips !== undefined) {
                             onSelectClips(selectedIds);

@@ -673,7 +673,11 @@ function CaptionStyleTab({
         aria-label={`Caption ${label.toLowerCase()}`}
         onChange={(event) =>
           onChange(
-            { ...clipStyle, [property]: event.currentTarget.valueAsNumber },
+            {
+              ...clipStyle,
+              // Never off the picture: a value outside the slider range is pulled back to it.
+              [property]: Math.min(max, Math.max(min, event.currentTarget.valueAsNumber)),
+            },
             `Set caption ${label.toLowerCase()}`,
           )
         }

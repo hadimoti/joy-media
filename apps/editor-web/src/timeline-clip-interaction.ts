@@ -69,6 +69,84 @@ export function nearestFreeStartUs(input: {
   return best;
 }
 
+export interface ClipLanding {
+  readonly clipId: string;
+  readonly sourceTrackId: string;
+  readonly targetTrackId: string;
+  readonly startUs: number;
+  readonly durationUs: number;
+}
+
+/**
+ * Where a moved clip, or a moved group of clips, lands. The group keeps its shape and moves as one: the shift
+ * nearest to the drop that leaves every clip on a free spot of its target track (the clips being moved never count
+ * as obstacles). A free drop stays where it is. The clip being dragged (`anchorClipId`) decides the wanted shift.
+ * Never `undefined` for a valid drop: past the last clip of every target track there is always room.
+ */
+export function planClipLandings(input: {
+  readonly members: readonly {
+    readonly clip: Clip;
+    readonly sourceTrackId: string;
+    readonly targetTrackId: string;
+  }[];
+  readonly tracks: readonly { readonly id: string; readonly clips: readonly Clip[] }[];
+  readonly anchorClipId: string;
+  readonly desiredStartUs: number;
+}): readonly ClipLanding[] | undefined {
+  const anchor = input.members.find((member) => member.clip.id === input.anchorClipId);
+  if (anchor === undefined) return undefined;
+  const movingIds = new Set(input.members.map((member) => member.clip.id));
+  const lanes = input.members.map((member) => ({
+    member,
+    others: (input.tracks.find((track) => track.id === member.targetTrackId)?.clips ?? []).filter(
+      (candidate) => !movingIds.has(candidate.id),
+    ),
+  }));
+  const wantedDelta = Math.round(input.desiredStartUs) - anchor.clip.startUs;
+  const fits = (delta: number): boolean =>
+    lanes.every(({ member, others }) => {
+      const start = member.clip.startUs + delta;
+      return (
+        start >= 0 &&
+        others.every(
+          (other) =>
+            start + member.clip.durationUs <= other.startUs ||
+            start >= other.startUs + other.durationUs,
+        )
+      );
+    });
+  let farthestEndUs = 0;
+  let earliestStartUs = Number.POSITIVE_INFINITY;
+  const candidates = [wantedDelta];
+  for (const { member, others } of lanes) {
+    earliestStartUs = Math.min(earliestStartUs, member.clip.startUs);
+    candidates.push(-member.clip.startUs);
+    for (const other of others) {
+      const otherEndUs = other.startUs + other.durationUs;
+      farthestEndUs = Math.max(farthestEndUs, otherEndUs);
+      candidates.push(otherEndUs - member.clip.startUs);
+      candidates.push(other.startUs - member.clip.durationUs - member.clip.startUs);
+    }
+  }
+  candidates.push(farthestEndUs - earliestStartUs);
+  let best: number | undefined;
+  for (const candidate of candidates) {
+    if (!fits(candidate)) continue;
+    if (best === undefined || Math.abs(candidate - wantedDelta) < Math.abs(best - wantedDelta)) {
+      best = candidate;
+    }
+  }
+  if (best === undefined) return undefined;
+  const delta = best;
+  return input.members.map((member) => ({
+    clipId: member.clip.id,
+    sourceTrackId: member.sourceTrackId,
+    targetTrackId: member.targetTrackId,
+    startUs: member.clip.startUs + delta,
+    durationUs: member.clip.durationUs,
+  }));
+}
+
 export function buildTimelineClipMoveTransaction(input: {
   readonly compositionId: string;
   readonly sourceTrackId: string;

@@ -4052,6 +4052,21 @@ label {
   direction: ltr;
 }
 /* Clips show their icon and length only; the name stays in the tooltip and the accessible name. */
+/* Where a dragged clip will land: a dashed outline in the theme colour, red when the drop is refused. */
+.timeline-move-ghost {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  z-index: 1;
+  border: 2px dashed var(--joy-accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-accent) 14%, transparent);
+  pointer-events: none;
+}
+.timeline-move-ghost.is-refused {
+  border-color: var(--joy-danger);
+  background: color-mix(in srgb, var(--joy-danger) 14%, transparent);
+}
 .timeline-clip-label {
   display: none;
   overflow: hidden;

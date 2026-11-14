@@ -7,6 +7,7 @@ import {
   buildDuplicateSelectionTransaction,
   buildTimelineClipMoveTransaction,
   nearestFreeStartUs,
+  planClipLandings,
   buildTimelineClipReplaceTransaction,
   keyboardTrimTimeUs,
 } from './timeline-clip-interaction.js';
@@ -246,6 +247,127 @@ describe('nearestFreeStartUs (a drop on a taken spot)', () => {
     expect(nearestFreeStartUs({ clips, durationUs: 2_000_000, desiredStartUs: 1_000_000 })).toBe(
       7_000_000,
     );
+  });
+});
+
+describe('planClipLandings (a clip or a group lands at the nearest free spot)', () => {
+  const clip = (id: string, startUs: number, durationUs: number): Clip => ({
+    ...CLIP,
+    id,
+    startUs,
+    durationUs,
+  });
+  const member = (c: Clip, track = 'V1', target = track) => ({
+    clip: c,
+    sourceTrackId: track,
+    targetTrackId: target,
+  });
+
+  it('keeps a free single drop and shifts a taken one', () => {
+    const a = clip('a', 0, 1_000_000);
+    const b = clip('b', 4_000_000, 2_000_000);
+    const tracks = [{ id: 'V1', clips: [a, b] }];
+    expect(
+      planClipLandings({
+        members: [member(a)],
+        tracks,
+        anchorClipId: 'a',
+        desiredStartUs: 2_000_000,
+      })?.[0]?.startUs,
+    ).toBe(2_000_000);
+    expect(
+      planClipLandings({
+        members: [member(a)],
+        tracks,
+        anchorClipId: 'a',
+        desiredStartUs: 5_000_000,
+      })?.[0]?.startUs,
+    ).toBe(6_000_000);
+  });
+
+  it('moves a group together, keeping its shape, past an obstacle', () => {
+    const a = clip('a', 0, 1_000_000);
+    const b = clip('b', 2_000_000, 1_000_000);
+    const wall = clip('wall', 5_000_000, 2_000_000);
+    const tracks = [{ id: 'V1', clips: [a, b, wall] }];
+    const landings = planClipLandings({
+      members: [member(a), member(b)],
+      tracks,
+      anchorClipId: 'a',
+      desiredStartUs: 6_000_000,
+    });
+    // b would sit at 8 s inside the wall: the whole group slides past it, as one.
+    expect(landings?.map((landing) => landing.startUs)).toEqual([7_000_000, 9_000_000]);
+    const gap = (landings?.[1]?.startUs ?? 0) - (landings?.[0]?.startUs ?? 0);
+    expect(gap).toBe(2_000_000);
+  });
+
+  it('lets the group land before the obstacle when that is nearer', () => {
+    const a = clip('a', 0, 1_000_000);
+    const b = clip('b', 1_000_000, 1_000_000);
+    const wall = clip('wall', 6_000_000, 2_000_000);
+    const landings = planClipLandings({
+      members: [member(a), member(b)],
+      tracks: [{ id: 'V1', clips: [a, b, wall] }],
+      anchorClipId: 'a',
+      desiredStartUs: 5_500_000,
+    });
+    expect(landings?.map((landing) => landing.startUs)).toEqual([4_000_000, 5_000_000]);
+  });
+
+  it('never sends a clip before the start of the track', () => {
+    const a = clip('a', 2_000_000, 1_000_000);
+    const b = clip('b', 3_000_000, 1_000_000);
+    const landings = planClipLandings({
+      members: [member(a), member(b)],
+      tracks: [{ id: 'V1', clips: [a, b] }],
+      anchorClipId: 'a',
+      desiredStartUs: -5_000_000,
+    });
+    expect(landings?.map((landing) => landing.startUs)).toEqual([0, 1_000_000]);
+  });
+
+  it('does not count the moved clips as obstacles and lands on another row', () => {
+    const a = clip('a', 0, 2_000_000);
+    const other = clip('other', 1_000_000, 3_000_000);
+    const landings = planClipLandings({
+      members: [member(a, 'V1', 'V2')],
+      tracks: [
+        { id: 'V1', clips: [a] },
+        { id: 'V2', clips: [other] },
+      ],
+      anchorClipId: 'a',
+      desiredStartUs: 1_500_000,
+    });
+    expect(landings?.[0]).toMatchObject({ targetTrackId: 'V2', startUs: 4_000_000 });
+  });
+
+  it('builds a group transaction that applies cleanly', () => {
+    const a = clip('a', 0, 1_000_000);
+    const b = clip('b', 2_000_000, 1_000_000);
+    const wall = clip('wall', 5_000_000, 2_000_000);
+    const composition = baseComposition([a, b, wall]);
+    const landings = planClipLandings({
+      members: [member(a), member(b)],
+      tracks: composition.tracks,
+      anchorClipId: 'a',
+      desiredStartUs: 6_000_000,
+    });
+    const transaction = buildTimelineClipGroupMoveTransaction({
+      compositionId: composition.id,
+      moves: (landings ?? []).map((landing) => ({
+        sourceTrackId: landing.sourceTrackId,
+        targetTrackId: landing.targetTrackId,
+        clipId: landing.clipId,
+        newStartUs: landing.startUs,
+      })),
+    });
+    expect(transaction).toBeDefined();
+    const history = new ProjectHistory(projectWith(composition));
+    history.apply(transaction!);
+    const clips = history.present.compositions[composition.id]?.tracks[0]?.clips ?? [];
+    expect(clips.find((c) => c.id === 'a')?.startUs).toBe(7_000_000);
+    expect(clips.find((c) => c.id === 'b')?.startUs).toBe(9_000_000);
   });
 });
 
