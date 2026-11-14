@@ -66,6 +66,7 @@ import {
 import type { TransformPatches } from './monitor/monitor-transform-drag.js';
 import type { LocalTransform } from './monitor/monitor-transform-maths.js';
 import { calculateMediaFitTransform, type MediaFitTransformInput } from './media-fit-transform.js';
+import { ColorSwatchPicker } from './ColorPickerPopover.js';
 import {
   linkedScalePair,
   opacityFromPercent,
@@ -1709,12 +1710,7 @@ function EffectParamControl({
       <div className="inspector-prop">
         <label>{param.label}</label>
         <div className="inspector-prop-row">
-          <input
-            type="color"
-            value={strValue}
-            onChange={(e) => setValue(e.currentTarget.value)}
-            aria-label={param.label}
-          />
+          <ColorSwatchPicker label={param.label} value={strValue} onChange={setValue} />
           <span className="value">{strValue}</span>
         </div>
       </div>

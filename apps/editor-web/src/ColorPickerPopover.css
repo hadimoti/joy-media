@@ -1,0 +1,100 @@
+.joy-color-swatch {
+  flex: none;
+  width: 28px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.joy-color-swatch:hover:not(:disabled) {
+  border-color: var(--joy-text-secondary);
+}
+.joy-color-swatch:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 1px;
+}
+.joy-color-swatch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.joy-color-popover {
+  position: fixed;
+  z-index: 10001;
+  box-sizing: border-box;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  color: var(--joy-text);
+}
+
+.joy-color-square,
+.joy-color-hue {
+  position: relative;
+  box-sizing: border-box;
+  border-radius: var(--radius-xs);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+.joy-color-square {
+  height: 140px;
+  background:
+    linear-gradient(to top, #000, rgba(0, 0, 0, 0)),
+    linear-gradient(to right, #fff, rgba(255, 255, 255, 0)), var(--joy-picker-hue, #f00);
+}
+.joy-color-hue {
+  height: 14px;
+  background: linear-gradient(
+    to right,
+    #f00 0%,
+    #ff0 16.667%,
+    #0f0 33.333%,
+    #0ff 50%,
+    #00f 66.667%,
+    #f0f 83.333%,
+    #f00 100%
+  );
+}
+.joy-color-square:focus-visible,
+.joy-color-hue:focus-visible,
+.joy-color-hex:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 1px;
+}
+
+.joy-color-marker {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.joy-color-hue .joy-color-marker {
+  top: 50%;
+}
+
+.joy-color-hex {
+  box-sizing: border-box;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-family: inherit;
+  font-size: var(--joy-type-xs);
+  text-transform: lowercase;
+}

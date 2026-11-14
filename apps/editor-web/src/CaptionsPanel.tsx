@@ -31,6 +31,7 @@ import { readCaptionBurnIn, withCaptionBurnIn } from './caption-burn-in.js';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { BurnInIcon, LanguageIcon, PlusIcon, TrashIcon, UndoIcon, PngMaskIcon } from './icons.js';
 import { PanelShell } from './PanelShell.js';
+import { ColorSwatchPicker } from './ColorPickerPopover.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { downloadBrowserTextFile } from './browser-text-download.js';
 import { PropertyRow } from './components/PropertyRow.js';
@@ -775,40 +776,29 @@ function CaptionStyleTab({
         <h4 id="caption-colors-heading">Colors</h4>
         <label className="caption-color-row">
           <span>Text</span>
-          <input
-            type="color"
+          <ColorSwatchPicker
+            label="Text"
             value={clipStyle.textColor}
-            onChange={(event) =>
-              onChange(
-                { ...clipStyle, textColor: event.currentTarget.value },
-                'Set caption text color',
-              )
-            }
+            onChange={(hex) => onChange({ ...clipStyle, textColor: hex }, 'Set caption text color')}
           />
         </label>
         <label className="caption-color-row">
           <span>Highlight</span>
-          <input
-            type="color"
+          <ColorSwatchPicker
+            label="Highlight"
             value={clipStyle.highlightColor}
-            onChange={(event) =>
-              onChange(
-                { ...clipStyle, highlightColor: event.currentTarget.value },
-                'Set caption highlight color',
-              )
+            onChange={(hex) =>
+              onChange({ ...clipStyle, highlightColor: hex }, 'Set caption highlight color')
             }
           />
         </label>
         <label className="caption-color-row">
           <span>Plate</span>
-          <input
-            type="color"
+          <ColorSwatchPicker
+            label="Plate"
             value={clipStyle.plateColor}
-            onChange={(event) =>
-              onChange(
-                { ...clipStyle, plateColor: event.currentTarget.value },
-                'Set caption plate color',
-              )
+            onChange={(hex) =>
+              onChange({ ...clipStyle, plateColor: hex }, 'Set caption plate color')
             }
           />
         </label>
