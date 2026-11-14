@@ -595,7 +595,11 @@ const EMPTY_CLIP_TIMES: ClipTimingLookup = new Map();
  * Old projects without an explicit binding remain always visible for backward
  * compatibility; newly inserted text/sticker overlays obey their clip range.
  */
-function isBoundObjectActive(project: JoyProjectV1, objectId: string, timeUs: TimeUs): boolean {
+export function isBoundObjectActive(
+  project: JoyProjectV1,
+  objectId: string,
+  timeUs: TimeUs,
+): boolean {
   const raw = project.pluginData?.['joy.clipObjects'];
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return true;
   const boundClipIds = Object.entries(raw as Record<string, unknown>)

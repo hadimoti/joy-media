@@ -5,7 +5,11 @@ import type { EditorOverlayIR, RenderFrameIR } from '@joy-media/render-ir';
 import type { VisualObjectV1 } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
-import { buildRenderFrameIR, type ResolvedObject } from '@joy-media/visual-object-renderer';
+import {
+  buildRenderFrameIR,
+  isBoundObjectActive,
+  type ResolvedObject,
+} from '@joy-media/visual-object-renderer';
 import { effectRegistry } from '@joy-media/visual-effects';
 import {
   createBrowserPixiRenderer,
@@ -594,16 +598,19 @@ function MonitorPanelContent({
         ? findVideoClipById(timelineProject, drawnGrade.clipId)
         : undefined;
     const objectsById = drawnProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
-    const resolved: ResolvedObject[] = Object.values(drawnProject.visualObjects).map((object) => ({
-      object,
-      transform: evaluateCameraExpressionTransform(
-        object.id,
-        cameraId,
-        objectsById,
-        state.playheadUs,
-        composition.height,
-      ).transform,
-    }));
+    // A text or sticker bound to a clip is drawn only while that clip plays.
+    const resolved: ResolvedObject[] = Object.values(drawnProject.visualObjects)
+      .filter((object) => isBoundObjectActive(drawnProject, object.id, state.playheadUs))
+      .map((object) => ({
+        object,
+        transform: evaluateCameraExpressionTransform(
+          object.id,
+          cameraId,
+          objectsById,
+          state.playheadUs,
+          composition.height,
+        ).transform,
+      }));
     const visualFrame = withCaptionBurnInNodes(
       buildRenderFrameIR(
         composition.id,

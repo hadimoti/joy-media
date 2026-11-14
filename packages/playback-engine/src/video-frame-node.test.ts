@@ -139,4 +139,28 @@ describe('video-frame-node bridge', () => {
     expect(next.nodes.map((node) => node.id)).toEqual(['clip-1', 'clip-2']);
     expect(() => validateRenderFrameIR(next)).not.toThrow();
   });
+
+  it('draws video under the overlays that are already in the frame', () => {
+    const video = videoFrameNodeFromDecoded(
+      baseClip,
+      { assetId: 'm1', sourceTimeUs: 0, token: 't1' },
+      { width: 10, height: 10 },
+    );
+    const withText: RenderFrameIR = {
+      ...baseFrame,
+      nodes: [
+        {
+          kind: 'text',
+          id: 'title',
+          zIndex: 0,
+          opacity: 1,
+          transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+          text: 'Title',
+          color: { r: 255, g: 255, b: 255, a: 255 },
+        },
+      ],
+    };
+    const next = withVideoFrameNodes(withText, [video]);
+    expect(next.nodes.map((node) => node.id)).toEqual(['clip-1', 'title']);
+  });
 });

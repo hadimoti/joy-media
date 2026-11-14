@@ -83,6 +83,7 @@ import {
 import {
   buildRenderFrameIR,
   evaluateEffectInstances,
+  isBoundObjectActive,
   transformToRenderTransform,
   type ResolvedObject,
 } from '@joy-media/visual-object-renderer';
@@ -2307,6 +2308,8 @@ function EditorWorkspace({
         (transition !== undefined
           ? findVideoClipById(session.timelineProject, transition.leftClipId)
           : undefined);
+      // No video under the playhead (a gap): the Monitor must not keep the last frame it drew.
+      if (clip === undefined) setPreviewVideoFrame(undefined);
       if (
         video === null ||
         replacementAudio === null ||
@@ -4517,8 +4520,9 @@ function EditorWorkspace({
           Record<string, VisualObjectV1>
         >;
         const buildFrame = (timeUs: number) => {
-          const resolved: ResolvedObject[] = Object.values(exportVisualProject.visualObjects).map(
-            (object) => ({
+          const resolved: ResolvedObject[] = Object.values(exportVisualProject.visualObjects)
+            .filter((object) => isBoundObjectActive(exportVisualProject, object.id, timeUs))
+            .map((object) => ({
               object,
               transform: evaluateCameraExpressionTransform(
                 object.id,
@@ -4527,8 +4531,7 @@ function EditorWorkspace({
                 timeUs,
                 height,
               ).transform,
-            }),
-          );
+            }));
           return withCaptionBurnInNodes(
             buildRenderFrameIR(
               compositionV1?.id ?? 'root',

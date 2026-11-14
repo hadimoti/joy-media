@@ -91,7 +91,8 @@ export function withVideoFrameNodes(
   nodes: readonly VideoFrameNode[],
 ): RenderFrameIR {
   if (nodes.length === 0) return frame;
-  const nextNodes: readonly RenderNode[] = [...frame.nodes, ...nodes];
+  // Video sits under the overlays (text, stickers, captions): equal layers draw in list order.
+  const nextNodes: readonly RenderNode[] = [...nodes, ...frame.nodes];
   const next: RenderFrameIR = { ...frame, nodes: nextNodes };
   validateRenderFrameIR(next);
   return next;
