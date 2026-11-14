@@ -447,4 +447,131 @@ describe('timeline clip state paste (look and keyframes)', () => {
     expect(session.visualProject.visualObjects[controllerId]?.transform).toEqual(look);
     expect(clipAnimations(session, pastedId)).toHaveLength(1);
   });
+
+  /** A composition-time position keyframe curve (x and y) on one visual object. */
+  const positionAnimation = (controllerId: string, timesUs: readonly number[]) => ({
+    binding: {
+      ownerKind: 'visual-object' as const,
+      ownerId: controllerId,
+      propertyId: 'visual.transform.position',
+      timeDomain: 'composition' as const,
+    },
+    value: {
+      kind: 'vector' as const,
+      curve: {
+        x: {
+          keyframes: timesUs.map((timeUs, index) => ({
+            timeUs,
+            value: 100 * (index + 1),
+            interpolation: 'linear' as const,
+          })),
+        },
+        y: {
+          keyframes: timesUs.map((timeUs, index) => ({
+            timeUs,
+            value: -50 * (index + 1),
+            interpolation: 'linear' as const,
+          })),
+        },
+      },
+    },
+  });
+
+  /** The lookFixture project with a position keyframe pair on the source controller (10 s, 12 s). */
+  function withPositionKeys(
+    visual: ReturnType<typeof lookFixture>['visual'],
+    controllerId: string,
+  ) {
+    const animation = positionAnimation(controllerId, [10_000_000, 12_000_000]);
+    return {
+      ...visual,
+      propertyAnimations: {
+        ...visual.propertyAnimations,
+        [canonicalBindingKey(animation.binding)]: animation,
+      },
+    };
+  }
+
+  /** Composition times of every position key of one visual object, x then y. */
+  const positionKeyTimes = (session: EditorSession, objectId: string): number[] =>
+    Object.values(session.visualProject.propertyAnimations ?? {})
+      .filter(
+        (animation) =>
+          animation.binding.ownerKind === 'visual-object' &&
+          animation.binding.ownerId === objectId &&
+          animation.value.kind === 'vector',
+      )
+      .flatMap((animation) =>
+        animation.value.kind === 'vector'
+          ? Object.values(animation.value.curve).flatMap((curve) =>
+              curve.keyframes.map((key) => key.timeUs),
+            )
+          : [],
+      );
+
+  it('moves a pasted controller position keyframes with the clip to the pasted playhead', () => {
+    const { timeline, root, visual, sourceClip, sourceControllerId } = lookFixture();
+    const withKeys = withPositionKeys(visual, sourceControllerId);
+    const session = new EditorSession(memoryStorage(), timeline, withKeys);
+    expect(positionKeyTimes(session, sourceControllerId)).toEqual([
+      10_000_000, 12_000_000, 10_000_000, 12_000_000,
+    ]);
+
+    const clipboard = copyTimelineClips(root, [sourceClip.id], withKeys)!;
+    const pastedId = pasteClipboard(session, clipboard, 40_000_000, 'pasted-position');
+    const controllerId = `media-controller-${pastedId}`;
+
+    // The pasted clip starts at 40 s, 30 s after the source at 10 s: its keys move by 30 s.
+    expect(positionKeyTimes(session, controllerId)).toEqual([
+      40_000_000, 42_000_000, 40_000_000, 42_000_000,
+    ]);
+    expect(positionKeyTimes(session, sourceControllerId)).toEqual([
+      10_000_000, 12_000_000, 10_000_000, 12_000_000,
+    ]);
+  });
+
+  it('moves the keyframes of a cut clip to its pasted playhead', () => {
+    const { timeline, root, visual, sourceClip, sourceControllerId } = lookFixture();
+    const withKeys = withPositionKeys(visual, sourceControllerId);
+    const session = new EditorSession(memoryStorage(), timeline, withKeys);
+
+    const cut = buildTimelineCutPlan({
+      composition: root,
+      selectedClipIds: [sourceClip.id],
+      visualProject: withKeys,
+    });
+    if (!cut.ok) throw new Error(cut.reason);
+    applyTimelineMediaPlacement(session, audioStateFromProject(withKeys), cut.transaction, []);
+
+    const pastedId = pasteClipboard(session, cut.clipboard, 40_000_000, 'pasted-cut-position');
+    expect(positionKeyTimes(session, `media-controller-${pastedId}`)).toEqual([
+      40_000_000, 42_000_000, 40_000_000, 42_000_000,
+    ]);
+  });
+
+  it('restores the original controller and clip keyframes when a cut is undone', () => {
+    const { timeline, root, visual, sourceClip, sourceControllerId } = lookFixture();
+    const withKeys = withPositionKeys(visual, sourceControllerId);
+    const session = new EditorSession(memoryStorage(), timeline, withKeys);
+    const before = session.visualProject.propertyAnimations;
+    const sourceAnimations = clipAnimations(session, sourceClip.id);
+    expect(sourceAnimations).toHaveLength(1);
+
+    const cut = buildTimelineCutPlan({
+      composition: root,
+      selectedClipIds: [sourceClip.id],
+      visualProject: withKeys,
+    });
+    if (!cut.ok) throw new Error(cut.reason);
+    applyTimelineMediaPlacement(session, audioStateFromProject(withKeys), cut.transaction, []);
+    expect(clipAnimations(session, sourceClip.id)).toHaveLength(0);
+
+    session.undo();
+
+    expect(session.visualProject.propertyAnimations).toEqual(before);
+    expect(clipAnimations(session, sourceClip.id)).toEqual(sourceAnimations);
+    expect(positionKeyTimes(session, sourceControllerId)).toEqual([
+      10_000_000, 12_000_000, 10_000_000, 12_000_000,
+    ]);
+  });
 });

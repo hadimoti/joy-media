@@ -720,6 +720,7 @@ export {
   removeClipPropertyAnimations,
   removePropertyAnimations,
   restoreClipPropertyAnimations,
+  shiftCompositionPropertyAnimations,
   snapshotClipPropertyAnimations,
   splitClipPropertyAnimations,
   benchmarkScalarChannelSampling,

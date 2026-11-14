@@ -8,7 +8,10 @@ import type {
   SpikeProject,
   VisualObjectV1,
 } from '@joy-media/project-schema';
-import { snapshotClipPropertyAnimations } from '@joy-media/property-system';
+import {
+  shiftCompositionPropertyAnimations,
+  snapshotClipPropertyAnimations,
+} from '@joy-media/property-system';
 import {
   buildTimelineDeletePlan,
   type TimelineDeleteTrackState,
@@ -49,6 +52,60 @@ export function captureTimelineClipState(
       bound === undefined ? undefined : objectId,
     ),
   };
+}
+
+/**
+ * Moves a captured clip state by `shiftUs`, the distance from the source clip's start
+ * to the pasted clip's start. Composition-domain keys (the controller's animations,
+ * its keyframe curves and its spatial path) are composition times, so they move with
+ * the clip. Clip-local keys are untouched. Keys pushed below 0 by a negative shift
+ * collapse onto 0, keeping the latest of them.
+ */
+export function shiftTimelineClipState(
+  state: TimelineClipStateSnapshot,
+  shiftUs: number,
+): TimelineClipStateSnapshot {
+  if (shiftUs === 0) return state;
+  return {
+    ...(state.object === undefined ? {} : { object: shiftObjectKeys(state.object, shiftUs) }),
+    animations: shiftCompositionPropertyAnimations(state.animations, shiftUs),
+  };
+}
+
+function shiftObjectKeys(object: VisualObjectV1, shiftUs: number): VisualObjectV1 {
+  return {
+    ...object,
+    ...(object.animations === undefined
+      ? {}
+      : {
+          animations: Object.fromEntries(
+            Object.entries(object.animations).map(([channel, curve]) => [
+              channel,
+              curve === undefined ? curve : { keyframes: shiftKeys(curve.keyframes, shiftUs) },
+            ]),
+          ) as NonNullable<VisualObjectV1['animations']>,
+        }),
+    ...(object.spatialPath === undefined
+      ? {}
+      : { spatialPath: { keyframes: shiftKeys(object.spatialPath.keyframes, shiftUs) } }),
+  };
+}
+
+function shiftKeys<T extends { readonly timeUs: number }>(
+  keys: readonly T[],
+  shiftUs: number,
+): T[] {
+  const moved: T[] = [];
+  for (const key of keys) {
+    const timeUs = Math.max(0, key.timeUs + shiftUs);
+    const moving = { ...key, timeUs };
+    if (moved.length > 0 && moved[moved.length - 1]!.timeUs === timeUs) {
+      moved[moved.length - 1] = moving;
+    } else {
+      moved.push(moving);
+    }
+  }
+  return moved;
 }
 
 export interface TimelineClipboardClip {
@@ -362,6 +419,7 @@ export function buildTimelinePastePlan(input: TimelinePasteInput): TimelinePaste
 
   const pastes: TimelinePastedClip[] = clipboard.items.map((item, index) => {
     const clipId = uniqueId(item.clip.id, index);
+    const startUs = basePlayheadUs + item.offsetUs;
     return {
       clipId,
       sourceClipId: item.clip.id,
@@ -369,9 +427,12 @@ export function buildTimelinePastePlan(input: TimelinePasteInput): TimelinePaste
       clip: {
         ...item.clip,
         id: clipId,
-        startUs: basePlayheadUs + item.offsetUs,
+        startUs,
       },
-      ...(item.state === undefined ? {} : { state: item.state }),
+      // Composition-time keys follow the clip from its source start to the pasted start.
+      ...(item.state === undefined
+        ? {}
+        : { state: shiftTimelineClipState(item.state, startUs - item.clip.startUs) }),
     };
   });
 
