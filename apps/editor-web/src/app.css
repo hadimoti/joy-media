@@ -104,10 +104,14 @@ textarea:focus:not(:focus-visible) {
 
 /* Timeline geometry is scoped so shared TimelineCanvas surfaces inherit one
    exact 168px gutter without changing unrelated panel grids. Keep this aligned
-   with TIMELINE_TRACK_GUTTER_WIDTH_PX in timeline-layout.ts. */
+   with TIMELINE_TRACK_GUTTER_WIDTH_PX in timeline-layout.ts. The Timeline panel
+   overrides the variable inline with the width the user dragged its titles to. */
 .timeline-panel,
 .dual-time {
   --timeline-track-gutter-width: 168px;
+  /* The track titles column: one step lighter than the lanes. */
+  --timeline-gutter-bg: color-mix(in srgb, var(--joy-bg-panel) 45%, var(--joy-bg-inset));
+  --timeline-lane-bg: color-mix(in srgb, var(--joy-bg-inset) 92%, var(--joy-bg-deep));
 }
 
 /* Persian explainer/guidance copy stays centered and layout-neutral. Titles,
@@ -3026,7 +3030,8 @@ label {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 0.45rem 0.55rem 0.35rem;
+  /* The bottom inset matches the sides, so the rounded tracks frame sits evenly in the tile. */
+  padding: 0.45rem 0.55rem 0.55rem;
   box-sizing: border-box;
   overflow: hidden;
   container-type: inline-size;
@@ -3286,9 +3291,9 @@ label {
   min-width: var(--timeline-track-gutter-width);
   padding-inline: 0.35rem 0.45rem;
   box-sizing: border-box;
-  /* Let the single opaque scrub-row surface show through rather than creating
-     a second filled block behind the timecode. */
-  background: transparent;
+  /* The same colour as the scrub row, so it reads as one surface; opaque so
+     the ruler never shows through the timecode when the tracks scroll sideways. */
+  background: var(--joy-bg-panel);
 }
 .timeline-playhead-slider {
   flex: none;
@@ -3531,20 +3536,82 @@ label {
   white-space: nowrap;
   direction: ltr;
 }
+/* The rounded box that holds the tracks. It paints the titles column and the
+   lane surface itself, fixed to the box, so both run to the bottom edge however
+   few tracks there are and wherever the tracks are scrolled. The resize handle
+   of the titles column sits in it, outside the scroll container. */
+.timeline-tracks-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--joy-radius-inner);
+  background:
+    linear-gradient(
+      to right,
+      var(--timeline-gutter-bg) 0 var(--timeline-track-gutter-width),
+      transparent var(--timeline-track-gutter-width)
+    ),
+    var(--timeline-lane-bg);
+}
 .timeline-tracks {
-  display: block;
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding-bottom: 0.15rem;
-  background: var(--joy-bg-inset);
+  padding-bottom: 0;
+  background: transparent;
+  /* Keeps every layer of the tracks below the titles resize handle. */
+  isolation: isolate;
 }
 .timeline-tracks-inner {
   position: relative;
   display: grid;
+  /* Rows never stretch when the area is taller than the tracks. */
+  align-content: start;
   gap: 0.1rem;
+  /* Fill the rest of the frame: the grid lines reach the bottom edge. */
+  flex: 1 0 auto;
   min-width: 100%;
-  background: color-mix(in srgb, var(--joy-bg-inset) 92%, var(--joy-bg-deep));
+  padding-bottom: 0.15rem;
+  box-sizing: border-box;
+  background: transparent;
+}
+/* The grid lines never show inside the titles column after a sideways scroll. */
+.timeline-panel .timeline-tracks-grid {
+  clip-path: inset(0 0 0 var(--timeline-scroll-left, 0px));
+}
+.timeline-gutter-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--timeline-track-gutter-width) - 8px);
+  z-index: 1;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.timeline-gutter-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--joy-border);
+  transition: background-color var(--joy-motion-hover) var(--joy-ease);
+}
+.timeline-gutter-resizer:hover::after,
+.timeline-gutter-resizer:focus-visible::after,
+.timeline-gutter-resizer.is-dragging::after {
+  background: var(--joy-accent);
+}
+.timeline-gutter-resizer:focus-visible {
+  outline: none;
 }
 .timeline-clip {
   position: absolute;
@@ -4109,31 +4176,43 @@ label {
   color: var(--joy-text-secondary);
   direction: ltr;
 }
+/* One line of whole chips, left aligned under the track name. A chip that
+   does not fit wraps to a second line, which the fixed height hides: a chip is
+   shown in full or not at all, never cut. Wider titles show more chips. */
 .timeline-audio-dsp-pills {
-  display: inline-flex;
-  gap: 3px;
-  margin-inline-start: 6px;
-  vertical-align: middle;
-  /* The gutter is narrow (168 px) and rows can be 44 px: pills shrink and
-     truncate on one line instead of pushing the row wider. */
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 2px 3px;
+  height: calc(var(--joy-type-xs) * 1.25 + 2px);
+  margin-top: 2px;
+  overflow: hidden;
   max-width: 100%;
   min-width: 0;
 }
 .audio-dsp-pill {
+  flex: none;
+  box-sizing: border-box;
   font-size: var(--joy-type-xs);
   font-weight: 700;
   letter-spacing: 0.03em;
-  padding: 1px 4px;
+  padding: 0 4px;
   border-radius: 3px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.05);
   color: var(--joy-text-secondary);
-  line-height: 1;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.25;
   white-space: nowrap;
+}
+/* The label column measures itself, so a chip wider than the whole line hides
+   instead of being clipped (Noise reduction is about 107 px wide). */
+.timeline-panel .timeline-track-label {
+  container: timeline-track-label / inline-size;
+}
+@container timeline-track-label (max-width: 7.25rem) {
+  .audio-dsp-pill.dsp-dfn {
+    display: none;
+  }
 }
 .audio-dsp-pill.is-active {
   background: rgba(247, 245, 134, 0.15);
@@ -4157,6 +4236,27 @@ label {
   min-width: 0;
   padding-inline: 0.35rem;
   box-sizing: border-box;
+}
+/* Timeline panel: the titles stay on the left while the lanes scroll under
+   them, fill their whole row and sit above the clips, markers and junctions. */
+.timeline-panel .timeline-track-header {
+  position: sticky;
+  left: 0;
+  z-index: 9;
+  align-self: stretch;
+  background: var(--timeline-gutter-bg);
+}
+.timeline-panel .timeline-track--audio .timeline-track-header {
+  background: color-mix(in srgb, #3f7fd6 7%, var(--timeline-gutter-bg));
+}
+.timeline-panel .timeline-runway .timeline-track-header {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+/* Clear of the 8 px titles resize handle on the right edge. */
+.timeline-panel .timeline-track-controls {
+  inset-inline-end: calc(0.2rem + 8px);
 }
 .timeline-track-identity-icon {
   position: relative;
