@@ -26,13 +26,6 @@ export function PanelHeaderMenu({
 
   const items: readonly ActionOverflowMenuItem[] = [
     {
-      id: 'close-panel',
-      label: 'Close panel',
-      disabled: activePanel === undefined,
-      disabledReason: 'There is no active panel to close.',
-      onSelect: () => activePanel?.api.close(),
-    },
-    {
       id: 'float-panel',
       label: 'Float group',
       tooltip: 'Moves the whole panel group into a floating window.',

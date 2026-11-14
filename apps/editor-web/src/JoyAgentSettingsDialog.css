@@ -13,6 +13,9 @@
    doubled up so the dialog's own width wins whatever order the two
    stylesheets land in. */
 .agent-settings-dialog.joy-agent-settings-dialog {
+  /* clip, not hidden: a hidden box can still be scrolled by a focus or a scroll-into-view, which pushed
+     the left tabs out of sight and left a blank column. Only the page beside the tabs scrolls. */
+  overflow: clip;
   width: min(1040px, calc(100vw - 48px));
   height: min(720px, calc(100vh - 48px));
   max-height: min(760px, calc(100vh - 48px));
@@ -71,7 +74,7 @@
   display: flex;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
 }
 
 /* ─── The left list ─────────────────────────────────────────────────────── */
@@ -79,6 +82,8 @@
 .joy-agent-settings-sidebar {
   display: flex;
   flex: none;
+  align-self: stretch;
+  overflow-y: auto;
   flex-direction: column;
   gap: 8px;
   width: 230px;
@@ -485,6 +490,8 @@
   align-items: center;
   justify-content: center;
   color: var(--joy-text-faint);
+  /* Closed: pointing right. Open: pointing down. */
+  transform: rotate(-90deg);
   transition: transform 0.2s ease;
 }
 
@@ -493,9 +500,10 @@
   height: 12px;
 }
 
-.joy-accordion-item.is-open .joy-accordion-chevron {
+/* The open item only: a closed accordion nested inside an open one must keep pointing right. */
+.joy-accordion-item.is-open > .joy-accordion-trigger .joy-accordion-chevron {
   color: var(--joy-accent);
-  transform: rotate(180deg);
+  transform: rotate(0deg);
 }
 
 .joy-accordion-content {
@@ -560,7 +568,8 @@
 }
 
 .joy-provider-route-accordions .joy-accordion-trigger {
-  justify-content: center;
+  /* The name stands at the left; the badge and the chevron stand at the right. */
+  justify-content: space-between;
   gap: 12px;
   color: var(--joy-text);
 }
@@ -580,7 +589,10 @@
 }
 
 .joy-provider-route-accordions .joy-accordion-chevron,
-.joy-provider-route-accordions .joy-accordion-item.is-open .joy-accordion-chevron {
+.joy-provider-route-accordions
+  .joy-accordion-item.is-open
+  > .joy-accordion-trigger
+  .joy-accordion-chevron {
   color: var(--joy-text-faint);
 }
 

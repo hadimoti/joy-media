@@ -337,12 +337,12 @@ export function widescreenDockLayout(): unknown {
             data: [
               {
                 type: 'leaf',
-                size: 1496,
+                size: 1584,
                 data: { views: ['timeline', 'flow'], activeView: 'timeline', id: 'timeline-row' },
               },
               {
                 type: 'leaf',
-                size: 704,
+                size: 616,
                 data: { views: ['agent'], activeView: 'agent', id: 'agent-col' },
               },
             ],

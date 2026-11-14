@@ -20170,3 +20170,18 @@ label {
   outline-offset: -1px;
   background: color-mix(in srgb, var(--joy-accent) 12%, transparent);
 }
+
+/* The custom-endpoint consent: the tick sits in front of its sentence, on one line. */
+.joy-settings-field .agent-toggle.joy-settings-consent {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.55rem;
+  text-align: left;
+  white-space: nowrap;
+}
+.joy-settings-consent input[type='checkbox'] {
+  flex: none;
+  margin: 0;
+}

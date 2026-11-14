@@ -101,13 +101,21 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
         <span className="panel-tab-fallback">{label}</span>
       )}
       <span className="panel-tab-label">{label}</span>
-      {api.id === 'agent' && (
+      {/* The close button is the only way to close a tab (it is not in the group menu, and a click or a middle-click on the tab never closes it). */}
+      {
         <button
           type="button"
           className="panel-tab-close"
-          aria-label="Close Joy Code panel"
-          title={presence.active ? 'Stop Joy Code before closing it' : 'Close Joy Code'}
-          disabled={presence.active}
+          aria-label={api.id === 'agent' ? 'Close Joy Code panel' : `Close ${label} panel`}
+          title={
+            api.id === 'agent'
+              ? presence.active
+                ? 'Stop Joy Code before closing it'
+                : 'Close Joy Code'
+              : `Close ${label}`
+          }
+          disabled={api.id === 'agent' && presence.active}
+          onAuxClick={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
@@ -117,7 +125,7 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
         >
           <CloseGlyph />
         </button>
-      )}
+      }
       {presence.active && (
         <span
           className="panel-tab-agent-marker"

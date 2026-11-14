@@ -191,6 +191,45 @@ function joyCodeDockPosition(
   return { position: { referencePanel: reference, direction: 'right' } };
 }
 
+/**
+ * A panel that was closed with its tab button comes back in the group it was seeded in, at its old place in the
+ * tab row, not in whichever group happens to have focus.
+ */
+const SEEDED_TAB_NEIGHBOURS: Readonly<Record<string, readonly string[]>> = {
+  media: ['effects'],
+  effects: ['media'],
+  inspector: ['scene3d', 'audio', 'jobs'],
+  scene3d: ['inspector', 'audio', 'jobs'],
+  audio: ['inspector', 'scene3d', 'jobs'],
+  jobs: ['inspector', 'scene3d', 'audio'],
+  timeline: ['flow'],
+  flow: ['timeline'],
+};
+const SEEDED_FIRST_TABS: ReadonlySet<string> = new Set(['media', 'inspector', 'timeline']);
+
+function seededTabPosition(
+  api: DockviewApi,
+  panelId: string,
+): {
+  readonly position?: {
+    readonly referencePanel: string;
+    readonly direction: 'within';
+    readonly index?: number;
+  };
+} {
+  const neighbour = (SEEDED_TAB_NEIGHBOURS[panelId] ?? []).find(
+    (id) => api.getPanel(id) !== undefined,
+  );
+  if (neighbour === undefined) return {};
+  return {
+    position: {
+      referencePanel: neighbour,
+      direction: 'within',
+      ...(SEEDED_FIRST_TABS.has(panelId) ? { index: 0 } : {}),
+    },
+  };
+}
+
 function useOwnerVisibleDockviewPanel(api: IDockviewPanelProps['api']): boolean {
   const [ownerVisible, setOwnerVisible] = useState(() => isOwnerVisibleDockviewPanel(api));
   useEffect(() => {
@@ -447,6 +486,7 @@ import { createAgentCommandBus } from './agent-command-bus.js';
 import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
 import { getOrCreateControlPlaneProjectBinding } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
+import { placeTranscriptOnTimeline } from './caption-transcript-timing.js';
 import { ProjectMediaResolver } from './project-media-resolver.js';
 import { createProjectColorLutResolver } from './project-color-luts.js';
 import { createObservationCache } from './media-observation/observation-cache.js';
@@ -3513,24 +3553,50 @@ function EditorWorkspace({
   const transcribe = useCallback(
     async (documentId: string, language: 'fa-IR' | 'en-US') => {
       try {
-        const clip = activeVideoClipAt(
-          session.timelineProject,
-          state.playheadUs,
-          state.selectedIds,
-          session.visualProject,
+        // The clip the owner selected is the one to transcribe, wherever the playhead is; with nothing
+        // selected, the clip under the playhead.
+        const elementKinds = readTimelineElementKindMap(session.visualProject);
+        const selectedMedia = flattenRootTimelineVideoClips(session.timelineProject).find(
+          (candidate) =>
+            state.selectedIds.includes(candidate.id) &&
+            candidate.kind === 'video' &&
+            !isControlTimelineElement(timelineElementKindForClip(candidate, elementKinds)),
         );
+        const clip =
+          selectedMedia ??
+          activeVideoClipAt(
+            session.timelineProject,
+            state.playheadUs,
+            state.selectedIds,
+            session.visualProject,
+          );
         if (clip === undefined || clip.kind !== 'video')
           throw new Error('Place a media clip before transcribing.');
         const source = await mediaResolver.resolve(clip.assetId);
         const response = await fetch(source.url);
         if (!response.ok) throw new Error(`Unable to read ${clip.assetId} for transcription.`);
         const media = await response.blob();
-        const document = await transcribeReferenceCaption(
+        const transcript = await transcribeReferenceCaption(
           documentId,
           language,
           mediaControlPlaneClient,
           { media, mediaType: source.mimeType },
         );
+        // The transcript is timed from the start of the file; the caption layer is timed from its own start.
+        const root = session.visualProject.compositions[session.visualProject.rootCompositionId];
+        const captionClipStartUs =
+          root?.tracks
+            .flatMap((track) => track.clips)
+            .find(
+              (candidate) =>
+                candidate.kind === 'caption' && candidate.captionDocumentId === documentId,
+            )?.startUs ?? 0;
+        const document = placeTranscriptOnTimeline(transcript, {
+          offsetUs: clip.startUs - captionClipStartUs,
+          sourceInUs: clip.sourceInUs,
+          durationUs: clip.durationUs,
+          ...(clip.playbackRate === undefined ? {} : { playbackRate: clip.playbackRate }),
+        });
         session.dispatchVisualObjects({
           label: `Transcribe ${language}`,
           commands: [{ type: 'caption.replaceDocument', payload: { documentId, document } }],
@@ -3607,9 +3673,17 @@ function EditorWorkspace({
         title: panelLabel(dockPanelId),
         minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
         minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
-        ...joyCodeDockPosition(api, dockPanelId, viewModeRef.current),
+        ...(dockPanelId === 'agent'
+          ? joyCodeDockPosition(api, dockPanelId, viewModeRef.current)
+          : seededTabPosition(api, dockPanelId)),
       });
       panel = api.getPanel(dockPanelId);
+      // Joy Code opens as wide as the Inspector column above it, not as a half of the timeline.
+      if (dockPanelId === 'agent' && panel !== undefined) {
+        const inspectorWidth = api.getPanel('inspector')?.group.api.width;
+        if (inspectorWidth !== undefined && inspectorWidth > 0)
+          panel.group.api.setSize({ width: inspectorWidth });
+      }
     }
     panel?.api.setActive();
   }, []);

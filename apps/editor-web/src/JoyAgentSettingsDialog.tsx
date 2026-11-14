@@ -1462,7 +1462,7 @@ export function JoyAgentSettingsDialog({
 
                         {requiresCustomEndpointConsent(provider, baseUrl) && (
                           <div className="joy-settings-field-full joy-settings-field">
-                            <label className="agent-toggle joy-settings-hint-muted">
+                            <label className="agent-toggle joy-settings-hint-muted joy-settings-consent">
                               <input
                                 type="checkbox"
                                 checked={customDisclosure}

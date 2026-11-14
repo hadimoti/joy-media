@@ -155,7 +155,6 @@ describe('Dockview panel header menu', () => {
     let items = await openMenu(current);
 
     expect(items.map((item) => item.textContent?.trim())).toEqual([
-      'Close panel',
       'Float group',
       'Maximize panel',
       'Move group to left of Media',
@@ -169,10 +168,9 @@ describe('Dockview panel header menu', () => {
     expect(items.find((item) => itemLabel(item) === 'Reset workspace')?.title).toBe(
       'Clears every saved panel layout for all workspaces, plus saved view settings. Your projects and media are not touched.',
     );
-    await select(items, 'Close panel');
-    expect(current.closePanel).toHaveBeenCalledOnce();
+    // A tab closes only with its own close button, never from this menu.
+    expect(items.some((item) => itemLabel(item) === 'Close panel')).toBe(false);
 
-    items = await openMenu(current);
     await select(items, 'Float group');
     expect(current.addFloatingGroup).toHaveBeenCalledWith(current.sourceGroup);
 
