@@ -3465,39 +3465,43 @@ label {
   color: inherit;
   cursor: pointer;
 }
+/* The track colour menu is a small row of dots on the page (a portal), above every panel. */
 .timeline-track-color-menu {
-  position: absolute;
-  z-index: 20;
-  top: 1.8rem;
-  left: 0;
-  display: grid;
-  gap: 0.1rem;
-  min-width: 9rem;
-  padding: 0.3rem;
+  position: fixed;
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px;
   border: 1px solid var(--joy-border-hover);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   background: var(--joy-bg-raised);
   box-shadow: 0 8px 20px rgb(0 0 0 / 45%);
 }
 .timeline-track-color-choice {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.25rem 0.4rem;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: 50%;
   background: transparent;
-  color: var(--joy-text);
-  text-align: left;
   cursor: pointer;
 }
-.timeline-track-color-choice:hover,
-.timeline-track-color-choice[aria-checked='true'] {
+.timeline-track-color-choice:hover {
   background: var(--joy-bg-active);
 }
+.timeline-track-color-choice:focus-visible {
+  outline: 1px solid var(--joy-accent);
+}
+.timeline-track-color-choice[aria-checked='true'] {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 1px;
+}
 .timeline-track-color-swatch {
-  width: 0.7rem;
-  height: 0.7rem;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--joy-border-hover);
 }

@@ -599,6 +599,8 @@ export function isBoundObjectActive(
   project: JoyProjectV1,
   objectId: string,
   timeUs: TimeUs,
+  /** Clips on a hidden track (the eye button): an object bound only to hidden clips is not drawn. */
+  hiddenClipIds: ReadonlySet<string> = new Set(),
 ): boolean {
   const raw = project.pluginData?.['joy.clipObjects'];
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return true;
@@ -611,6 +613,7 @@ export function isBoundObjectActive(
       track.clips.some(
         (clip) =>
           boundClipIds.includes(clip.id) &&
+          !hiddenClipIds.has(clip.id) &&
           timeUs >= clip.startUs &&
           timeUs < clip.startUs + clip.durationUs,
       ),

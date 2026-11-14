@@ -48,6 +48,7 @@ import type {
 } from '@joy-media/render-ir';
 import { toggleSelection } from '@joy-media/timeline-engine';
 import { buildDuplicateSelectionTransaction } from './timeline-clip-interaction.js';
+import { hiddenClipIds } from './timeline-hidden-clips.js';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import { validateH264ExportDimensions } from '@joy-media/job-protocol';
 import type {
@@ -4595,9 +4596,12 @@ function EditorWorkspace({
         const objectsById = exportVisualProject.visualObjects as Readonly<
           Record<string, VisualObjectV1>
         >;
+        const exportHiddenClipIds = hiddenClipIds(session.timelineProject);
         const buildFrame = (timeUs: number) => {
           const resolved: ResolvedObject[] = Object.values(exportVisualProject.visualObjects)
-            .filter((object) => isBoundObjectActive(exportVisualProject, object.id, timeUs))
+            .filter((object) =>
+              isBoundObjectActive(exportVisualProject, object.id, timeUs, exportHiddenClipIds),
+            )
             .map((object) => ({
               object,
               transform: evaluateCameraExpressionTransform(

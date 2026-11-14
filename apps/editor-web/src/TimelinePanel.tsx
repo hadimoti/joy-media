@@ -1139,6 +1139,7 @@ export function TimelinePanel({
     | undefined
   >(undefined);
   const [colorMenuTrackId, setColorMenuTrackId] = useState<string | undefined>();
+  const [colorMenuAnchor, setColorMenuAnchor] = useState({ left: 0, bottom: 0 });
   const [localTrackLabelColors, setLocalTrackLabelColors] = useState<
     Readonly<Record<string, TimelineTrackLabelColor | undefined>>
   >({});
@@ -3673,6 +3674,8 @@ export function TimelinePanel({
                         aria-expanded={colorMenuTrackId === track.id}
                         onClick={(event) => {
                           event.stopPropagation();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setColorMenuAnchor({ left: rect.left, bottom: rect.bottom });
                           setColorMenuTrackId((current) =>
                             current === track.id ? undefined : track.id,
                           );
@@ -3718,6 +3721,7 @@ export function TimelinePanel({
                       {colorMenuTrackId === track.id && (
                         <TimelineTrackColorMenu
                           current={trackLabelColor}
+                          anchor={colorMenuAnchor}
                           onSelect={(labelColor?: TimelineTrackLabelColor) => {
                             setLocalTrackLabelColors((current) => ({
                               ...current,

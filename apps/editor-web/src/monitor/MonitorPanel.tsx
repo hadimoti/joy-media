@@ -40,6 +40,7 @@ import {
   type PreviewQuality,
 } from '../preview-quality.js';
 import { timelineEffectiveDurationUs } from '../timeline-layout.js';
+import { hiddenClipIds } from '../timeline-hidden-clips.js';
 import { COVER_MAX_SIDE, saveProjectCard } from '../project-card-save.js';
 import { AgentPreviewBadge } from '../AgentPreviewBadge.js';
 import { useAgentPreviewSnapshot } from '../agent-preview-store.js';
@@ -605,7 +606,14 @@ function MonitorPanelContent({
     const objectsById = drawnProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
     // A text or sticker bound to a clip is drawn only while that clip plays.
     const resolved: ResolvedObject[] = Object.values(drawnProject.visualObjects)
-      .filter((object) => isBoundObjectActive(drawnProject, object.id, state.playheadUs))
+      .filter((object) =>
+        isBoundObjectActive(
+          drawnProject,
+          object.id,
+          state.playheadUs,
+          hiddenClipIds(timelineProject),
+        ),
+      )
       .map((object) => ({
         object,
         transform: evaluateCameraExpressionTransform(
