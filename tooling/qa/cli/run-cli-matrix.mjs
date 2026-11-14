@@ -1503,12 +1503,10 @@ export async function runCliMatrix(options = {}) {
       ['render', '--project', defaultProjectId, '--preset', 'bad-preset', '--out', renderOutDir],
       sandbox,
     );
-    const pass = rGood.status === 0 && rBad.status === 2;
-    const manifestFile = join(renderOutDir, `${defaultProjectId}.mov.manifest.json`);
-    recordEvidence(
-      'L-037.json',
-      existsSync(manifestFile) ? readFileSync(manifestFile, 'utf8') : rGood.stdout,
-    );
+    const c = classifyRender(rGood, 'prores', 'mov');
+    // The bad-preset run must still exit 2; if it does not, the row fails outright.
+    const l037Status = rBad.status === 2 ? c.status : 'FAIL';
+    recordEvidence('L-037.json', c.manifest ? JSON.stringify(c.manifest, null, 2) : rGood.stdout);
 
     // Readiness record cli.render.unsupported-features, derived from the bad-preset run.
     readinessRecords.push(
@@ -1534,10 +1532,11 @@ export async function runCliMatrix(options = {}) {
     rows.push({
       id: 'L-037',
       command: 'joy-media render --preset prores',
-      status: pass ? 'PASS' : 'FAIL',
+      status: l037Status,
       exitCode: rGood.status,
-      summary: 'ProRes preset manifest rendered; missing/invalid preset exits 2',
+      summary: 'The ProRes preset writes a ProRes file; an invalid preset exits 2',
       evidence: 'T-A13\\L-037.json',
+      defectReason: l037Status === 'DEFECT' ? c.defectReason : undefined,
     });
   }
 
