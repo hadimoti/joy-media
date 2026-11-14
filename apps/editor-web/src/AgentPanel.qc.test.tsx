@@ -105,16 +105,26 @@ async function sendPrompt(client: JoyAgentEngineClient, prompt: string): Promise
   const textarea = container.querySelector<HTMLTextAreaElement>(
     'textarea[aria-label="Message Joy Code"]',
   );
-  const send = container.querySelector<HTMLButtonElement>('button.joy-code-send');
+  const send = container.querySelector<HTMLButtonElement>(
+    'button.joy-code-send[aria-label="Send message"]',
+  );
   if (textarea === null || send === null) throw new Error('The Joy Code composer is missing');
-  const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  const setValue = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    'value',
+  )?.set;
   if (setValue === undefined) throw new Error('No textarea value setter');
   act(() => {
     setValue.call(textarea, prompt);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
+  const currentSend = container.querySelector<HTMLButtonElement>(
+    'button.joy-code-send[aria-label="Send message"]',
+  );
+  if (currentSend === null) throw new Error('The Joy Code send button is missing');
+  expect(currentSend.disabled).toBe(false);
   await act(async () => {
-    send.click();
+    currentSend.click();
   });
 }
 

@@ -604,6 +604,10 @@ describe('QC request intent', () => {
       'please review the timeline frames',
       'QC this export',
       'are there any issues in the video?',
+      'Find problems in the timeline',
+      'Are there faults in this export?',
+      'Spot mistakes in the film',
+      'Does the cut have errors?',
       'کنترل کیفیت فیلم را انجام بده',
     ])
       expect(isQcCheckRequest(prompt), prompt).toBe(true);

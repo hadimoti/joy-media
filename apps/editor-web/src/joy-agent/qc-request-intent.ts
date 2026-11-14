@@ -30,6 +30,9 @@ export function isQcCheckRequest(prompt: string): boolean {
     /\b(?:check|review|inspect|audit|watch)\b[^.\n]{0,40}\b(?:cut|timeline|film|video|export|frames?)\b/.test(
       value,
     ) ||
+    /\b(?:problems?|faults?|issues?|mistakes?|errors?)\b[^.\n]{0,40}\b(?:cut|timeline|film|video|export)\b/.test(
+      value,
+    ) ||
     /\b(?:cut|timeline|film|video|export)\b[^.\n]{0,40}\b(?:problems?|faults?|issues?|mistakes?|errors?)\b/.test(
       value,
     ) ||
