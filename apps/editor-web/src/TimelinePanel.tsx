@@ -54,7 +54,10 @@ import {
   CutIcon,
   PasteIcon,
   WarningIcon,
+  EffectsUiIcon,
+  TransitionUiIcon,
 } from './icons.js';
+import { computeClipEffectFlags, type ClipEffectFlags } from './timeline-clip-effect-flags.js';
 import {
   buildClipContextMenu,
   buildEmptyCanvasContextMenu,
@@ -234,6 +237,7 @@ function TimelineGapIndicator({
 function TimelineClip({
   clip,
   elementKind,
+  effectFlags,
   displayName,
   selected,
   isDragOver,
@@ -260,6 +264,8 @@ function TimelineClip({
 }: {
   readonly clip: Clip;
   readonly elementKind: TimelineElementKind;
+  /** Set when the clip has an effect, a filter or a transition: shows a small icon for each. */
+  readonly effectFlags?: ClipEffectFlags | undefined;
   readonly displayName?: string;
   /** Set when this clip's file is missing: the file's name, shown in the badge and tooltip (T-R03). */
   readonly missingName?: string | undefined;
@@ -699,6 +705,24 @@ function TimelineClip({
           </span>
           <span className="timeline-clip-label">{label}</span>
           {showDuration && <span className="timeline-clip-duration">{durationLabel}</span>}
+          {effectFlags?.effects === true && (
+            <span
+              className="timeline-clip-flag timeline-clip-flag--effects"
+              title="Has effects or filters"
+              data-clip-flag="effects"
+            >
+              <EffectsUiIcon />
+            </span>
+          )}
+          {effectFlags?.transition === true && (
+            <span
+              className="timeline-clip-flag timeline-clip-flag--transition"
+              title="Has a transition"
+              data-clip-flag="transition"
+            >
+              <TransitionUiIcon />
+            </span>
+          )}
           {rateBadge !== undefined && <span className="timeline-clip-badge">{rateBadge}</span>}
         </span>
       )}
@@ -1549,6 +1573,11 @@ export function TimelinePanel({
   };
 
   const frameUs = useMemo(() => frameDurationUs(composition.frameRate), [composition.frameRate]);
+  // Which clips carry an effect, a filter or a transition (their small icons).
+  const clipEffectFlags = useMemo(
+    () => (visualProject === undefined ? {} : computeClipEffectFlags(visualProject)),
+    [visualProject],
+  );
   const snapAnchors = useMemo(
     () =>
       collectTimelineSnapAnchors({
@@ -3812,6 +3841,9 @@ export function TimelinePanel({
                       key={clip.id}
                       clip={clip}
                       elementKind={timelineElementKindForClip(clip, elementKinds)}
+                      {...(clipEffectFlags[clip.id] === undefined
+                        ? {}
+                        : { effectFlags: clipEffectFlags[clip.id] })}
                       {...(clip.kind !== 'composition' &&
                       assetDisplayNames?.[clip.assetId] !== undefined
                         ? { displayName: assetDisplayNames[clip.assetId] }

@@ -3972,6 +3972,21 @@ label {
   color: var(--joy-text);
   direction: ltr;
 }
+/* Small theme-coloured icons on a clip that has effects, filters or a transition. */
+.timeline-clip-flag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  color: var(--joy-accent);
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 58%));
+}
+.timeline-clip-flag svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
 .timeline-clip-badge {
   flex: none;
   padding: 0.05rem 0.28rem;
