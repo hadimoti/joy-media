@@ -36,7 +36,7 @@ export type QcFindingState = 'measured' | 'model-observed' | 'unconfirmed';
 
 /**
  * Every threshold is a setting, not a constant: ADR-0045 admits they are guesses until they have run on real
- * cuts. A job payload may override any of them; the Worker clamps each value into a sane range.
+ * cuts. A job payload may override any of them; the Worker refuses a value outside that setting's range (it does not clamp it).
  */
 export interface QcThresholds {
   /** Shortest black run to report, seconds. */

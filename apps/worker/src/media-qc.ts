@@ -76,8 +76,12 @@ const THRESHOLD_RANGES: Readonly<Record<keyof QcThresholds, readonly [number, nu
 /** Whole-run time cap. A payload may lower it; it may not raise it past the maximum. */
 export const DEFAULT_QC_MAX_RUN_MS = 10 * 60 * 1000;
 export const MAX_QC_MAX_RUN_MS = 30 * 60 * 1000;
-/** The report is cut down (scene cuts first) until its JSON fits this. */
-export const MAX_QC_REPORT_BYTES = 256 * 1024;
+/**
+ * The report is cut down until its JSON fits this. The Worker posts the report to the local complete route,
+ * which reads at most 64 KiB of JSON (apps/desktop local-job-api.ts MAX_JSON_BYTES), so the cap leaves room for
+ * the envelope. Hard cuts go first, then minor findings, then major ones.
+ */
+export const MAX_QC_REPORT_BYTES = 48 * 1024;
 /** Captured ffmpeg text per pass. The head and the tail are kept: filter lines run through, the summary is last. */
 const STDERR_HEAD_BYTES = 1024 * 1024;
 const STDERR_TAIL_BYTES = 1024 * 1024;
@@ -90,6 +94,9 @@ const MAX_SAMPLE_FPS = 2;
 const BLACK_FRAME_YMAX = 40;
 /** Chroma planes sit at 128 when the picture is neutral. */
 const NEUTRAL_CHROMA = 128;
+/** ffmpeg's answer when a filter is missing from this build. scdet needs FFmpeg 4.4 or later. */
+const UNKNOWN_FILTER_PATTERN = /no such filter|unknown filter|filter not found/i;
+const AUDIO_CHECKS: readonly QcFileFindingType[] = ['silence', 'clipping', 'loudness'];
 
 const NUM = String.raw`-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?`;
 const NUM_OR_INF = String.raw`(?:${NUM}|-?inf)`;
@@ -466,6 +473,31 @@ export function analysePicture(
   return { sampledFrames: usable.length, meanLuma, medianChromaDistance, exposureRuns: runs };
 }
 
+/**
+ * The audio filters in the order they run. ebur128 is last: it is the filter most likely to change the audio
+ * (it may resample), so silencedetect and astats must see the audio as it is.
+ */
+export function audioFilterChain(
+  checks: ReadonlySet<QcFileFindingType>,
+  thresholds: QcThresholds,
+): string[] {
+  const chain: string[] = [];
+  if (checks.has('silence'))
+    chain.push(`silencedetect=n=${thresholds.silenceDb}dB:d=${thresholds.silenceMinDurationSec}`);
+  if (checks.has('clipping')) chain.push('astats');
+  if (checks.has('loudness')) chain.push('ebur128=peak=true:framelog=quiet');
+  return chain;
+}
+
+/**
+ * The picture filters of the stats pass. `format=yuv420p` comes before signalstats: signalstats reports values
+ * in the clip's own bit depth, so a 10-bit clip (phone HDR, ProRes) would read 0 to 1023 and look far too bright
+ * and off-colour. After the conversion every value is on the 8-bit scale the thresholds assume.
+ */
+export function pictureFilterGraph(fps: number): string {
+  return `fps=${fps.toFixed(4)},format=yuv420p,signalstats,metadata=mode=print:file=-`;
+}
+
 // ---------------------------------------------------------------------------------------------------------
 // Report
 
@@ -663,6 +695,12 @@ export function qcFindings(measurements: QcMeasurements, thresholds: QcThreshold
   return drafts.sort((a, b) => a.startUs - b.startUs || a.type.localeCompare(b.type));
 }
 
+/** Order in which findings are dropped from an oversized report: a lower rank goes first. */
+function removalRank(draft: DraftFinding): number {
+  if (draft.type === 'scene-cut') return 0;
+  return draft.severity === 'minor' ? 1 : 2;
+}
+
 export interface BuildQcReportInput {
   readonly reportId: string;
   readonly assetId: string;
@@ -724,37 +762,32 @@ export function buildQcReport(input: BuildQcReportInput): QcReport {
     };
   };
 
-  let report = compose(drafts, truncated);
+  const report = compose(drafts, truncated);
   if (Buffer.byteLength(JSON.stringify(report)) <= maxBytes) return report;
 
-  // Too big: drop scene cuts first (the cheapest fact to lose), then the last findings, until it fits.
+  // Too big. Hard cuts go first, then minor findings, then major ones; within a rank the latest goes first.
+  // Sizes use the keys compose() writes, so the running total is exact up to the separating commas, which
+  // are counted, so it is never low. The 80-byte placeholder covers the final "not listed" sentence.
   const sizes = drafts.map(
     (draft) => Buffer.byteLength(JSON.stringify({ id: 'qc-finding-0000', ...draft })) + 1,
   );
+  const ranks = drafts.map(removalRank);
+  const removalOrder = drafts
+    .map((_, index) => index)
+    .sort((a, b) => (ranks[a] ?? 0) - (ranks[b] ?? 0) || b - a);
   let total = Buffer.byteLength(JSON.stringify(compose([], [...truncated, 'x'.repeat(80)])));
   for (const size of sizes) total += size;
-  const kept = [...drafts];
-  const keptSizes = [...sizes];
-  let dropped = 0;
-  while (total > maxBytes && kept.length > 0) {
-    let index = -1;
-    for (let i = kept.length - 1; i >= 0; i -= 1) {
-      if (kept[i]?.type === 'scene-cut') {
-        index = i;
-        break;
-      }
-    }
-    if (index < 0) index = kept.length - 1;
-    total -= keptSizes[index] ?? 0;
-    kept.splice(index, 1);
-    keptSizes.splice(index, 1);
-    dropped += 1;
+  const removed = new Set<number>();
+  for (const index of removalOrder) {
+    if (total <= maxBytes) break;
+    total -= sizes[index] ?? 0;
+    removed.add(index);
   }
-  report = compose(kept, [
+  const kept = drafts.filter((_, index) => !removed.has(index));
+  return compose(kept, [
     ...truncated,
-    `${dropped} findings were not listed to keep the report under ${Math.round(maxBytes / 1024)} KB`,
+    `${removed.size} findings were not listed to keep the report under ${Math.round(maxBytes / 1024)} KB`,
   ]);
-  return report;
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -1111,7 +1144,7 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
       '-sn',
       '-dn',
       '-vf',
-      `fps=${fps.toFixed(4)},signalstats,metadata=mode=print:file=-`,
+      pictureFilterGraph(fps),
       '-f',
       'null',
       '-',
