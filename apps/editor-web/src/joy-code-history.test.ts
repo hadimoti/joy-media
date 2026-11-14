@@ -60,6 +60,98 @@ describe('Joy Code history', () => {
   });
 });
 
+describe('Joy Code message parts', () => {
+  const OLD_HISTORY = JSON.stringify([
+    {
+      id: 'old-thread',
+      title: 'Shorten the intro',
+      createdAt: '2026-07-27T10:00:00.000Z',
+      updatedAt: '2026-07-27T10:02:00.000Z',
+      status: 'completed',
+      messages: [
+        {
+          id: 'm1',
+          role: 'user',
+          body: 'Shorten the intro',
+          createdAt: '2026-07-27T10:01:00.000Z',
+        },
+        {
+          id: 'm2',
+          role: 'assistant',
+          body: 'Done.',
+          createdAt: '2026-07-27T10:02:00.000Z',
+          failureKey: 'unexpected-failure',
+        },
+      ],
+    },
+  ]);
+
+  it('loads a history written before parts existed, unchanged', () => {
+    const [thread] = loadJoyCodeThreads(memoryStorage(OLD_HISTORY), 'project-a');
+    expect(thread?.messages).toHaveLength(2);
+    expect(thread?.messages[0]).toEqual({
+      id: 'm1',
+      role: 'user',
+      body: 'Shorten the intro',
+      createdAt: '2026-07-27T10:01:00.000Z',
+    });
+    expect(thread?.messages[0]).not.toHaveProperty('parts');
+    expect(thread?.messages[1]?.failureKey).toBe('unexpected-failure');
+  });
+
+  it('an old history gains a message with parts and saves and loads it back', () => {
+    const storage = memoryStorage(OLD_HISTORY);
+    const loaded = loadJoyCodeThreads(storage, 'project-a');
+    const updated = addJoyCodeMessage(loaded, 'old-thread', {
+      id: 'm3',
+      role: 'assistant',
+      body: 'Picture ready',
+      createdAt: '2026-07-27T10:03:00.000Z',
+      parts: [
+        { kind: 'text', text: 'Picture ready' },
+        { kind: 'image', jobId: 'job-1', label: 'Sunset' },
+        { kind: 'video', jobId: 'job-2' },
+        {
+          kind: 'job',
+          jobId: 'job-3',
+          mediaKind: 'video',
+          state: 'running',
+          startedAt: '2026-07-27T10:03:00.000Z',
+        },
+      ],
+    });
+    saveJoyCodeThreads(storage, 'project-a', updated);
+
+    const reloaded = loadJoyCodeThreads(storage, 'project-a')[0];
+    expect(reloaded?.messages).toHaveLength(3);
+    expect(reloaded?.messages[2]?.parts).toHaveLength(4);
+    expect(reloaded?.messages[0]).not.toHaveProperty('parts');
+  });
+
+  it.each([
+    ['an unknown part kind', [{ kind: 'sound', jobId: 'a' }]],
+    ['a picture without a job id', [{ kind: 'image' }]],
+    [
+      'a job in an unknown state',
+      [{ kind: 'job', jobId: 'a', mediaKind: 'image', state: 'sleeping', startedAt: 'x' }],
+    ],
+    ['a part list that is not a list', 'image'],
+    ['too many parts', Array.from({ length: 17 }, () => ({ kind: 'text', text: 'x' }))],
+  ])('refuses a history with %s', (_name, parts) => {
+    const raw = JSON.stringify([
+      {
+        id: 't',
+        title: 'x',
+        createdAt: 'a',
+        updatedAt: 'a',
+        status: 'draft',
+        messages: [{ id: 'm', role: 'assistant', body: '', createdAt: 'a', parts }],
+      },
+    ]);
+    expect(loadJoyCodeThreads(memoryStorage(raw), 'project-a')).toEqual([]);
+  });
+});
+
 describe('Joy Code prompt routing', () => {
   it.each([
     ['/split', 'split-at-playhead'],

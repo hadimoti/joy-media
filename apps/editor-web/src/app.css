@@ -9582,6 +9582,130 @@ label {
   font-size: 0.75rem;
   line-height: 1.2;
 }
+/* Joy Code picture, video and job messages (T-C05). */
+.joy-code-parts {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.joy-code-media-icon {
+  flex: 0 0 auto;
+  color: var(--joy-accent);
+}
+.joy-code-media-card {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  min-width: 0;
+}
+.joy-code-media-thumb {
+  justify-self: start;
+  max-width: 100%;
+  padding: 0;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-inset);
+  cursor: zoom-in;
+  overflow: hidden;
+}
+.joy-code-media-thumb img {
+  display: block;
+  max-width: 100%;
+  max-height: 9rem;
+  object-fit: contain;
+}
+.joy-code-media-video {
+  display: block;
+  width: 100%;
+  max-height: 14rem;
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-inset);
+}
+.joy-code-media-loading,
+.joy-code-media-problem {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+}
+.joy-code-media-problem {
+  border-color: var(--joy-danger);
+}
+.joy-code-media-problem button,
+.joy-code-media-actions button,
+.joy-code-job-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  font-size: var(--joy-type-xs);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.joy-code-media-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+.joy-code-job-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem 0.7rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+}
+.joy-code-job-card.is-problem {
+  border-color: var(--joy-danger);
+}
+.joy-code-job-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--joy-text);
+  font-weight: 650;
+}
+.joy-code-job-elapsed {
+  font-variant-numeric: tabular-nums;
+}
+.joy-code-job-reason {
+  overflow-wrap: anywhere;
+}
+.joy-code-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: rgb(0 0 0 / 78%);
+}
+.joy-code-lightbox-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+}
+.joy-code-lightbox-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  padding: 0.4rem;
+}
 .joy-code-brief-artifact {
   display: flex;
   align-items: center;
