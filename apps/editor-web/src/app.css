@@ -4099,11 +4099,13 @@ label {
   outline-offset: -1px;
   box-shadow: 0 0 0 1px var(--joy-accent-soft, rgb(233 185 73 / 40%));
 }
+/* The playhead is above everything in the timeline: the track titles (9), the timecode block (4) and the clips. It is
+   hidden, never covered, while it is scrolled behind the titles. */
 .timeline-playhead {
   position: absolute;
   top: 0;
   bottom: 0;
-  z-index: 5;
+  z-index: 12;
   width: 2px;
   margin-left: -1px;
   background: var(--joy-accent);
@@ -4111,7 +4113,7 @@ label {
   pointer-events: none;
 }
 .timeline-playhead--scrub {
-  z-index: 3;
+  z-index: 6;
 }
 .timeline-playhead--scrub::before {
   content: '';
