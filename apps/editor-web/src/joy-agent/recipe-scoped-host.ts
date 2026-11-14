@@ -17,7 +17,11 @@ import type { EditorSession } from '../editor-session.js';
 import type { JoyAgentTarget } from '../agent-presence.js';
 import type { JoyAgentContextSnapshotInput } from './context-snapshot.js';
 import type { JoyAgentEngineClient, JoyAgentRunHost } from './engine-client.js';
-import { createJoyAgentHostRpcMethodsForSnapshot } from './tool-bridge.js';
+import {
+  createJoyAgentHostRpcMethodsForSnapshot,
+  type JoyAgentQcToolAdapter,
+} from './tool-bridge.js';
+import { isQcHostToolName } from './qc-request-intent.js';
 import type { JoyAgentObservationAdapterFactory } from './observation-host-factory.js';
 import type { JoyAgentObservationHostBridge } from './observation-tool-adapter.js';
 import type { ObservationTransferAuthority } from './observation-transfer-service.js';
@@ -74,6 +78,13 @@ export interface RecipeScopedEditRunDeps {
   ) => void | Promise<void>;
   /** Records the change-set id a recipe run staged, for later cleanup. */
   readonly onStaged?: (scope: CreativeSkillRunScope, changeSetId: string) => void;
+  /**
+   * Builds the QC adapter for one recipe run. It is called only when the
+   * recipe's allow-list names a QC tool, so a recipe that does not ask for QC
+   * never gets the adapter. The adapter holds only per-run memory, and its
+   * identity check goes stale with the run, so it needs no separate teardown.
+   */
+  readonly createQcAdapter?: (scope: CreativeSkillRunScope) => JoyAgentQcToolAdapter | undefined;
 }
 
 const OBSERVE_TOOL_NAMES: ReadonlySet<JoyAgentHostToolName> = new Set([
@@ -136,6 +147,16 @@ export function runScopedCreativeSkillEditToolLoop(
       : undefined;
   if (observationBridge !== undefined) deps.onObservationBridgeCreated?.(scope, observationBridge);
 
+  // The QC tools are advertised only when the recipe's allow-list names one, and
+  // they are answered only when an adapter exists. Without the adapter the
+  // names are dropped from the list so the model is never offered a dead tool.
+  const wantsQc = boundedAllowList.some((name) => isQcHostToolName(name));
+  const qcAdapter = wantsQc ? deps.createQcAdapter?.(scope) : undefined;
+  const effectiveAllowList =
+    qcAdapter === undefined
+      ? boundedAllowList.filter((name) => !isQcHostToolName(name))
+      : boundedAllowList;
+
   const revokeStaged = (changeSetId: string | undefined): void => {
     if (changeSetId === undefined) return;
     const prepared = deps.preparedChanges.getView(changeSetId);
@@ -164,8 +185,10 @@ export function runScopedCreativeSkillEditToolLoop(
               manifestId: result.manifestId,
             });
           },
+      undefined,
+      qcAdapter,
     ),
-    allowedToolNames: boundedAllowList,
+    allowedToolNames: effectiveAllowList,
     onCancelled: () => revokeStaged(lastStaged),
   };
 

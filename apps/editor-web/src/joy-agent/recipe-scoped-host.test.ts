@@ -11,6 +11,7 @@ import type {
   JoyAgentRunHost,
 } from './engine-client.js';
 import type { JoyAgentObservationHostBridge } from './observation-tool-adapter.js';
+import type { JoyAgentQcToolAdapter } from './tool-bridge.js';
 import type { HostRpcJson, HostRpcMethod } from './host-rpc.js';
 import { JOY_AGENT_PROTOCOL_VERSION, type JoyAgentSafeEvent } from './protocol.js';
 import { PreparedChangeStore, type PreparedChangeAuthority } from './prepared-change-store.js';
@@ -188,6 +189,66 @@ describe('runScopedCreativeSkillEditToolLoop', () => {
 
     expect(result.kind).toBe('failed');
     expect(d.staged).toEqual([]);
+  });
+
+  describe('QC adapter', () => {
+    const qcAdapter = {
+      readReport: vi.fn(() => ({ ok: true })),
+      isReportFrameSelectionValid: vi.fn(() => false),
+      isCachedImageSupported: vi.fn(() => false),
+      isPrivacyModeAllowed: vi.fn(() => true),
+      hasApprovedConsent: vi.fn(() => false),
+      reviewFrames: vi.fn(),
+    } as unknown as JoyAgentQcToolAdapter;
+    const QC_NAMES = ['qc_report_read', 'media_frames_view', 'media_contact_sheet'] as const;
+
+    function startedHost(d: ReturnType<typeof deps>): JoyAgentRunHost {
+      const calls = (d.value.client.startRun as ReturnType<typeof vi.fn>).mock.calls;
+      return calls[0]![1] as JoyAgentRunHost;
+    }
+
+    it('passes the adapter and keeps the QC names when the recipe asks for QC tools', async () => {
+      const d = deps();
+      const createQcAdapter = vi.fn(() => qcAdapter);
+
+      await runScopedCreativeSkillEditToolLoop(
+        { ...d.value, createQcAdapter },
+        input({ allowedToolNames: ['read_project_context', 'validate_proposal', ...QC_NAMES] }),
+      );
+
+      expect(createQcAdapter).toHaveBeenCalledWith(SCOPE);
+      const host = startedHost(d);
+      for (const name of QC_NAMES) {
+        expect(host.allowedToolNames).toContain(name);
+        expect(host.methods[name], name).toBeDefined();
+      }
+    });
+
+    it('never builds the adapter for a recipe that does not name a QC tool', async () => {
+      const d = deps();
+      const createQcAdapter = vi.fn(() => qcAdapter);
+
+      await runScopedCreativeSkillEditToolLoop({ ...d.value, createQcAdapter }, input());
+
+      expect(createQcAdapter).not.toHaveBeenCalled();
+      const host = startedHost(d);
+      for (const name of QC_NAMES) expect(host.methods[name], name).toBeUndefined();
+    });
+
+    it('drops the QC names when no adapter can be built, so the model is not offered a dead tool', async () => {
+      const d = deps();
+
+      await runScopedCreativeSkillEditToolLoop(
+        { ...d.value, createQcAdapter: () => undefined },
+        input({ allowedToolNames: ['read_project_context', 'validate_proposal', ...QC_NAMES] }),
+      );
+
+      const host = startedHost(d);
+      for (const name of QC_NAMES) {
+        expect(host.allowedToolNames).not.toContain(name);
+        expect(host.methods[name], name).toBeUndefined();
+      }
+    });
   });
 
   it('keeps observation authority in the visual identity domain', async () => {
