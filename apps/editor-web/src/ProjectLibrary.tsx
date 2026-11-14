@@ -1,3 +1,4 @@
+import { WindowControls } from './WindowControls.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import {
@@ -319,6 +320,7 @@ export function ProjectLibrary({
               Trash ({trashedCount})
             </button>
           </div>
+          <WindowControls />
         </div>
       </header>
 
