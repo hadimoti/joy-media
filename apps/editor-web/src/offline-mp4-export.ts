@@ -401,18 +401,18 @@ export async function exportOfflineMp4(
       latencyMode: 'quality',
       bitrateMode: 'variable',
       keyFrameInterval: 2,
-      onEncoderConfig: (config) => {
-        (config as VideoEncoderConfig & { colorSpace?: unknown }).colorSpace = {
-          ...EXPORT_BT709_COLOR_SPACE,
-        };
+      onEncodedPacket: (_packet, metadata) => {
+        // The encoder supplies the complete decoder config, including the AVC description, on
+        // its first packet. Tag that metadata before mediabunny hands it to the MP4 muxer.
+        if (metadata?.decoderConfig !== undefined) {
+          Object.assign(metadata.decoderConfig, {
+            colorSpace: { ...EXPORT_BT709_COLOR_SPACE },
+          });
+        }
       },
     } satisfies VideoEncodingConfig);
     output.addVideoTrack(videoSource, {
       frameRate,
-      decoderConfig: {
-        codec: source.capability.codec,
-        colorSpace: { ...EXPORT_BT709_COLOR_SPACE },
-      },
     });
     source.audio?.attach(output);
     await output.start();
