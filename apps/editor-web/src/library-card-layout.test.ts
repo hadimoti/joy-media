@@ -25,6 +25,17 @@ describe('library card layout', () => {
     expect(card).toContain('library-card-description sr-only');
   });
 
+  it('draws the plus in the theme colour, also when unavailable', () => {
+    expect(css).toMatch(/\.library-card-add \{[^}]*color: var\(--joy-accent\);/);
+    expect(css).toMatch(/\.library-card-add:disabled \{[^}]*color: var\(--joy-accent\);/);
+    expect(css).toMatch(/\.library-card-favorite \{[^}]*color: var\(--joy-accent\);/);
+  });
+
+  it('shows no clip name inside timeline clips', () => {
+    const appCss = readFileSync(join(dir, 'app.css'), 'utf8');
+    expect(appCss).toMatch(/\.timeline-clip-label \{\s*display: none;/);
+  });
+
   it('keeps the plus a small fixed square', () => {
     expect(css).toMatch(/\.library-card-add \{[^}]*width: 1\.5rem;[^}]*height: 1\.5rem;/);
   });

@@ -375,7 +375,7 @@
   border: 1px solid var(--joy-border-soft);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--joy-bg-deep) 78%, transparent);
-  color: var(--joy-text-secondary);
+  color: var(--joy-accent);
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
@@ -413,8 +413,8 @@
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--joy-accent) 56%, var(--joy-border));
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--joy-accent) 22%, var(--joy-bg-deep));
-  color: var(--joy-text);
+  background: color-mix(in srgb, var(--joy-accent) 16%, var(--joy-bg-deep));
+  color: var(--joy-accent);
   font: inherit;
   font-size: var(--joy-type-xs);
   font-weight: 600;
@@ -434,10 +434,11 @@
   outline: none;
 }
 
+/* Unavailable still reads as the theme colour, only dimmer. */
 .library-card-add:disabled {
-  color: var(--joy-text-faint);
+  color: var(--joy-accent);
   cursor: not-allowed;
-  opacity: 0.58;
+  opacity: 0.6;
 }
 
 .library-card-actions > .template-card-save,
