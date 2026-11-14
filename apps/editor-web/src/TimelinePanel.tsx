@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+} from 'react';
 import {
   buildRulerTicks,
   clipRateLabel,
@@ -136,6 +144,8 @@ import {
 } from './editor-pointer-dnd.js';
 import { TimelinePropertyLanes } from './TimelinePropertyLanes.js';
 import { TimelineElementGlyph, TimelineElementMedia } from './TimelineElementVisual.js';
+import { EditorPanelContext } from './editor-panel-context.js';
+import type { TimelineElementMediaSource } from './timeline-media.js';
 import {
   timelineElementKindForClip,
   type TimelineElementKind,
@@ -239,6 +249,7 @@ function TimelineClip({
   clip,
   elementKind,
   effectFlags,
+  loadAssetBlob,
   displayName,
   selected,
   isDragOver,
@@ -267,6 +278,7 @@ function TimelineClip({
   readonly elementKind: TimelineElementKind;
   /** Set when the clip has an effect, a filter or a transition: shows a small icon for each. */
   readonly effectFlags?: ClipEffectFlags | undefined;
+  readonly loadAssetBlob?: (assetId: string) => Promise<Blob | undefined>;
   readonly displayName?: string;
   /** Set when this clip's file is missing: the file's name, shown in the badge and tooltip (T-R03). */
   readonly missingName?: string | undefined;
@@ -293,6 +305,19 @@ function TimelineClip({
   readonly onDragMove: (clientX: number, clientY: number) => number | undefined;
   readonly onRestoreSelection: () => void;
 }) {
+  const mediaSource = useMemo<TimelineElementMediaSource | undefined>(
+    () =>
+      clip.kind !== 'video'
+        ? undefined
+        : {
+            assetId: clip.assetId,
+            sourceInUs: clip.sourceInUs,
+            durationUs: clip.durationUs,
+            ...(clip.playbackRate === undefined ? {} : { playbackRate: clip.playbackRate }),
+            ...(clip.reversed === undefined ? {} : { reversed: clip.reversed }),
+          },
+    [clip],
+  );
   const [dragPx, setDragPx] = useState<number | undefined>(undefined);
   const [trimPreview, setTrimPreview] = useState<
     { edge: 'start' | 'end'; timeUs: number } | undefined
@@ -700,9 +725,10 @@ function TimelineClip({
       )}
       <TimelineElementMedia
         kind={elementKind}
-        seed={clip.id}
         widthPx={layoutWidthPx}
         pixelsPerSecond={viewport.pixelsPerSecond}
+        {...(mediaSource === undefined ? {} : { media: mediaSource })}
+        {...(loadAssetBlob === undefined ? {} : { loadAssetBlob })}
       />
       {showChrome && (
         <span className="timeline-clip-chrome">
@@ -1030,6 +1056,7 @@ export function TimelinePanel({
   /** Called after this mounted timeline surface has committed an immutable preview bundle. */
   readonly onAgentPreviewRendered?: (runId: string, bundleVersion: number) => void;
 }) {
+  const panelContext = useContext(EditorPanelContext);
   const [localTrackFlags, setLocalTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const [localActiveCompositionId, setLocalActiveCompositionId] = useState(
     project.rootCompositionId,
@@ -3852,6 +3879,9 @@ export function TimelinePanel({
                       {...(clipEffectFlags[clip.id] === undefined
                         ? {}
                         : { effectFlags: clipEffectFlags[clip.id] })}
+                      {...(panelContext?.loadProjectAssetBlob === undefined
+                        ? {}
+                        : { loadAssetBlob: panelContext.loadProjectAssetBlob })}
                       {...(clip.kind !== 'composition' &&
                       assetDisplayNames?.[clip.assetId] !== undefined
                         ? { displayName: assetDisplayNames[clip.assetId] }

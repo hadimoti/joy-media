@@ -4,6 +4,7 @@ import {
   AudioSpikeError,
   buildWaveform,
   buildWaveformDirect,
+  WaveformPeakAccumulator,
   exportPcm16Wav,
   measureAudioClockDrift,
   mixAudioTracks,
@@ -60,6 +61,28 @@ describe('audio sync spike', () => {
     const measurement = measureAudioClockDrift(hourUs, RATE, [0, 1, 33_333, 123_456_789, hourUs]);
     expect(measurement.maxAbsoluteDriftUs).toBeLessThanOrEqual(21); // ceil(1e6 / 48000) µs
     expect(sampleStartUs(sampleIndexAtUs(hourUs, RATE), RATE)).toBe(hourUs);
+  });
+});
+
+describe('WaveformPeakAccumulator', () => {
+  it('builds the same peaks across streamed chunks as one contiguous waveform', () => {
+    const samples = new Float32Array([-1, -0.5, 0.25, 1, 0.1, -0.2, 0.9, 0.4]);
+    const accumulator = new WaveformPeakAccumulator(samples.length, 4);
+    accumulator.add(samples.subarray(0, 3), 0);
+    accumulator.add(samples.subarray(3), 3);
+    expect(accumulator.finish()).toEqual(buildWaveform(samples, 4));
+  });
+
+  it('combines channels into one min/max peak and fills uncovered buckets with silence', () => {
+    const accumulator = new WaveformPeakAccumulator(8, 4);
+    accumulator.add(new Float32Array([0.25, -0.5]), 0);
+    accumulator.add(new Float32Array([-0.75, 0.9]), 0);
+    expect(accumulator.finish()).toEqual([
+      { min: -0.75, max: Math.fround(0.9) },
+      { min: 0, max: 0 },
+      { min: 0, max: 0 },
+      { min: 0, max: 0 },
+    ]);
   });
 });
 

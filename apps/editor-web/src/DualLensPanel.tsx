@@ -305,6 +305,7 @@ function lanesToCanvasTracks(
             ...(item.clipId === undefined ? {} : { clipId: item.clipId }),
             ...(item.icon === undefined ? {} : { icon: item.icon }),
             ...(item.elementKind === undefined ? {} : { elementKind: item.elementKind }),
+            ...(item.media === undefined ? {} : { media: item.media }),
             ...(timed ? {} : { unplaced: true as const }),
           };
         }),

@@ -4,7 +4,7 @@
  * geometry so zoom/fit and clip widths stay one source of truth.
  */
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useContext, useEffect, useMemo, useRef } from 'react';
 import {
   buildRulerTicks,
   fitPixelsPerSecond,
@@ -36,6 +36,8 @@ import { TimelineElementGlyph, TimelineElementMedia } from './TimelineElementVis
 import type { TimelineElementKind } from './timeline-element-kind.js';
 import type { TransitionV1 } from '@joy-media/project-schema';
 import { TimelineTransitionJunction } from './TimelineTransitionJunction.js';
+import { EditorPanelContext } from './editor-panel-context.js';
+import type { TimelineElementMediaSource } from './timeline-media.js';
 
 export type TimelineCanvasIcon =
   TimelineElementKind | 'script' | 'prompt' | 'generation' | 'agent' | 'generic';
@@ -48,6 +50,7 @@ export interface TimelineCanvasItem {
   readonly clipId?: string;
   readonly icon?: TimelineCanvasIcon;
   readonly elementKind?: TimelineElementKind;
+  readonly media?: TimelineElementMediaSource;
   readonly unplaced?: boolean;
 }
 
@@ -243,12 +246,14 @@ function InspectClip({
   selected,
   onSelect,
   onSeek,
+  loadAssetBlob,
 }: {
   readonly item: TimelineCanvasItem;
   readonly viewport: TimelineViewport;
   readonly selected: boolean;
   readonly onSelect: () => void;
   readonly onSeek: (timeUs: number) => void;
+  readonly loadAssetBlob?: (assetId: string) => Promise<Blob | undefined>;
 }) {
   const durationUs = Math.max(1, item.endUs - item.startUs);
   const leftPx = timeToPixel(item.startUs, { ...viewport, originUs: 0 });
@@ -283,9 +288,10 @@ function InspectClip({
     >
       <TimelineElementMedia
         kind={elementKind}
-        seed={item.id}
         widthPx={layoutWidthPx}
         pixelsPerSecond={viewport.pixelsPerSecond}
+        {...(item.media === undefined ? {} : { media: item.media })}
+        {...(loadAssetBlob === undefined ? {} : { loadAssetBlob })}
       />
       {showChrome && (
         <span className="timeline-clip-chrome">
@@ -322,6 +328,7 @@ export function TimelineCanvas({
   onRemoveMarker,
   transitions = [],
 }: TimelineCanvasProps) {
+  const panelContext = useContext(EditorPanelContext);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
   const { selectedMarkerId, selectMarker, removeMarker } = useTimelineMarkerSelection(markers, {
@@ -502,6 +509,9 @@ export function TimelineCanvas({
                         if (item.clipId !== undefined) onSelectClips([item.clipId]);
                       }}
                       onSeek={onSeek}
+                      {...(panelContext?.loadProjectAssetBlob === undefined
+                        ? {}
+                        : { loadAssetBlob: panelContext.loadProjectAssetBlob })}
                     />
                   );
                 })

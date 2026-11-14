@@ -3,6 +3,7 @@ import type { HistoryEntry } from './editor-session.js';
 import { clipNameFromMedia, polishMediaLabel } from './media-label.js';
 import { objectDisplayLabel } from './object-display-label.js';
 import { readClipObjectMap } from './sticker-bindings.js';
+import type { TimelineElementMediaSource } from './timeline-media.js';
 import {
   timelineTrackCode,
   timelineTrackDisplayName,
@@ -55,6 +56,7 @@ export interface DualLensLaneItem {
   readonly icon?: DualLensItemIcon;
   /** Shared Classic/Time View presentation for placed timeline elements. */
   readonly elementKind?: TimelineElementKind;
+  readonly media?: TimelineElementMediaSource;
 }
 
 export type DualLensItemIcon =
@@ -351,6 +353,17 @@ function buildLanes(
         clipId: clip.id,
         icon: timelineElementKindForClip(clip, elementKinds),
         elementKind: timelineElementKindForClip(clip, elementKinds),
+        ...(clip.kind !== 'video'
+          ? {}
+          : {
+              media: {
+                assetId: clip.assetId,
+                sourceInUs: clip.sourceInUs,
+                durationUs: clip.durationUs,
+                ...(clip.playbackRate === undefined ? {} : { playbackRate: clip.playbackRate }),
+                ...(clip.reversed === undefined ? {} : { reversed: clip.reversed }),
+              },
+            }),
         startUs: clip.startUs,
         endUs: clip.startUs + clip.durationUs,
       })),
