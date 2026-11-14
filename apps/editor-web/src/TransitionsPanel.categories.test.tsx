@@ -23,8 +23,9 @@ describe('TransitionsPanel category rail (T-V08)', () => {
   it('shows a labelled rail with All and the eight categories', () => {
     const markup = renderPanel();
     expect(markup).toContain('aria-label="Transition categories"');
-    expect(markup).toContain('data-transition-category="all"');
+    expect(markup).toContain('data-library-category="all"');
     for (const category of TRANSITION_CATEGORIES) {
+      expect(markup).toContain(`data-library-category="${category.id}"`);
       expect(markup).toContain(`data-transition-category="${category.id}"`);
       expect(markup).toContain(`<h5 class="transition-category-heading">${category.label}</h5>`);
     }
@@ -33,20 +34,20 @@ describe('TransitionsPanel category rail (T-V08)', () => {
   it('lists every catalogue entry once, under its category heading', () => {
     const markup = renderPanel();
     for (const entry of listTransitionShaders()) {
-      expect(markup.split(`data-transition-type="${entry.id}"`).length - 1, entry.id).toBe(1);
+      expect(markup.split(`data-library-id="${entry.id}"`).length - 1, entry.id).toBe(1);
       const section = markup.indexOf(
         `<section class="transition-category-section" data-transition-category="${entry.category}"`,
       );
-      const card = markup.indexOf(`data-transition-type="${entry.id}"`);
+      const card = markup.indexOf(`data-library-id="${entry.id}"`);
       expect(section, entry.id).toBeGreaterThanOrEqual(0);
       expect(card, entry.id).toBeGreaterThan(section);
     }
   });
 
-  it('keeps the cards inside the "Transition type" group the e2e tests use', () => {
+  it('keeps the transition cards inside the shared category grid', () => {
     const markup = renderPanel();
-    const group = markup.indexOf('aria-label="Transition type"');
+    const group = markup.indexOf('class="library-browser-main transition-category-groups"');
     expect(group).toBeGreaterThanOrEqual(0);
-    expect(markup.indexOf('data-transition-type="gl:fade"')).toBeGreaterThan(group);
+    expect(markup.indexOf('data-library-id="gl:fade"')).toBeGreaterThan(group);
   });
 });

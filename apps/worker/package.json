@@ -3,6 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./media-qc": {
+      "types": "./dist/media-qc.d.ts",
+      "default": "./dist/media-qc.js"
+    }
+  },
   "scripts": {
     "build": "tsc -b",
     "dev": "tsx src/index.ts",

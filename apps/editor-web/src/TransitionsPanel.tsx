@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useId } from 'react';
 import {
   canonicalBindingKey,
   type JoyProjectV1,
@@ -17,8 +17,10 @@ import {
 } from '@joy-media/transition-shaders';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { beginEditorPointerDrag } from './editor-pointer-dnd.js';
-import { TransitionPreviewCard } from './TransitionPreviewCard.js';
-import { StarFilledIcon } from './icons.js';
+import { LibraryCard } from './LibraryCard.js';
+import { LibraryRail, libraryTabPanelProps } from './LibraryRail.js';
+import { TransitionStripPreview } from './TransitionStripPreview.js';
+import { LayersIcon, StarIcon } from './icons.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import {
@@ -32,6 +34,7 @@ import {
 } from './components/PropertyControlAdapters.js';
 import { PropertyRow, type PropertyAnimationState } from './components/PropertyRow.js';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
+import './library-panels.css';
 
 const SHADER_CATALOG = listTransitionShaders();
 
@@ -247,79 +250,31 @@ function TransitionCard({
   readonly onAdd: () => void;
   readonly onToggleFavorite: () => void;
 }) {
-  const cardRef = useRef<HTMLDivElement | null>(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const el = cardRef.current;
-    if (el === null) return;
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry!.isIntersecting), {
-      threshold: 0,
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const shaderEntry = useMemo(() => SHADER_CATALOG.find((e) => e.id === entry.id), [entry.id]);
-
   return (
-    <div
-      ref={cardRef}
-      className={`transition-card${isActive ? ' is-active' : ''}`}
-      data-transition-type={entry.id}
-      role="button"
-      tabIndex={0}
-      aria-pressed={isActive}
-      aria-label={`${isActive ? 'Selected' : 'Apply'} ${entry.label} transition`}
+    <LibraryCard
+      id={entry.id}
+      name={entry.label}
+      description={entry.description ?? entry.label}
+      preview={(previewActive) => (
+        <TransitionStripPreview
+          transitionId={entry.id}
+          label={entry.label}
+          playing={previewActive}
+        />
+      )}
+      isFavorite={isFavorite}
+      onToggleFavorite={onToggleFavorite}
+      onAdd={onAdd}
+      active={isActive}
+      className="transition-card"
+      title={`${entry.description === undefined ? entry.label : `${entry.label}: ${entry.description}`}. Drag onto a cut between clips.`}
       onPointerDown={(event) => {
         beginEditorPointerDrag(event.nativeEvent, event.currentTarget, {
           kind: 'transition',
           transitionId: entry.id,
         });
       }}
-      onClick={onAdd}
-      onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-        onAdd();
-      }}
-      title={`${entry.description === undefined ? entry.label : `${entry.label}: ${entry.description}`}. Drag onto a cut between clips.`}
-    >
-      <div className="transition-card-thumb">
-        {(visible || isActive) && shaderEntry !== undefined ? (
-          <TransitionPreviewCard entry={shaderEntry} isActive={isActive || visible} />
-        ) : (
-          <div className="transition-card-fallback" />
-        )}
-      </div>
-      <div className="transition-card-footer">
-        <span className="transition-card-label">{entry.label}</span>
-        <button
-          type="button"
-          className="icon-button card-fav-btn"
-          aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleFavorite();
-          }}
-          title={isFavorite ? 'Remove favorite' : 'Add favorite'}
-        >
-          <svg
-            aria-hidden="true"
-            focusable="false"
-            width="12"
-            height="12"
-            viewBox="0 0 16 16"
-            fill={isFavorite ? 'currentColor' : 'none'}
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <path d="M8 2.5l1.5 4.5h4.5l-3.5 2.5 1.3 4.2-3.8-2.8-3.8 2.8 1.3-4.2-3.5-2.5h4.5z" />
-          </svg>
-        </button>
-      </div>
-    </div>
+    />
   );
 }
 
@@ -336,6 +291,7 @@ export function TransitionsPanel({
   storage,
 }: TransitionsPanelProps) {
   const rootComp = timelineProject.compositions[timelineProject.rootCompositionId];
+  const railPanelId = useId();
   const [pendingType, setPendingType] = useState('gl:fade');
   const [storedFavorites, setFavorites] = useState<Set<string>>(() =>
     storage === undefined ? new Set() : readTransitionFavorites(storage),
@@ -346,8 +302,7 @@ export function TransitionsPanel({
     [storedFavorites],
   );
   const [query, setQuery] = useState('');
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [category, setCategory] = useState<TransitionCategoryId | 'all'>('all');
+  const [category, setCategory] = useState<TransitionCategoryId | 'all' | 'favorites'>('all');
 
   // Dockview may render a cached panel before its writer-gated provider is
   // attached. Hydrate only when that adapter exists; do not use raw storage
@@ -465,14 +420,11 @@ export function TransitionsPanel({
     ],
   );
 
-  const hasFavorites = favorites.size > 0;
-  const favItems = hasFavorites ? SHADER_CATALOG.filter((e) => favorites.has(e.id)) : [];
-
   const q = query.trim().toLowerCase();
   const catalog = SHADER_CATALOG.filter(
     (entry) =>
-      (!favoritesOnly || favorites.has(entry.id)) &&
-      (category === 'all' || entry.category === category) &&
+      (category === 'all' || category === 'favorites' || q !== '' || entry.category === category) &&
+      (category !== 'favorites' || favorites.has(entry.id)) &&
       (q === '' ||
         entry.label.toLowerCase().includes(q) ||
         entry.id.toLowerCase().includes(q) ||
@@ -488,7 +440,7 @@ export function TransitionsPanel({
     <PanelShell
       title="Transitions"
       iconUrl={panelTabIconUrl('transitions')}
-      className="transitions-panel"
+      className="transitions-panel library-panel"
       search={{ value: query, onChange: setQuery, placeholder: 'Search transitions…' }}
       actions={
         <>
@@ -507,112 +459,67 @@ export function TransitionsPanel({
               ×
             </button>
           )}
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={favoritesOnly ? 'Show all transitions' : 'Show favorites only'}
-            title={favoritesOnly ? 'Show all transitions' : 'Show favorites only'}
-            aria-pressed={favoritesOnly}
-            onClick={() => setFavoritesOnly((v) => !v)}
-          >
-            <StarFilledIcon />
-          </button>
         </>
       }
     >
-      <>
-        {hasFavorites && !favoritesOnly && (
-          <div className="transitions-subsection">
-            <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
-              Favorites
-            </h4>
-            <div className="transition-type-picker" role="group" aria-label="Favorite transitions">
-              {favItems.map((entry) => (
-                <TransitionCard
-                  key={entry.id}
-                  entry={entry}
-                  isActive={
-                    selectedShaderId === entry.id ||
-                    (selectedTransition === undefined && pendingType === entry.id)
-                  }
-                  isFavorite={true}
-                  onAdd={() => handleAddTransition(entry.id)}
-                  onToggleFavorite={() => toggleFavorite(entry.id)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="transitions-subsection">
-          <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
-            {favoritesOnly ? 'Favorites' : hasFavorites ? 'All' : 'All Transitions'}
-          </h4>
-          <div className="transition-category-rail" role="group" aria-label="Transition categories">
-            <button
-              type="button"
-              className={`transition-category-chip${category === 'all' ? ' is-active' : ''}`}
-              aria-pressed={category === 'all'}
-              data-transition-category="all"
-              onClick={() => setCategory('all')}
+      <div className="library-browser transitions-browser">
+        <LibraryRail
+          label="Transition categories"
+          panelId={railPanelId}
+          selectedId={category}
+          onSelect={(id) => setCategory(id as TransitionCategoryId | 'all' | 'favorites')}
+          items={[
+            { id: 'all', label: 'All', icon: <LayersIcon />, count: SHADER_CATALOG.length },
+            { id: 'favorites', label: 'Favorites', icon: <StarIcon />, count: favorites.size },
+            ...TRANSITION_CATEGORIES.map((item) => ({
+              id: item.id,
+              label: item.label,
+              icon: <LayersIcon />,
+              count: SHADER_CATALOG.filter((entry) => entry.category === item.id).length,
+            })),
+          ]}
+        />
+        <div
+          className="library-browser-main transition-category-groups"
+          {...libraryTabPanelProps(railPanelId, category)}
+        >
+          {catalogGroups.length === 0 && <p className="empty-hint">No transitions match.</p>}
+          {catalogGroups.map((group) => (
+            <section
+              key={group.id}
+              className="transition-category-section"
+              data-transition-category={group.id}
+              aria-label={group.label}
             >
-              All <span className="transition-category-count">{SHADER_CATALOG.length}</span>
-            </button>
-            {TRANSITION_CATEGORIES.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`transition-category-chip${category === item.id ? ' is-active' : ''}`}
-                aria-pressed={category === item.id}
-                data-transition-category={item.id}
-                onClick={() => setCategory(item.id)}
-              >
-                {item.label}{' '}
-                <span className="transition-category-count">
-                  {SHADER_CATALOG.filter((entry) => entry.category === item.id).length}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="transition-category-groups" role="group" aria-label="Transition type">
-            {catalogGroups.length === 0 && <p className="empty-hint">No transitions match.</p>}
-            {catalogGroups.map((group) => (
-              <section
-                key={group.id}
-                className="transition-category-section"
-                data-transition-category={group.id}
-                aria-label={group.label}
-              >
-                <h5 className="transition-category-heading">{group.label}</h5>
-                <div className="transition-type-picker">
-                  {group.entries.map((entry) => (
-                    <TransitionCard
-                      key={entry.id}
-                      entry={entry}
-                      isActive={
-                        selectedShaderId === entry.id ||
-                        (selectedTransition === undefined && pendingType === entry.id)
-                      }
-                      isFavorite={favorites.has(entry.id)}
-                      onAdd={() => handleAddTransition(entry.id)}
-                      onToggleFavorite={() => toggleFavorite(entry.id)}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
+              <h5 className="transition-category-heading">{group.label}</h5>
+              <div className="transition-type-picker library-card-grid">
+                {group.entries.map((entry) => (
+                  <TransitionCard
+                    key={entry.id}
+                    entry={entry}
+                    isActive={
+                      selectedShaderId === entry.id ||
+                      (selectedTransition === undefined && pendingType === entry.id)
+                    }
+                    isFavorite={favorites.has(entry.id)}
+                    onAdd={() => handleAddTransition(entry.id)}
+                    onToggleFavorite={() => toggleFavorite(entry.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+          {selectedTransition !== undefined && (
+            <SelectedTransitionInspector
+              transition={selectedTransition}
+              project={project}
+              playheadUs={playheadUs}
+              onUpdateTransition={onUpdateTransition}
+              onDispatch={onDispatch}
+            />
+          )}
         </div>
-        {selectedTransition !== undefined && (
-          <SelectedTransitionInspector
-            transition={selectedTransition}
-            project={project}
-            playheadUs={playheadUs}
-            onUpdateTransition={onUpdateTransition}
-            onDispatch={onDispatch}
-          />
-        )}
-      </>
+      </div>
     </PanelShell>
   );
 }

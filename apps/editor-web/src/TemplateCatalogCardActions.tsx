@@ -6,27 +6,31 @@ export function TemplateCatalogCardActions({
   onApply,
   onSave,
   onDelete,
+  hideApply = false,
 }: {
   readonly label: string;
   readonly isMine: boolean;
   readonly onApply: () => void;
   readonly onSave: () => void;
   readonly onDelete: () => void;
+  readonly hideApply?: boolean;
 }) {
   return (
     <>
-      <button
-        type="button"
-        className="icon-button template-card-apply"
-        aria-label={`Apply ${label}`}
-        title={`Apply ${label}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onApply();
-        }}
-      >
-        <PlusIcon />
-      </button>
+      {!hideApply && (
+        <button
+          type="button"
+          className="icon-button template-card-apply"
+          aria-label={`Apply ${label}`}
+          title={`Apply ${label}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onApply();
+          }}
+        >
+          <PlusIcon />
+        </button>
+      )}
       {isMine ? (
         <button
           type="button"

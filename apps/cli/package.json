@@ -24,6 +24,7 @@
     "@joy-media/motion-core": "workspace:*",
     "@joy-media/provider-oauth": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*",
+    "@joy-media/worker": "workspace:*",
     "ai": "7.0.92"
   },
   "devDependencies": {

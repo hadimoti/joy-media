@@ -88,7 +88,7 @@ describe('EffectsPanel', () => {
     await mountPanel();
 
     const selected = container!.querySelector<HTMLButtonElement>(
-      'button.effects-panel-category-tab[aria-selected="true"]',
+      'button.library-rail-item[aria-selected="true"]',
     );
     expect(selected?.getAttribute('aria-label')).toMatch(/^Colour & Light \([1-9]\d*\)$/);
     expect(container!.textContent).toContain('Curves');
@@ -110,7 +110,7 @@ describe('EffectsPanel', () => {
 
   it('shows each effect once, with no second group of the same items', async () => {
     await mountPanel();
-    const categories = [...container!.querySelectorAll('.effects-panel-category-tab')].map((tab) =>
+    const categories = [...container!.querySelectorAll('.library-rail-item')].map((tab) =>
       tab.getAttribute('aria-label')?.replace(/ \(\d+\)$/u, ''),
     );
     expect(categories.join(' ')).not.toContain('Pixel / B&W');
@@ -131,7 +131,12 @@ describe('EffectsPanel', () => {
     await mountPanel({ objectId: 'intro-title', canApplyEffects: true, onDispatch });
 
     const card = container!.querySelector<HTMLElement>('.effect-card');
-    expect(card?.getAttribute('role')).toBe('group');
+    // Named by its visible title; no redundant "library card" group label.
+    expect(card?.getAttribute('role')).toBeNull();
+    expect(card?.getAttribute('aria-label')).toBeNull();
+    expect(document.getElementById(card?.getAttribute('aria-labelledby') ?? '')?.textContent).toBe(
+      card?.querySelector('.library-card-name')?.textContent,
+    );
     expect(card?.getAttribute('aria-keyshortcuts')).toBe('Enter Space');
     await act(async () => {
       card?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));

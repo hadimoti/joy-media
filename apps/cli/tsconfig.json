@@ -13,6 +13,7 @@
     { "path": "../../packages/agent-tools" },
     { "path": "../../packages/motion-core" },
     { "path": "../../packages/provider-sdk" },
-    { "path": "../../packages/provider-oauth" }
+    { "path": "../../packages/provider-oauth" },
+    { "path": "../worker" }
   ]
 }

@@ -192,15 +192,44 @@ async function openProjectWithMissingMedia(
     await source.close();
 
     const app = await launchPackagedEditor(profiles.fresh);
-    const page = await openEditorPage(app);
-    await createHostProject(page, hostTitle);
-    await importEditableProject(page, strippedPath);
-    await expect(page.getByRole('heading', { name: projectTitle, level: 1 })).toBeVisible();
-    return { app, page, projectTitle };
+    try {
+      const page = await openEditorPage(app);
+      await createHostProject(page, hostTitle);
+      await importEditableProject(page, strippedPath);
+      await expectProjectStored(page, projectTitle);
+      return { app, page, projectTitle };
+    } catch (error) {
+      // Close the fresh app here: the caller never receives it, and an open app
+      // keeps its profile folder locked so the cleanup would fail with EPERM.
+      await app.close().catch(() => undefined);
+      throw error;
+    }
   } catch (error) {
     await source.close().catch(() => undefined);
     throw error;
   }
+}
+
+async function catalogTitleCount(page: Page, title: string): Promise<number> {
+  const titles = await page.evaluate(() => {
+    // The catalog lives in the editor origin's localStorage (App.tsx guards it); the old
+    // joyDesktop.projectStorage bridge no longer exists.
+    const raw = window.localStorage.getItem('joy-media.project-catalog.v1');
+    if (raw == null) return [] as string[];
+    const parsed = JSON.parse(raw) as {
+      projects?: Record<string, { title?: string; trashedAt?: string }>;
+    };
+    return Object.values(parsed.projects ?? {})
+      .filter((entry) => entry.trashedAt === undefined && typeof entry.title === 'string')
+      .map((entry) => entry.title ?? '');
+  });
+  return titles.filter((entry) => entry === title).length;
+}
+
+// The editor shows no project name outside the Projects library, so "this project is
+// stored" is read from the project catalog.
+async function expectProjectStored(page: Page, title: string): Promise<void> {
+  await expect.poll(() => catalogTitleCount(page, title)).toBe(1);
 }
 
 /** After a restart the app may open the last project directly or show the library. */
@@ -212,7 +241,7 @@ async function reopenAfterRestart(app: ElectronApplication, projectTitle: string
   if (await projects.isVisible()) {
     await page.getByRole('button', { name: new RegExp(projectTitle) }).click();
   }
-  await expect(page.getByRole('heading', { name: projectTitle, level: 1 })).toBeVisible();
+  await expectProjectStored(page, projectTitle);
   return page;
 }
 
