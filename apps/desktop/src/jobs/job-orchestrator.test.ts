@@ -103,6 +103,39 @@ describe('job orchestrator', () => {
       expect(result.message).toContain('FFmpeg');
     });
 
+    it('refuses a QC job until the Worker advertises media.qc, then leases it with its payload and keeps the report', () => {
+      const orchestrator = orchestratorFor(database);
+      const request = {
+        jobType: 'media.qc',
+        refId: 'asset-1',
+        kind: 'media.qc',
+        payload: { checks: ['black'] },
+      };
+      expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
+      orchestrator.hello(WORKER, ['asset.thumbnail']);
+      expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
+      orchestrator.hello(WORKER, ['media.qc']);
+      expect(orchestrator.submit({ ...request, payload: undefined })).toMatchObject({
+        ok: false,
+        code: 'PAYLOAD_INVALID',
+      });
+      const submitted = orchestrator.submit(request);
+      if (!submitted.ok) throw new Error(`expected a queued job, got ${submitted.code}`);
+      const leased = orchestrator.lease(WORKER);
+      expect(leased).toMatchObject({
+        id: submitted.jobId,
+        jobType: 'media.qc',
+        refId: 'asset-1',
+        payload: { checks: ['black'] },
+      });
+      const resultJson = JSON.stringify({ kind: 'media.qc', assetId: 'asset-1', report: {} });
+      orchestrator.complete(WORKER, submitted.jobId, leased?.leaseToken ?? '', {
+        kind: 'media.qc',
+        resultJson,
+      });
+      expect(orchestrator.get(submitted.jobId)).toMatchObject({ status: 'done', resultJson });
+    });
+
     it('refuses an upscale job without its payload, even when the Worker advertises the model', () => {
       const orchestrator = orchestratorFor(database);
       orchestrator.hello(WORKER, ['upscale.image']);

@@ -39,6 +39,20 @@ export type {
   WorkerCapabilitySnapshot,
   JobEvent,
 } from './protocol.js';
+export { QC_FILE_FINDING_TYPES } from './qc.js';
+export type {
+  MediaQcJobPayload,
+  QcFileFindingType,
+  QcFinding,
+  QcFindingState,
+  QcNote,
+  QcRange,
+  QcReport,
+  QcSeverity,
+  QcTarget,
+  QcTechnicalSummary,
+  QcThresholds,
+} from './qc.js';
 export type {
   GpuPreviewFrameRequest,
   GpuPreviewFrameResponse,

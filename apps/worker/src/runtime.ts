@@ -39,6 +39,7 @@ import {
   type UpscalingAvailability,
 } from './local-upscaling.js';
 import { executeLeasedExport, exportJobPayload } from './export-job.js';
+import { runMediaQc, type MediaQcReceipt } from './media-qc.js';
 import { verifyExport } from '@joy-media/export-core';
 
 export interface DeviceIdentity {
@@ -243,6 +244,7 @@ export class WorkerRuntime {
     if (this.tools.ffmpeg && this.tools.ffprobe) capabilities.push('asset.thumbnail');
     if (this.tools.ffmpeg && this.tools.ffprobe && this.options.downloadJobAsset !== undefined)
       capabilities.push('render.export');
+    if (this.tools.ffmpeg && this.tools.ffprobe) capabilities.push('media.qc');
     if (this.options.gpuPreviewAvailable === true) capabilities.push('render.preview.gpu');
     if (this.tools.comfy) capabilities.push('image.comfy');
     if (this.tools.ffprobe && this.tools.upscaling?.image?.modelReady === true)
@@ -349,6 +351,40 @@ export class WorkerRuntime {
             },
           },
         };
+      } catch (error) {
+        if (error instanceof Error && error.message === 'canceled') {
+          this.log.write(`job ${job.id} canceled`);
+          return { state: 'canceled' };
+        }
+        throw error;
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
+    if (job.type === 'media.qc') {
+      if (!this.tools.ffmpeg || !this.tools.ffprobe)
+        throw new Error('FFmpeg and FFprobe are required for media.qc');
+      if (job.assetId === undefined) throw new Error('media.qc requires an input asset');
+      if (options.cancelled()) return { state: 'canceled' };
+      const registeredSource = this.options.sources?.resolve(job.assetId);
+      if (registeredSource === undefined && this.options.downloadJobAsset === undefined)
+        throw new Error(`asset ${job.assetId} is not available on this Worker`);
+      const tempDir = mkdtempSync(join(tmpdir(), `joy-media-qc-${job.id}-`));
+      this.log.write(`job ${job.id} started (media.qc)`);
+      try {
+        // A local-route job's source is not in this Worker's registry, so the desktop serves its bytes.
+        const sourcePath =
+          registeredSource ?? (await this.stageDownloadedSource(job.id, job.leaseToken, tempDir));
+        const result = await runMediaQc({
+          jobId: job.id,
+          assetId: job.assetId,
+          sourcePath,
+          payload: job.payload,
+          cancelled: options.cancelled,
+          progress: options.progress,
+        });
+        this.log.write(`job ${job.id} completed`);
+        return { state: 'completed', result };
       } catch (error) {
         if (error instanceof Error && error.message === 'canceled') {
           this.log.write(`job ${job.id} canceled`);
@@ -667,6 +703,7 @@ export class WorkerRuntime {
       return bytes;
     }
     if (result.kind === 'text') throw new Error('AI text results have no retained derivative');
+    if (result.kind === 'media.qc') throw new Error('QC reports have no retained derivative');
     if (result.kind === 'fixture.thumbnail') {
       throw new Error('fixture thumbnail has no retained derivative');
     }
@@ -710,6 +747,7 @@ export type WorkerDerivativeReceipt =
   | RenderExportReceipt
   | LocalGpuReceipt
   | LocalAiReceipt
+  | MediaQcReceipt
   | MaskWorkerDerivative
   | UpscaleWorkerDerivative;
 
