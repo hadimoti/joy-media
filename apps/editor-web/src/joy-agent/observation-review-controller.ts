@@ -92,7 +92,10 @@ export interface ObservationReviewRequestSummary {
 /**
  * The only model-produced information retained by this controller. It is
  * bounded plain text plus the opaque evidence identities already approved by
- * the local host. It is presentation data, never tool-loop input.
+ * the local host. Direct reviews remain presentation data; the trusted host
+ * may return this bounded text to a QC tool result after its own report,
+ * capability, privacy, consent, and budget checks. Media bytes never enter
+ * this type or the tool loop.
  */
 export interface ObservationReviewAnalysis {
   readonly text: string;

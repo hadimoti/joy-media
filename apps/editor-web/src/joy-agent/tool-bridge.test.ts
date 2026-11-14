@@ -35,7 +35,10 @@ function method(
     | 'media_frames'
     | 'media_transcript'
     | 'evidence_read'
-    | 'evidence_coverage',
+    | 'evidence_coverage'
+    | 'qc_report_read'
+    | 'media_frames_view'
+    | 'media_contact_sheet',
 ): HostRpcMethod<HostRpcJson, HostRpcJson> {
   return methods[name] as unknown as HostRpcMethod<HostRpcJson, HostRpcJson>;
 }
@@ -50,7 +53,10 @@ async function invoke(
     | 'media_frames'
     | 'media_transcript'
     | 'evidence_read'
-    | 'evidence_coverage',
+    | 'evidence_coverage'
+    | 'qc_report_read'
+    | 'media_frames_view'
+    | 'media_contact_sheet',
   args: HostRpcJson,
 ): Promise<HostRpcJson> {
   const target = method(methods, name);
@@ -121,6 +127,102 @@ describe('JOY Agent trusted host tool bridge', () => {
       'read_project_context',
       'validate_proposal',
     ]);
+  });
+
+  it('gates QC frame review on report membership, cached image support, privacy, and consent', async () => {
+    let consentApproved = false;
+    let imageSupported = true;
+    let privacyAllowed = true;
+    const readReport = vi.fn(async () => ({
+      ok: true,
+      reportId: 'qc-report-1',
+      frameIds: ['frame-1'],
+      findings: [],
+    }));
+    const reviewFrames = vi.fn(async (input: { readonly frameIds: readonly string[] }) => ({
+      ok: true as const,
+      analysis: 'The title is clipped at the right edge.',
+      submittedFrameIds: input.frameIds,
+      framesSent: input.frameIds.length,
+    }));
+    const qc = {
+      readReport,
+      isReportFrameSelectionValid: async (input: { readonly frameIds: readonly string[] }) =>
+        input.frameIds.every((id) => id === 'frame-1'),
+      isCachedImageSupported: () => imageSupported,
+      isPrivacyModeAllowed: () => privacyAllowed,
+      hasApprovedConsent: () => consentApproved,
+      reviewFrames,
+    };
+    const methods = createJoyAgentHostRpcMethods({
+      context: createJoyAgentPagedContext({ projectId: 'project-1', revision: 'revision-1' }),
+      prepareProposal: () => preparedResult(),
+      qc,
+    });
+
+    await expect(
+      invoke(methods, 'qc_report_read', { reportId: 'qc-report-1', includeFindings: true }),
+    ).resolves.toMatchObject({ ok: true, reportId: 'qc-report-1', frameIds: ['frame-1'] });
+    await expect(
+      invoke(methods, 'media_frames_view', {
+        reportId: 'qc-report-1',
+        frameIds: ['frame-1'],
+        reason: 'Inspect the right title edge',
+      }),
+    ).resolves.toMatchObject({ ok: false, code: 'JOY_AGENT_QC_CONSENT_REQUIRED', framesSent: 0 });
+    expect(reviewFrames).not.toHaveBeenCalled();
+
+    imageSupported = false;
+    consentApproved = true;
+    await expect(
+      invoke(methods, 'media_frames_view', {
+        reportId: 'qc-report-1',
+        frameIds: ['frame-1'],
+        reason: 'Check image capability',
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: 'JOY_AGENT_QC_CAPABILITY_UNAVAILABLE',
+      framesSent: 0,
+    });
+    imageSupported = true;
+    privacyAllowed = false;
+    await expect(
+      invoke(methods, 'media_frames_view', {
+        reportId: 'qc-report-1',
+        frameIds: ['frame-1'],
+        reason: 'Check privacy policy',
+      }),
+    ).resolves.toMatchObject({ ok: false, code: 'JOY_AGENT_QC_PRIVACY_BLOCKED', framesSent: 0 });
+    privacyAllowed = true;
+
+    consentApproved = true;
+    await expect(
+      invoke(methods, 'media_contact_sheet', {
+        reportId: 'qc-report-1',
+        frameIds: ['frame-1'],
+        columns: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      analysis: 'The title is clipped at the right edge.',
+      submittedFrameIds: ['frame-1'],
+      framesSent: 1,
+    });
+    expect(reviewFrames).toHaveBeenCalledTimes(1);
+    expect(reviewFrames).toHaveBeenCalledWith(
+      expect.objectContaining({ tool: 'media_contact_sheet', frameIds: ['frame-1'], columns: 1 }),
+      expect.anything(),
+    );
+
+    await expect(
+      invoke(methods, 'media_frames_view', {
+        reportId: 'qc-report-1',
+        frameIds: ['unlisted-frame'],
+        reason: 'Try an unlisted frame',
+      }),
+    ).resolves.toMatchObject({ ok: false, code: 'JOY_AGENT_QC_FRAME_NOT_LISTED', framesSent: 0 });
+    expect(reviewFrames).toHaveBeenCalledTimes(1);
   });
 
   it('serves frozen pages beyond the compact model snapshot and supports track/title discovery', async () => {

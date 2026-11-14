@@ -87,6 +87,9 @@ describe('mounted Worker bounded semantic tool exchange', () => {
       'media_transcript',
       'evidence_read',
       'evidence_coverage',
+      'qc_report_read',
+      'media_frames_view',
+      'media_contact_sheet',
       'look_apply',
       'look_update',
       'look_reset_overrides',
@@ -101,6 +104,9 @@ describe('mounted Worker bounded semantic tool exchange', () => {
       'media_transcript',
       'evidence_read',
       'evidence_coverage',
+      'qc_report_read',
+      'media_frames_view',
+      'media_contact_sheet',
     ] as const satisfies readonly JoyAgentHostToolName[];
     const catalog = createBrowserAgentToolCatalog(
       agentTools.createModelVisibleJoyCodeProposalParameters(),
@@ -150,6 +156,213 @@ describe('mounted Worker bounded semantic tool exchange', () => {
           },
         },
       },
+    });
+    expect(catalog.tools.find((tool) => tool.function.name === 'media_frames_view')).toMatchObject({
+      function: {
+        strict: true,
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['reportId', 'frameIds', 'reason'],
+          properties: {
+            reportId: { type: 'string', minLength: 1, maxLength: 128 },
+            frameIds: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 16,
+              items: { type: 'string', minLength: 1, maxLength: 512 },
+            },
+            reason: { type: 'string', maxLength: 280 },
+          },
+        },
+      },
+    });
+    expect(catalog.tools.find((tool) => tool.function.name === 'qc_report_read')).toMatchObject({
+      function: {
+        strict: true,
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['reportId', 'includeFindings'],
+          properties: {
+            reportId: { type: 'string', minLength: 1, maxLength: 128 },
+            includeFindings: { type: 'boolean' },
+          },
+        },
+      },
+    });
+    const qcFlowToolNames = [
+      'read_project_context',
+      'qc_report_read',
+      'media_frames_view',
+      'media_contact_sheet',
+      'validate_proposal',
+    ] as const satisfies readonly JoyAgentHostToolName[];
+    expect(
+      createBrowserAgentToolCatalog(
+        agentTools.createModelVisibleJoyCodeProposalParameters(),
+        qcFlowToolNames,
+      ).tools.map((tool) => tool.function.name),
+    ).toEqual(qcFlowToolNames);
+    expect(
+      catalog.tools.find((tool) => tool.function.name === 'media_contact_sheet'),
+    ).toMatchObject({
+      function: {
+        strict: true,
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['reportId', 'frameIds', 'columns'],
+          properties: {
+            reportId: { type: 'string', minLength: 1, maxLength: 128 },
+            frameIds: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 16,
+              items: { type: 'string', minLength: 1, maxLength: 512 },
+            },
+            columns: { type: 'integer', minimum: 1, maximum: 16 },
+          },
+        },
+      },
+    });
+  });
+
+  it('counts selected frames against one bounded run budget and returns a refusal to the model', async () => {
+    const allowedToolNames = [
+      'read_project_context',
+      'media_frames_view',
+      'media_contact_sheet',
+    ] as const;
+    let exchange = 0;
+    const providerMessages: (readonly unknown[])[] = [];
+    const callHost = vi.fn(async (method: JoyAgentHostToolName, args: HostRpcJson) => {
+      if (method === 'read_project_context') return { domain: 'overview', records: [] };
+      void args;
+      return { ok: true, analysis: 'The first two selected frames are clear.' };
+    });
+    const outcome = await runBoundedToolExchange(
+      [],
+      async (messages) => {
+        providerMessages.push(structuredClone(messages));
+        exchange += 1;
+        if (exchange === 1)
+          return response({
+            tool_calls: [call('context', 'read_project_context', { domain: 'overview' })],
+          });
+        if (exchange === 2)
+          return response({
+            tool_calls: [
+              call('sheet', 'media_contact_sheet', {
+                reportId: 'qc-report-1',
+                frameIds: ['frame-1', 'frame-2'],
+                columns: 2,
+              }),
+            ],
+          });
+        if (exchange === 3)
+          return response({
+            tool_calls: [
+              call('one-more', 'media_frames_view', {
+                reportId: 'qc-report-1',
+                frameIds: ['frame-3'],
+                reason: 'Check the last cut',
+              }),
+            ],
+          });
+        return response({ role: 'assistant', content: 'The remaining frame was not sent.' });
+      },
+      callHost,
+      { allowedToolNames, maxObservationFrames: 2 },
+    );
+
+    expect(outcome).toEqual({ kind: 'answer', text: 'The remaining frame was not sent.' });
+    expect(callHost).toHaveBeenCalledTimes(2);
+    expect(callHost).toHaveBeenLastCalledWith(
+      'media_contact_sheet',
+      expect.objectContaining({ frameIds: ['frame-1', 'frame-2'] }),
+    );
+    expect(lastToolResult(providerMessages[3]!)).toMatchObject({
+      ok: false,
+      code: 'JOY_AGENT_QC_FRAME_BUDGET_EXCEEDED',
+      message: expect.stringContaining('run budget'),
+    });
+  });
+
+  it('returns a clear no-consent refusal and accepts only host-approved QC review results', async () => {
+    const allowedToolNames = [
+      'read_project_context',
+      'qc_report_read',
+      'media_frames_view',
+    ] as const;
+    let exchange = 0;
+    const providerMessages: (readonly unknown[])[] = [];
+    const callHost = vi.fn(async (method: JoyAgentHostToolName, _args: HostRpcJson) => {
+      if (method === 'read_project_context') return { domain: 'overview', records: [] };
+      if (method === 'qc_report_read')
+        return { ok: true, reportId: 'qc-report-1', frameIds: ['frame-1'] };
+      return exchange === 3
+        ? {
+            ok: false,
+            code: 'JOY_AGENT_QC_CONSENT_REQUIRED',
+            message: 'Approve the image review in the consent card before sending frames.',
+            framesSent: 0,
+          }
+        : { ok: true, framesSent: 1, analysis: 'The title is clipped at the right edge.' };
+    });
+    const outcome = await runBoundedToolExchange(
+      [],
+      async (messages) => {
+        providerMessages.push(structuredClone(messages));
+        exchange += 1;
+        if (exchange === 1)
+          return response({
+            tool_calls: [call('context', 'read_project_context', { domain: 'overview' })],
+          });
+        if (exchange === 2)
+          return response({
+            tool_calls: [
+              call('report', 'qc_report_read', { reportId: 'qc-report-1', includeFindings: true }),
+            ],
+          });
+        if (exchange === 3)
+          return response({
+            tool_calls: [
+              call('refused-view', 'media_frames_view', {
+                reportId: 'qc-report-1',
+                frameIds: ['frame-1'],
+                reason: 'Check the title edge',
+              }),
+            ],
+          });
+        if (exchange === 4)
+          return response({
+            tool_calls: [
+              call('approved-view', 'media_frames_view', {
+                reportId: 'qc-report-1',
+                frameIds: ['frame-1'],
+                reason: 'Check the title edge after approval',
+              }),
+            ],
+          });
+        return response({ role: 'assistant', content: 'The title appears clipped.' });
+      },
+      callHost,
+      { allowedToolNames },
+    );
+
+    expect(outcome).toEqual({ kind: 'answer', text: 'The title appears clipped.' });
+    expect(callHost).toHaveBeenCalledTimes(4);
+    expect(lastToolResult(providerMessages[3]!)).toEqual({
+      ok: false,
+      code: 'JOY_AGENT_QC_CONSENT_REQUIRED',
+      message: 'Approve the image review in the consent card before sending frames.',
+      framesSent: 0,
+    });
+    expect(lastToolResult(providerMessages[4]!)).toEqual({
+      ok: true,
+      framesSent: 1,
+      analysis: 'The title is clipped at the right edge.',
     });
   });
 

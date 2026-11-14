@@ -13,6 +13,9 @@ export const JOY_AGENT_HOST_TOOL_NAMES = [
   'media_transcript',
   'evidence_read',
   'evidence_coverage',
+  'qc_report_read',
+  'media_frames_view',
+  'media_contact_sheet',
   // Living Look intent tools (R2 / GAP 5). Deterministic host tools like
   // `validate_proposal`: the model supplies intent (which pack, which controls,
   // which instance) and the trusted host compiles the exact Look plan, stages a

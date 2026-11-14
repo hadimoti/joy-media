@@ -296,6 +296,76 @@ export interface JoyAgentObservationToolAdapter {
   ): JoyAgentEvidenceCoverageResult | Promise<JoyAgentEvidenceCoverageResult>;
 }
 
+export interface JoyAgentQcReportReadRequest {
+  readonly reportId: string;
+  readonly includeFindings: boolean;
+}
+
+export type JoyAgentQcFrameReviewRequest =
+  | {
+      readonly tool: 'media_frames_view';
+      readonly reportId: string;
+      readonly frameIds: readonly string[];
+      readonly reason: string;
+    }
+  | {
+      readonly tool: 'media_contact_sheet';
+      readonly reportId: string;
+      readonly frameIds: readonly string[];
+      readonly columns: number;
+    };
+
+export interface JoyAgentQcFrameReviewSuccess {
+  readonly ok: true;
+  readonly analysis: string;
+  readonly submittedFrameIds: readonly string[];
+  /** Count of frames actually sent to the provider, including failed replies. */
+  readonly framesSent: number;
+}
+
+export interface JoyAgentQcFrameReviewRefusal {
+  readonly ok: false;
+  readonly code:
+    | 'JOY_AGENT_QC_CAPABILITY_UNAVAILABLE'
+    | 'JOY_AGENT_QC_PRIVACY_BLOCKED'
+    | 'JOY_AGENT_QC_CONSENT_REQUIRED'
+    | 'JOY_AGENT_QC_REPORT_UNAVAILABLE'
+    | 'JOY_AGENT_QC_FRAME_NOT_LISTED'
+    | 'JOY_AGENT_QC_REVIEW_FAILED';
+  readonly message: string;
+  readonly framesSent: number;
+}
+
+/**
+ * Trusted host seam for saved QC reports and frame review. Implementations
+ * keep report/evidence stores local, reuse the existing consent card and
+ * private one-shot transport, and return analysis text only over HostRpc.
+ */
+export interface JoyAgentQcToolAdapter {
+  readReport(
+    input: JoyAgentQcReportReadRequest,
+    context: HostRpcHandlerContext,
+  ): HostRpcJson | Promise<HostRpcJson>;
+  isReportFrameSelectionValid(
+    input: JoyAgentQcFrameReviewRequest,
+    context: HostRpcHandlerContext,
+  ): boolean | Promise<boolean>;
+  /** Must reflect the active model's cached synthetic image-capability probe. */
+  isCachedImageSupported(context: HostRpcHandlerContext): boolean | Promise<boolean>;
+  isPrivacyModeAllowed(context: HostRpcHandlerContext): boolean | Promise<boolean>;
+  hasApprovedConsent(
+    input: JoyAgentQcFrameReviewRequest,
+    context: HostRpcHandlerContext,
+  ): boolean | Promise<boolean>;
+  reviewFrames(
+    input: JoyAgentQcFrameReviewRequest,
+    context: HostRpcHandlerContext,
+  ):
+    | JoyAgentQcFrameReviewSuccess
+    | JoyAgentQcFrameReviewRefusal
+    | Promise<JoyAgentQcFrameReviewSuccess | JoyAgentQcFrameReviewRefusal>;
+}
+
 export interface JoyAgentHostToolBridgeOptions {
   /** Frozen, sanitized project facts retained only on the trusted main thread. */
   readonly context: JoyAgentPagedContext;
@@ -322,6 +392,8 @@ export interface JoyAgentHostToolBridgeOptions {
   readonly prepareLook?: PrepareLookHandler;
   /** Optional until the trusted host wires a concrete local observation adapter. */
   readonly observation?: JoyAgentObservationToolAdapter;
+  /** Available only on an explicitly scoped QC run. */
+  readonly qc?: JoyAgentQcToolAdapter;
   /**
    * Private host notification after a bounded source observation completes.
    * It is never serialized through Host RPC and cannot widen the model tool
@@ -347,7 +419,7 @@ export interface JoyAgentLibraryEntry {
   };
 }
 
-function isRecord(value: HostRpcJson): value is { readonly [key: string]: HostRpcJson } {
+function isRecord(value: unknown): value is { readonly [key: string]: HostRpcJson } {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
@@ -391,6 +463,9 @@ const MAX_OBSERVATION_PAGE_SIZE = 128;
 const MAX_OBSERVATION_CURSOR = 2_097_152;
 const MAX_OBSERVATION_DIMENSION = 16_384;
 const MAX_EVIDENCE_FRAME_IDS_PER_PAGE = 512;
+const MAX_QC_FRAME_REVIEW_SIZE = 16;
+const MAX_QC_REPORT_RESULT_BYTES = 48 * 1024;
+const MAX_QC_ANALYSIS_BYTES = 16 * 1024;
 const SAFE_OPAQUE_IDENTIFIER =
   /^[A-Za-z0-9][A-Za-z0-9._:@=-]*(?:\/[A-Za-z0-9][A-Za-z0-9._:@=-]*)*$/;
 const SAFE_LANGUAGE = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8}){0,3}$/;
@@ -542,6 +617,172 @@ function parseEvidenceReadArgs(value: HostRpcJson): JoyAgentEvidenceReadRequest 
 function parseEvidenceCoverageArgs(value: HostRpcJson): JoyAgentEvidenceCoverageRequest {
   const record = readObservationRecord(value, ['manifestId']);
   return Object.freeze({ manifestId: readSafeOpaqueIdentifier(record.manifestId, 'manifestId') });
+}
+
+function parseQcReportReadArgs(value: HostRpcJson): JoyAgentQcReportReadRequest {
+  const record = readObservationRecord(value, ['reportId', 'includeFindings']);
+  if (typeof record.includeFindings !== 'boolean') invalidObservationRequest('includeFindings');
+  return Object.freeze({
+    reportId: readSafeOpaqueIdentifier(record.reportId, 'reportId'),
+    includeFindings: record.includeFindings,
+  });
+}
+
+function parseQcFrameIds(value: HostRpcJson): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > MAX_QC_FRAME_REVIEW_SIZE ||
+    value.some((id) => !isSafeOpaqueIdentifier(id, 512)) ||
+    new Set(value).size !== value.length
+  )
+    invalidObservationRequest('frameIds');
+  return Object.freeze([...value] as string[]);
+}
+
+function parseQcFrameReviewArgs(
+  tool: 'media_frames_view' | 'media_contact_sheet',
+  value: HostRpcJson,
+): JoyAgentQcFrameReviewRequest {
+  if (tool === 'media_frames_view') {
+    const record = readObservationRecord(value, ['reportId', 'frameIds', 'reason']);
+    if (typeof record.reason !== 'string' || record.reason.length > 280)
+      invalidObservationRequest('reason');
+    return Object.freeze({
+      tool,
+      reportId: readSafeOpaqueIdentifier(record.reportId, 'reportId'),
+      frameIds: parseQcFrameIds(requiredObservationField(record, 'frameIds')),
+      reason: record.reason,
+    });
+  }
+  const record = readObservationRecord(value, ['reportId', 'frameIds', 'columns']);
+  const frameIds = parseQcFrameIds(requiredObservationField(record, 'frameIds'));
+  return Object.freeze({
+    tool,
+    reportId: readSafeOpaqueIdentifier(record.reportId, 'reportId'),
+    frameIds,
+    columns: readPositiveInteger(
+      record.columns,
+      'columns',
+      Math.min(MAX_QC_FRAME_REVIEW_SIZE, frameIds.length),
+    ),
+  });
+}
+
+function qcRefusal(
+  code: JoyAgentQcFrameReviewRefusal['code'],
+  message: string,
+  framesSent = 0,
+): JoyAgentQcFrameReviewRefusal {
+  return Object.freeze({ ok: false, code, message, framesSent });
+}
+
+function safeQcText(value: unknown, maxBytes: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.trim().length > 0 &&
+    new TextEncoder().encode(value).byteLength <= maxBytes &&
+    // Keep tabs and line breaks; reject control characters and bidi overrides.
+    // eslint-disable-next-line no-control-regex
+    !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value) &&
+    !/(?:\b(?:https?|file|data|blob):|\\|\b(?:api[_-]?key|authorization|bearer|cookie|headers?)\b|\b[A-Z]:\\)/i.test(
+      value,
+    )
+  );
+}
+
+function safeQcReportJson(value: unknown, depth = 0, budget = { nodes: 0 }): value is HostRpcJson {
+  budget.nodes += 1;
+  if (budget.nodes > 4_096 || depth > 12) return false;
+  if (value === null || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'string') return value.length === 0 || safeQcText(value, 4_096);
+  if (Array.isArray(value))
+    return (
+      value.length <= 1_024 && value.every((item) => safeQcReportJson(item, depth + 1, budget))
+    );
+  if (!isRecord(value)) return false;
+  const entries = Object.entries(value);
+  return (
+    entries.length <= 128 &&
+    entries.every(
+      ([key, item]) =>
+        !/^(?:path|url|bytes|blob|jpeg|rgba|pixels|image|data|base64|encoded|payload)$/i.test(
+          key,
+        ) && safeQcReportJson(item, depth + 1, budget),
+    )
+  );
+}
+
+function parseQcReportResult(value: HostRpcJson): HostRpcJson {
+  if (
+    !safeQcReportJson(value) ||
+    new TextEncoder().encode(JSON.stringify(value)).byteLength > MAX_QC_REPORT_RESULT_BYTES
+  )
+    return {
+      ok: false,
+      code: 'JOY_AGENT_QC_REPORT_UNAVAILABLE',
+      message: 'The saved QC report is unavailable or contains unsupported data.',
+    };
+  return value;
+}
+
+function parseQcFrameReviewResult(
+  value: unknown,
+  input?: JoyAgentQcFrameReviewRequest,
+): JoyAgentQcFrameReviewSuccess | JoyAgentQcFrameReviewRefusal {
+  if (!isRecord(value))
+    return qcRefusal('JOY_AGENT_QC_REVIEW_FAILED', 'JOY could not complete that frame review.');
+  if (value.ok === true) {
+    const ids = value.submittedFrameIds;
+    if (
+      !safeQcText(value.analysis, MAX_QC_ANALYSIS_BYTES) ||
+      !Array.isArray(ids) ||
+      ids.length < 1 ||
+      ids.length > MAX_QC_FRAME_REVIEW_SIZE ||
+      ids.some((id) => !isSafeOpaqueIdentifier(id, 512)) ||
+      (input !== undefined &&
+        (ids.length !== input.frameIds.length ||
+          ids.some((id, index) => id !== input.frameIds[index]))) ||
+      value.framesSent !== (input?.frameIds.length ?? ids.length)
+    )
+      return qcRefusal(
+        'JOY_AGENT_QC_REVIEW_FAILED',
+        'JOY could not verify the frames returned by that review.',
+        input?.frameIds.length ?? (Array.isArray(ids) ? ids.length : 0),
+      );
+    return Object.freeze({
+      ok: true,
+      analysis: value.analysis,
+      submittedFrameIds: Object.freeze([...ids] as string[]),
+      framesSent: value.framesSent,
+    });
+  }
+  const refusalCodes: readonly string[] = [
+    'JOY_AGENT_QC_CAPABILITY_UNAVAILABLE',
+    'JOY_AGENT_QC_PRIVACY_BLOCKED',
+    'JOY_AGENT_QC_CONSENT_REQUIRED',
+    'JOY_AGENT_QC_REPORT_UNAVAILABLE',
+    'JOY_AGENT_QC_FRAME_NOT_LISTED',
+    'JOY_AGENT_QC_REVIEW_FAILED',
+  ];
+  if (
+    value.ok !== false ||
+    typeof value.code !== 'string' ||
+    !refusalCodes.includes(value.code) ||
+    !safeQcText(value.message, 512) ||
+    typeof value.framesSent !== 'number' ||
+    !Number.isSafeInteger(value.framesSent) ||
+    value.framesSent < 0 ||
+    value.framesSent > (input?.frameIds.length ?? MAX_QC_FRAME_REVIEW_SIZE)
+  )
+    return qcRefusal('JOY_AGENT_QC_REVIEW_FAILED', 'JOY could not complete that frame review.');
+  return Object.freeze({
+    ok: false,
+    code: value.code as JoyAgentQcFrameReviewRefusal['code'],
+    message: value.message,
+    framesSent: value.framesSent,
+  });
 }
 
 function readObservationResultRecord(
@@ -1302,9 +1543,96 @@ export function createJoyAgentHostRpcMethods(
     },
     parseResult: parsePreparedHostResult,
   };
+  const qcReportRead: HostRpcMethod<JoyAgentQcReportReadRequest, HostRpcJson> = {
+    parseArgs: parseQcReportReadArgs,
+    execute: async (input, context) => {
+      context.signal.throwIfAborted();
+      const qc = options.qc;
+      if (qc === undefined)
+        return {
+          ok: false,
+          code: 'JOY_AGENT_QC_REPORT_UNAVAILABLE',
+          message: 'No saved QC report is available in this JOY session.',
+        };
+      try {
+        const result = await qc.readReport(input, context);
+        context.signal.throwIfAborted();
+        return result;
+      } catch {
+        return {
+          ok: false,
+          code: 'JOY_AGENT_QC_REPORT_UNAVAILABLE',
+          message: 'JOY could not read that saved QC report.',
+        };
+      }
+    },
+    parseResult: parseQcReportResult,
+  };
+  const executeQcFrameReview = async (
+    input: JoyAgentQcFrameReviewRequest,
+    context: HostRpcHandlerContext,
+  ): Promise<HostRpcJson> => {
+    const qc = options.qc;
+    if (qc === undefined)
+      return qcRefusal(
+        'JOY_AGENT_QC_REPORT_UNAVAILABLE',
+        'Frame review is unavailable because no saved QC evidence is connected.',
+      ) as unknown as HostRpcJson;
+    try {
+      context.signal.throwIfAborted();
+      if (!(await qc.isReportFrameSelectionValid(input, context)))
+        return qcRefusal(
+          'JOY_AGENT_QC_FRAME_NOT_LISTED',
+          'Those frame IDs are not listed by the saved QC report. No frames were sent.',
+        ) as unknown as HostRpcJson;
+      if (!(await qc.isCachedImageSupported(context)))
+        return qcRefusal(
+          'JOY_AGENT_QC_CAPABILITY_UNAVAILABLE',
+          'The cached provider check does not confirm image support. No frames were sent.',
+        ) as unknown as HostRpcJson;
+      if (!(await qc.isPrivacyModeAllowed(context)))
+        return qcRefusal(
+          'JOY_AGENT_QC_PRIVACY_BLOCKED',
+          'Privacy settings keep these frames on this device. No frames were sent.',
+        ) as unknown as HostRpcJson;
+      if (!(await qc.hasApprovedConsent(input, context)))
+        return qcRefusal(
+          'JOY_AGENT_QC_CONSENT_REQUIRED',
+          'Approve the image review in the consent card before sending frames.',
+        ) as unknown as HostRpcJson;
+      const result = await qc.reviewFrames(input, context);
+      context.signal.throwIfAborted();
+      return parseQcFrameReviewResult(result, input) as unknown as HostRpcJson;
+    } catch {
+      // If the one-shot call began before it failed, charge the requested
+      // frames conservatively so a provider fault cannot bypass the run cap.
+      return qcRefusal(
+        'JOY_AGENT_QC_REVIEW_FAILED',
+        'JOY could not complete that frame review.',
+        input.frameIds.length,
+      ) as unknown as HostRpcJson;
+    }
+  };
+  const qcFramesView: HostRpcMethod<JoyAgentQcFrameReviewRequest, HostRpcJson> = {
+    parseArgs: (value) => parseQcFrameReviewArgs('media_frames_view', value),
+    execute: executeQcFrameReview,
+    parseResult: (value) => parseQcFrameReviewResult(value) as unknown as HostRpcJson,
+  };
+  const qcContactSheet: HostRpcMethod<JoyAgentQcFrameReviewRequest, HostRpcJson> = {
+    parseArgs: (value) => parseQcFrameReviewArgs('media_contact_sheet', value),
+    execute: executeQcFrameReview,
+    parseResult: (value) => parseQcFrameReviewResult(value) as unknown as HostRpcJson,
+  };
   const baseMethods = {
     read_project_context: readProjectContext as HostRpcMethod<unknown, unknown>,
     validate_proposal: validateProposal as HostRpcMethod<unknown, unknown>,
+    ...(options.qc === undefined
+      ? {}
+      : {
+          qc_report_read: qcReportRead as HostRpcMethod<unknown, unknown>,
+          media_frames_view: qcFramesView as HostRpcMethod<unknown, unknown>,
+          media_contact_sheet: qcContactSheet as HostRpcMethod<unknown, unknown>,
+        }),
     ...(options.prepareLook === undefined ? {} : createLookHostRpcMethods(options.prepareLook)),
   } as const;
   const observation = options.observation;
@@ -1441,6 +1769,7 @@ export function createJoyAgentHostRpcMethodsForSnapshot(
   observation?: JoyAgentObservationToolAdapter,
   onObservationCompleted?: JoyAgentHostToolBridgeOptions['onObservationCompleted'],
   readLibraryCatalog?: JoyAgentHostToolBridgeOptions['readLibraryCatalog'],
+  qc?: JoyAgentHostToolBridgeOptions['qc'],
 ): HostRpcMethods {
   return createJoyAgentHostRpcMethods({
     context: createJoyAgentPagedContext(input),
@@ -1448,5 +1777,6 @@ export function createJoyAgentHostRpcMethodsForSnapshot(
     ...(observation === undefined ? {} : { observation }),
     ...(onObservationCompleted === undefined ? {} : { onObservationCompleted }),
     ...(readLibraryCatalog === undefined ? {} : { readLibraryCatalog }),
+    ...(qc === undefined ? {} : { qc }),
   });
 }
