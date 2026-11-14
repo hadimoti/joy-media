@@ -1016,15 +1016,15 @@ const CATEGORY_REPRESENTATIVES: Readonly<Record<string, string>> = {
 /** Intermediate frames (progress 1/N .. (N-1)/N) checked against both clips. */
 const TRANSITION_SWEEP_STEPS = 20;
 
-/** Transition window used by the test project: [1 s, 2 s) at 20 fps (one frame = 50 ms). */
+/** Transition window used by the test project: [1 s, 2 s) at 100 fps (one frame = 10 ms). */
 const TRANSITION_START_US = 1_000_000;
 const TRANSITION_DURATION_US = 1_000_000;
 /**
  * The last frame that is inside the window. The window is [start, end), so the
  * frame at exactly 2 s is plain clip B and never runs the shader; the check
- * that "the end is clip B" has to use this frame (progress 0.95) instead.
+ * that "the end is clip B" has to use this frame (progress 0.99) instead.
  */
-const TRANSITION_LAST_FRAME_US = 1_950_000;
+const TRANSITION_LAST_FRAME_US = 1_990_000;
 /** Preview and export frames compared: window start, 25, 50, 75 percent, last frame. */
 const TRANSITION_SAMPLE_TIMES_US = [
   TRANSITION_START_US,
@@ -1096,7 +1096,7 @@ function buildTransitionProject(
         name: 'Transition Test Composition',
         width: compWidth,
         height: compHeight,
-        fps: 20,
+        fps: 100,
         durationUs: 3_000_000,
         backgroundColor: '#0c101c',
         tracks: [
@@ -1485,7 +1485,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
 
   const { compId, project } = buildTransitionProject(input.id, 1_000_000);
 
-  // 1. Preview frames at 0%, 25%, 50%, 75% and the last frame inside the window (95%)
+  // 1. Preview frames at 0%, 25%, 50%, 75% and the last frame inside the window (99%)
   const previewFramesBase64: string[] = [];
   const previewPixelsList: Uint8ClampedArray[] = [];
   const diffsVsA: number[] = [];
@@ -1547,7 +1547,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
   const midFrameDiff = Math.max(...sweepDiffsVsA.map((a, i) => Math.min(a, sweepDiffsVsB[i] ?? 0)));
 
   // 2. Export offline MP4 (or frames fallback)
-  const exportFps = 20;
+  const exportFps = 100;
   const exportFrameCount = 60;
   let exportMode = 'offline-mp4';
   let exportError: string | undefined;
@@ -1677,7 +1677,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
 
   // Progress curve: a transition has no easing option in the project format, so
   // the definition is linear progress over the window. The values the renderer
-  // really put on the transition node at 0, 25, 50, 75 and 95 percent must be
+  // really put on the transition node at 0, 25, 50, 75 and 99 percent must be
   // strictly increasing and equal to the linear curve.
   const progressStrictlyIncreasing = sampledProgress.every(
     (value, idx) => idx === 0 || value > sampledProgress[idx - 1]!,
@@ -1758,7 +1758,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
 
   // Preview checks. The window is [start, end), so the frame at exactly the end
   // is plain clip B and never runs the shader; the "end is clip B" check uses the
-  // last frame inside the window (95 percent). A shader that has not nearly
+  // last frame inside the window (99 percent). A shader that has not nearly
   // reached clip B by then fails, and the picture must not move away from B
   // between 50 percent, 75 percent and that last frame.
   const clipABDiff = computeRgbaDiffMetrics(

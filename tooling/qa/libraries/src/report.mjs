@@ -142,13 +142,13 @@ export function buildTransitionsMarkdownReport(report) {
     '',
     '## 1. Transitions Summary Matrix',
     '',
-    '| ID | Category | Label | Preview (0%, 25%, 50%, 75%, 95%) | Encoded MP4 vs Preview (5 pts) | Options (Dur/Dir/Col/Progress/Params) | Audio Crossfade | 1080p ms/f | Status |',
+    '| ID | Category | Label | Preview (0%, 25%, 50%, 75%, 99%) | Encoded MP4 vs Preview (5 pts) | Options (Dur/Dir/Col/Progress/Params) | Audio Crossfade | 1080p ms/f | Status |',
     '|---|---|---|---|---|---|---|---|---|',
   ];
 
   for (const item of report.items) {
     const previewCell = item.preview.passed
-      ? `PASS (ΔA@0=${fmtNum(item.preview.diffVsA[0])}, ΔB@75=${fmtNum(item.preview.diffVsB[3])}, ΔB@95=${fmtNum(item.preview.diffVsB[4])}, mid=${fmtNum(item.preview.midFrameDiff)})`
+      ? `PASS (ΔA@0=${fmtNum(item.preview.diffVsA[0])}, ΔB@75=${fmtNum(item.preview.diffVsB[3])}, ΔB@99=${fmtNum(item.preview.diffVsB[4])}, mid=${fmtNum(item.preview.midFrameDiff)})`
       : `FAIL`;
     const exportCell = formatTransitionExportCell(item);
     const optionsCell = formatTransitionOptionsCell(item);
@@ -229,9 +229,9 @@ export function buildTransitionsMarkdownReport(report) {
 export const TRANSITIONS_KNOWN_LIMITS = [
   '## Known limits of this audit (read before trusting the rows)',
   '',
-  '- **What a pass means.** The first frame equals clip A; the last frame inside the window (95 percent, because the window is [start, end) and the frame at exactly the end is plain clip B) is close to clip B (mean difference at most 25 percent of the A-to-B difference, floor 3); the distance to clip B does not grow between 50, 75 and 95 percent (slack 15 percent of the A-to-B difference); one of 19 sweep frames differs from both clips. The thresholds were chosen by hand, not from a measured baseline.',
-  '- **Export versus preview** compares five preview frames (0, 25, 50, 75 and 95 percent) with frames that ffmpeg extracts from the encoded MP4 of the same composition (mean difference at most 12, which allows for H.264 loss). If WebCodecs is not available the frames are encoded with ffmpeg x264 instead; the report says which mode ran.',
-  '- **Progress** (`prog`) checks the progress value the renderer put on the transition node at 0, 25, 50, 75 and 95 percent against linear progress. A transition has no easing option in the project format, so linear is the definition.',
+  '- **What a pass means.** The first frame equals clip A; the last frame inside the window (99 percent, because the window is [start, end) and the frame at exactly the end is plain clip B) is close to clip B (mean difference at most 25 percent of the A-to-B difference, floor 3); the distance to clip B does not grow between 50, 75 and 99 percent (slack 15 percent of the A-to-B difference); one of 19 sweep frames differs from both clips. The thresholds were chosen by hand, not from a measured baseline.',
+  '- **Export versus preview** compares five preview frames (0, 25, 50, 75 and 99 percent) with frames that ffmpeg extracts from the encoded MP4 of the same composition (mean difference at most 12, which allows for H.264 loss). If WebCodecs is not available the frames are encoded with ffmpeg x264 instead; the report says which mode ran.',
+  '- **Progress** (`prog`) checks the progress value the renderer put on the transition node at 0, 25, 50, 75 and 99 percent against linear progress. A transition has no easing option in the project format, so linear is the definition.',
   '- **Params** counts float uniforms whose changed value alters the picture at 50 percent; a failing one fails the transition. Vector and colour options use the direction and colour checks.',
   '- Edge cases ("clip shorter than the duration", "first and last clip", "mixed bitmap size") only check that a non-empty frame renders, once per category on one representative item. No frame rate is set anywhere.',
   '- Add, replace, remove, drag onto a cut, undo and redo are plain object edits inside the harness. They do not use the real property-system commands or the TimelinePanel drop handler (T-H04 covers the drop live). Save and reopen is a JSON round trip, not the app save, load and validate path.',
