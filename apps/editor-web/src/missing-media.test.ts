@@ -1,8 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AssetRecordV1 } from '@joy-media/project-schema';
-import { deriveMissingMedia, matchReplacementFiles } from './missing-media.js';
+import { emptySpikeProject, makeVideoClip, SECOND_US, withClips } from '@joy-media/test-fixtures';
+import {
+  createMissingClipLookup,
+  deriveMissingMedia,
+  isClipMissing,
+  matchReplacementFiles,
+  missingAssetIdSet,
+} from './missing-media.js';
 import type { RelinkCache } from './media-relink.js';
 import type { OriginalAssetDescriptor } from './opfs-original-asset-cache.js';
+import { flattenRootTimelineVideoClips } from './timeline-nested-playback.js';
+import type * as NestedPlayback from './timeline-nested-playback.js';
+
+// The flatten is wrapped, not replaced, so the test can count how often a playhead tick reflattens.
+vi.mock('./timeline-nested-playback.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof NestedPlayback>();
+  return { ...actual, flattenRootTimelineVideoClips: vi.fn(actual.flattenRootTimelineVideoClips) };
+});
 
 async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', await new Blob([bytes]).arrayBuffer());
@@ -136,5 +151,78 @@ describe('matchReplacementFiles', () => {
     );
     expect(result.matches.map((match) => match.assetId)).toEqual(['asset-1']);
     expect(result.unresolvedAssetIds).toEqual(['asset-2']);
+  });
+});
+
+describe('missing clips on the timeline (T-R03)', () => {
+  const entryFor = (assetId: string, displayName: string) => ({
+    assetId,
+    record: {
+      id: assetId,
+      kind: 'video' as const,
+      displayName,
+      sha256: 'a'.repeat(64),
+      bytes: 4,
+      descriptor: { mimeType: 'video/mp4' },
+    },
+  });
+
+  it('marks exactly the clip whose file is missing, using the document and the cache list', async () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-present', 0, SECOND_US, { assetId: 'asset-present' }),
+      makeVideoClip('clip-missing', SECOND_US, SECOND_US, { assetId: 'asset-missing' }),
+    ]);
+    const assets = {
+      'asset-present': await recordOf('asset-present', encode('present')),
+      'asset-missing': await recordOf('asset-missing', encode('missing')),
+    };
+    const missingIds = missingAssetIdSet(
+      await deriveMissingMedia(assets, cacheWith(['asset-present'])),
+    );
+    const marked = Object.values(project.compositions)
+      .flatMap((composition) => composition.tracks.flatMap((track) => track.clips))
+      .filter((clip) => isClipMissing(clip, missingIds))
+      .map((clip) => clip.id);
+    expect(marked).toEqual(['clip-missing']);
+  });
+
+  it('finds the missing video clip the monitor cannot draw at the playhead, and nothing otherwise', () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-present', 0, SECOND_US, { assetId: 'asset-present' }),
+      makeVideoClip('clip-missing', SECOND_US, SECOND_US, { assetId: 'asset-missing' }),
+    ]);
+    const lookup = createMissingClipLookup(
+      project,
+      missingAssetIdSet([entryFor('asset-missing', 'take-2.mov')]),
+    );
+
+    expect(lookup(SECOND_US + 10)).toBe('asset-missing');
+    expect(lookup(10)).toBeUndefined();
+    expect(lookup(2 * SECOND_US)).toBeUndefined();
+    expect(createMissingClipLookup(project, new Set())(SECOND_US + 10)).toBeUndefined();
+  });
+
+  it('flattens the root timeline once per project, so a playhead tick only scans the missing clips', () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-present', 0, SECOND_US, { assetId: 'asset-present' }),
+      makeVideoClip('clip-missing', SECOND_US, SECOND_US, { assetId: 'asset-missing' }),
+    ]);
+    const missingIds = missingAssetIdSet([entryFor('asset-missing', 'take-2.mov')]);
+    vi.mocked(flattenRootTimelineVideoClips).mockClear();
+
+    const lookup = createMissingClipLookup(project, missingIds);
+    const found = [0, 10, SECOND_US, SECOND_US + 10, SECOND_US + 999, 2 * SECOND_US].map((timeUs) =>
+      lookup(timeUs),
+    );
+
+    expect(found).toEqual([
+      undefined,
+      undefined,
+      'asset-missing',
+      'asset-missing',
+      'asset-missing',
+      undefined,
+    ]);
+    expect(flattenRootTimelineVideoClips).toHaveBeenCalledTimes(1);
   });
 });

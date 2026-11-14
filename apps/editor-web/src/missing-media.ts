@@ -1,5 +1,6 @@
-import type { AssetRecordV1 } from '@joy-media/project-schema';
+import type { AssetRecordV1, Clip, SpikeProject } from '@joy-media/project-schema';
 import { verifyReplacementMedia, type RelinkCache } from './media-relink.js';
+import { flattenRootTimelineVideoClips } from './timeline-nested-playback.js';
 
 /** A project asset whose original is not in this browser profile's cache. */
 export interface MissingMediaEntry {
@@ -45,6 +46,41 @@ export async function deriveMissingMedia(
     if ((await cache.get(assetId)) === undefined) missing.push({ assetId, record });
   }
   return missing;
+}
+
+/**
+ * The asset ids of a missing list. A timeline clip is marked missing exactly when its asset id is in
+ * this set (T-R03), so only the clips that use the missing file are marked.
+ */
+export function missingAssetIdSet(missing: readonly MissingMediaEntry[]): ReadonlySet<string> {
+  return new Set(missing.map((entry) => entry.assetId));
+}
+
+/**
+ * True when a timeline clip's file is missing. A clip is marked exactly when its asset id is in the
+ * set, so only the clips that use the missing file are marked (T-R03). Composition clips have no file.
+ */
+export function isClipMissing(clip: Clip, missingAssetIds: ReadonlySet<string>): boolean {
+  return 'assetId' in clip && missingAssetIds.has(clip.assetId);
+}
+
+/**
+ * The Program Monitor's "Media offline" lookup for one project. For a playhead time it returns the
+ * asset id of the first playing video clip whose file is missing, or undefined. The root timeline is
+ * flattened here, once per project and missing set, so a playhead tick only scans the missing clips
+ * (T-R03).
+ */
+export function createMissingClipLookup(
+  project: SpikeProject,
+  missingAssetIds: ReadonlySet<string>,
+): (timeUs: number) => string | undefined {
+  if (missingAssetIds.size === 0) return () => undefined;
+  const missingClips = flattenRootTimelineVideoClips(project).filter((clip) =>
+    missingAssetIds.has(clip.assetId),
+  );
+  return (timeUs) =>
+    missingClips.find((clip) => timeUs >= clip.startUs && timeUs < clip.startUs + clip.durationUs)
+      ?.assetId;
 }
 
 /**
