@@ -330,6 +330,14 @@ export function createBlobSink(): BlobSink {
   };
 }
 
+/** BT.709 color space tags enforced on all MP4 exports so first and later exports remain identical. */
+export const EXPORT_BT709_COLOR_SPACE = Object.freeze({
+  primaries: 'bt709' as const,
+  transfer: 'bt709' as const,
+  matrix: 'bt709' as const,
+  fullRange: false,
+});
+
 /**
  * Encodes every painted frame into an MP4, as fast as the encoder allows.
  *
@@ -393,8 +401,19 @@ export async function exportOfflineMp4(
       latencyMode: 'quality',
       bitrateMode: 'variable',
       keyFrameInterval: 2,
+      onEncoderConfig: (config) => {
+        (config as VideoEncoderConfig & { colorSpace?: unknown }).colorSpace = {
+          ...EXPORT_BT709_COLOR_SPACE,
+        };
+      },
     } satisfies VideoEncodingConfig);
-    output.addVideoTrack(videoSource, { frameRate });
+    output.addVideoTrack(videoSource, {
+      frameRate,
+      decoderConfig: {
+        codec: source.capability.codec,
+        colorSpace: { ...EXPORT_BT709_COLOR_SPACE },
+      },
+    });
     source.audio?.attach(output);
     await output.start();
 

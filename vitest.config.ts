@@ -12,6 +12,10 @@ export default defineConfig({
       '@joy-media/commands': pkg('./packages/commands/src/index.ts'),
       '@joy-media/test-fixtures': pkg('./packages/test-fixtures/src/index.ts'),
       '@joy-media/render-ir': pkg('./packages/render-ir/src/index.ts'),
+      '@joy-media/renderer-pixi/browser-export': pkg(
+        './packages/renderer-pixi/src/browser-export.ts',
+      ),
+      '@joy-media/renderer-pixi/browser': pkg('./packages/renderer-pixi/src/browser.ts'),
       '@joy-media/renderer-pixi': pkg('./packages/renderer-pixi/src/index.ts'),
       '@joy-media/renderer-headless': pkg('./packages/renderer-headless/src/index.ts'),
       '@joy-media/html-scene-runtime/first-party': pkg(
