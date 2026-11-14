@@ -475,8 +475,6 @@ async function initHarness(
     clipBPngBase64: chartB540.pngBase64,
   };
 }
-  };
-}
 
 async function testItem(input: TestItemInput) {
   if (!state) throw new Error('Harness not initialized');
@@ -1019,6 +1017,19 @@ const CATEGORY_REPRESENTATIVES: Readonly<Record<string, string>> = {
   creative: 'gl:ButterflyWaveScrawler',
 };
 
+const TRANSITION_IMAGE_SIZES_540 = {
+  'clip-a': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+  'clip-b': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+  'clip-1': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+  'clip-2': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+  'clip-3': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+};
+
+const TRANSITION_IMAGE_SIZES_1080 = {
+  'clip-a': { width: BENCH_WIDTH, height: BENCH_HEIGHT },
+  'clip-b': { width: BENCH_WIDTH, height: BENCH_HEIGHT },
+};
+
 function buildTransitionProject(
   transitionId: string,
   durationUs = 1_000_000,
@@ -1149,6 +1160,7 @@ function runCategoryEdgeCases(
       compositions: {
         'c-short': {
           id: 'c-short',
+          name: 'Short Clip Composition',
           width: PREVIEW_WIDTH,
           height: PREVIEW_HEIGHT,
           fps: 20,
@@ -1166,8 +1178,18 @@ function runCategoryEdgeCases(
         },
       },
       visualObjects: {
-        'clip-a': { id: 'clip-a', kind: 'image' },
-        'clip-b': { id: 'clip-b', kind: 'image' },
+        'clip-a': {
+          id: 'clip-a',
+          kind: 'image',
+          name: 'Clip A',
+          transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+        },
+        'clip-b': {
+          id: 'clip-b',
+          kind: 'image',
+          name: 'Clip B',
+          transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+        },
       },
       transitions: [
         {
@@ -1187,6 +1209,7 @@ function runCategoryEdgeCases(
       200_000,
       PREVIEW_WIDTH,
       PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
     );
     renderer.render(frameShort, bitmaps540);
     const px = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1204,6 +1227,7 @@ function runCategoryEdgeCases(
       compositions: {
         'c-multi': {
           id: 'c-multi',
+          name: 'Multi Clip Composition',
           width: PREVIEW_WIDTH,
           height: PREVIEW_HEIGHT,
           fps: 20,
@@ -1222,9 +1246,24 @@ function runCategoryEdgeCases(
         },
       },
       visualObjects: {
-        'clip-1': { id: 'clip-1', kind: 'image' },
-        'clip-2': { id: 'clip-2', kind: 'image' },
-        'clip-3': { id: 'clip-3', kind: 'image' },
+        'clip-1': {
+          id: 'clip-1',
+          kind: 'image',
+          name: 'Clip 1',
+          transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+        },
+        'clip-2': {
+          id: 'clip-2',
+          kind: 'image',
+          name: 'Clip 2',
+          transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+        },
+        'clip-3': {
+          id: 'clip-3',
+          kind: 'image',
+          name: 'Clip 3',
+          transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+        },
       },
       transitions: [
         {
@@ -1258,6 +1297,7 @@ function runCategoryEdgeCases(
       1_500_000,
       PREVIEW_WIDTH,
       PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
     );
     renderer.render(frameFirst, multiBitmaps);
     const pxFirst = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1268,6 +1308,7 @@ function runCategoryEdgeCases(
       3_500_000,
       PREVIEW_WIDTH,
       PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
     );
     renderer.render(frameLast, multiBitmaps);
     const pxLast = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1292,6 +1333,7 @@ function runCategoryEdgeCases(
       1_500_000,
       PREVIEW_WIDTH,
       PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
     );
     renderer.render(frame, diffSizeBitmaps);
     const px = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1305,7 +1347,7 @@ function runCategoryEdgeCases(
   let lifecyclePassed = false;
   let lifecycleDetails = '';
   try {
-    const { project } = buildTransitionProject(transitionId, 1_000_000);
+    const { compId, project } = buildTransitionProject(transitionId, 1_000_000);
     const initialCount = project.transitions?.length ?? 0;
     if (initialCount !== 1) throw new Error('Initial add failed');
 
@@ -1351,12 +1393,23 @@ function runCategoryEdgeCases(
     if ((redoState?.transitions?.length ?? 0) !== 1) throw new Error('Redo failed');
 
     const json = JSON.stringify(project);
-    const parsed = JSON.parse(json);
-    const migrated = migrateV0ToV1(parsed).project;
-    if (!migrated.transitions || migrated.transitions.length !== 1)
+    const parsed = JSON.parse(json) as JoyProjectV1;
+    if (!parsed.transitions || parsed.transitions.length !== 1)
       throw new Error('Reopen transitions missing');
-    if (migrated.transitions[0]?.type !== transitionId)
+    if (parsed.transitions[0]?.type !== transitionId)
       throw new Error('Reopen transition type mismatch');
+
+    const reopenFrame = buildRenderFrameIRFromProject(
+      parsed,
+      compId,
+      1_500_000,
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+    );
+    renderer.render(reopenFrame, bitmaps540);
+    const pxReopen = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    if (!pxReopen || pxReopen.data.length === 0) throw new Error('Render reopen project failed');
 
     lifecyclePassed = true;
     lifecycleDetails =
@@ -1395,8 +1448,19 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
       timeUs,
       PREVIEW_WIDTH,
       PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
     );
     currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
+    console.log(
+      'TRANSITION DEBUG:',
+      input.id,
+      'timeUs:',
+      timeUs,
+      'nodes:',
+      frame.nodes.length,
+      'transitionNode:',
+      JSON.stringify(frame.nodes.find((n) => n.kind === 'transition')),
+    );
     const px = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
     if (!px) throw new Error(`readPixels failed at time ${timeUs}`);
     const b64 = rgbaToPngBase64(
@@ -1413,6 +1477,9 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
     const diffB = computeRgbaDiffMetrics(px.data, currentState.clipBBitmap540.data);
     diffsVsA.push(diffA.meanAbsDiff);
     diffsVsB.push(diffB.meanAbsDiff);
+    if (timeUs === 1_500_000) {
+      console.log('DIFF AT 1.5s:', input.id, 'diffA:', diffA.meanAbsDiff, 'diffB:', diffB.meanAbsDiff, 'px[0..10]:', Array.from(px.data.slice(0, 10)), 'clipA[0..10]:', Array.from(currentState.clipABitmap540.data.slice(0, 10)));
+    }
   }
 
   // 2. Export offline MP4 (or frames fallback)
@@ -1444,6 +1511,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
             timeUs,
             PREVIEW_WIDTH,
             PREVIEW_HEIGHT,
+            { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
           );
           currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
           if ([20, 25, 30, 35, 40].includes(frameIndex)) {
@@ -1484,6 +1552,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
           timeUs,
           PREVIEW_WIDTH,
           PREVIEW_HEIGHT,
+          { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
         );
         currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
         const px = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1512,6 +1581,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
     1_250_000,
     PREVIEW_WIDTH,
     PREVIEW_HEIGHT,
+    { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
   );
   currentState.previewRenderer.render(frame500ms, currentState.transitionBitmaps540);
   const px500ms = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1531,6 +1601,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
       1_500_000,
       PREVIEW_WIDTH,
       PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
     );
     currentState.previewRenderer.render(frameDir, currentState.transitionBitmaps540);
     const pxDir = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1556,6 +1627,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
       1_500_000,
       PREVIEW_WIDTH,
       PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
     );
     currentState.previewRenderer.render(frameCol, currentState.transitionBitmaps540);
     const pxCol = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1589,6 +1661,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
         1_500_000,
         PREVIEW_WIDTH,
         PREVIEW_HEIGHT,
+        { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
       );
       currentState.previewRenderer.render(frameParam, currentState.transitionBitmaps540);
       const pxParam = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1611,6 +1684,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
     1_500_000,
     BENCH_WIDTH,
     BENCH_HEIGHT,
+    { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_1080 },
   );
   for (let i = 0; i < 2; i += 1) {
     currentState.benchRenderer.render(frame1080, currentState.transitionBitmaps1080);

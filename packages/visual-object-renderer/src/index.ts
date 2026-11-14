@@ -58,20 +58,20 @@ export interface ResolvedObject {
 export type ClipTimingLookup = ReadonlyMap<string, { readonly startUs: TimeUs }>;
 
 export interface BuildRenderFrameOptions {
-  readonly transitions?: readonly TransitionV1[];
+  readonly transitions?: readonly TransitionV1[] | undefined;
   /** Right-clip start times used to activate transitions at the junction. */
-  readonly clipTimes?: ClipTimingLookup;
-  readonly colorGrade?: ColorGradeV1 | ColorGradeV2 | ColorGradeIR;
+  readonly clipTimes?: ClipTimingLookup | undefined;
+  readonly colorGrade?: ColorGradeV1 | ColorGradeV2 | ColorGradeIR | undefined;
   /** Per-object effect stacks from `VisualObjectV1.effects` (P16). */
-  readonly effectsByObjectId?: Readonly<Record<string, readonly EffectInstanceV1[]>>;
+  readonly effectsByObjectId?: Readonly<Record<string, readonly EffectInstanceV1[]>> | undefined;
   /** Universal property animation map used for frame-local effect sampling. */
-  readonly propertyAnimations?: JoyProjectV1['propertyAnimations'];
+  readonly propertyAnimations?: JoyProjectV1['propertyAnimations'] | undefined;
   /** Intrinsic pixel size for image stickers when real bitmaps are available. */
   readonly imageSizesByObjectId?: Readonly<
     Record<string, { readonly width: number; readonly height: number }>
-  >;
+  > | undefined;
   /** Optional evaluator-provided layer order for universal timeline tracks. */
-  readonly zIndexByObjectId?: Readonly<Record<string, number>>;
+  readonly zIndexByObjectId?: Readonly<Record<string, number>> | undefined;
 }
 
 /**
@@ -107,7 +107,7 @@ export function buildRenderFrameIRFromProject(
           : { expressionDiagnostics: resolved.diagnostics }),
       };
     });
-  return buildRenderFrameIR(compositionId, timeUs, width, height, resolvedObjects, {
+  const buildOptions: BuildRenderFrameOptions = {
     ...options,
     propertyAnimations: options.propertyAnimations ?? project.propertyAnimations,
     transitions: options.transitions ?? project.transitions,
@@ -130,7 +130,8 @@ export function buildRenderFrameIRFromProject(
               : project.colorGrade,
         }
       : {}),
-  });
+  };
+  return buildRenderFrameIR(compositionId, timeUs, width, height, resolvedObjects, buildOptions);
 }
 
 /**
@@ -416,7 +417,7 @@ export function sampleTransitionParams(
   const defaults = mergeTransitionParams(transition.type, transition.params);
   if (right === undefined) return numericParams(defaults);
   const range = {
-    startUs: right.startUs - transition.durationUs,
+    startUs: Math.max(0, right.startUs - transition.durationUs),
     durationUs: transition.durationUs,
   };
   const params: Record<string, number> = {};
