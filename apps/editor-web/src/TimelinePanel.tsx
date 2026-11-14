@@ -58,6 +58,7 @@ import {
   TransitionUiIcon,
 } from './icons.js';
 import { computeClipEffectFlags, type ClipEffectFlags } from './timeline-clip-effect-flags.js';
+import { clipChromeLayout } from './timeline-clip-chrome-layout.js';
 import {
   buildClipContextMenu,
   buildEmptyCanvasContextMenu,
@@ -418,8 +419,13 @@ function TimelineClip({
   const durationLabel = `${(displayDurationUs / 1_000_000).toFixed(1)}s`;
   const startLabel = `${(clip.startUs / 1_000_000).toFixed(1)}s`;
   const endLabel = `${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`;
-  const showChrome = layoutWidthPx >= 48;
-  const showDuration = layoutWidthPx >= 100;
+  // Parts drop in order as the clip shrinks (length, effect icons, speed badge): never cut in half.
+  const chromeLayout = clipChromeLayout(layoutWidthPx, {
+    flagCount: (effectFlags?.effects === true ? 1 : 0) + (effectFlags?.transition === true ? 1 : 0),
+    hasBadge: rateBadge !== undefined,
+  });
+  const showChrome = chromeLayout.chrome;
+  const showDuration = chromeLayout.duration;
   const kindClass =
     clip.kind === 'composition' ? 'timeline-clip--comp' : `timeline-clip--${elementKind}`;
   const laneClass = `timeline-clip--lane-${Math.min(laneIndex, 3)}`;
@@ -705,7 +711,7 @@ function TimelineClip({
           </span>
           <span className="timeline-clip-label">{label}</span>
           {showDuration && <span className="timeline-clip-duration">{durationLabel}</span>}
-          {effectFlags?.effects === true && (
+          {chromeLayout.flags && effectFlags?.effects === true && (
             <span
               className="timeline-clip-flag timeline-clip-flag--effects"
               title="Has effects or filters"
@@ -714,7 +720,7 @@ function TimelineClip({
               <EffectsUiIcon />
             </span>
           )}
-          {effectFlags?.transition === true && (
+          {chromeLayout.flags && effectFlags?.transition === true && (
             <span
               className="timeline-clip-flag timeline-clip-flag--transition"
               title="Has a transition"
@@ -723,7 +729,9 @@ function TimelineClip({
               <TransitionUiIcon />
             </span>
           )}
-          {rateBadge !== undefined && <span className="timeline-clip-badge">{rateBadge}</span>}
+          {chromeLayout.badge && rateBadge !== undefined && (
+            <span className="timeline-clip-badge">{rateBadge}</span>
+          )}
         </span>
       )}
       {!showChrome && (
