@@ -51,6 +51,7 @@ import {
   databaseModuleProblem,
 } from './scenario-driver.mjs';
 import {
+  afterRunComparison,
   approvedOwnerFilesOf,
   countFiles,
   unexpectedRunArtifacts,
@@ -384,13 +385,10 @@ async function runFreshProcess(options) {
       }),
     );
     // The owner library is compared with its reading from before the run. A change is a blocker, as in the restart runner.
-    report = reportWithFolderChanges(report, [
-      {
-        label: 'the owner library',
-        before: libraryBefore,
-        after: await driver.ownerLibrarySignature(),
-      },
-    ]);
+    report = afterRunComparison(FRESH_PROCESS_SCENARIO, report, {
+      libraryBefore,
+      libraryAfter: await driver.ownerLibrarySignature(),
+    });
   } catch (error) {
     const errorPath = join(out, 'error.json');
     if (runFolderProblem(out) === undefined) {
@@ -589,18 +587,12 @@ async function main() {
     );
     // The owner library and the Downloads folder are compared with their readings from before the run. A change is
     // recorded as a blocker and no receipt is written, so the run's evidence is kept.
-    report = reportWithFolderChanges(report, [
-      {
-        label: 'the owner library',
-        before: libraryBefore,
-        after: await driver.ownerLibrarySignature(),
-      },
-      {
-        label: 'the Downloads folder',
-        before: downloadsBefore,
-        after: await driver.downloadsSignature(),
-      },
-    ]);
+    report = afterRunComparison(RESTART_SAVE_EXPORT, report, {
+      libraryBefore,
+      libraryAfter: await driver.ownerLibrarySignature(),
+      downloadsBefore,
+      downloadsAfter: await driver.downloadsSignature(),
+    });
   } catch (error) {
     const errorPath = join(out, 'error.json');
     if (runFolderProblem(out) === undefined) {

@@ -14,6 +14,7 @@ import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FRESH_PROCESS_SCENARIO } from './attended-fresh-process.ts';
 import {
+  afterRunComparison,
   approvedOwnerFilesOf,
   countFiles,
   findOnPath,
@@ -399,5 +400,80 @@ describe('the report after the folders are compared again', () => {
       'process 4000 did not close: x',
       'the owner library changed during the run',
     ]);
+  });
+});
+
+describe('the runner after-run comparison pure function', () => {
+  const baseReport = {
+    verdict: 'passed',
+    blockers: [] as string[],
+    checks: [{ name: 'project-persisted', status: 'passed' }],
+    receipt: { schema: 'receipt', candidateSha: 'abc' },
+  };
+
+  it('leaves the report unchanged when watched signatures match in fresh-process scenario', () => {
+    const result = afterRunComparison(FRESH_PROCESS_SCENARIO, baseReport, {
+      libraryBefore: 'sig-lib-1',
+      libraryAfter: 'sig-lib-1',
+    });
+    expect(result).toBe(baseReport);
+  });
+
+  it('fails and removes receipt when owner library changes in fresh-process scenario', () => {
+    const result = afterRunComparison(FRESH_PROCESS_SCENARIO, baseReport, {
+      libraryBefore: 'sig-lib-1',
+      libraryAfter: 'sig-lib-2',
+    });
+    expect(result.verdict).toBe('failed');
+    expect(result.blockers).toEqual(['the owner library changed during the run']);
+    expect(result.receipt).toBeUndefined();
+    expect(result.checks).toEqual(baseReport.checks);
+  });
+
+  it('ignores downloads changes for fresh-process scenario because only library is watched', () => {
+    const result = afterRunComparison(FRESH_PROCESS_SCENARIO, baseReport, {
+      libraryBefore: 'sig-lib-1',
+      libraryAfter: 'sig-lib-1',
+      downloadsBefore: 'sig-dl-1',
+      downloadsAfter: 'sig-dl-2',
+    });
+    expect(result).toBe(baseReport);
+  });
+
+  it('leaves the report unchanged when watched signatures match in restart scenario', () => {
+    const result = afterRunComparison('desktop.app.restart-save-export', baseReport, {
+      libraryBefore: 'sig-lib-1',
+      libraryAfter: 'sig-lib-1',
+      downloadsBefore: 'sig-dl-1',
+      downloadsAfter: 'sig-dl-1',
+    });
+    expect(result).toBe(baseReport);
+  });
+
+  it('fails when Downloads folder changes in restart scenario', () => {
+    const result = afterRunComparison('desktop.app.restart-save-export', baseReport, {
+      libraryBefore: 'sig-lib-1',
+      libraryAfter: 'sig-lib-1',
+      downloadsBefore: 'sig-dl-1',
+      downloadsAfter: 'sig-dl-2',
+    });
+    expect(result.verdict).toBe('failed');
+    expect(result.blockers).toEqual(['the Downloads folder changed during the run']);
+    expect(result.receipt).toBeUndefined();
+  });
+
+  it('records both library and Downloads blockers when both change in restart scenario', () => {
+    const result = afterRunComparison('desktop.app.restart-save-export', baseReport, {
+      libraryBefore: 'sig-lib-1',
+      libraryAfter: 'sig-lib-2',
+      downloadsBefore: 'sig-dl-1',
+      downloadsAfter: 'sig-dl-2',
+    });
+    expect(result.verdict).toBe('failed');
+    expect(result.blockers).toEqual([
+      'the owner library changed during the run',
+      'the Downloads folder changed during the run',
+    ]);
+    expect(result.receipt).toBeUndefined();
   });
 });
