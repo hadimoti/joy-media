@@ -129,6 +129,8 @@ export function useMonitorTransform(
     () =>
       scopedKeyTable.register({
         scope: MONITOR_KEY_SCOPE,
+        // Before the frame step on Left and Right: with something selected the arrows move it (LTP-049).
+        priority: 10,
         match: (event) =>
           !event.ctrlKey &&
           !event.altKey &&

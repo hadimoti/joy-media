@@ -257,6 +257,11 @@ export interface ScopedKeyBinding {
   readonly run: (event: ScopedKeyEvent) => void;
   /** Also runs while a text field has focus. Off by default. */
   readonly inTextFields?: boolean;
+  /**
+   * Which binding is asked first when two want the same key. Higher first, 0 by default; equal ones keep their
+   * order of registration. The Monitor's nudge asks before its frame step, so a selected clip moves with the arrows.
+   */
+  readonly priority?: number;
 }
 
 export interface ScopedKeyTable {
@@ -284,7 +289,11 @@ export function createScopedKeyTable(): ScopedKeyTable {
       };
     },
     register(binding) {
-      bindings.push(binding);
+      // Stable insert: after every binding of the same or a higher priority.
+      const rank = binding.priority ?? 0;
+      let at = bindings.length;
+      while (at > 0 && (bindings[at - 1]?.priority ?? 0) < rank) at -= 1;
+      bindings.splice(at, 0, binding);
       return () => {
         const index = bindings.indexOf(binding);
         if (index >= 0) bindings.splice(index, 1);

@@ -25,6 +25,22 @@ describe('scoped key table (focus-based keys)', () => {
     expect(table.dispatch(key('ArrowRight'))).toBe(false);
   });
 
+  it('asks a higher priority binding first, and falls through when it does not match (LTP-049)', () => {
+    const table = createScopedKeyTable();
+    table.setScope('monitor', () => true);
+    const frameStep = vi.fn();
+    table.register({ scope: 'monitor', match: () => true, run: frameStep });
+    const nudge = vi.fn();
+    let selected = true;
+    table.register({ scope: 'monitor', priority: 10, match: () => selected, run: nudge });
+    expect(table.dispatch(key('ArrowRight'))).toBe(true);
+    expect(nudge).toHaveBeenCalledTimes(1);
+    expect(frameStep).not.toHaveBeenCalled();
+    selected = false;
+    expect(table.dispatch(key('ArrowRight'))).toBe(true);
+    expect(frameStep).toHaveBeenCalledTimes(1);
+  });
+
   it('skips text fields unless the binding asks for them', () => {
     const table = createScopedKeyTable();
     table.setScope('monitor', () => true);
