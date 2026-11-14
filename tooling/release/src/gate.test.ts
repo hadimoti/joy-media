@@ -4,9 +4,11 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildStaticAssetInventory,
+  EFFECT_PREVIEW_BASELINE_PATH,
   evaluateReleaseGate,
   FEATURE_STATUS_PATH,
   findProductionFixtureRegistrations,
+  MINIMUM_EFFECT_PREVIEW_COUNT,
   findTrackedArtifactViolations,
   RELEASE_COMMANDS,
   releaseChildEnv,
@@ -653,6 +655,7 @@ describe('JOY Media 1.0 release gate', () => {
     ];
     const publicFiles = [
       ...svgAssets,
+      'effects/preview/before.webp',
       'effects/preview/glow.webp',
       'effects/preview/emboss.webp',
       'effects/preview/sepia.webp',
@@ -696,6 +699,9 @@ describe('JOY Media 1.0 release gate', () => {
     expect(result.inventory.summary.effectPreviewCount).toBe(3);
     expect(result.inventory.summary.effectMotionPreviewCount).toBe(0);
     expect(
+      result.inventory.assets.find((asset) => asset.path === EFFECT_PREVIEW_BASELINE_PATH),
+    ).toMatchObject({ kind: 'effect-preview-baseline' });
+    expect(
       result.inventory.assets.find((asset) => asset.path === 'assets/index-abcd1234.js'),
     ).toMatchObject({
       kind: 'built-asset',
@@ -703,6 +709,29 @@ describe('JOY Media 1.0 release gate', () => {
       size: expect.any(Number),
       sha256: expect.any(String),
     });
+  });
+
+  it('does not let the before baseline stand in for a missing effect preview', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-release-effect-floor-'));
+    const webp = Buffer.from('RIFF\x04\x00\x00\x00WEBPVP8 ', 'latin1');
+    // One effect preview short of the floor, plus the baseline still.
+    const assets = [
+      EFFECT_PREVIEW_BASELINE_PATH,
+      ...Array.from(
+        { length: MINIMUM_EFFECT_PREVIEW_COUNT - 1 },
+        (_, index) => `effects/preview/effect-${index}.webp`,
+      ),
+    ];
+    for (const asset of assets) {
+      for (const base of ['apps/editor-web/public', 'apps/editor-web/dist']) {
+        mkdirSync(resolve(root, base, asset, '..'), { recursive: true });
+        writeFileSync(join(root, base, asset), webp);
+      }
+    }
+
+    const { inventory } = buildStaticAssetInventory(root);
+    expect(inventory.summary.effectPreviewCount).toBe(MINIMUM_EFFECT_PREVIEW_COUNT - 1);
+    expect(inventory.summary.effectPreviewCount).toBeLessThan(MINIMUM_EFFECT_PREVIEW_COUNT);
   });
 
   it('requires every effect preview binary to survive the build without an SPA fallback', () => {

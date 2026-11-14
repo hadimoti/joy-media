@@ -3,6 +3,10 @@
  * Builds WebP still previews for all effects/filters and 24-frame WebP strips
  * for all transitions using @joy-media/renderer-pixi/browser inside headless Chromium,
  * then writes tooling/previews/manifest.json with per-entry input/output hashes.
+ *
+ * Usage: node tooling/previews/build-previews.mjs [--only=all|effects|transitions] [--filter=<id>]
+ * The manifest is rewritten only by an unfiltered run, and only after verification passes.
+ * Every run fails on a page error or console.error from the harness.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -40,6 +44,7 @@ const viteEntry = pathToFileURL(
   require.resolve('vite', { paths: [resolve(REPO_ROOT, 'apps/editor-web'), REPO_ROOT] }),
 ).href;
 const playwrightEntry = pathToFileURL(require.resolve('playwright', { paths: [REPO_ROOT] })).href;
+const prettierBin = resolve(REPO_ROOT, 'node_modules/prettier/bin/prettier.cjs');
 
 function parseArgs(argv) {
   const secondSource = new Set(DEFAULT_SECOND_SOURCE_EFFECT_IDS);
@@ -67,6 +72,10 @@ function parseArgs(argv) {
     } else if (arg.startsWith('--filter=')) {
       filterPattern = arg.slice('--filter='.length);
     }
+  }
+
+  if (!['all', 'effects', 'transitions'].includes(only)) {
+    throw new Error(`--only must be all, effects or transitions (got "${only}")`);
   }
 
   return {
@@ -562,7 +571,16 @@ async function main() {
       transitionEntries.push(...previousManifest.transitions);
     }
 
-    if (!filterPattern && (only === 'all' || only === 'effects')) {
+    // Every run, partial or full, fails on a page error or console.error from the harness.
+    const errors = [...browserErrors];
+
+    // Only an unfiltered run rewrites the manifest, and only after the whole manifest verifies.
+    if (!filterPattern) {
+      if (!beforeEntry) {
+        throw new Error(
+          'The manifest has no "before" still yet: run --only=all or --only=effects first',
+        );
+      }
       const stillsTotalBytes =
         beforeEntry.bytes + effectEntries.reduce((sum, entry) => sum + entry.bytes, 0);
       const transitionsTotalBytes = transitionEntries.reduce((sum, entry) => sum + entry.bytes, 0);
@@ -601,19 +619,25 @@ async function main() {
         }
       }
 
-      const errors = [
-        ...browserErrors,
-        ...verifyPreviewManifest(manifest, expected, REPO_ROOT, { verifyPixels: true }),
-      ];
-      writeFileSync(existingManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+      errors.push(...verifyPreviewManifest(manifest, expected, REPO_ROOT, { verifyPixels: true }));
       console.log('Preview build summary:', JSON.stringify(manifest.summary));
       console.log(
         `Budgets: stills ${stillsTotalBytes} <= ${PREVIEW_SIZE_BUDGETS.maxStillsTotalBytes}, maxTransition ${maxTransitionBytes} <= ${PREVIEW_SIZE_BUDGETS.maxTransitionBytes}, total ${manifest.summary.totalBytes} < ${PREVIEW_SIZE_BUDGETS.maxTotalBytes}`,
       );
-      if (errors.length > 0) {
-        console.error('Verification errors:\n' + errors.join('\n'));
-        process.exitCode = 1;
+
+      if (errors.length === 0) {
+        writeFileSync(existingManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+        // Keep the committed manifest in the prettier format that format:check enforces.
+        execFileSync(process.execPath, [prettierBin, '--write', existingManifestPath], {
+          stdio: 'pipe',
+        });
+        console.log(`Wrote ${PREVIEW_MANIFEST_PATH}`);
       }
+    }
+
+    if (errors.length > 0) {
+      console.error('Verification errors:\n' + errors.join('\n'));
+      process.exitCode = 1;
     }
   } finally {
     await browser.close();

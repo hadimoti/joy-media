@@ -21,6 +21,8 @@ export const REQUIRED_EDITOR_STATIC_ASSETS = [
   'assets/transition-preview-frame-b.svg',
 ] as const;
 export const MINIMUM_EFFECT_PREVIEW_COUNT = 33;
+/** Counted as a baseline, never as one of the effect previews the floor above measures. */
+export const EFFECT_PREVIEW_BASELINE_PATH = 'effects/preview/before.webp';
 export const REQUIRED_EFFECT_MOTION_PREVIEW_COUNT = 0;
 
 const PUBLIC_STATIC_ROOT = 'apps/editor-web/public' as const;
@@ -224,6 +226,7 @@ export interface ReleaseStaticAssetRecord {
     | 'built-asset'
     | 'required-transition-frame'
     | 'effect-preview'
+    | 'effect-preview-baseline'
     | 'effect-motion-preview';
   readonly mimeType: string;
   readonly signature: string;
@@ -1036,6 +1039,8 @@ function classifyStaticAsset(path: string): ReleaseStaticAssetRecord['kind'] {
   )
     return 'required-transition-frame';
   if (path.startsWith('effects/preview-motion/')) return 'effect-motion-preview';
+  // before.webp is the unfiltered baseline still used for pixel comparison, not one of the effect previews.
+  if (path === EFFECT_PREVIEW_BASELINE_PATH) return 'effect-preview-baseline';
   if (path.startsWith('effects/preview/')) return 'effect-preview';
   return 'copied-public-asset';
 }
