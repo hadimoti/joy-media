@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Output } from 'mediabunny';
+import { validateVideoChunkMetadata } from '../node_modules/mediabunny/dist/modules/src/codec.js';
 import {
   createBlobSink,
   detectOfflineMp4Capability,
@@ -17,7 +18,8 @@ const state = {
   adds: [] as { readonly timestamp: number; readonly duration: number | undefined }[],
   progress: [] as { readonly completed: number; readonly total: number }[],
   fedUntil: [] as number[],
-  videoTrackMetadata: undefined as { readonly frameRate: number } | undefined,
+  videoTrackMetadata: undefined as
+    { readonly frameRate: number; readonly decoderConfig?: unknown } | undefined,
   encodingConfig: undefined as unknown,
   formatOptions: undefined as unknown,
   outputCreated: 0,
@@ -95,7 +97,10 @@ class FakeOutput {
     state.log.push('output:new');
   }
 
-  addVideoTrack(_source: unknown, metadata?: { readonly frameRate: number }): unknown {
+  addVideoTrack(
+    _source: unknown,
+    metadata?: { readonly frameRate: number; readonly decoderConfig?: unknown },
+  ): unknown {
     state.videoTrackMetadata = metadata;
     state.log.push('output:addVideoTrack');
     return {};
@@ -300,7 +305,7 @@ describe('exportOfflineMp4', () => {
     expect(state.videoSourceClosed).toBe(1);
   });
 
-  it('encodes with the capability codec and the manifest frame rate', async () => {
+  it('encodes with the capability codec and tags encoded decoder metadata as BT.709', async () => {
     await exportOfflineMp4(baseSource(), deps);
 
     expect(state.encodingConfig).toMatchObject({
@@ -311,6 +316,32 @@ describe('exportOfflineMp4', () => {
       latencyMode: 'quality',
       keyFrameInterval: 2,
     });
+    const packetMetadata = {
+      decoderConfig: {
+        codec: 'avc1.640028',
+        codedWidth: 160,
+        codedHeight: 90,
+        description: new Uint8Array([1, 2, 3]),
+      },
+    };
+    const encodingConfig = state.encodingConfig as {
+      onEncodedPacket?: (packet: unknown, metadata: typeof packetMetadata) => void;
+    };
+    encodingConfig.onEncodedPacket?.({}, packetMetadata);
+
+    expect(packetMetadata.decoderConfig).toEqual({
+      codec: 'avc1.640028',
+      codedWidth: 160,
+      codedHeight: 90,
+      description: new Uint8Array([1, 2, 3]),
+      colorSpace: {
+        primaries: 'bt709',
+        transfer: 'bt709',
+        matrix: 'bt709',
+        fullRange: false,
+      },
+    });
+    expect(() => validateVideoChunkMetadata(packetMetadata, 'avc')).not.toThrow();
     expect(state.videoTrackMetadata).toEqual({ frameRate: 30 });
     // Written front to back, one fragment at a time, so no copy of the file builds up in memory.
     expect(state.formatOptions).toEqual({ fastStart: 'fragmented' });

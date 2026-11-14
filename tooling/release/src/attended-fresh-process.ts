@@ -80,7 +80,7 @@ export interface FreshEditorPage {
   /** The browser storage values for these keys, or null for a key that is absent. */
   readStorage(keys: readonly string[]): Promise<Readonly<Record<string, string | null>>>;
   /** Export MP4, then the download of the verified file; resolves with the MP4 bytes. */
-  renderMp4(): Promise<Uint8Array>;
+  renderMp4(options?: { readonly forceRecorderFallback?: boolean }): Promise<Uint8Array>;
   /** The page's visible text and a screenshot, taken when a step fails so the failure can be read afterwards. */
   snapshot(): Promise<{ readonly text: string; readonly png: Uint8Array }>;
 }

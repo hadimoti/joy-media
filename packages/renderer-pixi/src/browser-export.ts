@@ -183,7 +183,10 @@ export async function downloadBrowserMp4(
   const bytesPerFrame = width * height * 4;
   const frameDurationMs = 1_000 / frameRate;
   try {
-    const context = source.renderFrame === undefined ? undefined : canvas.getContext('2d');
+    const context =
+      source.renderFrame === undefined
+        ? undefined
+        : canvas.getContext('2d', { colorSpace: 'srgb' });
     if (source.renderFrame !== undefined && context === null)
       throw new Error('2D canvas is unavailable for browser MP4 export');
     let manualFrameCapture = false;

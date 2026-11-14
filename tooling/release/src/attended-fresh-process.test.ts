@@ -223,9 +223,9 @@ class FakePage implements FreshEditorPage {
     return { text: 'fake page text', png: new Uint8Array([137, 80, 78, 71]) };
   }
 
-  async renderMp4(): Promise<Uint8Array> {
+  async renderMp4(options?: { readonly forceRecorderFallback?: boolean }): Promise<Uint8Array> {
     if (this.driver.faults.renderFails) throw new Error('the render ended as failed');
-    this.driver.events.push('render');
+    this.driver.events.push(options?.forceRecorderFallback ? 'render:recorder-fallback' : 'render');
     return RENDER;
   }
 }
@@ -915,5 +915,13 @@ describe('the package and store helpers', () => {
     expect(names.clipName).toBe('fresh-process-2b0f6c7e.mp4');
     expect(other.clipName).not.toBe(names.clipName);
     expect(names.sourceTitle).not.toBe(other.sourceTitle);
+  });
+
+  it('exercises the recorder fallback route through renderMp4 when requested (C-079)', async () => {
+    const driver = new FakeFreshDriver();
+    const page = new FakePage(driver, true);
+    const bytes = await page.renderMp4({ forceRecorderFallback: true });
+    expect(bytes).toBe(RENDER);
+    expect(driver.events).toContain('render:recorder-fallback');
   });
 });

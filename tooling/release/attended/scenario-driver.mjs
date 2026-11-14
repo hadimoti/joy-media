@@ -728,7 +728,12 @@ function freshEditorPageOf(base) {
       return { text, png: new Uint8Array(png) };
     },
 
-    async renderMp4() {
+    async renderMp4(options = {}) {
+      if (options.forceRecorderFallback) {
+        await page.evaluate(() => {
+          window.__JOY_MEDIA_FORCE_RECORDER_FALLBACK__ = true;
+        });
+      }
       const start = await captureStart(page);
       await button('Export MP4').click();
       const recent = button('Recent processes');

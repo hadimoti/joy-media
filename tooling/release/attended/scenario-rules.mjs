@@ -348,6 +348,39 @@ export function reportWithFolderChanges(report, watched) {
   return reportWithChanges(report, changed);
 }
 
+/**
+ * Compares watched folders after a scenario run and returns the updated report.
+ * A changed folder is recorded as a blocker, the verdict becomes 'failed', and
+ * the receipt is dropped.
+ *
+ * For `project.persistence.fresh-process`, compares the owner library.
+ * For other scenarios (e.g. `desktop.app.restart-save-export`), compares the
+ * owner library and the Downloads folder.
+ */
+export function afterRunComparison(scenario, report, signatures) {
+  if (scenario === FRESH_PROCESS_SCENARIO) {
+    return reportWithFolderChanges(report, [
+      {
+        label: 'the owner library',
+        before: signatures.libraryBefore,
+        after: signatures.libraryAfter,
+      },
+    ]);
+  }
+  return reportWithFolderChanges(report, [
+    {
+      label: 'the owner library',
+      before: signatures.libraryBefore,
+      after: signatures.libraryAfter,
+    },
+    {
+      label: 'the Downloads folder',
+      before: signatures.downloadsBefore,
+      after: signatures.downloadsAfter,
+    },
+  ]);
+}
+
 /** The owner's default asset library under a home folder. A run reads it only to count its files. */
 export function ownerDefaultLibrary(home) {
   return join(home, 'joy-media-assets');

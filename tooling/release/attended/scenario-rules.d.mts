@@ -24,6 +24,17 @@ export function reportWithFolderChanges<T extends object>(
   report: T,
   watched: readonly { readonly label: string; readonly before: string; readonly after: string }[],
 ): T;
+export interface AfterRunSignatures {
+  readonly libraryBefore: string;
+  readonly libraryAfter: string;
+  readonly downloadsBefore?: string;
+  readonly downloadsAfter?: string;
+}
+export function afterRunComparison<T extends object>(
+  scenario: string,
+  report: T,
+  signatures: AfterRunSignatures,
+): T;
 export function ownerDefaultLibrary(home: string): string;
 export function approvedOwnerFilesOf(
   options: Readonly<Record<string, string | boolean>>,
