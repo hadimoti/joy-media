@@ -18,6 +18,7 @@ import { removeAgentIdempotencyRecords } from './agent-idempotency-store.js';
 import { ProjectOperationLedger } from './project-operation-ledger.js';
 import {
   purgeCatalogProject,
+  projectCardFields,
   restoreCatalogProject,
   trashCatalogProject,
   TIMELINE_LOG_KEY,
@@ -161,6 +162,8 @@ export function duplicateLocalProject(
     updatedAt: now,
     timelineProjectId: id,
     visualProjectId: id,
+    // A copy looks like its source until it is saved on its own.
+    ...projectCardFields(entry),
   };
   upsertCatalogProject(storage, next);
   return next;
