@@ -89,7 +89,9 @@ describe('transcribeReferenceCaption (live + fixture fallback)', () => {
 
     await expect(
       transcribeReferenceCaption('caption-en', 'en-US', client, { media, mediaType: 'audio/wav' }),
-    ).rejects.toThrow('Live transcription could not process the selected media.');
+    ).rejects.toThrow(
+      'Live transcription could not process the selected media. local Whisper unavailable',
+    );
   });
 
   it('surfaces the local Whisper configuration error for selected media', async () => {

@@ -48,6 +48,8 @@ import type {
 } from '@joy-media/render-ir';
 import { toggleSelection } from '@joy-media/timeline-engine';
 import { buildDuplicateSelectionTransaction } from './timeline-clip-interaction.js';
+import { inspectorClipTitle } from './inspector-title.js';
+import { readPlayheadMemory, writePlayheadMemory } from './playhead-memory.js';
 import { hiddenClipIds } from './timeline-hidden-clips.js';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import { validateH264ExportDimensions } from '@joy-media/job-protocol';
@@ -2589,6 +2591,23 @@ function EditorWorkspace({
         setState((active) => ({ ...active, playing: false }));
       });
   }, [syncMediaToPlayhead]);
+  // The playhead goes back to where it was when this project was last open (once per opened project), and is
+  // remembered a moment after it comes to rest; never while playing.
+  const playheadRestoredRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (playheadRestoredRef.current === projectId) return;
+    playheadRestoredRef.current = projectId;
+    const saved = readPlayheadMemory(storage, projectId);
+    if (saved !== undefined) seek(saved);
+  }, [projectId, seek, storage]);
+  useEffect(() => {
+    if (state.playing || playheadRestoredRef.current !== projectId) return;
+    const timer = window.setTimeout(
+      () => writePlayheadMemory(storage, projectId, state.playheadUs),
+      300,
+    );
+    return () => window.clearTimeout(timer);
+  }, [projectId, state.playheadUs, state.playing, storage]);
   useEffect(() => {
     if (!state.playing) return;
     const video = videoRef.current;
@@ -6456,10 +6475,19 @@ function EditorWorkspace({
               : selectedElementKind.charAt(0).toUpperCase() + selectedElementKind.slice(1)
           }
           selectedName={
-            selectedTimelineEntry?.clip?.kind === 'video'
-              ? (visualProject.assets[selectedTimelineEntry.clip.assetId]?.displayName ??
-                selectedTimelineEntry.clip.id)
-              : selectedTimelineEntry?.clip?.id
+            selectedTimelineEntry?.clip === undefined
+              ? undefined
+              : inspectorClipTitle({
+                  assetName:
+                    selectedTimelineEntry.clip.kind === 'video'
+                      ? visualProject.assets[selectedTimelineEntry.clip.assetId]?.displayName
+                      : undefined,
+                  object,
+                  kindLabel:
+                    selectedElementKind === undefined
+                      ? undefined
+                      : selectedElementKind.charAt(0).toUpperCase() + selectedElementKind.slice(1),
+                })
           }
           selectedTrackName={selectedTimelineEntry?.track.id}
           selectedSourceMissing={

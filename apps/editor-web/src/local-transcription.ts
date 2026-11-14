@@ -155,7 +155,13 @@ export async function transcribeReferenceCaption(
       ) {
         throw new Error(error.message);
       }
-      throw new Error('Live transcription could not process the selected media.');
+      // Keep the reason, short and on one line, so the owner can tell a refused file from a down server.
+      const reason = (error instanceof Error ? error.message : '').replace(/\s+/g, ' ').trim();
+      throw new Error(
+        reason.length === 0
+          ? 'Live transcription could not process the selected media.'
+          : `Live transcription could not process the selected media. ${reason.slice(0, 160)}`,
+      );
     }
     const provider = fixtureProvider(language);
     return captionDocumentFromTranscription(

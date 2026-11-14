@@ -76,6 +76,8 @@ function project() {
 async function mountPanel(
   selectedIds: readonly string[],
   onDispatch: (t: CommandTransaction) => void,
+  onToggleSelection: (clipId: string) => void = () => undefined,
+  onClearSelection: () => void = () => undefined,
 ) {
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -94,8 +96,8 @@ async function mountPanel(
         onAutoFitChange={noop}
         onTogglePlayback={noop}
         onSeek={noop}
-        onToggleSelection={noop}
-        onClearSelection={noop}
+        onToggleSelection={onToggleSelection}
+        onClearSelection={onClearSelection}
         onDispatch={onDispatch}
       />,
     );
@@ -158,5 +160,29 @@ describe('a clip move that cannot fit lands at the nearest free spot', () => {
     await act(async () => clipA.dispatchEvent(pointer('pointerup', 9 * PX_PER_SECOND)));
     const payload = dispatched[0]!.commands[0]!.payload as unknown as { newStartUs: number };
     expect(payload.newStartUs).toBe(10 * SECOND_US);
+  });
+});
+
+describe('Shift+click extends the selection like Ctrl+click', () => {
+  it('adds to the selection on Shift+click and Ctrl+click; a plain click replaces it', async () => {
+    const toggled: string[] = [];
+    let cleared = 0;
+    const host = await mountPanel(
+      ['a'],
+      () => undefined,
+      (clipId) => toggled.push(clipId),
+      () => (cleared += 1),
+    );
+    const clipB = host.querySelector<HTMLElement>('[data-clip-id="b"]')!;
+    const click = (init: MouseEventInit) =>
+      act(async () => {
+        clipB.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init }));
+      });
+    await click({ shiftKey: true });
+    await click({ ctrlKey: true });
+    expect(toggled).toEqual(['b', 'b']);
+    expect(cleared).toBe(0);
+    await click({});
+    expect(cleared).toBe(1);
   });
 });

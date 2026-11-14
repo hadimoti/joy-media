@@ -555,7 +555,7 @@ function TimelineClip({
           return;
         }
         if (dragRef.current?.moved !== true && trimRef.current === null) {
-          onSelect(clip.id, event.metaKey || event.ctrlKey);
+          onSelect(clip.id, event.metaKey || event.ctrlKey || event.shiftKey);
         }
         dragRef.current = null;
       }}
@@ -563,7 +563,7 @@ function TimelineClip({
         if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          onSelect(clip.id, event.metaKey || event.ctrlKey);
+          onSelect(clip.id, event.metaKey || event.ctrlKey || event.shiftKey);
           return;
         }
         if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
@@ -607,7 +607,13 @@ function TimelineClip({
         // Composition clips use their click stream to detect a resilient
         // double-click. Calling onSelect here as well would make one physical
         // click look like two clicks after Dockview remounts the clip.
-        if (clip.kind !== 'composition' && !selected && !event.ctrlKey && !event.metaKey) {
+        if (
+          clip.kind !== 'composition' &&
+          !selected &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.shiftKey
+        ) {
           onSelect(clip.id, false);
         }
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -1577,7 +1583,7 @@ export function TimelinePanel({
       marqueeRef.current = {
         origin: { x: event.clientX, y: event.clientY },
         baselineIds: [...selectedIds],
-        additive: event.metaKey || event.ctrlKey,
+        additive: event.metaKey || event.ctrlKey || event.shiftKey,
         pointerId: event.pointerId,
         capture,
       };
