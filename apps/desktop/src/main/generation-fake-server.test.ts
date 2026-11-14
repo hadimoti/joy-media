@@ -545,7 +545,9 @@ describe('generation against the fake MiniMax server: videos', () => {
     const job = await waitForJob(made, started.id, finished);
 
     expect(job).toMatchObject({ state: 'completed', route: 'legacy', model: 'MiniMax-Hailuo-02' });
-    expect(made.server.requests.find((request) => request.label === 'video-create-legacy')).toMatchObject({
+    expect(
+      made.server.requests.find((request) => request.label === 'video-create-legacy'),
+    ).toMatchObject({
       method: 'POST',
       path: '/v1/video_generation',
       authorizationOk: true,
