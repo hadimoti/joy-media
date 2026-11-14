@@ -185,12 +185,9 @@ async function importEditableProject(page: Page, packagePath: string): Promise<v
 
 async function catalogTitleCount(page: Page, title: string): Promise<number> {
   const titles = await page.evaluate(() => {
-    const desktop = (
-      window as unknown as {
-        joyDesktop?: { projectStorage?: { getItem(key: string): string | null } };
-      }
-    ).joyDesktop;
-    const raw = desktop?.projectStorage?.getItem('joy-media.project-catalog.v1');
+    // The catalog lives in the editor origin's localStorage (App.tsx guards it); the old
+    // joyDesktop.projectStorage bridge no longer exists.
+    const raw = window.localStorage.getItem('joy-media.project-catalog.v1');
     if (raw == null) return [] as string[];
     const parsed = JSON.parse(raw) as {
       projects?: Record<string, { title?: string; trashedAt?: string }>;
@@ -202,22 +199,24 @@ async function catalogTitleCount(page: Page, title: string): Promise<number> {
   return titles.filter((entry) => entry === title).length;
 }
 
+// The editor shows no project name outside the Projects library, so "this project is
+// open" is read from the stored catalog plus content only the imported project has.
+async function expectProjectStored(page: Page, title: string): Promise<void> {
+  await expect.poll(() => catalogTitleCount(page, title)).toBe(1);
+}
+
 async function expectRestoredProject(
   page: Page,
   projectTitle: string,
   mediaName: string,
 ): Promise<void> {
-  await expect(page.getByRole('heading', { name: projectTitle, level: 1 })).toBeVisible();
+  await expectProjectStored(page, projectTitle);
   await expect(
     page.locator(`.timeline-clip[aria-label^="${mediaName.replace(/\.mp4$/, '')},"]`),
   ).toHaveCount(1);
-  await openPanel(page, 'Assets');
-  await page.getByRole('button', { name: /^My media/ }).click();
-  const assetSearch = page.getByPlaceholder('Search media…');
-  if (!(await assetSearch.isVisible())) {
-    await page.getByRole('button', { name: 'Search Assets' }).click();
-  }
-  await assetSearch.fill(mediaName);
+  // The media library is the Create > Media tab and is always visible now; the old Assets panel
+  // and its My media button no longer exist.
+  await expect(page.locator('.asset-card', { hasText: mediaName }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: `Add ${mediaName} to timeline` })).toBeVisible();
 }
 
@@ -325,7 +324,7 @@ test.describe('desktop.file-project-package', () => {
       );
       await review.getByRole('button', { name: 'Close missing media' }).click();
       await expect(freshPage.getByRole('dialog')).toHaveCount(0);
-      await expect(freshPage.getByRole('heading', { name: projectTitle, level: 1 })).toBeVisible();
+      await expectProjectStored(freshPage, projectTitle);
       await expect(
         freshPage.locator(`.timeline-clip[aria-label^="${mediaName.replace(/\.mp4$/, '')},"]`),
       ).toHaveCount(1);
@@ -360,8 +359,7 @@ test.describe('desktop.file-project-package', () => {
       const startCount = await libraryProjectCount(page);
       await createHostProject(page, hostTitle);
       await importEditableProject(page, packagePath);
-      await expect(page.getByRole('heading', { name: projectTitle, level: 1 })).toBeVisible();
-      await expect.poll(() => catalogTitleCount(page, projectTitle)).toBe(1);
+      await expectProjectStored(page, projectTitle);
       await importEditableProject(page, packagePath);
       await expect.poll(() => catalogTitleCount(page, projectTitle)).toBe(2);
       await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -401,7 +399,7 @@ test.describe('desktop.file-project-package', () => {
       await expect(
         page.getByRole('alert').filter({ hasText: 'Project import failed:' }),
       ).toBeVisible();
-      await expect(page.getByRole('heading', { name: hostTitle, level: 1 })).toBeVisible();
+      await expectProjectStored(page, hostTitle);
 
       await page.getByRole('button', { name: 'File', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Projects Library…', exact: true }).click();
