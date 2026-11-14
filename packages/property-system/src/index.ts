@@ -249,12 +249,9 @@ export function applyVisualObjectProjectCommand(
       };
     }
     if (target.scope === 'clip') {
-      if (
-        !Object.values(project.compositions).some((composition) =>
-          composition.tracks.some((track) => track.clips.some((clip) => clip.id === target.clipId)),
-        )
-      )
-        throw new RangeError(`unknown clip "${target.clipId}"`);
+      // The video clips live in the timeline project, not in this one (its root composition holds no
+      // video tracks), so a clip id cannot be checked here: it comes from the timeline selection.
+      if (target.clipId.length === 0) throw new RangeError('clip id must not be empty');
       const clipColorGrades = { ...(project.clipColorGrades ?? {}) };
       if (grade === undefined) delete clipColorGrades[target.clipId];
       else clipColorGrades[target.clipId] = grade;

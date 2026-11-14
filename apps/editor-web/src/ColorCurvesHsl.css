@@ -40,9 +40,10 @@
   background: #e4b42e;
 }
 
-/* The graph keeps its square shape and fills the panel width. */
+/* The graph keeps its square shape, small and centred (it used to fill the whole panel width). */
 .ccv-graph {
-  width: 100%;
+  width: min(100%, 12rem);
+  margin-inline: auto;
   aspect-ratio: 1;
   border: 1px solid #43444a;
   border-radius: 0.25rem;

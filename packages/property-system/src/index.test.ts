@@ -177,6 +177,25 @@ describe('visual property schemas', () => {
     return { before, after };
   }
 
+  it('accepts a clip grade for a timeline clip that this project does not hold', () => {
+    // The video clips live in the timeline project; this project has none of them.
+    const { after } = gradesWithValues();
+    const start = migrateV0ToV1(emptySpikeProject()).project;
+    const changed = applyVisualObjectProjectCommand(start, {
+      type: 'color.setGrade',
+      payload: { target: { scope: 'clip', clipId: 'timeline-clip' }, grade: after },
+    });
+    expect(changed.project.clipColorGrades?.['timeline-clip']).toEqual(after);
+    const undone = applyVisualObjectProjectCommand(changed.project, changed.inverse);
+    expect(undone.project.clipColorGrades?.['timeline-clip']).toBeUndefined();
+    expect(() =>
+      applyVisualObjectProjectCommand(start, {
+        type: 'color.setGrade',
+        payload: { target: { scope: 'clip', clipId: '' }, grade: after },
+      }),
+    ).toThrow(RangeError);
+  });
+
   it('undoes and redoes an output grade change over a grade that already had values', () => {
     const { before, after } = gradesWithValues();
     const start = { ...migrateV0ToV1(emptySpikeProject()).project, colorGrade: before };

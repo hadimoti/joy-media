@@ -416,7 +416,11 @@ export function ColorCurves({
             ))}
           </svg>
         </div>
-        <output className="ccv-readout" data-curve-readout aria-live="polite">
+        <output
+          className={`ccv-readout${readout === undefined ? ' sr-only' : ''}`}
+          data-curve-readout
+          aria-live="polite"
+        >
           {readout ?? 'Click the line to add a point.'}
         </output>
       </PropertyRow>

@@ -594,6 +594,8 @@ function identityCurveTexture(): Texture {
       width: 256,
       height: 1,
       scaleMode: 'nearest',
+      // Four curve tables ride in R, G, B and A: the alpha is data and must not premultiply the rest.
+      alphaMode: 'no-premultiply-alpha',
     }),
   });
   identityCurveTextureCache.set(identityCurveTexture, texture);
@@ -618,6 +620,8 @@ function getCurveTexture(curves: NonNullable<ColorGradeIR['curves']>): CurveText
       width: 256,
       height: 1,
       scaleMode: 'nearest',
+      // Four curve tables ride in R, G, B and A: the alpha is data and must not premultiply the rest.
+      alphaMode: 'no-premultiply-alpha',
     }),
   });
   const entry = { texture, references: 1 };
