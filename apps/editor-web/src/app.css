@@ -3985,6 +3985,22 @@ label {
   opacity: 0.9;
   background: var(--joy-accent);
 }
+/* The audio of a video clip, drawn on A1 for display only: quieter than a real audio clip,
+   no handles, never hit by the pointer. */
+.timeline-linked-audio-strip {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  z-index: 1;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-text-secondary) 8%, transparent);
+  opacity: 0.5;
+  pointer-events: none;
+  user-select: none;
+}
 .timeline-clip-chrome {
   position: absolute;
   inset: 0;
