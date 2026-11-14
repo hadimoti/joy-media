@@ -217,6 +217,24 @@ const LEGACY_JOY_AGENT_TOOL_NAMES = Object.freeze([
   'validate_proposal',
 ] as const satisfies readonly JoyAgentHostToolName[]);
 
+/**
+ * Generation (T-C04) and QC review (T-B04) tools are in the shared catalog, but
+ * this panel does not pass their host dependencies into
+ * createJoyAgentHostRpcMethodsForSnapshot. Offering them would let the model
+ * call a tool that no host answers. Drop a name here only in the same change
+ * that registers its host method.
+ */
+const HOST_UNREGISTERED_TOOL_NAMES: ReadonlySet<JoyAgentHostToolName> =
+  new Set<JoyAgentHostToolName>([
+    'generate_media',
+    'attach_generated_media',
+    'qc_report_read',
+    'media_frames_view',
+    'media_contact_sheet',
+  ]);
+const OBSERVATION_OFFERED_TOOL_NAMES: readonly JoyAgentHostToolName[] =
+  JOY_AGENT_HOST_TOOL_NAMES.filter((name) => !HOST_UNREGISTERED_TOOL_NAMES.has(name));
+
 /** A Worker approval event held until the staged preview has actually rendered. */
 interface DeferredPreviewApproval {
   readonly run: JoyAgentRunIterator['run'];
@@ -2221,7 +2239,7 @@ export function AgentPanel({
                 allowedToolNames:
                   observationBridge === undefined
                     ? LEGACY_JOY_AGENT_TOOL_NAMES
-                    : JOY_AGENT_HOST_TOOL_NAMES,
+                    : OBSERVATION_OFFERED_TOOL_NAMES,
                 onCancelled: revokeStagedChange,
               };
           const contextSnapshot = structured
