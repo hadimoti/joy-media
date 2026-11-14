@@ -91,9 +91,7 @@ describe('coverDataUrlFromPixels', () => {
       drawImage: vi.fn(),
       fillStyle: '',
     };
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
-      context as unknown as CanvasRenderingContext2D,
-    );
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as never);
     const toDataURL = vi
       .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
       .mockReturnValueOnce(COVER)
@@ -122,7 +120,11 @@ describe('coverDataUrlFromPixels', () => {
 });
 
 describe('saveProjectCard', () => {
-  const base = { projectId: 'alpha', canvas: { width: 1080, height: 1920 }, durationUs: 24_000_000 };
+  const base = {
+    projectId: 'alpha',
+    canvas: { width: 1080, height: 1920 },
+    durationUs: 24_000_000,
+  };
 
   it('saves format and length even when no frame can be read', () => {
     const storage = storeWithProject();
