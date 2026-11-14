@@ -5,6 +5,7 @@ import {
   buildTimelineClipInsertTransaction,
   buildTimelineClipGroupMoveTransaction,
   buildTimelineClipMoveTransaction,
+  nearestFreeStartUs,
   buildTimelineClipReplaceTransaction,
   keyboardTrimTimeUs,
 } from './timeline-clip-interaction.js';
@@ -198,3 +199,51 @@ function projectWith(composition: Composition): SpikeProject {
     compositions: { [composition.id]: composition },
   };
 }
+
+describe('nearestFreeStartUs (a drop on a taken spot)', () => {
+  const clip = (id: string, startUs: number, durationUs: number) => ({
+    ...CLIP,
+    id,
+    startUs,
+    durationUs,
+  });
+
+  it('keeps a free drop where it is', () => {
+    expect(
+      nearestFreeStartUs({
+        clips: [clip('a', 0, 2_000_000)],
+        durationUs: 1_000_000,
+        desiredStartUs: 5_000_000,
+      }),
+    ).toBe(5_000_000);
+  });
+
+  it('moves a drop on a taken spot to the nearest free start, after or before the clip', () => {
+    const clips = [clip('a', 2_000_000, 4_000_000)];
+    expect(nearestFreeStartUs({ clips, durationUs: 1_000_000, desiredStartUs: 5_000_000 })).toBe(
+      6_000_000,
+    );
+    expect(nearestFreeStartUs({ clips, durationUs: 1_000_000, desiredStartUs: 2_500_000 })).toBe(
+      1_000_000,
+    );
+  });
+
+  it('does not count the clip that is being moved on its own track', () => {
+    const clips = [clip('self', 2_000_000, 4_000_000)];
+    expect(
+      nearestFreeStartUs({
+        clips,
+        durationUs: 4_000_000,
+        desiredStartUs: 3_000_000,
+        ignoreClipId: 'self',
+      }),
+    ).toBe(3_000_000);
+  });
+
+  it('never returns a spot that overlaps, also when the gaps are too small', () => {
+    const clips = [clip('a', 0, 3_000_000), clip('b', 4_000_000, 3_000_000)];
+    expect(nearestFreeStartUs({ clips, durationUs: 2_000_000, desiredStartUs: 1_000_000 })).toBe(
+      7_000_000,
+    );
+  });
+});

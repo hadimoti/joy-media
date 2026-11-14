@@ -144,6 +144,7 @@ import {
   buildTimelineClipReplaceTransaction,
   hasExceededDragThreshold,
   keyboardTrimTimeUs,
+  nearestFreeStartUs,
 } from './timeline-clip-interaction.js';
 import {
   registerEditorPointerDndRoot,
@@ -1866,19 +1867,31 @@ export function TimelinePanel({
               newStartUs: entry.clip.startUs + deltaUs,
             })),
           });
-          if (groupTransaction === undefined) return false;
+          if (groupTransaction === undefined) {
+            showToast?.('There is no room for the selected clips there.', 'info');
+            return false;
+          }
           onDispatch(groupTransaction);
           return true;
         }
+        // A drop on a taken spot lands at the nearest free spot of that track, never silently nowhere.
         const transaction = buildTimelineClipMoveTransaction({
           compositionId: composition.id,
           sourceTrackId: trackId,
           targetTrackId,
           clip,
           targetClips: target.clips,
-          newStartUs,
+          newStartUs: nearestFreeStartUs({
+            clips: target.clips,
+            durationUs: clip.durationUs,
+            desiredStartUs: newStartUs,
+            ...(trackId === targetTrackId ? { ignoreClipId: clip.id } : {}),
+          }),
         });
-        if (transaction === undefined) return false;
+        if (transaction === undefined) {
+          showToast?.('There is no room for the clip there.', 'info');
+          return false;
+        }
         onDispatch(transaction);
         return true;
       } catch {

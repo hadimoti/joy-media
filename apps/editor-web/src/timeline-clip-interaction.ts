@@ -33,6 +33,41 @@ export function keyboardTrimTimeUs(input: {
   );
 }
 
+/**
+ * Where a clip of this length lands on a track when it is dropped at `desiredStartUs` and that spot is taken: the free
+ * start nearest to the drop, which is the start of the track, the end of a clip, or just before a clip. A free drop
+ * stays where it is. `ignoreClipId` is the clip being moved, when it is already on this track.
+ */
+export function nearestFreeStartUs(input: {
+  readonly clips: readonly Clip[];
+  readonly durationUs: number;
+  readonly desiredStartUs: number;
+  readonly ignoreClipId?: string;
+}): number {
+  const others = input.clips.filter((candidate) => candidate.id !== input.ignoreClipId);
+  const desired = Math.max(0, Math.round(input.desiredStartUs));
+  const fits = (startUs: number): boolean =>
+    startUs >= 0 &&
+    others.every(
+      (candidate) =>
+        startUs + input.durationUs <= candidate.startUs ||
+        startUs >= candidate.startUs + candidate.durationUs,
+    );
+  if (fits(desired)) return desired;
+  const candidates = [
+    0,
+    ...others.flatMap((candidate) => [
+      candidate.startUs + candidate.durationUs,
+      candidate.startUs - input.durationUs,
+    ]),
+  ].filter(fits);
+  let best = candidates[0] ?? desired;
+  for (const candidate of candidates) {
+    if (Math.abs(candidate - desired) < Math.abs(best - desired)) best = candidate;
+  }
+  return best;
+}
+
 export function buildTimelineClipMoveTransaction(input: {
   readonly compositionId: string;
   readonly sourceTrackId: string;
