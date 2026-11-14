@@ -29,8 +29,14 @@ export interface PropertyRowProps {
   readonly onPreviousKeyframe?: (() => void) | undefined;
   readonly onNextKeyframe?: (() => void) | undefined;
   readonly onOpenGraph?: (() => void) | undefined;
-  /** `inline` keeps a small, high-frequency control on one line at every panel width. */
-  readonly layout?: 'compact' | 'inline' | 'two-line' | undefined;
+  /**
+   * `inline` keeps a small, high-frequency control on one line at every panel width.
+   * `grid` is the Inspector's fixed-column row (label, value, slider, actions); only the
+   * Inspector asks for it, and it adds the `inspector-grid-row` class family.
+   */
+  readonly layout?: 'compact' | 'inline' | 'two-line' | 'grid' | undefined;
+  /** One more action button after the animation controls (the Inspector's expression button). */
+  readonly trailing?: ReactNode;
   /** True when a validated JOY operation targets this exact property row. */
   readonly agentActive?: boolean | undefined;
 }
@@ -84,6 +90,7 @@ export function PropertyRow({
   onNextKeyframe,
   onOpenGraph,
   layout = 'compact',
+  trailing,
   agentActive = false,
 }: PropertyRowProps) {
   const descriptionId = controlId === undefined ? undefined : `${controlId}-description`;
@@ -94,7 +101,7 @@ export function PropertyRow({
 
   return (
     <div
-      className={`property-row property-row-${layout}${mixed ? ' is-mixed' : ''}${disabled ? ' is-disabled' : ''}${error !== undefined ? ' has-error' : ''}${agentActive ? ' is-agent-active' : ''}`}
+      className={`property-row property-row-${layout}${layout === 'grid' ? ' inspector-grid-row' : ''}${mixed ? ' is-mixed' : ''}${disabled ? ' is-disabled' : ''}${error !== undefined ? ' has-error' : ''}${agentActive ? ' is-agent-active' : ''}`}
       data-property-row={label}
       data-agent-active={agentActive ? 'true' : undefined}
     >
@@ -161,7 +168,7 @@ export function PropertyRow({
         {onOpenGraph !== undefined && (
           <button
             type="button"
-            className="property-row-action"
+            className="property-row-action property-row-graph"
             aria-label={`Open ${label} in Graph Editor`}
             title={`Open ${label} in Graph Editor`}
             disabled={disabled}
@@ -171,6 +178,7 @@ export function PropertyRow({
           </button>
         )}
       </div>
+      {trailing}
       {(mixed || error !== undefined) && (
         <p
           id={descriptionId}

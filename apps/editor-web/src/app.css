@@ -14233,58 +14233,6 @@ label {
   box-sizing: border-box;
   font-size: 0.78rem;
 }
-.inspector-selection-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-width: 0;
-}
-.inspector-selected-name {
-  margin: 0;
-  min-width: 0;
-  flex: 1 1 auto;
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.inspector-playhead-meta {
-  margin: 0;
-  flex: none;
-  text-align: end;
-  white-space: nowrap;
-}
-.inspector-selection-summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.3rem;
-  padding: 0.45rem 0.5rem;
-  border: 1px solid var(--joy-border-soft);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--joy-bg-surface) 82%, transparent);
-}
-.inspector-selection-detail {
-  display: grid;
-  gap: 0.1rem;
-  min-width: 0;
-}
-.inspector-selection-detail span {
-  color: var(--joy-text-secondary);
-  font-size: var(--joy-type-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.inspector-selection-detail strong {
-  overflow: hidden;
-  color: var(--joy-text);
-  font-size: var(--joy-type-xs);
-  font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .inspector-section {
   display: grid;
   gap: 0.35rem;
@@ -14385,27 +14333,6 @@ label {
   gap: var(--space-2);
 }
 
-/* Inspector Visual rows (T-D08): X and Y share one row, Scale has a link toggle,
-   opacity is one percentage with a slider, and Reset appears on hover or focus. */
-.inspector-transform-pair {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--space-2);
-  min-width: 0;
-}
-.inspector-transform-pair-linked {
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-}
-.inspector-transform-pair .property-control-input {
-  width: 100%;
-}
-.inspector-transform-pair .inspector-prop-row {
-  flex-wrap: wrap;
-}
-.inspector-transform-pair .property-control-slider {
-  flex: 1 1 6rem;
-  width: auto;
-}
 .inspector-unit {
   color: var(--joy-text-faint);
   font-size: var(--joy-type-xs);
@@ -14442,18 +14369,6 @@ label {
   opacity: 0.4;
   cursor: not-allowed;
 }
-/* Reset stays in the tab order but is visible only on hover or while the row has focus. */
-.inspector-transform-property .property-row-reset {
-  opacity: 0;
-  pointer-events: none;
-}
-.inspector-transform-property:hover .property-row-reset,
-.inspector-transform-property:focus-within .property-row-reset,
-.inspector-transform-property .property-row-reset:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 /* Inspector / Mask — compact local-first segmentation controls. */
 .mask-inspector {
   display: grid;

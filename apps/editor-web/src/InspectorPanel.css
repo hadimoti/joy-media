@@ -1,0 +1,576 @@
+/* The Inspector grid.
+
+   One property is one line, on the same seven columns in every row of every
+   section (Visual, Effects, Adjust, Audio, Speed):
+
+     1 label (left)  2 value  3 slider (free space)  4 reset  5 graph  6 keyframe  7 fx
+
+   The class family `.inspector-grid-*` belongs to the Inspector only. PropertyRow adds
+   `.inspector-grid-row` when the Inspector asks for `layout="grid"`; the Color, Text,
+   Captions, Audio, Camera and Transitions panels keep the original `.property-row-*`
+   look. Spacing follows the 4 / 8 / 12 / 16 px scale (`--space-*`). */
+
+.inspector-panel {
+  --insp-label-w: 6.5rem;
+  --insp-value-w: 4.75rem;
+  --insp-btn: 24px;
+  --insp-gap: var(--space-1);
+}
+
+.inspector-panel .joy-panel-body {
+  gap: var(--space-2);
+}
+
+/* ---- Nothing selected: one centred line, nothing else ---- */
+
+.inspector-panel .joy-panel-hint {
+  padding: var(--space-4) 0;
+}
+
+/* ---- Clip header: name left, playhead right, details as an aligned list ---- */
+
+.inspector-clip-header {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.inspector-panel .inspector-selection-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--insp-btn);
+  min-width: 0;
+}
+
+.inspector-panel .inspector-selected-name {
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--joy-text);
+  font-size: var(--joy-type-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-panel .inspector-playhead-meta {
+  margin: 0;
+  flex: none;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.inspector-panel .inspector-selection-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1) var(--space-4);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.inspector-panel .inspector-selection-detail {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.inspector-panel .inspector-selection-detail span {
+  color: var(--joy-text-faint);
+  font-size: var(--joy-type-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.inspector-panel .inspector-selection-detail strong {
+  overflow: hidden;
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Sections: left-aligned header, 1px divider, 8 / 12 px rhythm ---- */
+
+.inspector-panel .joy-panel-body > .inspector-section,
+.inspector-panel .joy-panel-body > .mask-inspector,
+.inspector-panel .joy-panel-body > .enhance-inspector {
+  padding: var(--space-2) 0 0;
+  border: 0;
+  border-top: 1px solid var(--joy-border-subtle);
+}
+
+.inspector-panel .inspector-section {
+  gap: var(--space-1);
+}
+
+.inspector-panel .inspector-section h3 {
+  margin: 0;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: start;
+  text-transform: uppercase;
+}
+
+.inspector-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--insp-btn);
+  min-width: 0;
+}
+
+.inspector-panel .inspector-section-toggle {
+  width: auto;
+  min-width: 0;
+  min-height: var(--insp-btn);
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: start;
+}
+
+/* The section's own small controls sit at the right end of the header line. */
+.inspector-section-head .inspector-kf-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0;
+}
+
+.inspector-section-head .inspector-kf-row .icon-button {
+  display: grid;
+  place-items: center;
+  width: var(--insp-btn);
+  height: var(--insp-btn);
+  min-width: var(--insp-btn);
+  min-height: var(--insp-btn);
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--joy-text-faint);
+}
+
+.inspector-section-head .inspector-kf-row .icon-button svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.inspector-section-head .inspector-kf-row .icon-button:hover {
+  color: var(--joy-text);
+}
+
+.inspector-section-head .inspector-kf-row .icon-button[aria-pressed='true'] {
+  color: var(--joy-accent);
+}
+
+.inspector-panel .inspector-media-fit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-1);
+}
+
+.inspector-panel .inspector-animation-action {
+  min-height: var(--insp-btn);
+}
+
+/* ---- The row ---- */
+
+.inspector-transform-property {
+  min-width: 0;
+}
+
+.property-row.inspector-grid-row,
+.inspector-grid-row-plain {
+  display: grid;
+  grid-template-columns:
+    var(--insp-label-w) var(--insp-value-w) minmax(0, 1fr) var(--insp-btn) var(--insp-btn)
+    var(--insp-btn) var(--insp-btn);
+  align-items: center;
+  column-gap: var(--insp-gap);
+  min-width: 0;
+  min-height: var(--control-sm);
+}
+
+/* Label: first column, left aligned, one line. */
+.inspector-grid-row .property-row-heading,
+.inspector-grid-row-plain > label {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.inspector-grid-row .property-row-label,
+.inspector-grid-row-plain > label {
+  overflow: hidden;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-grid-row-plain > label::first-letter {
+  text-transform: uppercase;
+}
+
+/* The control and its actions give their children to the grid. */
+.inspector-grid-row .property-row-control,
+.inspector-grid-row .property-row-actions,
+.inspector-grid-row .inspector-prop-row {
+  display: contents;
+}
+
+/* Value: second column, number left aligned, unit inside the field. */
+.inspector-grid-row .property-row-control > :not(.inspector-prop-row),
+.inspector-grid-value,
+.inspector-grid-row-plain > :is(input, button, output) {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.inspector-grid-row-plain > select,
+.inspector-grid-row-plain > .inspector-grid-wide {
+  grid-column: 2 / 5;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.inspector-grid-value {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.inspector-grid-row input[type='number'],
+.inspector-grid-row .property-control-input,
+.inspector-grid-row-plain input[type='number'] {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--control-sm);
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: start;
+}
+
+.inspector-grid-value.has-unit input {
+  padding-inline-end: calc(var(--space-2) + 1.25rem);
+}
+
+.inspector-grid-row .inspector-unit {
+  position: absolute;
+  inset-inline-end: var(--space-2);
+  color: var(--joy-text-faint);
+  font-size: var(--joy-type-xs);
+  pointer-events: none;
+}
+
+.inspector-grid-row input:focus-visible,
+.inspector-grid-row-plain input:focus-visible,
+.inspector-grid-row-plain select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--joy-accent) 70%, transparent);
+  outline-offset: 1px;
+}
+
+.inspector-grid-row-plain select {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--control-sm);
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
+
+/* Slider: third column, takes the free space. */
+.inspector-grid-row .property-control-slider {
+  grid-column: 3;
+  grid-row: 1;
+  width: auto;
+  min-width: 0;
+  margin: 0 var(--space-2);
+  accent-color: var(--joy-accent);
+}
+
+/* Actions: fixed 24 px squares. */
+.inspector-grid-row .property-row-action,
+.inspector-grid-row .fx {
+  grid-row: 1;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: var(--insp-btn);
+  height: var(--insp-btn);
+  min-width: var(--insp-btn);
+  min-height: var(--insp-btn);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--joy-text-faint);
+  line-height: 1;
+}
+
+.inspector-grid-row .property-row-reset {
+  grid-column: 4;
+}
+
+.inspector-grid-row .property-row-graph {
+  grid-column: 5;
+}
+
+.inspector-grid-row .property-row-keyframe {
+  grid-column: 6;
+}
+
+.inspector-grid-row .fx {
+  grid-column: 7;
+  font-size: var(--joy-type-xs);
+  font-style: italic;
+  cursor: pointer;
+}
+
+.inspector-grid-row .property-row-action svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.inspector-grid-row .property-row-keyframe.is-keyed,
+.inspector-grid-row .property-row-keyframe.is-between,
+.inspector-grid-row .fx.fx-on {
+  color: var(--joy-accent);
+}
+
+.inspector-grid-row .property-row-action:hover:not(:disabled),
+.inspector-grid-row .fx:hover:not(:disabled) {
+  border-color: var(--joy-border-strong);
+  background: var(--joy-bg-hover);
+  color: var(--joy-text);
+}
+
+.inspector-grid-row .property-row-keyframe.is-keyed:hover:not(:disabled),
+.inspector-grid-row .property-row-keyframe.is-between:hover:not(:disabled),
+.inspector-grid-row .fx.fx-on:hover:not(:disabled) {
+  color: var(--joy-accent-hover);
+}
+
+.inspector-grid-row .property-row-action:focus-visible,
+.inspector-grid-row .fx:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 60%, transparent);
+}
+
+.inspector-grid-row .fx:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* Reset stays in the tab order but shows only on hover or while the row has focus. */
+.inspector-grid-row .property-row-reset {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.inspector-grid-row:hover .property-row-reset,
+.inspector-grid-row:focus-within .property-row-reset,
+.inspector-grid-row .property-row-reset:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* A short validation message sits under the row, across all columns. */
+.inspector-grid-row .property-row-description {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  margin: 0;
+}
+
+.inspector-grid-row .inspector-expression-error,
+.inspector-transform-property .inspector-expression-error {
+  margin: 0;
+}
+
+.inspector-transform-property .inspector-expression-editor {
+  margin: var(--space-1) 0 0;
+}
+
+.inspector-transform-property .inspector-expression-input {
+  box-sizing: border-box;
+  width: 100%;
+  border-color: var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
+
+/* ---- Groups: Position and Scale are two rows; the link sits between the Scale rows ---- */
+
+.inspector-grid-group {
+  position: relative;
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.inspector-grid-group .inspector-link-toggle {
+  position: absolute;
+  top: 50%;
+  inset-inline-start: calc(var(--insp-label-w) + var(--insp-value-w) + var(--insp-gap) * 2);
+  width: var(--insp-btn);
+  height: var(--insp-btn);
+  margin-inline-start: var(--space-2);
+  transform: translateY(-50%);
+}
+
+/* ---- Rows that are not numeric properties (Crop, effect switches, selects, colours) ---- */
+
+.inspector-grid-row-plain {
+  grid-template-columns:
+    var(--insp-label-w) var(--insp-value-w) minmax(0, 1fr) var(--insp-btn) var(--insp-btn)
+    var(--insp-btn) var(--insp-btn);
+}
+
+.inspector-grid-row-plain > .icon-button-labeled {
+  justify-self: start;
+  min-width: var(--insp-value-w);
+  height: var(--insp-btn);
+  min-height: var(--insp-btn);
+  font-size: var(--joy-type-xs);
+}
+
+.inspector-grid-row-plain > .inspector-speed-apply {
+  grid-column: 3;
+  justify-self: start;
+}
+
+.inspector-grid-row-plain > .inspector-grid-wide {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.inspector-speed-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-1);
+  padding-inline-start: calc(var(--insp-label-w) + var(--insp-gap));
+}
+
+.inspector-grid-row-plain > .inspector-speed-value {
+  grid-column: 4 / -1;
+  justify-self: end;
+}
+
+/* ---- Effect, animation and adjustment blocks use the same rhythm ---- */
+
+.inspector-panel .inspector-effects-list {
+  gap: var(--space-2);
+}
+
+.inspector-panel .inspector-effect-item {
+  padding: var(--space-2);
+}
+
+.inspector-panel .inspector-effect-params {
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+}
+
+.inspector-panel .inspector-effect-header {
+  min-height: var(--insp-btn);
+}
+
+.inspector-panel .inspector-adjustment-group {
+  padding: var(--space-2);
+}
+
+.inspector-panel .inspector-adjustment-parent {
+  grid-template-columns: var(--insp-label-w) minmax(0, 1fr);
+  gap: var(--insp-gap);
+}
+
+.inspector-panel .inspector-adjustment-parent select {
+  height: var(--control-sm);
+}
+
+.inspector-panel .inspector-empty-state {
+  min-height: 0;
+  padding: var(--space-2) 0;
+  border: 0;
+}
+
+.inspector-panel .inspector-animation-entry {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-height: var(--control-sm);
+  gap: var(--space-1);
+}
+
+.inspector-panel .inspector-animation-property {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+/* ---- Narrow panels: the slider is hidden, then the reset and graph columns, never cut ---- */
+
+@container (max-width: 22rem) {
+  .inspector-grid-row .property-control-slider {
+    display: none;
+  }
+}
+
+@container (max-width: 19rem) {
+  /* The panel body is the container, so the narrower columns are set on its children. */
+  .inspector-panel .joy-panel-body > * {
+    --insp-label-w: 5rem;
+    --insp-value-w: 4rem;
+  }
+
+  .inspector-grid-row .property-row-reset,
+  .inspector-grid-row .property-row-graph {
+    display: none;
+  }
+
+  .property-row.inspector-grid-row,
+  .inspector-grid-row-plain {
+    grid-template-columns:
+      var(--insp-label-w) var(--insp-value-w) minmax(0, 1fr) var(--insp-btn)
+      var(--insp-btn);
+  }
+
+  .inspector-grid-row .property-row-keyframe {
+    grid-column: 4;
+  }
+
+  .inspector-grid-row .fx {
+    grid-column: 5;
+  }
+}

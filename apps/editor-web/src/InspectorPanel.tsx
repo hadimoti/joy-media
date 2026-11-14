@@ -1,11 +1,12 @@
 /**
  * Inspector — labeled property rows (transform + crop + selected-clip audio).
  *
- * DESIGN.md §3c: this panel is always mounted. With nothing selected it binds
- * its rows to IDLE_OBJECT and renders them disabled, so the user can see every
- * property the Inspector offers instead of a bare "Select a clip" sentence.
+ * DESIGN.md §3c: this panel is always mounted, with its header and tabs. With
+ * nothing selected its body is one centred "Select a clip" line (no greyed
+ * controls). Every property is one line on the fixed grid in InspectorPanel.css.
  */
 
+import './InspectorPanel.css';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   audioClipPropertyBinding,
@@ -545,9 +546,9 @@ function TransformPropertyRow({
   return (
     <div className={`inspector-transform-property${modified ? ' modified' : ''}`}>
       <PropertyRow
+        layout="grid"
         label={property.label}
         controlId={`insp-${property.key}`}
-        value={isOpacity ? undefined : round(previewValue)}
         disabled={disabled}
         error={diagnostic}
         onReset={() => writeValue(DEFAULTS[property.key] ?? 0)}
@@ -556,20 +557,23 @@ function TransformPropertyRow({
         {...(animated && onOpenAnimationGraph !== undefined
           ? { onOpenGraph: () => onOpenAnimationGraph(target.id, property.key) }
           : {})}
+        trailing={expressionButton}
         agentActive={agentPresence.active}
       >
         <div className="inspector-prop-row">
-          <NumericPropertyControl
-            id={`insp-${property.key}`}
-            value={shown}
-            adapter={isOpacity ? percentAdapter : adapter}
-            ariaLabel={property.label}
-            min={isOpacity ? 0 : property.min}
-            max={isOpacity ? 100 : property.max}
-            step={1}
-            disabled={disabled}
-          />
-          {isOpacity && <span className="inspector-unit">%</span>}
+          <div className={`inspector-grid-value${isOpacity ? ' has-unit' : ''}`}>
+            <NumericPropertyControl
+              id={`insp-${property.key}`}
+              value={shown}
+              adapter={isOpacity ? percentAdapter : adapter}
+              ariaLabel={property.label}
+              min={isOpacity ? 0 : property.min}
+              max={isOpacity ? 100 : property.max}
+              step={1}
+              disabled={disabled}
+            />
+            {isOpacity && <span className="inspector-unit">%</span>}
+          </div>
           {isOpacity && (
             <SliderPropertyControl
               value={shown}
@@ -581,7 +585,6 @@ function TransformPropertyRow({
               disabled={disabled}
             />
           )}
-          {expressionButton}
         </div>
       </PropertyRow>
       {children}
@@ -656,11 +659,7 @@ export function InspectorPanel({
   );
   const title =
     selectedName ??
-    (object !== undefined
-      ? target.id
-      : selectedClipId !== undefined
-        ? selectedClipId
-        : 'Nothing selected');
+    (object !== undefined ? target.id : selectedClipId !== undefined ? selectedClipId : '—');
   const animatedProperties = Object.entries(target.animations ?? {}).flatMap(
     ([property, curve]) => {
       if (curve === undefined || curve.keyframes.length === 0) return [];
@@ -968,6 +967,35 @@ export function InspectorPanel({
     );
   };
 
+  const interpolationGroup = (
+    <div
+      className="preset-icon-group inspector-kf-row"
+      role="group"
+      aria-label="Keyframe interpolation"
+    >
+      {(
+        [
+          ['hold', InterpHoldIcon, 'Hold'],
+          ['linear', InterpLinearIcon, 'Linear'],
+          ['eased', InterpEasedIcon, 'Eased'],
+          ['bezier', InterpBezierIcon, 'Bezier'],
+        ] as const
+      ).map(([id, Icon, label]) => (
+        <button
+          key={id}
+          type="button"
+          className="icon-button"
+          aria-pressed={interpolation === id}
+          aria-label={label}
+          data-guide={label}
+          onClick={() => setInterpolation(id)}
+        >
+          <Icon />
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <PanelShell
       title="Inspector"
@@ -981,35 +1009,37 @@ export function InspectorPanel({
       noteMode={inspectorInactive ? 'hint' : undefined}
     >
       <AgentPreviewBadge surface="Inspector" />
-      <div className="inspector-selection-row">
-        <h2 className="inspector-selected-name" dir="ltr">
-          {title}
-        </h2>
-        <p className="monitor-meta inspector-playhead-meta" dir="ltr">
-          Playhead {(timeUs / 1_000_000).toFixed(2)}s
-        </p>
-      </div>
-      <div className="inspector-selection-summary" aria-label="Selection details">
-        <div className="inspector-selection-detail">
-          <span>Kind</span>
-          <strong>
-            {selectedKind ?? (object === undefined ? 'Nothing selected' : target.kind)}
-          </strong>
+      {!inspectorInactive && (
+        <div className="inspector-clip-header">
+          <div className="inspector-selection-row">
+            <h2 className="inspector-selected-name" dir="ltr">
+              {title}
+            </h2>
+            <p className="inspector-playhead-meta" dir="ltr" title="Playhead">
+              {(timeUs / 1_000_000).toFixed(2)}s
+            </p>
+          </div>
+          <div className="inspector-selection-summary" aria-label="Selection details">
+            <div className="inspector-selection-detail">
+              <span>Kind</span>
+              <strong>{selectedKind ?? target.kind}</strong>
+            </div>
+            <div className="inspector-selection-detail">
+              <span>Track</span>
+              <strong>{selectedTrackName ?? '—'}</strong>
+            </div>
+            <div className="inspector-selection-detail">
+              <span>Source</span>
+              <strong>{formatDuration(selectedSourceDurationUs)}</strong>
+            </div>
+            <div className="inspector-selection-detail">
+              <span>Timeline</span>
+              <strong>{formatDuration(selectedTimelineDurationUs)}</strong>
+            </div>
+          </div>
         </div>
-        <div className="inspector-selection-detail">
-          <span>Track</span>
-          <strong>{selectedTrackName ?? '—'}</strong>
-        </div>
-        <div className="inspector-selection-detail">
-          <span>Source</span>
-          <strong>{formatDuration(selectedSourceDurationUs)}</strong>
-        </div>
-        <div className="inspector-selection-detail">
-          <span>Timeline</span>
-          <strong>{formatDuration(selectedTimelineDurationUs)}</strong>
-        </div>
-      </div>
-      {selectedSourceMissing === true && (
+      )}
+      {selectedSourceMissing === true && !inspectorInactive && (
         <div className="inspector-missing-source" role="status">
           <span>The source file is missing</span>
           {onRelinkSelectedSource !== undefined && (
@@ -1024,16 +1054,19 @@ export function InspectorPanel({
         </div>
       )}
 
-      {tab === 'visual' && (
+      {!inspectorInactive && tab === 'visual' && (
         <section className="inspector-section">
-          <button
-            type="button"
-            className="inspector-section-toggle"
-            aria-expanded={transformOpen}
-            onClick={() => setTransformOpen((v) => !v)}
-          >
-            <h3>Transform</h3>
-          </button>
+          <div className="inspector-section-head">
+            <button
+              type="button"
+              className="inspector-section-toggle"
+              aria-expanded={transformOpen}
+              onClick={() => setTransformOpen((v) => !v)}
+            >
+              <h3>Transform</h3>
+            </button>
+            {transformOpen && interpolationGroup}
+          </div>
           {transformOpen && (
             <>
               {mediaFit !== undefined && (
@@ -1046,9 +1079,7 @@ export function InspectorPanel({
                     type="button"
                     className="inspector-animation-action"
                     aria-label="Fit clip to frame"
-                    title={
-                      mediaFit.disabledReason ?? 'Fits the current transform to the composition.'
-                    }
+                    title={mediaFit.disabledReason}
                     disabled={mediaFit.disabledReason !== undefined}
                     onClick={() => applyMediaFit('fit')}
                   >
@@ -1058,9 +1089,7 @@ export function InspectorPanel({
                     type="button"
                     className="inspector-animation-action"
                     aria-label="Fill frame with clip"
-                    title={
-                      mediaFit.disabledReason ?? 'Fills the composition with the current transform.'
-                    }
+                    title={mediaFit.disabledReason}
                     disabled={mediaFit.disabledReason !== undefined}
                     onClick={() => applyMediaFit('fill')}
                   >
@@ -1068,47 +1097,11 @@ export function InspectorPanel({
                   </button>
                 </div>
               )}
-              <div
-                className="preset-icon-group inspector-kf-row"
-                role="group"
-                aria-label="Keyframe interpolation"
-              >
-                {(
-                  [
-                    ['hold', InterpHoldIcon, 'Hold'],
-                    ['linear', InterpLinearIcon, 'Linear'],
-                    ['eased', InterpEasedIcon, 'Eased'],
-                    ['bezier', InterpBezierIcon, 'Bezier'],
-                  ] as const
-                ).map(([id, Icon, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    className="icon-button"
-                    style={{
-                      width: 'var(--control-sm)',
-                      height: 'var(--control-sm)',
-                      minWidth: 'var(--control-sm)',
-                      minHeight: 'var(--control-sm)',
-                    }}
-                    aria-pressed={interpolation === id}
-                    aria-label={label}
-                    data-guide={label}
-                    onClick={() => setInterpolation(id)}
-                  >
-                    <Icon />
-                  </button>
-                ))}
-              </div>
-              <div className="inspector-transform-pair" role="group" aria-label="Position">
+              <div className="inspector-grid-group" role="group" aria-label="Position">
                 {renderTransformRow('x')}
                 {renderTransformRow('y')}
               </div>
-              <div
-                className="inspector-transform-pair inspector-transform-pair-linked"
-                role="group"
-                aria-label="Scale"
-              >
+              <div className="inspector-grid-group" role="group" aria-label="Scale">
                 {renderTransformRow('scaleX')}
                 <button
                   type="button"
@@ -1136,12 +1129,10 @@ export function InspectorPanel({
         </section>
       )}
 
-      {tab === 'visual' && !idle && (
+      {!inspectorInactive && tab === 'visual' && !idle && (
         <section className="inspector-section" aria-label="Animations">
           <h3>Animations</h3>
-          {animatedProperties.length === 0 ? (
-            <p className="inspector-animation-empty">No keyframed properties.</p>
-          ) : (
+          {animatedProperties.length > 0 && (
             <div className="inspector-animations-list">
               {animatedProperties.map(({ property, label, keyframeCount }) => (
                 <div
@@ -1182,11 +1173,11 @@ export function InspectorPanel({
         </section>
       )}
 
-      {tab === 'visual' && target.kind === 'image' && (
+      {!inspectorInactive && tab === 'visual' && target.kind === 'image' && (
         <section className="inspector-section" aria-label="Crop">
           <h3>Crop</h3>
           {(['left', 'top', 'right', 'bottom'] as const).map((edge) => (
-            <div key={edge} className="inspector-prop">
+            <div key={edge} className="inspector-grid-row-plain">
               <label htmlFor={`crop-${edge}`}>{edge}</label>
               <input
                 id={`crop-${edge}`}
@@ -1221,7 +1212,7 @@ export function InspectorPanel({
         </section>
       )}
 
-      {tab === 'visual' && onCreateAdjustmentLayer !== undefined && (
+      {!inspectorInactive && tab === 'visual' && onCreateAdjustmentLayer !== undefined && (
         <section className="inspector-section" aria-label="Adjustment layer">
           <h3>Adjustment layer</h3>
           <button
@@ -1237,7 +1228,7 @@ export function InspectorPanel({
         </section>
       )}
 
-      {tab === 'adjust' && adjustmentLayer !== undefined && (
+      {!inspectorInactive && tab === 'adjust' && adjustmentLayer !== undefined && (
         <AdjustmentLayerSection
           object={target}
           adjustment={adjustmentLayer}
@@ -1250,7 +1241,7 @@ export function InspectorPanel({
         />
       )}
 
-      {tab === 'effects' && (
+      {!inspectorInactive && tab === 'effects' && (
         <EffectsSection
           object={target}
           {...(project === undefined ? {} : { project })}
@@ -1261,7 +1252,8 @@ export function InspectorPanel({
         />
       )}
 
-      {tab === 'mask' &&
+      {!inspectorInactive &&
+        tab === 'mask' &&
         maskTarget !== undefined &&
         project !== undefined &&
         maskProjectId !== undefined &&
@@ -1280,7 +1272,8 @@ export function InspectorPanel({
           />
         )}
 
-      {tab === 'enhance' &&
+      {!inspectorInactive &&
+        tab === 'enhance' &&
         upscaleTarget !== undefined &&
         project !== undefined &&
         upscaleProjectId !== undefined &&
@@ -1297,7 +1290,8 @@ export function InspectorPanel({
           />
         )}
 
-      {tab === 'audio' &&
+      {!inspectorInactive &&
+        tab === 'audio' &&
         (clipAudio !== undefined && selectedClipId !== undefined ? (
           <AudioSection
             open={audioOpen}
@@ -1309,10 +1303,10 @@ export function InspectorPanel({
             {...(project === undefined ? {} : { project, onProjectDispatch: onDispatch })}
           />
         ) : (
-          <p className="empty-hint">Select a clip to mix its audio.</p>
+          <p className="empty-hint">Select a clip</p>
         ))}
 
-      {tab === 'speed' && (
+      {!inspectorInactive && tab === 'speed' && (
         <SpeedSection
           open={speedOpen}
           onToggle={() => setSpeedOpen((value) => !value)}
@@ -1379,7 +1373,6 @@ function AdjustmentLayerSection({
         {adjustmentEffects.length === 0 ? (
           <div className="inspector-empty-state" role="status">
             <strong>No color adjustments</strong>
-            <span>Add a color effect from the Effects tab.</span>
           </div>
         ) : (
           <div className="inspector-adjustment-stack">
@@ -1446,9 +1439,6 @@ export function EffectsSection({
         {open && (
           <div className="inspector-empty-state" role="status">
             <strong>No effects applied</strong>
-            <span>
-              Choose an effect in the Effects tab, then return here to edit and keyframe it.
-            </span>
           </div>
         )}
       </section>
@@ -1674,7 +1664,7 @@ function EffectParamControl({
   if (param.type === 'boolean') {
     const boolValue = typeof value === 'boolean' ? value : (param.defaultValue as boolean);
     return (
-      <div className="inspector-prop">
+      <div className="inspector-grid-row-plain">
         <label>{param.label}</label>
         <button
           type="button"
@@ -1691,7 +1681,7 @@ function EffectParamControl({
   if (param.type === 'enum' && param.options) {
     const strValue = typeof value === 'string' ? value : String(param.defaultValue);
     return (
-      <div className="inspector-prop">
+      <div className="inspector-grid-row-plain">
         <label>{param.label}</label>
         <select value={strValue} onChange={(e) => setValue(e.currentTarget.value)}>
           {param.options.map((opt) => (
@@ -1707,11 +1697,10 @@ function EffectParamControl({
   if (param.type === 'color') {
     const strValue = typeof value === 'string' ? value : (param.defaultValue as string);
     return (
-      <div className="inspector-prop">
+      <div className="inspector-grid-row-plain">
         <label>{param.label}</label>
-        <div className="inspector-prop-row">
+        <div className="inspector-grid-wide">
           <ColorSwatchPicker label={param.label} value={strValue} onChange={setValue} />
-          <span className="value">{strValue}</span>
         </div>
       </div>
     );
@@ -1830,9 +1819,9 @@ function EffectNumericParamControl({
   const controlId = `effect-${effect.id}-${param.key}`;
   return (
     <PropertyRow
+      layout="grid"
       label={param.label}
       controlId={controlId}
-      value={`${previewValue.toFixed(2)}${param.unit ?? ''}`}
       onReset={() => commitValue(param.defaultValue as number)}
       {...(param.animatable
         ? {
@@ -1858,6 +1847,22 @@ function EffectNumericParamControl({
         : {})}
     >
       <div className="inspector-prop-row">
+        <div
+          className={`inspector-grid-value${param.unit !== undefined && param.unit !== '' ? ' has-unit' : ''}`}
+        >
+          <NumericPropertyControl
+            id={controlId}
+            value={previewValue}
+            adapter={adapter}
+            ariaLabel={`${param.label} value`}
+            min={param.min}
+            max={param.max}
+            step={param.step}
+          />
+          {param.unit !== undefined && param.unit !== '' && (
+            <span className="inspector-unit">{param.unit}</span>
+          )}
+        </div>
         <SliderPropertyControl
           value={previewValue}
           adapter={adapter}
@@ -1865,15 +1870,6 @@ function EffectNumericParamControl({
           min={param.min ?? -1}
           max={param.max ?? 1}
           step={param.step ?? 0.01}
-        />
-        <NumericPropertyControl
-          id={controlId}
-          value={previewValue}
-          adapter={adapter}
-          ariaLabel={`${param.label} value`}
-          min={param.min}
-          max={param.max}
-          step={param.step}
         />
       </div>
     </PropertyRow>
@@ -2046,50 +2042,43 @@ export function SpeedSection({
                 Reverse
               </button>
             </div>
-            {rate < 0 && (
-              <p className="inspector-speed-support-note">
-                Reverse preview is silent; exported audio plays in reverse.
-              </p>
-            )}
           </div>
 
           {!frozen && (
             <div className="inspector-speed-control">
               <span className="inspector-speed-label">Constant speed</span>
-              <div className="inspector-prop inspector-speed-rate">
+              <div className="inspector-grid-row-plain inspector-speed-rate">
                 <label htmlFor={rateControlId}>Rate</label>
-                <div className="inspector-prop-row">
-                  <input
-                    id={rateControlId}
-                    type="number"
-                    min={rateInputMin}
-                    max={rateInputMax}
-                    step={0.05}
-                    inputMode="decimal"
-                    value={draftRate}
-                    disabled={!canChange}
-                    aria-describedby={rateOutputId}
-                    onChange={(event) => {
-                      setDraftRate(event.currentTarget.value);
-                      setRateError(undefined);
-                    }}
-                    onBlur={commitDraftRate}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') commitDraftRate();
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="icon-button icon-button-labeled inspector-speed-apply"
-                    disabled={!canChange}
-                    onClick={commitDraftRate}
-                  >
-                    Apply
-                  </button>
-                  <output id={rateOutputId} className="inspector-speed-value" aria-live="polite">
-                    {formatInspectorSpeedRate(rate)}
-                  </output>
-                </div>
+                <input
+                  id={rateControlId}
+                  type="number"
+                  min={rateInputMin}
+                  max={rateInputMax}
+                  step={0.05}
+                  inputMode="decimal"
+                  value={draftRate}
+                  disabled={!canChange}
+                  aria-describedby={rateOutputId}
+                  onChange={(event) => {
+                    setDraftRate(event.currentTarget.value);
+                    setRateError(undefined);
+                  }}
+                  onBlur={commitDraftRate}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') commitDraftRate();
+                  }}
+                />
+                <button
+                  type="button"
+                  className="icon-button icon-button-labeled inspector-speed-apply"
+                  disabled={!canChange}
+                  onClick={commitDraftRate}
+                >
+                  Apply
+                </button>
+                <output id={rateOutputId} className="inspector-speed-value" aria-live="polite">
+                  {formatInspectorSpeedRate(rate)}
+                </output>
               </div>
               {rateError !== undefined && (
                 <p className="inspector-speed-support-note inspector-speed-error" role="alert">
@@ -2120,7 +2109,7 @@ export function SpeedSection({
 
           <div className="inspector-speed-control" aria-label="Time remap">
             <span className="inspector-speed-label">Time remap</span>
-            <div className="inspector-prop-row">
+            <div className="inspector-grid-row-plain">
               <label htmlFor={`insp-remap-start-${clipId}`}>Start source µs</label>
               <input
                 id={`insp-remap-start-${clipId}`}
@@ -2131,6 +2120,8 @@ export function SpeedSection({
                 disabled={!canChange}
                 onChange={(event) => setDraftRemapStartUs(event.currentTarget.value)}
               />
+            </div>
+            <div className="inspector-grid-row-plain">
               <label htmlFor={`insp-remap-end-${clipId}`}>End source µs</label>
               <input
                 id={`insp-remap-end-${clipId}`}
@@ -2141,6 +2132,8 @@ export function SpeedSection({
                 disabled={!canChange}
                 onChange={(event) => setDraftRemapEndUs(event.currentTarget.value)}
               />
+            </div>
+            <div className="inspector-speed-actions">
               <button
                 type="button"
                 className="icon-button icon-button-labeled inspector-speed-apply"
@@ -2162,14 +2155,9 @@ export function SpeedSection({
                 </button>
               )}
             </div>
-            {remapError !== undefined ? (
+            {remapError !== undefined && (
               <p className="inspector-speed-support-note inspector-speed-error" role="alert">
                 {remapError}
-              </p>
-            ) : (
-              <p className="inspector-speed-support-note">
-                Two bounded endpoints define a monotonic source-time curve; reverse remaps are
-                allowed.
               </p>
             )}
           </div>
@@ -2197,12 +2185,7 @@ export function SpeedSection({
                 </button>
               ))}
             </div>
-            {supportsRamps ? (
-              <p className="inspector-speed-support-note">
-                Applying a ramp creates three source-continuous speed segments. Undo restores the
-                original clip.
-              </p>
-            ) : (
+            {!supportsRamps && (
               <p id={rampHintId} className="inspector-speed-support-note">
                 Speed ramps are unavailable for this clip.
               </p>
@@ -2264,9 +2247,9 @@ function AudioSection({
       {open && (
         <>
           <PropertyRow
+            layout="grid"
             label="Volume"
             controlId="insp-gain"
-            value={round(clip.gain)}
             {...keyframe('gain', clip.gain)}
           >
             <input
@@ -2288,9 +2271,9 @@ function AudioSection({
             />
           </PropertyRow>
           <PropertyRow
+            layout="grid"
             label="Pan"
             controlId="insp-pan"
-            value={round(clip.pan)}
             {...keyframe('pan', clip.pan)}
           >
             <input
@@ -2311,11 +2294,7 @@ function AudioSection({
               }
             />
           </PropertyRow>
-          <PropertyRow
-            label="Mute"
-            value={clip.mute ? 'Muted' : 'On'}
-            {...keyframe('mute', clip.mute)}
-          >
+          <PropertyRow layout="grid" label="Mute" {...keyframe('mute', clip.mute)}>
             <button
               type="button"
               className="icon-button icon-button-labeled"
