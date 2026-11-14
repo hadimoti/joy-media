@@ -1,16 +1,48 @@
 import { describe, expect, it } from 'vitest';
+import { createTimelineContactSheet, formatQcTimecode } from './contact-sheet.js';
+import type { EvidenceFrameArtifact } from './evidence-store.js';
 
-const loadContactSheet = async () => import('./contact-sheet.js').catch(() => undefined);
+function createFrames(count: number): EvidenceFrameArtifact[] {
+  return Array.from({ length: count }, (_, index) => ({
+    frameId: `frame-${index}`,
+    timestampUs: index * 1_000_000,
+    jpeg: new Blob(['a'], { type: 'image/jpeg' }),
+    width: 320,
+    height: 180,
+    coverage: {
+      sourceDurationUs: count * 1_000_000,
+      sampledFrameCount: count,
+      sampledCutCount: 0,
+      totalCutCount: 0,
+      completeSourceCoverage: false,
+    },
+  }));
+}
+
+function canvasFactory() {
+  return (width: number, height: number) => ({
+    width,
+    height,
+    getContext: () => ({
+      fillStyle: '',
+      font: '',
+      textBaseline: '',
+      fillRect: () => undefined,
+      drawImage: () => undefined,
+      fillText: () => undefined,
+    }),
+    convertToBlob: async ({ type }: { type: string }) =>
+      new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type }),
+  });
+}
+
+const imageBitmapFactory = async () => ({ width: 320, height: 180 });
 
 describe('timeline QC contact sheet', () => {
   it('lays out JPEG frames and burns a readable timecode into each tile', async () => {
-    const contactSheet = await loadContactSheet();
-    expect(contactSheet).toBeDefined();
-    if (contactSheet === undefined) return;
-
     const labels: string[] = [];
     const drawCalls: unknown[][] = [];
-    const canvasFactory = (width: number, height: number) => ({
+    const factory = (width: number, height: number) => ({
       width,
       height,
       getContext: () => ({
@@ -24,40 +56,13 @@ describe('timeline QC contact sheet', () => {
       convertToBlob: async ({ type }: { type: string }) =>
         new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type }),
     });
-    const frames = [
-      {
-        frameId: 'frame-1',
-        timestampUs: 1_000_000,
-        jpeg: new Blob(['a'], { type: 'image/jpeg' }),
-        width: 320,
-        height: 180,
-        coverage: {
-          sourceDurationUs: 130_000_000,
-          sampledFrameCount: 2,
-          sampledCutCount: 0,
-          totalCutCount: 0,
-          completeSourceCoverage: false as const,
-        },
-      },
-      {
-        frameId: 'frame-2',
-        timestampUs: 123_450_000,
-        jpeg: new Blob(['b'], { type: 'image/jpeg' }),
-        width: 320,
-        height: 180,
-        coverage: {
-          sourceDurationUs: 130_000_000,
-          sampledFrameCount: 2,
-          sampledCutCount: 0,
-          totalCutCount: 0,
-          completeSourceCoverage: false as const,
-        },
-      },
-    ];
+    const frames = createFrames(2);
+    frames[0] = { ...frames[0]!, timestampUs: 1_000_000 };
+    frames[1] = { ...frames[1]!, timestampUs: 123_450_000 };
 
-    const sheet = await contactSheet.createTimelineContactSheet({
+    const sheet = await createTimelineContactSheet({
       frames,
-      canvasFactory,
+      canvasFactory: factory,
       imageBitmapFactory: async (blob: Blob) => ({
         width: 320,
         height: 180,
@@ -71,31 +76,26 @@ describe('timeline QC contact sheet', () => {
     expect(sheet).toMatchObject({ type: 'image/jpeg', size: 4 });
     expect(labels).toEqual(['00:00:01.000', '00:02:03.450']);
     expect(drawCalls.filter(([kind]) => kind === 'drawImage')).toHaveLength(2);
-    expect(contactSheet.formatQcTimecode(3_661_234_000)).toBe('01:01:01.234');
+    expect(formatQcTimecode(3_661_234_000)).toBe('01:01:01.234');
+  });
+
+  it('accepts exactly the 24-frame contact-sheet cap', async () => {
+    const sheet = await createTimelineContactSheet({
+      frames: createFrames(24),
+      canvasFactory: canvasFactory(),
+      imageBitmapFactory,
+    });
+
+    expect(sheet).toMatchObject({ type: 'image/jpeg', size: 4 });
   });
 
   it('rejects more than 24 frames instead of silently omitting evidence', async () => {
-    const contactSheet = await loadContactSheet();
-    expect(contactSheet).toBeDefined();
-    if (contactSheet === undefined) return;
-
-    const frames = Array.from({ length: 25 }, (_, index) => ({
-      frameId: `frame-${index}`,
-      timestampUs: index * 1_000_000,
-      jpeg: new Blob(['a'], { type: 'image/jpeg' }),
-      width: 1,
-      height: 1,
-      coverage: {
-        sourceDurationUs: 25_000_000,
-        sampledFrameCount: 25,
-        sampledCutCount: 0,
-        totalCutCount: 0,
-        completeSourceCoverage: false as const,
-      },
-    }));
-
-    await expect(contactSheet.createTimelineContactSheet({ frames })).rejects.toMatchObject({
-      code: 'too-many-frames',
-    });
+    await expect(
+      createTimelineContactSheet({
+        frames: createFrames(25),
+        canvasFactory: canvasFactory(),
+        imageBitmapFactory,
+      }),
+    ).rejects.toMatchObject({ code: 'too-many-frames' });
   });
 });

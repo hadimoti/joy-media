@@ -1,4 +1,8 @@
-import type { EvidenceManifestLookup, EvidenceStore } from './evidence-store.js';
+import {
+  EvidenceStoreQuotaError,
+  type EvidenceManifestLookup,
+  type EvidenceStore,
+} from './evidence-store.js';
 import type {
   CompositionCaptureFailureCode,
   CompositionObservationRequest,
@@ -113,6 +117,14 @@ export interface TimelineQcSamplerOptions {
   readonly maxReadbackBytes?: number;
 }
 
+interface TimelineQcTextAnalyzer {
+  /** Consumes this frame immediately and retains only the selected text-check results. */
+  observe(
+    frame: Pick<CapturedCompositionEvidence, 'outputTimeUs' | 'width' | 'height' | 'rgba'>,
+  ): void;
+  finish(): readonly TimelineQcTextAnalysis[];
+}
+
 export interface TimelineQcSampleRequest {
   readonly plan: TimelineQcSamplingPlan;
   readonly composition: Omit<CompositionObservationRequest, 'outputTimesUs'>;
@@ -209,6 +221,7 @@ export function planTimelineQcSampling(input: TimelineQcSamplingPlanInput): Time
   for (const box of textBoxes)
     selectedTimes.add(Math.floor(box.startUs + (box.endUs - box.startUs) / 2));
   const timesUs = [...selectedTimes].sort((left, right) => left - right);
+  // A cut at zero is invalid; cuts or text midpoints beyond maxFrames fail closed.
   if (timesUs.length < 1 || timesUs.length > maxFrames)
     throw new TimelineQcSamplerError('invalid-plan');
   const selectedSet = new Set(timesUs);
@@ -253,7 +266,7 @@ export function analyzeTimelineTextBoxes(
   const normalizedBoxes = normalizeTextBoxes(textBoxes, Number.MAX_SAFE_INTEGER);
   return Object.freeze(
     normalizedBoxes.map((box) => {
-      const midpointUs = Math.floor(box.startUs + (box.endUs - box.startUs) / 2);
+      const midpointUs = textBoxMidpoint(box);
       const frame = frames
         .filter(
           (candidate) =>
@@ -263,56 +276,40 @@ export function analyzeTimelineTextBoxes(
           (left, right) =>
             Math.abs(left.outputTimeUs - midpointUs) - Math.abs(right.outputTimeUs - midpointUs),
         )[0];
-      const inside90Percent =
-        box.x >= 0.05 && box.y >= 0.05 && box.x + box.width <= 0.95 && box.y + box.height <= 0.95;
-      if (frame === undefined) {
-        return Object.freeze({
-          id: box.id,
-          kind: box.kind,
-          startUs: box.startUs,
-          endUs: box.endUs,
-          safeArea: Object.freeze({ inside90Percent }),
-          legibility: Object.freeze({
-            status: 'unavailable' as const,
-            sampledAtUs: null,
-            contrastRatio: null,
-            meetsMinimumContrast: null,
-          }),
-        });
-      }
-      const backgroundLuminance = sampleBackgroundLuminance(frame, box);
-      if (backgroundLuminance === undefined) {
-        return Object.freeze({
-          id: box.id,
-          kind: box.kind,
-          startUs: box.startUs,
-          endUs: box.endUs,
-          safeArea: Object.freeze({ inside90Percent }),
-          legibility: Object.freeze({
-            status: 'unavailable' as const,
-            sampledAtUs: null,
-            contrastRatio: null,
-            meetsMinimumContrast: null,
-          }),
-        });
-      }
-      const textLuminance = relativeLuminance(compositeColor(box.textColor, backgroundLuminance));
-      const contrastRatio = contrast(textLuminance, backgroundLuminance);
-      return Object.freeze({
-        id: box.id,
-        kind: box.kind,
-        startUs: box.startUs,
-        endUs: box.endUs,
-        safeArea: Object.freeze({ inside90Percent }),
-        legibility: Object.freeze({
-          status: 'measured' as const,
-          sampledAtUs: frame.outputTimeUs,
-          contrastRatio,
-          meetsMinimumContrast: contrastRatio >= MINIMUM_TIMELINE_TEXT_CONTRAST_RATIO,
-        }),
-      });
+      return analyzeTextBoxOnFrame(box, frame);
     }),
   );
+}
+
+/** Streams frames through text checks while retaining only small numeric results. */
+function createTimelineQcTextAnalyzer(
+  textBoxes: readonly TimelineQcTextBox[],
+  sampleTimesUs: readonly number[],
+): TimelineQcTextAnalyzer {
+  const boxes = normalizeTextBoxes(textBoxes, Number.MAX_SAFE_INTEGER);
+  const selectedTimeByTextBox = new Map<string, number>();
+  const analysisByTextBox = new Map<string, TimelineQcTextAnalysis>();
+  for (const box of boxes) {
+    const midpointUs = textBoxMidpoint(box);
+    const selectedTimeUs = sampleTimesUs
+      .filter((timeUs) => timeUs >= box.startUs && timeUs < box.endUs)
+      .sort((left, right) => Math.abs(left - midpointUs) - Math.abs(right - midpointUs))[0];
+    if (selectedTimeUs !== undefined) selectedTimeByTextBox.set(box.id, selectedTimeUs);
+  }
+
+  return {
+    observe(frame) {
+      for (const box of boxes) {
+        if (selectedTimeByTextBox.get(box.id) !== frame.outputTimeUs) continue;
+        analysisByTextBox.set(box.id, analyzeTextBoxOnFrame(box, frame));
+      }
+    },
+    finish() {
+      return Object.freeze(
+        boxes.map((box) => analysisByTextBox.get(box.id) ?? analyzeTextBoxOnFrame(box, undefined)),
+      );
+    },
+  };
 }
 
 /** Creates a sequential sampler which retains only bounded JPEG evidence. */
@@ -331,7 +328,7 @@ export function createTimelineQcSampler(options: TimelineQcSamplerOptions = {}):
           maxPixels: normalized.maxReadbackPixels,
           maxReadbackBytes: normalized.maxReadbackBytes,
         });
-        const capturedFrames: CapturedCompositionEvidence[] = [];
+        const textAnalyzer = createTimelineQcTextAnalyzer(plan.textBoxes, plan.timesUs);
         let totalBytes = 0;
 
         for (const [index, outputTimeUs] of plan.timesUs.entries()) {
@@ -370,6 +367,7 @@ export function createTimelineQcSampler(options: TimelineQcSamplerOptions = {}):
           const frame = result.frames[0];
           if (frame === undefined || result.frames.length !== 1)
             throw new TimelineQcSamplerError('capture-failed');
+          textAnalyzer.observe(frame);
           const encoded = await encodeJpeg(frame, normalized);
           const jpeg = encoded.jpeg;
           if (jpeg.size > normalized.maxFrameBytes)
@@ -395,7 +393,6 @@ export function createTimelineQcSampler(options: TimelineQcSamplerOptions = {}):
             coverage: plan.coverage,
           });
           if (!stored) throw new TimelineQcSamplerError('manifest-unavailable');
-          capturedFrames.push(frame);
           capturedCount += 1;
           totalBytes += jpeg.size;
         }
@@ -405,7 +402,7 @@ export function createTimelineQcSampler(options: TimelineQcSamplerOptions = {}):
           status: 'captured',
           frameIds: plan.frameIds,
           coverage: plan.coverage,
-          textChecks: analyzeTimelineTextBoxes(plan.textBoxes, capturedFrames),
+          textChecks: textAnalyzer.finish(),
         };
       } catch (error) {
         const cancelled =
@@ -418,7 +415,12 @@ export function createTimelineQcSampler(options: TimelineQcSamplerOptions = {}):
         if (cancelled) return { status: 'cancelled', sampledFrameCount: capturedCount };
         return {
           status: 'failed',
-          code: error instanceof TimelineQcSamplerError ? error.code : 'capture-failed',
+          code:
+            error instanceof TimelineQcSamplerError
+              ? error.code
+              : error instanceof EvidenceStoreQuotaError
+                ? 'byte-budget-exceeded'
+                : 'capture-failed',
           sampledFrameCount: capturedCount,
         };
       }
@@ -639,10 +641,70 @@ function normalizeColor(value: TimelineQcRgba): TimelineQcRgba {
   return Object.freeze({ r: value.r, g: value.g, b: value.b, a: value.a ?? 255 });
 }
 
-function sampleBackgroundLuminance(
+function textBoxMidpoint(box: TimelineQcTextBox): number {
+  return Math.floor(box.startUs + (box.endUs - box.startUs) / 2);
+}
+
+function analyzeTextBoxOnFrame(
+  box: TimelineQcTextBox,
+  frame:
+    Pick<CapturedCompositionEvidence, 'outputTimeUs' | 'width' | 'height' | 'rgba'> | undefined,
+): TimelineQcTextAnalysis {
+  const inside90Percent =
+    box.x >= 0.05 && box.y >= 0.05 && box.x + box.width <= 0.95 && box.y + box.height <= 0.95;
+  if (frame === undefined) {
+    return Object.freeze({
+      id: box.id,
+      kind: box.kind,
+      startUs: box.startUs,
+      endUs: box.endUs,
+      safeArea: Object.freeze({ inside90Percent }),
+      legibility: Object.freeze({
+        status: 'unavailable' as const,
+        sampledAtUs: null,
+        contrastRatio: null,
+        meetsMinimumContrast: null,
+      }),
+    });
+  }
+  const backgroundColor = sampleBackgroundColor(frame, box);
+  if (backgroundColor === undefined) {
+    return Object.freeze({
+      id: box.id,
+      kind: box.kind,
+      startUs: box.startUs,
+      endUs: box.endUs,
+      safeArea: Object.freeze({ inside90Percent }),
+      legibility: Object.freeze({
+        status: 'unavailable' as const,
+        sampledAtUs: null,
+        contrastRatio: null,
+        meetsMinimumContrast: null,
+      }),
+    });
+  }
+  const backgroundLuminance = relativeLuminance(backgroundColor);
+  const textLuminance = relativeLuminance(compositeColor(box.textColor, backgroundColor));
+  const contrastRatio = contrast(textLuminance, backgroundLuminance);
+  return Object.freeze({
+    id: box.id,
+    kind: box.kind,
+    startUs: box.startUs,
+    endUs: box.endUs,
+    safeArea: Object.freeze({ inside90Percent }),
+    legibility: Object.freeze({
+      status: 'measured' as const,
+      sampledAtUs: frame.outputTimeUs,
+      contrastRatio,
+      meetsMinimumContrast: contrastRatio >= MINIMUM_TIMELINE_TEXT_CONTRAST_RATIO,
+    }),
+  });
+}
+
+function sampleBackgroundColor(
   frame: Pick<CapturedCompositionEvidence, 'width' | 'height' | 'rgba'>,
   box: TimelineQcTextBox,
-): number | undefined {
+): TimelineQcRgba | undefined {
   if (
     !Number.isSafeInteger(frame.width) ||
     frame.width < 1 ||
@@ -652,7 +714,7 @@ function sampleBackgroundLuminance(
   )
     return undefined;
   if (box.backgroundColor !== undefined)
-    return relativeLuminance(compositeColor(box.backgroundColor, 0));
+    return compositeColor(box.backgroundColor, { r: 0, g: 0, b: 0, a: 255 });
 
   const left = Math.max(0, Math.floor(box.x * frame.width));
   const top = Math.max(0, Math.floor(box.y * frame.height));
@@ -664,33 +726,34 @@ function sampleBackgroundLuminance(
     Math.floor(Math.sqrt(((right - left) * (bottom - top)) / 4_096)),
   );
   const text = box.textColor;
-  const luminances: number[] = [];
-  const allLuminances: number[] = [];
+  const pixels: { readonly color: TimelineQcRgba; readonly luminance: number }[] = [];
+  const allPixels: { readonly color: TimelineQcRgba; readonly luminance: number }[] = [];
   for (let y = top; y < bottom; y += sampleStride) {
     for (let x = left; x < right; x += sampleStride) {
       const offset = (y * frame.width + x) * 4;
       const r = frame.rgba[offset]!;
       const g = frame.rgba[offset + 1]!;
       const b = frame.rgba[offset + 2]!;
-      const luminance = relativeLuminance({ r, g, b, a: 255 });
-      allLuminances.push(luminance);
+      const color = { r, g, b, a: 255 };
+      const luminance = relativeLuminance(color);
+      const sample = { color, luminance };
+      allPixels.push(sample);
       const distance = (r - text.r) ** 2 + (g - text.g) ** 2 + (b - text.b) ** 2;
-      if (distance > 30 ** 2 * 3) luminances.push(luminance);
+      if (distance > 30 ** 2 * 3) pixels.push(sample);
     }
   }
-  const pixels = luminances.length > 0 ? luminances : allLuminances;
-  if (pixels.length === 0) return undefined;
-  pixels.sort((leftValue, rightValue) => leftValue - rightValue);
-  return pixels[Math.floor(pixels.length / 2)];
+  const candidates = pixels.length > 0 ? pixels : allPixels;
+  if (candidates.length === 0) return undefined;
+  candidates.sort((left, right) => left.luminance - right.luminance);
+  return candidates[Math.floor(candidates.length / 2)]!.color;
 }
 
-function compositeColor(color: TimelineQcRgba, backgroundLuminance: number): TimelineQcRgba {
+function compositeColor(color: TimelineQcRgba, background: TimelineQcRgba): TimelineQcRgba {
   const alpha = (color.a ?? 255) / 255;
-  const background = Math.round(backgroundLuminance * 255);
   return {
-    r: color.r * alpha + background * (1 - alpha),
-    g: color.g * alpha + background * (1 - alpha),
-    b: color.b * alpha + background * (1 - alpha),
+    r: color.r * alpha + background.r * (1 - alpha),
+    g: color.g * alpha + background.g * (1 - alpha),
+    b: color.b * alpha + background.b * (1 - alpha),
     a: 255,
   };
 }

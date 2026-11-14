@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createEvidenceStore } from './evidence-store.js';
-
-const loadQcSampler = async () => import('./qc-sampler.js').catch(() => undefined);
+import {
+  analyzeTimelineTextBoxes,
+  createTimelineQcSampler,
+  planTimelineQcSampling,
+} from './qc-sampler.js';
 
 const textBox = {
   id: 'title-main',
@@ -15,114 +18,35 @@ const textBox = {
   textColor: { r: 255, g: 255, b: 255, a: 255 },
 };
 
-describe('timeline QC sampler', () => {
-  it('plans evenly spaced samples and includes every cut exactly once', async () => {
-    const qc = await loadQcSampler();
-    expect(qc).toBeDefined();
-    if (qc === undefined) return;
+let fixtureId = 0;
 
-    const plan = qc.planTimelineQcSampling({
-      durationUs: 10_000_000,
-      cutTimesUs: [8_000_000, 4_000_000, 4_000_000],
-      strategy: { kind: 'evenly-spaced-plus-cuts', count: 3 },
-    });
-
-    expect(plan.timesUs).toEqual([0, 4_000_000, 5_000_000, 8_000_000, 9_999_999]);
-    expect(plan.frameIds).toEqual(plan.timesUs.map((timeUs: number) => `timeline-frame-${timeUs}`));
-    expect(plan.coverage).toMatchObject({
-      sourceDurationUs: 10_000_000,
-      sampledFrameCount: 5,
-      sampledCutCount: 2,
-      totalCutCount: 2,
-      completeSourceCoverage: false,
-    });
+function createFixture(
+  plan: ReturnType<typeof planTimelineQcSampling>,
+  store = createEvidenceStore(),
+) {
+  fixtureId += 1;
+  const scope = {
+    runId: `qc-run-${fixtureId}`,
+    identity: {
+      projectId: `project-${fixtureId}`,
+      assetDigest: 'a'.repeat(64),
+      projectRevision: 'revision-1',
+      modelId: 'local-qc',
+      promptPolicyDigest: 'qc-v1',
+    },
+  };
+  const manifestId = `timeline-qc-${fixtureId}`;
+  const lookup = { manifestId, scope };
+  store.createManifest({
+    id: manifestId,
+    scope,
+    mode: 'overview',
+    intendedFrameIdPages: [plan.frameIds],
   });
-
-  it('adds a title midpoint to explicit sample times and checks its 90 percent safe area and contrast', async () => {
-    const qc = await loadQcSampler();
-    expect(qc).toBeDefined();
-    if (qc === undefined) return;
-
-    const plan = qc.planTimelineQcSampling({
-      durationUs: 6_000_000,
-      strategy: { kind: 'times', timesUs: [0, 5_999_999] },
-      textBoxes: [textBox],
-    });
-    expect(plan.timesUs).toEqual([0, 3_000_000, 5_999_999]);
-
-    const darkFrame = {
-      outputTimeUs: 3_000_000,
-      width: 10,
-      height: 10,
-      rgba: new Uint8Array(10 * 10 * 4),
-    };
-    darkFrame.rgba.forEach((_value, index) => {
-      if (index % 4 === 3) darkFrame.rgba[index] = 255;
-    });
-    const outsideBox = { ...textBox, id: 'title-outside', x: 0.9, width: 0.2 };
-    const checks = qc.analyzeTimelineTextBoxes([textBox, outsideBox], [darkFrame]);
-
-    expect(checks).toHaveLength(2);
-    expect(checks[0]).toMatchObject({
-      id: 'title-main',
-      safeArea: { inside90Percent: true },
-      legibility: { sampledAtUs: 3_000_000, meetsMinimumContrast: true },
-    });
-    expect(checks[0]?.legibility.contrastRatio).toBeGreaterThan(4.5);
-    expect(checks[1]).toMatchObject({
-      id: 'title-outside',
-      safeArea: { inside90Percent: false },
-    });
-  });
-
-  it('captures sequentially, downsizes to a JPEG budget, and stores time and coverage', async () => {
-    const qc = await loadQcSampler();
-    expect(qc).toBeDefined();
-    if (qc === undefined) return;
-
-    const plan = qc.planTimelineQcSampling({
-      durationUs: 1_000_000,
-      strategy: { kind: 'times', timesUs: [0, 500_000] },
-    });
-    const evidenceStore = createEvidenceStore();
-    const scope = {
-      runId: 'qc-run-1',
-      identity: {
-        projectId: 'project-1',
-        assetDigest: 'a'.repeat(64),
-        projectRevision: 'revision-1',
-        modelId: 'local-qc',
-        promptPolicyDigest: 'qc-v1',
-      },
-    };
-    const manifestId = 'timeline-qc-1';
-    const lookup = { manifestId, scope };
-    evidenceStore.createManifest({
-      id: manifestId,
-      scope,
-      mode: 'overview',
-      intendedFrameIdPages: [plan.frameIds],
-    });
-    const drawCalls: unknown[][] = [];
-    const canvasFactory = (width: number, height: number) => {
-      const context = {
-        createImageData: (imageWidth: number, imageHeight: number) => ({
-          width: imageWidth,
-          height: imageHeight,
-          data: new Uint8ClampedArray(imageWidth * imageHeight * 4),
-        }),
-        putImageData: (imageData: unknown) => drawCalls.push(['putImageData', imageData]),
-        drawImage: (...args: unknown[]) => drawCalls.push(['drawImage', ...args]),
-      };
-      return {
-        width,
-        height,
-        getContext: () => context,
-        convertToBlob: async ({ type }: { type: string }) =>
-          new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type }),
-      };
-    };
-    const request = {
+  return {
+    store,
+    lookup,
+    request: {
       plan,
       composition: {
         snapshot: {
@@ -158,24 +82,131 @@ describe('timeline QC sampler', () => {
           }),
         },
       },
-      evidenceStore,
+      evidenceStore: store,
       evidenceLookup: lookup,
+    },
+  };
+}
+
+function canvasFactory(jpegBytes = 4) {
+  return (width: number, height: number) => {
+    const context = {
+      createImageData: (imageWidth: number, imageHeight: number) => ({
+        width: imageWidth,
+        height: imageHeight,
+        data: new Uint8ClampedArray(imageWidth * imageHeight * 4),
+      }),
+      putImageData: () => undefined,
+      drawImage: () => undefined,
     };
-    const sampler = qc.createTimelineQcSampler({
-      canvasFactory,
+    return {
+      width,
+      height,
+      getContext: () => context,
+      convertToBlob: async ({ type }: { type: string }) =>
+        new Blob([new Uint8Array(jpegBytes)], { type }),
+    };
+  };
+}
+
+function darkFrame(outputTimeUs: number, width = 10, height = 10) {
+  const rgba = new Uint8Array(width * height * 4);
+  for (let index = 3; index < rgba.length; index += 4) rgba[index] = 255;
+  return { outputTimeUs, width, height, rgba };
+}
+
+describe('timeline QC sampler', () => {
+  it('plans evenly spaced samples and includes every cut exactly once', () => {
+    const plan = planTimelineQcSampling({
+      durationUs: 10_000_000,
+      cutTimesUs: [8_000_000, 4_000_000, 4_000_000],
+      strategy: { kind: 'evenly-spaced-plus-cuts', count: 3 },
+    });
+
+    expect(plan.timesUs).toEqual([0, 4_000_000, 5_000_000, 8_000_000, 9_999_999]);
+    expect(plan.frameIds).toEqual(plan.timesUs.map((timeUs) => `timeline-frame-${timeUs}`));
+    expect(plan.coverage).toMatchObject({
+      sourceDurationUs: 10_000_000,
+      sampledFrameCount: 5,
+      sampledCutCount: 2,
+      totalCutCount: 2,
+      completeSourceCoverage: false,
+    });
+  });
+
+  it('rejects a plan when adding cuts exceeds the frame cap', () => {
+    expect(() =>
+      planTimelineQcSampling({
+        durationUs: 10,
+        cutTimesUs: [2],
+        strategy: { kind: 'evenly-spaced-plus-cuts', count: 2 },
+        maxFrames: 2,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'invalid-plan' }));
+  });
+
+  it('adds a title midpoint and checks its 90 percent safe area and contrast', () => {
+    const plan = planTimelineQcSampling({
+      durationUs: 6_000_000,
+      strategy: { kind: 'times', timesUs: [0, 5_999_999] },
+      textBoxes: [textBox],
+    });
+    expect(plan.timesUs).toEqual([0, 3_000_000, 5_999_999]);
+
+    const frame = darkFrame(3_000_000);
+    const outsideBox = { ...textBox, id: 'title-outside', x: 0.9, width: 0.2 };
+    const checks = analyzeTimelineTextBoxes([textBox, outsideBox], [frame]);
+
+    expect(checks).toHaveLength(2);
+    expect(checks[0]).toMatchObject({
+      id: 'title-main',
+      safeArea: { inside90Percent: true },
+      legibility: { sampledAtUs: 3_000_000, meetsMinimumContrast: true },
+    });
+    expect(checks[0]?.legibility.contrastRatio).toBeGreaterThan(4.5);
+    expect(checks[1]).toMatchObject({
+      id: 'title-outside',
+      safeArea: { inside90Percent: false },
+    });
+  });
+
+  it('blends translucent text against the sampled colored background in sRGB', () => {
+    const frame = darkFrame(3_000_000);
+    for (let index = 0; index < frame.rgba.length; index += 4) {
+      frame.rgba[index] = 0;
+      frame.rgba[index + 1] = 0;
+      frame.rgba[index + 2] = 255;
+      frame.rgba[index + 3] = 255;
+    }
+    const translucentWhite = { ...textBox, textColor: { r: 255, g: 255, b: 255, a: 128 } };
+
+    const [check] = analyzeTimelineTextBoxes([translucentWhite], [frame]);
+
+    expect(check?.legibility.status).toBe('measured');
+    if (check?.legibility.status !== 'measured') throw new Error('expected measured contrast');
+    expect(check.legibility.contrastRatio).toBeCloseTo(2.639, 3);
+  });
+
+  it('captures sequentially, downsizes to a JPEG budget, and stores time and coverage', async () => {
+    const plan = planTimelineQcSampling({
+      durationUs: 1_000_000,
+      strategy: { kind: 'times', timesUs: [0, 500_000] },
+    });
+    const fixture = createFixture(plan);
+    const sampler = createTimelineQcSampler({
+      canvasFactory: canvasFactory(),
       maxWidth: 2,
       maxHeight: 2,
       maxFrameBytes: 32,
       maxTotalBytes: 64,
     });
 
-    const result = await sampler.sample(request);
+    const result = await sampler.sample(fixture.request);
 
     expect(result).toMatchObject({ status: 'captured', frameIds: plan.frameIds });
-    expect(drawCalls.some(([kind]) => kind === 'drawImage')).toBe(true);
     for (const frameId of plan.frameIds) {
       const timestampUs = Number(frameId.slice('timeline-frame-'.length));
-      expect(evidenceStore.readFrameArtifact({ ...lookup, frameId })).toMatchObject({
+      expect(fixture.store.readFrameArtifact({ ...fixture.lookup, frameId })).toMatchObject({
         timestampUs,
         jpeg: expect.objectContaining({ type: 'image/jpeg', size: 4 }),
         width: 2,
@@ -183,5 +214,83 @@ describe('timeline QC sampler', () => {
         coverage: { completeSourceCoverage: false, sampledFrameCount: 2 },
       });
     }
+  });
+
+  it('reports an artifact that exceeds the per-frame JPEG cap', async () => {
+    const plan = planTimelineQcSampling({
+      durationUs: 1_000_000,
+      strategy: { kind: 'times', timesUs: [0] },
+    });
+    const fixture = createFixture(plan);
+
+    const result = await createTimelineQcSampler({
+      canvasFactory: canvasFactory(8),
+      maxFrameBytes: 4,
+      maxTotalBytes: 16,
+    }).sample(fixture.request);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      code: 'artifact-too-large',
+      sampledFrameCount: 0,
+    });
+  });
+
+  it('reports when accumulated JPEGs exceed the total byte budget', async () => {
+    const plan = planTimelineQcSampling({
+      durationUs: 1_000_000,
+      strategy: { kind: 'times', timesUs: [0, 500_000] },
+    });
+    const fixture = createFixture(plan);
+
+    const result = await createTimelineQcSampler({
+      canvasFactory: canvasFactory(),
+      maxFrameBytes: 4,
+      maxTotalBytes: 4,
+    }).sample(fixture.request);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      code: 'byte-budget-exceeded',
+      sampledFrameCount: 1,
+    });
+  });
+
+  it('maps an evidence-store quota error to the byte-budget result', async () => {
+    const plan = planTimelineQcSampling({
+      durationUs: 1_000_000,
+      strategy: { kind: 'times', timesUs: [0] },
+    });
+    const fixture = createFixture(plan, createEvidenceStore({ maxFrameArtifactBytes: 2 }));
+
+    const result = await createTimelineQcSampler({
+      canvasFactory: canvasFactory(),
+      maxFrameBytes: 8,
+      maxTotalBytes: 16,
+    }).sample(fixture.request);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      code: 'byte-budget-exceeded',
+      sampledFrameCount: 0,
+    });
+  });
+
+  it('cancels an aborted capture request', async () => {
+    const plan = planTimelineQcSampling({
+      durationUs: 1_000_000,
+      strategy: { kind: 'times', timesUs: [0] },
+    });
+    const fixture = createFixture(plan);
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await createTimelineQcSampler({ canvasFactory: canvasFactory() }).sample({
+      ...fixture.request,
+      signal: controller.signal,
+    });
+
+    expect(result).toEqual({ status: 'cancelled', sampledFrameCount: 0 });
+    expect(fixture.store.readManifest(fixture.lookup)?.status).toBe('cancelled');
   });
 });
