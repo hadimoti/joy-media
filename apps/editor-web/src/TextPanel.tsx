@@ -14,6 +14,7 @@ import {
   textDocumentToString,
 } from '@joy-media/project-schema';
 import { PanelShell } from './PanelShell.js';
+import { ColorSwatchPicker } from './ColorPickerPopover.js';
 import { PropertyRow } from './components/PropertyRow.js';
 import { TextTabIcon } from './icons.js';
 import { resolveObjectIdForSelection } from './sticker-bindings.js';
@@ -472,20 +473,17 @@ function TextEditor({
         </div>
         <label className="text-color-row">
           <span>Start</span>
-          <input
-            type="color"
+          <ColorSwatchPicker
+            label="Start"
             value={solidColor}
-            onChange={(event) =>
+            onChange={(hex) =>
               update({
                 fill:
                   fill.kind === 'solid'
-                    ? { kind: 'solid', color: event.currentTarget.value }
+                    ? { kind: 'solid', color: hex }
                     : {
                         ...fill,
-                        stops: [
-                          { ...fill.stops[0]!, color: event.currentTarget.value },
-                          ...fill.stops.slice(1),
-                        ],
+                        stops: [{ ...fill.stops[0]!, color: hex }, ...fill.stops.slice(1)],
                       },
               })
             }
@@ -494,17 +492,15 @@ function TextEditor({
         {fill.kind === 'linear-gradient' && (
           <label className="text-color-row">
             <span>End</span>
-            <input
-              type="color"
+            <ColorSwatchPicker
+              label="End"
               value={secondGradientColor}
-              onChange={(event) =>
+              onChange={(hex) =>
                 update({
                   fill: {
                     ...fill,
                     stops: fill.stops.map((stop, index) =>
-                      index === fill.stops.length - 1
-                        ? { ...stop, color: event.currentTarget.value }
-                        : stop,
+                      index === fill.stops.length - 1 ? { ...stop, color: hex } : stop,
                     ),
                   },
                 })
@@ -517,13 +513,13 @@ function TextEditor({
         <h4>Effects</h4>
         <label className="text-color-row">
           <span>Stroke</span>
-          <input
-            type="color"
+          <ColorSwatchPicker
+            label="Stroke"
             value={style.stroke?.color ?? '#f6c453'}
-            onChange={(event) =>
+            onChange={(hex) =>
               update({
                 stroke: {
-                  color: event.currentTarget.value,
+                  color: hex,
                   widthPx: style.stroke?.widthPx ?? 2,
                   opacity: 1,
                 },
@@ -551,13 +547,13 @@ function TextEditor({
         </PropertyRow>
         <label className="text-color-row">
           <span>Shadow</span>
-          <input
-            type="color"
+          <ColorSwatchPicker
+            label="Shadow"
             value={style.shadow?.color ?? '#000000'}
-            onChange={(event) =>
+            onChange={(hex) =>
               update({
                 shadow: {
-                  color: event.currentTarget.value,
+                  color: hex,
                   offsetX: style.shadow?.offsetX ?? 4,
                   offsetY: style.shadow?.offsetY ?? 4,
                   blurPx: style.shadow?.blurPx ?? 8,
@@ -588,13 +584,13 @@ function TextEditor({
         </PropertyRow>
         <label className="text-color-row">
           <span>Glow</span>
-          <input
-            type="color"
+          <ColorSwatchPicker
+            label="Glow"
             value={style.glow?.color ?? '#53d9ff'}
-            onChange={(event) =>
+            onChange={(hex) =>
               update({
                 glow: {
-                  color: event.currentTarget.value,
+                  color: hex,
                   radiusPx: style.glow?.radiusPx ?? 18,
                   strength: style.glow?.strength ?? 0.8,
                 },
