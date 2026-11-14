@@ -4,8 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { applyTransaction } from '@joy-media/commands';
 import type { CommandTransaction } from '@joy-media/commands';
-import { validateSpikeProject } from '@joy-media/project-schema';
-import type { SpikeProject } from '@joy-media/project-schema';
+import {
+  createIdentityColorGrade,
+  migrateV0ToV1,
+  validateJoyProjectV1,
+  validateSpikeProject,
+} from '@joy-media/project-schema';
+import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { emptySpikeProject, makeVideoClip } from '@joy-media/test-fixtures';
 import {
   InMemoryProjectStore,
@@ -22,6 +27,13 @@ const adapter: PersistenceAdapter<SpikeProject, CommandTransaction> = {
   schemaVersion: (project) => project.schemaVersion,
   validate: validateSpikeProject,
   apply: (project, transaction) => applyTransaction(project, transaction).project,
+};
+
+const joyProjectAdapter: PersistenceAdapter<JoyProjectV1, CommandTransaction> = {
+  projectId: (project) => project.id,
+  schemaVersion: (project) => project.schemaVersion,
+  validate: validateJoyProjectV1,
+  apply: (project) => project,
 };
 
 function insert(id: string): CommandTransaction {
@@ -102,6 +114,46 @@ describe('local project persistence', () => {
       adapter,
     );
     expect(reopened.recover(initial.id)).toMatchObject({ project: expected, revision: 1 });
+  });
+
+  it('reopens the saved output color grade from a desktop project snapshot', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-color-persistence-'));
+    const filePath = join(directory, 'project-store.json');
+    const identity = createIdentityColorGrade();
+    const grade = {
+      ...identity,
+      adjust: {
+        ...identity.adjust!,
+        temperature: 0.4,
+        tint: -0.2,
+        exposure: 1,
+        contrast: 0.3,
+        pivot: 0.65,
+        highlights: 0.35,
+        shadows: -0.25,
+        whites: 0.45,
+        blacks: -0.4,
+        saturation: 1.4,
+        vibrance: 0.5,
+        hue: 45,
+      },
+      lut: { builtIn: 'warm-cinema' as const, intensity: 0.6 },
+    };
+    const project: JoyProjectV1 = {
+      ...migrateV0ToV1(emptySpikeProject()).project,
+      colorGrade: grade,
+    };
+
+    new LocalProjectPersistence(
+      new JsonFileProjectStore<JoyProjectV1, CommandTransaction>(filePath),
+      joyProjectAdapter,
+    ).initialize(project);
+
+    const reopened = new LocalProjectPersistence(
+      new JsonFileProjectStore<JoyProjectV1, CommandTransaction>(filePath),
+      joyProjectAdapter,
+    ).recover(project.id);
+    expect(reopened.project.colorGrade).toEqual(grade);
   });
 
   it('persists a browser-local snapshot plus log across a fresh store instance', () => {

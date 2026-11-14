@@ -1,12 +1,43 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createIdentityColorGrade } from '@joy-media/project-schema';
-import { HslSection, LooksSection, ScopeCanvas } from './ColorPanel.js';
+import { AdjustSection, HslSection, LooksSection, ScopeCanvas } from './ColorPanel.js';
 
 const stateFor = () => 'none' as const;
 const ignore = () => undefined;
 
 describe('Color workspace sections', () => {
+  it('exposes every Adjust slider through the shared keyframe control', () => {
+    const markup = renderToStaticMarkup(
+      <AdjustSection
+        draft={createIdentityColorGrade()}
+        onPatch={ignore}
+        onCommit={ignore}
+        animationStateFor={stateFor}
+        onToggleAnimation={ignore}
+        canAnimate={true}
+      />,
+    );
+
+    for (const property of [
+      'Temperature',
+      'Tint',
+      'Exposure',
+      'Contrast',
+      'Pivot',
+      'Highlights',
+      'Shadows',
+      'Whites',
+      'Blacks',
+      'Saturation',
+      'Vibrance',
+      'Hue',
+    ]) {
+      expect(markup).toContain(`aria-label="${property}"`);
+      expect(markup).toContain(`Add ${property} keyframe at playhead`);
+    }
+  });
+
   it('exposes every HSL dimension as an accessible, keyframeable property', () => {
     const markup = renderToStaticMarkup(
       <HslSection
@@ -53,6 +84,7 @@ describe('Color workspace sections', () => {
 
     expect(markup).toContain('Studio look.cube');
     expect(markup).toContain('data-property-row="LUT intensity"');
+    expect(markup).toContain('Add Look or LUT keyframe at playhead');
     expect(markup).toContain('Add LUT intensity keyframe at playhead');
   });
 

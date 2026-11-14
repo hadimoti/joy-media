@@ -128,12 +128,28 @@ describe('visual property schemas', () => {
     expect(updated.visualObjects.title!.transform.x).toBe(12);
     expect(project.visualObjects.title!.transform.x).toBe(0);
   });
-  it('applies a reversible output color grade command', () => {
+  it('applies and reverses a full output color grade command', () => {
     const migrated = migrateV0ToV1(emptySpikeProject());
     const project = migrated.project;
+    const identity = createIdentityColorGrade();
     const grade = {
-      ...createIdentityColorGrade(),
-      adjust: { ...createIdentityColorGrade().adjust!, exposure: 1 },
+      ...identity,
+      adjust: {
+        ...identity.adjust!,
+        temperature: 0.4,
+        tint: -0.2,
+        exposure: 1,
+        contrast: 0.3,
+        pivot: 0.65,
+        highlights: 0.35,
+        shadows: -0.25,
+        whites: 0.45,
+        blacks: -0.4,
+        saturation: 1.4,
+        vibrance: 0.5,
+        hue: 45,
+      },
+      lut: { builtIn: 'warm-cinema' as const, intensity: 0.6 },
     };
     const applied = applyVisualObjectProjectCommand(project, {
       type: 'color.setGrade',

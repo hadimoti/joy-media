@@ -627,7 +627,7 @@ export function ColorPanel({
   );
 }
 
-function AdjustSection({
+export function AdjustSection({
   draft,
   onPatch,
   onCommit,
