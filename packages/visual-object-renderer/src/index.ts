@@ -58,19 +58,20 @@ export interface ResolvedObject {
 export type ClipTimingLookup = ReadonlyMap<string, { readonly startUs: TimeUs }>;
 
 export interface BuildRenderFrameOptions {
-  readonly transitions?: readonly TransitionV1[] | undefined;
+  readonly transitions?: readonly TransitionV1[];
   /** Right-clip start times used to activate transitions at the junction. */
-  readonly clipTimes?: ClipTimingLookup | undefined;
-  readonly colorGrade?: ColorGradeV1 | ColorGradeV2 | ColorGradeIR | undefined;
+  readonly clipTimes?: ClipTimingLookup;
+  readonly colorGrade?: ColorGradeV1 | ColorGradeV2 | ColorGradeIR;
   /** Per-object effect stacks from `VisualObjectV1.effects` (P16). */
-  readonly effectsByObjectId?: Readonly<Record<string, readonly EffectInstanceV1[]>> | undefined;
+  readonly effectsByObjectId?: Readonly<Record<string, readonly EffectInstanceV1[]>>;
   /** Universal property animation map used for frame-local effect sampling. */
-  readonly propertyAnimations?: JoyProjectV1['propertyAnimations'] | undefined;
+  readonly propertyAnimations?: JoyProjectV1['propertyAnimations'];
   /** Intrinsic pixel size for image stickers when real bitmaps are available. */
-  readonly imageSizesByObjectId?:
-    Readonly<Record<string, { readonly width: number; readonly height: number }>> | undefined;
+  readonly imageSizesByObjectId?: Readonly<
+    Record<string, { readonly width: number; readonly height: number }>
+  >;
   /** Optional evaluator-provided layer order for universal timeline tracks. */
-  readonly zIndexByObjectId?: Readonly<Record<string, number>> | undefined;
+  readonly zIndexByObjectId?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -106,11 +107,9 @@ export function buildRenderFrameIRFromProject(
           : { expressionDiagnostics: resolved.diagnostics }),
       };
     });
-  const buildOptions: BuildRenderFrameOptions = {
+  return buildRenderFrameIR(compositionId, timeUs, width, height, resolvedObjects, {
     ...options,
     propertyAnimations: options.propertyAnimations ?? project.propertyAnimations,
-    transitions: options.transitions ?? project.transitions,
-    clipTimes: options.clipTimes ?? clipTimesFromTracks(composition.tracks),
     ...(options.colorGrade === undefined && project.colorGrade !== undefined
       ? {
           colorGrade:
@@ -129,8 +128,7 @@ export function buildRenderFrameIRFromProject(
               : project.colorGrade,
         }
       : {}),
-  };
-  return buildRenderFrameIR(compositionId, timeUs, width, height, resolvedObjects, buildOptions);
+  });
 }
 
 /**

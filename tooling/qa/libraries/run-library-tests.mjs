@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* global window */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { extname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -19,6 +19,8 @@ const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 const AUDIT_MD_PATH = resolve(REPO_ROOT, 'docs/qa/v1.1.1/LIBRARY-AUDIT.md');
 const BROWSER_RUNNER_PATH = resolve(import.meta.dirname, 'src/browser-runner.ts');
 const EXPORT_COMPARE_MAX_MEAN_DELTA = 12.0;
+/** Seek a little before the wanted frame (the transition export runs at 20 fps = 50 ms per frame). */
+const EXPORT_SEEK_LEAD_SEC = 0.005;
 
 function printUsage() {
   console.log(
@@ -31,8 +33,9 @@ function printUsage() {
       '  --limit N                            Max number of items to run after filtering',
       '  --out <dir>                          Directory for reports, renders, and exported clips',
       '  --face <path>                        Optional portrait photo for bottom-right quadrant',
-      '  --pic1 <path>                        First clip picture for transitions (Left/From)',
-      '  --pic2 <path>                        Second clip picture for transitions (Right/To)',
+      '  --pic1 <path>                        First clip picture for transitions (Left/From); or env JOY_TRANSITION_PIC1',
+      '  --pic2 <path>                        Second clip picture for transitions (Right/To); or env JOY_TRANSITION_PIC2',
+      '  (env JOY_HARNESS_VERBOSE=1 prints the browser console; a run with --items or --limit does not write the tracked docs)',
       '  -h, --help                           Show this help text',
     ].join('\n'),
   );
@@ -49,10 +52,12 @@ function resolveGitCommit() {
   }
 }
 
-function readImageDataUrl(imagePath) {
+function readImageDataUrl(imagePath, what) {
   if (!imagePath) return undefined;
   const resolved = resolve(imagePath);
-  if (!existsSync(resolved)) return undefined;
+  if (!existsSync(resolved)) {
+    throw new Error(`${what} picture not found: ${resolved}`);
+  }
   const ext = extname(resolved).toLowerCase();
   const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
   const base64 = readFileSync(resolved).toString('base64');
@@ -177,18 +182,22 @@ async function main() {
   const outDir = resolve(options.outDir);
   mkdirSync(outDir, { recursive: true });
   const auditMap = parseLibraryAuditMarkdown(readFileSync(AUDIT_MD_PATH, 'utf8'));
-  const faceDataUrl = readImageDataUrl(options.facePath);
+  const faceDataUrl = readImageDataUrl(options.facePath, 'Face');
 
-  const OWNER_ASSETS_DIR = resolve(REPO_ROOT, '../joy-media-temps/fable-plan/assets-from-owner');
-  const altOwnerAssets = 'C:/Users/HadiMoti/Desktop/joy-media-temps/fable-plan/assets-from-owner';
-  const defaultPic1 = existsSync(join(OWNER_ASSETS_DIR, 'transition-preview-pic1.jpg'))
-    ? join(OWNER_ASSETS_DIR, 'transition-preview-pic1.jpg')
-    : join(altOwnerAssets, 'transition-preview-pic1.jpg');
-  const defaultPic2 = existsSync(join(OWNER_ASSETS_DIR, 'transition-preview-pic2.jpg'))
-    ? join(OWNER_ASSETS_DIR, 'transition-preview-pic2.jpg')
-    : join(altOwnerAssets, 'transition-preview-pic2.jpg');
-  const pic1DataUrl = readImageDataUrl(options.pic1Path || defaultPic1);
-  const pic2DataUrl = readImageDataUrl(options.pic2Path || defaultPic2);
+  // The two clip pictures for transitions come from --pic1/--pic2 or from the
+  // JOY_TRANSITION_PIC1 / JOY_TRANSITION_PIC2 environment variables; there is no
+  // built-in path. Other kinds do not use them.
+  const pic1Path = options.pic1Path || process.env.JOY_TRANSITION_PIC1;
+  const pic2Path = options.pic2Path || process.env.JOY_TRANSITION_PIC2;
+  if (options.kind === 'transitions' && (!pic1Path || !pic2Path)) {
+    throw new Error(
+      'Transitions need two clip pictures: pass --pic1 <path> and --pic2 <path>, or set JOY_TRANSITION_PIC1 and JOY_TRANSITION_PIC2.',
+    );
+  }
+  const pic1DataUrl = readImageDataUrl(pic1Path, 'First clip (--pic1)');
+  const pic2DataUrl = readImageDataUrl(pic2Path, 'Second clip (--pic2)');
+  const verbose = process.env.JOY_HARNESS_VERBOSE === '1';
+  const fullRun = options.items === undefined && options.limit === undefined;
 
   console.log(`Starting Vite server for library harness (${options.kind})...`);
   const { server, url } = await startHarnessViteServer();
@@ -204,7 +213,7 @@ async function main() {
     const runtimePageErrors = [];
     let settledStartup = false;
     page.on('console', (msg) => {
-      console.log(`[browser ${msg.type()}]`, msg.text());
+      if (verbose) console.log(`[browser ${msg.type()}]`, msg.text());
       if (msg.type() === 'error') {
         runtimeConsoleErrors.push(msg.text());
       }
@@ -279,12 +288,13 @@ async function main() {
         const itemDir = join(outDir, 'transitions', id.replace(/[:/]/g, '_'));
         mkdirSync(itemDir, { recursive: true });
 
+        // The window is [1 s, 2 s); the last frame inside it is 1.95 s (95 percent).
         const pFrames = [
           { key: '000', pct: 0, timeSec: 1.0, b64: browserResult.preview.p0Base64 },
           { key: '025', pct: 25, timeSec: 1.25, b64: browserResult.preview.p25Base64 },
           { key: '050', pct: 50, timeSec: 1.5, b64: browserResult.preview.p50Base64 },
           { key: '075', pct: 75, timeSec: 1.75, b64: browserResult.preview.p75Base64 },
-          { key: '100', pct: 100, timeSec: 2.0, b64: browserResult.preview.p100Base64 },
+          { key: '095', pct: 95, timeSec: 1.95, b64: browserResult.preview.pEndBase64 },
         ];
 
         for (const pf of pFrames) {
@@ -292,6 +302,7 @@ async function main() {
         }
 
         const exportPath = join(itemDir, 'export.mp4');
+        rmSync(exportPath, { force: true });
         if (browserResult.exportArtifact.mp4Base64) {
           writeFileSync(exportPath, Buffer.from(browserResult.exportArtifact.mp4Base64, 'base64'));
         } else if (browserResult.exportArtifact.framesPngBase64) {
@@ -316,20 +327,24 @@ async function main() {
         for (const pf of pFrames) {
           const previewFramePath = join(itemDir, `preview-${pf.key}.png`);
           const exportFramePath = join(itemDir, `export-${pf.key}.png`);
+          rmSync(exportFramePath, { force: true }); // never compare a frame left by an earlier run
 
-          if (browserResult.exportArtifact.directFramesPngBase64?.[String(pf.pct)]) {
-            writeFileSync(
-              exportFramePath,
-              Buffer.from(
-                browserResult.exportArtifact.directFramesPngBase64[String(pf.pct)],
-                'base64',
-              ),
-            );
-          } else if (existsSync(exportPath)) {
-            await extractExportFrame(exportPath, pf.timeSec, exportFramePath, {
-              width: 960,
-              height: 540,
-            });
+          // The export frame always comes out of the encoded MP4. The -ss time is
+          // placed a few milliseconds before the frame so that ffmpeg picks that
+          // frame (the first one at or after the seek time), not the next one.
+          if (existsSync(exportPath)) {
+            try {
+              await extractExportFrame(
+                exportPath,
+                Math.max(0, pf.timeSec - EXPORT_SEEK_LEAD_SEC),
+                exportFramePath,
+                { width: 960, height: 540 },
+              );
+            } catch (err) {
+              console.error(
+                `Could not extract ${pf.pct}% frame from ${exportPath}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
           }
 
           if (existsSync(exportFramePath)) {
@@ -365,6 +380,7 @@ async function main() {
         const exportComparison = {
           ok: exportAllPointsMatch && !browserResult.exportArtifact.error,
           exportMode: browserResult.exportArtifact.mode,
+          frameSource: 'frames extracted from the encoded MP4',
           points: pointComparisons,
           meanDelta,
           maxDelta,
@@ -379,9 +395,24 @@ async function main() {
         const itemPageErrors = runtimePageErrors.slice(pageErrStart);
 
         const failureReasons = [];
-        if (!browserResult.preview.passed) {
+        const pv = browserResult.preview;
+        if (!pv.passed) {
+          const parts = [];
+          if (!pv.startIsClipA) parts.push('the first frame is not clip A');
+          if (!pv.lastFrameIsClipB) {
+            parts.push(
+              `the last frame inside the window (95%) is not close to clip B (Δ to B=${pv.diffVsB[4].toFixed(2)}, allowed ${pv.endTolerance.toFixed(2)})`,
+            );
+          }
+          if (!pv.approachesClipB) {
+            parts.push(
+              `the picture moves away from clip B between 50%, 75% and 95% (Δ to B: ${pv.diffVsB[2].toFixed(2)}, ${pv.diffVsB[3].toFixed(2)}, ${pv.diffVsB[4].toFixed(2)}; slack ${pv.approachSlack.toFixed(2)})`,
+            );
+          }
+          if (!pv.middleDiffersFromBoth)
+            parts.push('no intermediate frame differs from both clips');
           failureReasons.push(
-            'Preview frames did not properly transition from clip A to clip B (frame 0 must equal A, frame 100 must equal B, and an intermediate frame must differ from both)',
+            `Preview did not transition from clip A to clip B: ${parts.join('; ')}`,
           );
         }
         if (!exportComparison.ok) {
@@ -399,8 +430,19 @@ async function main() {
         if (browserResult.optionsResults.colour && !browserResult.optionsResults.colour.passed) {
           failureReasons.push('Colour option variation did not alter rendering');
         }
-        if (browserResult.optionsResults.easing && !browserResult.optionsResults.easing.passed) {
-          failureReasons.push('Easing option variation did not alter rendering');
+        const prog = browserResult.optionsResults.progress;
+        if (!prog.passed) {
+          failureReasons.push(
+            `Transition progress is not the linear curve at 0/25/50/75/95% (expected ${prog.expected.join(', ')}; got ${prog.sampled.join(', ')})`,
+          );
+        }
+        const failedUniforms = (browserResult.optionsResults.uniformParams ?? []).filter(
+          (p) => !p.passed,
+        );
+        if (failedUniforms.length > 0) {
+          failureReasons.push(
+            `Parameter variation did not alter rendering for: ${failedUniforms.map((p) => p.name).join(', ')}`,
+          );
         }
         if (!browserResult.audioCrossfade.passed) {
           failureReasons.push(
@@ -607,10 +649,16 @@ async function main() {
 
     const { jsonPath, markdownPath } = writeLibraryReports(outDir, options.kind, reportPayload);
     if (options.kind === 'transitions') {
-      const docPath = resolve(REPO_ROOT, 'docs/qa/v1.1.1/TRANSITIONS.md');
-      const md = buildTransitionsMarkdownReport(reportPayload);
-      writeFileSync(docPath, md, 'utf8');
-      console.log(`Documented report written: ${docPath}`);
+      if (fullRun) {
+        const docPath = resolve(REPO_ROOT, 'docs/qa/v1.1.1/TRANSITIONS.md');
+        const md = buildTransitionsMarkdownReport(reportPayload);
+        writeFileSync(docPath, md, 'utf8');
+        console.log(`Documented report written: ${docPath}`);
+      } else {
+        console.log(
+          'Partial run (--items or --limit): the tracked docs/qa/v1.1.1/TRANSITIONS.md was not written; the report is in the --out folder.',
+        );
+      }
     }
     const failed = itemReports.filter((item) => !item.passed);
     console.log('');

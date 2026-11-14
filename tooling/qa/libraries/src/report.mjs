@@ -110,7 +110,7 @@ function formatTransitionOptionsCell(item) {
   if (opt.duration) parts.push(`dur:${opt.duration.passed ? 'PASS' : 'FAIL'}`);
   if (opt.direction) parts.push(`dir:${opt.direction.passed ? 'PASS' : 'FAIL'}`);
   if (opt.colour) parts.push(`col:${opt.colour.passed ? 'PASS' : 'FAIL'}`);
-  if (opt.easing) parts.push(`ease:${opt.easing.passed ? 'PASS' : 'FAIL'}`);
+  if (opt.progress) parts.push(`prog:${opt.progress.passed ? 'PASS' : 'FAIL'}`);
   if (opt.uniformParams && opt.uniformParams.length > 0) {
     const passedParams = opt.uniformParams.filter((p) => p.passed).length;
     parts.push(`params:${passedParams}/${opt.uniformParams.length}`);
@@ -136,18 +136,19 @@ export function buildTransitionsMarkdownReport(report) {
     `- **Transitions tested**: ${report.items.length} / 38 (${passedCount} passed, ${failedItems.length} failed)`,
     `- **Preview resolution**: ${report.previewResolution.width}x${report.previewResolution.height}`,
     `- **Benchmark resolution**: ${report.benchmarkResolution.width}x${report.benchmarkResolution.height}`,
-    `- **Known test clips**: \`transition-preview-pic1.jpg\` (Left) and \`transition-preview-pic2.jpg\` (Right)`,
+    `- **Known test clips**: two pictures supplied with --pic1 (Left) and --pic2 (Right)`,
+    `- **Export frames**: extracted with ffmpeg from the encoded MP4 (not from the renderer's own pixels)`,
     `- **Audio crossfade**: Equal-power cosine/sine curve (48 kHz, 1.0s window)`,
     '',
     '## 1. Transitions Summary Matrix',
     '',
-    '| ID | Category | Label | Preview (0%, 25%, 50%, 75%, 100%) | Export vs Preview (5 pts) | Options (Dur/Dir/Col/Ease) | Audio Crossfade | 1080p ms/f | Status |',
+    '| ID | Category | Label | Preview (0%, 25%, 50%, 75%, 95%) | Encoded MP4 vs Preview (5 pts) | Options (Dur/Dir/Col/Progress/Params) | Audio Crossfade | 1080p ms/f | Status |',
     '|---|---|---|---|---|---|---|---|---|',
   ];
 
   for (const item of report.items) {
     const previewCell = item.preview.passed
-      ? `PASS (Δ0=${fmtNum(item.preview.diffVsA[0])}, Δ50=${fmtNum(item.preview.diffVsA[2])}, Δ100=${fmtNum(item.preview.diffVsB[4])}, mid=${fmtNum(item.preview.midFrameDiff)})`
+      ? `PASS (ΔA@0=${fmtNum(item.preview.diffVsA[0])}, ΔB@75=${fmtNum(item.preview.diffVsB[3])}, ΔB@95=${fmtNum(item.preview.diffVsB[4])}, mid=${fmtNum(item.preview.midFrameDiff)})`
       : `FAIL`;
     const exportCell = formatTransitionExportCell(item);
     const optionsCell = formatTransitionOptionsCell(item);
@@ -168,7 +169,7 @@ export function buildTransitionsMarkdownReport(report) {
       '',
       '## 2. Category Edge Cases (8 Categories)',
       '',
-      '| Category | Rep ID | Clip < Duration | First & Last Clip | Mixed Size & FPS | Lifecycle (Add/Replace/Remove/DND/Undo/Redo/Save/Reopen) | Status |',
+      '| Category | Rep ID | Clip < Duration | First & Last Clip | Mixed Bitmap Size | Lifecycle (simulated object edits + JSON round trip) | Status |',
       '|---|---|---|---|---|---|---|',
     );
     for (const item of edgeCaseItems) {
@@ -216,8 +217,28 @@ export function buildTransitionsMarkdownReport(report) {
     );
   }
 
+  lines.push('', ...TRANSITIONS_KNOWN_LIMITS);
+
   return `${lines.join('\n')}\n`;
 }
+
+/**
+ * Written into every generated transitions report, so a regenerated
+ * docs/qa/v1.1.1/TRANSITIONS.md keeps its limits.
+ */
+export const TRANSITIONS_KNOWN_LIMITS = [
+  '## Known limits of this audit (read before trusting the rows)',
+  '',
+  '- **What a pass means.** The first frame equals clip A; the last frame inside the window (95 percent, because the window is [start, end) and the frame at exactly the end is plain clip B) is close to clip B (mean difference at most 25 percent of the A-to-B difference, floor 3); the distance to clip B does not grow between 50, 75 and 95 percent (slack 15 percent of the A-to-B difference); one of 19 sweep frames differs from both clips. The thresholds were chosen by hand, not from a measured baseline.',
+  '- **Export versus preview** compares five preview frames (0, 25, 50, 75 and 95 percent) with frames that ffmpeg extracts from the encoded MP4 of the same composition (mean difference at most 12, which allows for H.264 loss). If WebCodecs is not available the frames are encoded with ffmpeg x264 instead; the report says which mode ran.',
+  '- **Progress** (`prog`) checks the progress value the renderer put on the transition node at 0, 25, 50, 75 and 95 percent against linear progress. A transition has no easing option in the project format, so linear is the definition.',
+  '- **Params** counts float uniforms whose changed value alters the picture at 50 percent; a failing one fails the transition. Vector and colour options use the direction and colour checks.',
+  '- Edge cases ("clip shorter than the duration", "first and last clip", "mixed bitmap size") only check that a non-empty frame renders, once per category on one representative item. No frame rate is set anywhere.',
+  '- Add, replace, remove, drag onto a cut, undo and redo are plain object edits inside the harness. They do not use the real property-system commands or the TimelinePanel drop handler (T-H04 covers the drop live). Save and reopen is a JSON round trip, not the app save, load and validate path.',
+  '- The audio crossfade check runs `applyCrossfade` on constant signals; no real mixed or exported audio is measured, and the power check recomputes the formula it tests.',
+  '- Time per frame is software GL (SwiftShader), is reported and has no budget.',
+  '- One renderer fix came out of this work: `sampleTransitionParams` clamps the range start at 0 when the right clip starts earlier than the transition is long (it used to throw a RangeError). It has a unit test. The animated-parameter clock then starts at 0 while the progress value still uses the unclamped window start.',
+];
 
 /**
  * Persist both <kind>-report.json and <kind>-report.md into outDir.

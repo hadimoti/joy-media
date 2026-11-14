@@ -1,6 +1,9 @@
 # v1.1.1 Transitions QA — T-V10
 
 Comprehensive verification of all 38 catalogue transitions across 8 categories for JOY Media v1.1.1.
+
+> **Stale table:** the matrix below comes from the first run, whose ease and export columns were not real checks (the easing result was hard-coded and the export frames came from the renderer, not the MP4). Regenerate it with a full transitions run.
+
 Closes **OB-09d** (Transitions: every one tested).
 
 - **Generated**: 2026-11-14T08:53:37.452Z
@@ -72,12 +75,14 @@ Closes **OB-09d** (Transitions: every one tested).
 Zero shader defects identified across all 38 catalogue transitions.
 All shaders compile, blend dual textures cleanly in WebGL SwiftShader, match offline export within tolerance, and conserve audio power.
 
-## Known limits of this audit (read before trusting the edge-case rows)
+## Known limits of this audit (read before trusting the rows)
 
-- The 38 transitions pass the per-frame preview checks (0 percent equals clip A, 100 percent equals clip B, and a middle frame that differs from both), the export-versus-preview comparison at five points, and the option checks that the harness probes. The ZoomInCircles failure in the first run was a harness artefact: the test clip A is a flat dark background where the shader only moves rings over the background, so the intermediate frames look like A; the pass rule now needs one of 19 intermediate frames to differ from both clips.
-- Edge cases ("clip shorter than the duration", "first and last clip", "different size and frame rate") only check that a non-empty frame renders, once per category on one representative item. The size and frame-rate case never sets a frame rate.
-- Add, replace, remove, drag onto a cut, undo and redo are plain object edits inside the harness. They do not use the real property-system commands or the TimelinePanel drop handler (T-H04 covers the drop live).
-- Save and reopen is a JSON round trip, not the app's save, load and validate path.
+- **What a pass means.** The first frame equals clip A; the last frame inside the window (95 percent, because the window is [start, end) and the frame at exactly the end is plain clip B) is close to clip B (mean difference at most 25 percent of the A-to-B difference, floor 3); the distance to clip B does not grow between 50, 75 and 95 percent (slack 15 percent of the A-to-B difference); one of 19 sweep frames differs from both clips. The thresholds were chosen by hand, not from a measured baseline.
+- **Export versus preview** compares five preview frames (0, 25, 50, 75 and 95 percent) with frames that ffmpeg extracts from the encoded MP4 of the same composition (mean difference at most 12, which allows for H.264 loss). If WebCodecs is not available the frames are encoded with ffmpeg x264 instead; the report says which mode ran.
+- **Progress** (`prog`) checks the progress value the renderer put on the transition node at 0, 25, 50, 75 and 95 percent against linear progress. A transition has no easing option in the project format, so linear is the definition.
+- **Params** counts float uniforms whose changed value alters the picture at 50 percent; a failing one fails the transition. Vector and colour options use the direction and colour checks.
+- Edge cases ("clip shorter than the duration", "first and last clip", "mixed bitmap size") only check that a non-empty frame renders, once per category on one representative item. No frame rate is set anywhere.
+- Add, replace, remove, drag onto a cut, undo and redo are plain object edits inside the harness. They do not use the real property-system commands or the TimelinePanel drop handler (T-H04 covers the drop live). Save and reopen is a JSON round trip, not the app save, load and validate path.
 - The audio crossfade check runs `applyCrossfade` on constant signals; no real mixed or exported audio is measured, and the power check recomputes the formula it tests.
-- Time per frame is reported but has no budget.
-- One renderer fix came out of this work: `sampleTransitionParams` clamps the range start at 0 when the right clip starts earlier than the transition is long (it used to throw a RangeError). It has a unit test.
+- Time per frame is software GL (SwiftShader), is reported and has no budget.
+- One renderer fix came out of this work: `sampleTransitionParams` clamps the range start at 0 when the right clip starts earlier than the transition is long (it used to throw a RangeError). It has a unit test. The animated-parameter clock then starts at 0 while the progress value still uses the unclamped window start.

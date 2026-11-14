@@ -10,8 +10,10 @@ import { getTransitionShader, listTransitionShaders } from '@joy-media/transitio
 import { emptySpikeProject } from '@joy-media/test-fixtures';
 import {
   buildRenderFrameIRFromProject,
+  clipTimesFromTracks,
   evaluateEffectInstances,
 } from '@joy-media/visual-object-renderer';
+import type { BuildRenderFrameOptions } from '@joy-media/visual-object-renderer';
 import { createBrowserPixiRenderer } from '@joy-media/renderer-pixi/browser';
 import type {
   BrowserPixiRenderer,
@@ -1014,6 +1016,32 @@ const CATEGORY_REPRESENTATIVES: Readonly<Record<string, string>> = {
 /** Intermediate frames (progress 1/N .. (N-1)/N) checked against both clips. */
 const TRANSITION_SWEEP_STEPS = 20;
 
+/** Transition window used by the test project: [1 s, 2 s) at 20 fps (one frame = 50 ms). */
+const TRANSITION_START_US = 1_000_000;
+const TRANSITION_DURATION_US = 1_000_000;
+/**
+ * The last frame that is inside the window. The window is [start, end), so the
+ * frame at exactly 2 s is plain clip B and never runs the shader; the check
+ * that "the end is clip B" has to use this frame (progress 0.95) instead.
+ */
+const TRANSITION_LAST_FRAME_US = 1_950_000;
+/** Preview and export frames compared: window start, 25, 50, 75 percent, last frame. */
+const TRANSITION_SAMPLE_TIMES_US = [
+  TRANSITION_START_US,
+  TRANSITION_START_US + TRANSITION_DURATION_US * 0.25,
+  TRANSITION_START_US + TRANSITION_DURATION_US * 0.5,
+  TRANSITION_START_US + TRANSITION_DURATION_US * 0.75,
+  TRANSITION_LAST_FRAME_US,
+];
+const TRANSITION_EXPECTED_PROGRESS = TRANSITION_SAMPLE_TIMES_US.map(
+  (timeUs) => (timeUs - TRANSITION_START_US) / TRANSITION_DURATION_US,
+);
+/** Mean-difference slack for "the picture is not moving away from clip B". */
+const TRANSITION_APPROACH_SLACK_FRACTION = 0.15;
+/** The last frame must be within this fraction of the A-to-B difference of clip B (or the floor). */
+const TRANSITION_END_TOLERANCE_FRACTION = 0.25;
+const TRANSITION_END_TOLERANCE_FLOOR = 3;
+
 const TRANSITION_IMAGE_SIZES_540 = {
   'clip-a': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
   'clip-b': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
@@ -1026,6 +1054,31 @@ const TRANSITION_IMAGE_SIZES_1080 = {
   'clip-a': { width: BENCH_WIDTH, height: BENCH_HEIGHT },
   'clip-b': { width: BENCH_WIDTH, height: BENCH_HEIGHT },
 };
+
+/**
+ * The frame exactly as the editor's preview builds it for a project with
+ * transitions: the project's transitions and the clip start times are passed
+ * explicitly (see `renderFrameOptions` in the editor), because
+ * `buildRenderFrameIRFromProject` does not take them from the project itself.
+ */
+function buildTransitionFrame(
+  project: JoyProjectV1,
+  compId: string,
+  timeUs: number,
+  width: number,
+  height: number,
+  options: Pick<BuildRenderFrameOptions, 'imageSizesByObjectId'>,
+) {
+  const composition = project.compositions[compId];
+  if (composition === undefined) {
+    throw new Error(`Unknown composition "${compId}" in transition test project`);
+  }
+  return buildRenderFrameIRFromProject(project, compId, timeUs, width, height, {
+    ...options,
+    ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
+    clipTimes: clipTimesFromTracks(composition.tracks),
+  });
+}
 
 function buildTransitionProject(
   transitionId: string,
@@ -1200,7 +1253,7 @@ function runCategoryEdgeCases(
       ],
     } as unknown as JoyProjectV1;
 
-    const frameShort = buildRenderFrameIRFromProject(
+    const frameShort = buildTransitionFrame(
       shortProj,
       'c-short',
       200_000,
@@ -1289,7 +1342,7 @@ function runCategoryEdgeCases(
       ['clip-3', bitmaps540.get('clip-a')!],
     ]);
 
-    const frameFirst = buildRenderFrameIRFromProject(
+    const frameFirst = buildTransitionFrame(
       multiProj,
       'c-multi',
       1_500_000,
@@ -1300,7 +1353,7 @@ function runCategoryEdgeCases(
     renderer.render(frameFirst, multiBitmaps);
     const pxFirst = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
 
-    const frameLast = buildRenderFrameIRFromProject(
+    const frameLast = buildTransitionFrame(
       multiProj,
       'c-multi',
       3_500_000,
@@ -1315,7 +1368,7 @@ function runCategoryEdgeCases(
       pxFirst && pxLast && pxFirst.data.length > 0 && pxLast.data.length > 0,
     );
     firstLastDetails =
-      'First cut (0-2s) and last cut (2-4s, 4-6s) both rendered active transitions';
+      'A frame inside the first cut and a frame inside the last cut each rendered non-empty';
   } catch (err) {
     firstLastDetails = `Failed: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -1328,19 +1381,14 @@ function runCategoryEdgeCases(
       ['clip-b', state!.bitmaps1080.get(OBJECT_ID)!],
     ]);
     const { compId, project } = buildTransitionProject(transitionId, 1_000_000);
-    const frame = buildRenderFrameIRFromProject(
-      project,
-      compId,
-      1_500_000,
-      PREVIEW_WIDTH,
-      PREVIEW_HEIGHT,
-      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
-    );
+    const frame = buildTransitionFrame(project, compId, 1_500_000, PREVIEW_WIDTH, PREVIEW_HEIGHT, {
+      imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540,
+    });
     renderer.render(frame, diffSizeBitmaps);
     const px = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
     diffSizePassed = px !== undefined && px.data.length > 0;
     diffSizeDetails =
-      'Blended 960x540@24fps clip with 1920x1080@60fps clip with correct uRatio/vFromScale';
+      'Rendered a 960x540 bitmap with a 1920x1080 bitmap; only a non-empty frame is checked, no frame rate is set';
   } catch (err) {
     diffSizeDetails = `Failed: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -1402,7 +1450,7 @@ function runCategoryEdgeCases(
     if (parsed.transitions[0]?.type !== transitionId)
       throw new Error('Reopen transition type mismatch');
 
-    const reopenFrame = buildRenderFrameIRFromProject(
+    const reopenFrame = buildTransitionFrame(
       parsed,
       compId,
       1_500_000,
@@ -1416,7 +1464,7 @@ function runCategoryEdgeCases(
 
     lifecyclePassed = true;
     lifecycleDetails =
-      'Add, panel drag-to-cut drop, replace, remove, undo/redo, and JSON save/reopen all passed';
+      'Plain object edits (add, drop, replace, remove, undo/redo) and a JSON round trip with one frame render passed; not the app commands or the drop handler';
   } catch (err) {
     lifecycleDetails = `Failed: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -1437,21 +1485,20 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
 
   const { compId, project } = buildTransitionProject(input.id, 1_000_000);
 
-  // 1. Preview frames at 0%, 25%, 50%, 75%, 100%
-  const sampleTimes = [1_000_000, 1_250_000, 1_500_000, 1_750_000, 2_000_000];
+  // 1. Preview frames at 0%, 25%, 50%, 75% and the last frame inside the window (95%)
   const previewFramesBase64: string[] = [];
   const previewPixelsList: Uint8ClampedArray[] = [];
   const diffsVsA: number[] = [];
   const diffsVsB: number[] = [];
+  const sampledProgress: number[] = [];
 
-  for (const timeUs of sampleTimes) {
-    const frame = buildRenderFrameIRFromProject(
-      project,
-      compId,
-      timeUs,
-      PREVIEW_WIDTH,
-      PREVIEW_HEIGHT,
-      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+  for (const timeUs of TRANSITION_SAMPLE_TIMES_US) {
+    const frame = buildTransitionFrame(project, compId, timeUs, PREVIEW_WIDTH, PREVIEW_HEIGHT, {
+      imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540,
+    });
+    const transitionNode = frame.nodes.find((node) => node.kind === 'transition');
+    sampledProgress.push(
+      transitionNode?.kind === 'transition' ? transitionNode.progress : Number.NaN,
     );
     currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
     const px = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1479,7 +1526,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
   const sweepDiffsVsA: number[] = [];
   const sweepDiffsVsB: number[] = [];
   for (let step = 1; step < TRANSITION_SWEEP_STEPS; step += 1) {
-    const frame = buildRenderFrameIRFromProject(
+    const frame = buildTransitionFrame(
       project,
       compId,
       1_000_000 + Math.round((step * 1_000_000) / TRANSITION_SWEEP_STEPS),
@@ -1506,8 +1553,10 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
   let exportError: string | undefined;
   let exportMp4Base64: string | undefined;
   let exportFramesPngBase64: string[] | undefined;
-  const exportDirectFramesMap: Record<string, string> = {};
 
+  // The export is always compared through the encoded MP4: the runner extracts
+  // the sample frames from the file (or from the x264 encode of the Pixi frames
+  // when WebCodecs is not available), never from the renderer's own pixels.
   try {
     if (currentState.offlineCapability.ok) {
       const exported = await exportOfflineMp4({
@@ -1522,7 +1571,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
         capability: currentState.offlineCapability,
         paintFrame: (frameIndex: number) => {
           const timeUs = Math.round((frameIndex * 1_000_000) / exportFps);
-          const frame = buildRenderFrameIRFromProject(
+          const frame = buildTransitionFrame(
             project,
             compId,
             timeUs,
@@ -1531,58 +1580,32 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
             { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
           );
           currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
-          if ([20, 25, 30, 35, 40].includes(frameIndex)) {
-            const key =
-              frameIndex === 20
-                ? '0'
-                : frameIndex === 25
-                  ? '25'
-                  : frameIndex === 30
-                    ? '50'
-                    : frameIndex === 35
-                      ? '75'
-                      : '100';
-            const px = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
-            if (px) {
-              exportDirectFramesMap[key] = rgbaToPngBase64(
-                currentState.pngCtx540,
-                currentState.pngCanvas540,
-                px.data,
-                PREVIEW_WIDTH,
-                PREVIEW_HEIGHT,
-              );
-            }
-          }
         },
       });
-      if (exported.blob) {
-        exportMp4Base64 = await blobToBase64(exported.blob);
+      if (exported.blob === undefined) {
+        throw new Error('Offline MP4 export returned no blob');
       }
+      exportMp4Base64 = await blobToBase64(exported.blob);
     } else {
       exportMode = 'pixi-frames-ffmpeg';
       exportFramesPngBase64 = [];
       for (let frameIndex = 0; frameIndex < exportFrameCount; frameIndex += 1) {
         const timeUs = Math.round((frameIndex * 1_000_000) / exportFps);
-        const frame = buildRenderFrameIRFromProject(
-          project,
-          compId,
-          timeUs,
-          PREVIEW_WIDTH,
-          PREVIEW_HEIGHT,
-          { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
-        );
+        const frame = buildTransitionFrame(project, compId, timeUs, PREVIEW_WIDTH, PREVIEW_HEIGHT, {
+          imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540,
+        });
         currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
         const px = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
-        if (px) {
-          const b64 = rgbaToPngBase64(
+        if (!px) throw new Error(`readPixels failed for export frame ${frameIndex}`);
+        exportFramesPngBase64.push(
+          rgbaToPngBase64(
             currentState.pngCtx540,
             currentState.pngCanvas540,
             px.data,
             PREVIEW_WIDTH,
             PREVIEW_HEIGHT,
-          );
-          exportFramesPngBase64.push(b64);
-        }
+          ),
+        );
       }
     }
   } catch (err) {
@@ -1592,7 +1615,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
   // 3. Options testing
   // Duration option: 500ms duration
   const { project: proj500ms } = buildTransitionProject(input.id, 500_000);
-  const frame500ms = buildRenderFrameIRFromProject(
+  const frame500ms = buildTransitionFrame(
     proj500ms,
     compId,
     1_250_000,
@@ -1612,7 +1635,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
       'direction.x': 0,
       'direction.y': 1,
     });
-    const frameDir = buildRenderFrameIRFromProject(
+    const frameDir = buildTransitionFrame(
       projDir,
       compId,
       1_500_000,
@@ -1638,7 +1661,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
         ? { colorR: 0.1, colorG: 0.9, colorB: 0.1 }
         : { 'bgcolor.r': 1, 'bgcolor.g': 0, 'bgcolor.b': 0, 'bgcolor.a': 1 };
     const { project: projCol } = buildTransitionProject(input.id, 1_000_000, colParams);
-    const frameCol = buildRenderFrameIRFromProject(
+    const frameCol = buildTransitionFrame(
       projCol,
       compId,
       1_500_000,
@@ -1652,13 +1675,23 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
     colourResult = { passed: colDiff.meanAbsDiff > 0.5, diff: colDiff.meanAbsDiff };
   }
 
-  // Easing option:
-  const monotonicA =
-    diffsVsA[0]! <= diffsVsA[1]! + 0.1 &&
-    diffsVsA[1]! <= diffsVsA[2]! + 0.1 &&
-    diffsVsA[2]! <= diffsVsA[3]! + 0.1 &&
-    diffsVsA[3]! <= diffsVsA[4]! + 0.1;
-  const easingResult = { passed: true, monotonic: monotonicA };
+  // Progress curve: a transition has no easing option in the project format, so
+  // the definition is linear progress over the window. The values the renderer
+  // really put on the transition node at 0, 25, 50, 75 and 95 percent must be
+  // strictly increasing and equal to the linear curve.
+  const progressStrictlyIncreasing = sampledProgress.every(
+    (value, idx) => idx === 0 || value > sampledProgress[idx - 1]!,
+  );
+  const progressMatchesLinear = sampledProgress.every(
+    (value, idx) => Math.abs(value - TRANSITION_EXPECTED_PROGRESS[idx]!) < 1e-6,
+  );
+  const progressResult = {
+    passed: progressStrictlyIncreasing && progressMatchesLinear,
+    monotonic: progressStrictlyIncreasing,
+    matchesLinear: progressMatchesLinear,
+    expected: TRANSITION_EXPECTED_PROGRESS,
+    sampled: sampledProgress,
+  };
 
   // Float uniform params variation (if any)
   const uniformParamResults: Array<{ name: string; passed: boolean; diff: number }> = [];
@@ -1672,7 +1705,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
       const { project: projParam } = buildTransitionProject(input.id, 1_000_000, {
         [propName]: altVal,
       });
-      const frameParam = buildRenderFrameIRFromProject(
+      const frameParam = buildTransitionFrame(
         projParam,
         compId,
         1_500_000,
@@ -1695,14 +1728,9 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
   const audioCrossfade = testAudioCrossfade(1_000_000, 48000);
 
   // 5. 1080p Benchmark (warmup 2 + timed 6)
-  const frame1080 = buildRenderFrameIRFromProject(
-    project,
-    compId,
-    1_500_000,
-    BENCH_WIDTH,
-    BENCH_HEIGHT,
-    { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_1080 },
-  );
+  const frame1080 = buildTransitionFrame(project, compId, 1_500_000, BENCH_WIDTH, BENCH_HEIGHT, {
+    imageSizesByObjectId: TRANSITION_IMAGE_SIZES_1080,
+  });
   for (let i = 0; i < 2; i += 1) {
     currentState.benchRenderer.render(frame1080, currentState.transitionBitmaps1080);
     currentState.benchRenderer.readPixels(1, 1);
@@ -1728,19 +1756,46 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
       )
     : undefined;
 
+  // Preview checks. The window is [start, end), so the frame at exactly the end
+  // is plain clip B and never runs the shader; the "end is clip B" check uses the
+  // last frame inside the window (95 percent). A shader that has not nearly
+  // reached clip B by then fails, and the picture must not move away from B
+  // between 50 percent, 75 percent and that last frame.
+  const clipABDiff = computeRgbaDiffMetrics(
+    currentState.clipABitmap540.data,
+    currentState.clipBBitmap540.data,
+  ).meanAbsDiff;
+  const endTolerance = Math.max(
+    TRANSITION_END_TOLERANCE_FLOOR,
+    TRANSITION_END_TOLERANCE_FRACTION * clipABDiff,
+  );
+  const approachSlack = Math.max(1, TRANSITION_APPROACH_SLACK_FRACTION * clipABDiff);
+  const startIsClipA = diffsVsA[0]! < 1.0;
+  const lastFrameIsClipB = diffsVsB[4]! <= endTolerance && diffsVsB[4]! < diffsVsA[4]!;
+  const approachesClipB =
+    diffsVsB[3]! <= diffsVsB[2]! + approachSlack && diffsVsB[4]! <= diffsVsB[3]! + approachSlack;
+  const middleDiffersFromBoth = midFrameDiff > 1.0;
+
   return {
     id: input.id,
     label: entry.label,
     category: entry.category,
     optionsDeclared: entry.options,
     preview: {
-      passed: diffsVsA[0]! < 1.0 && diffsVsB[4]! < 1.0 && midFrameDiff > 1.0,
+      passed: startIsClipA && lastFrameIsClipB && approachesClipB && middleDiffersFromBoth,
+      startIsClipA,
+      lastFrameIsClipB,
+      approachesClipB,
+      middleDiffersFromBoth,
+      clipABDiff,
+      endTolerance,
+      approachSlack,
       midFrameDiff,
       p0Base64: previewFramesBase64[0]!,
       p25Base64: previewFramesBase64[1]!,
       p50Base64: previewFramesBase64[2]!,
       p75Base64: previewFramesBase64[3]!,
-      p100Base64: previewFramesBase64[4]!,
+      pEndBase64: previewFramesBase64[4]!,
       diffVsA: diffsVsA,
       diffVsB: diffsVsB,
     },
@@ -1749,13 +1804,12 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
       error: exportError,
       mp4Base64: exportMp4Base64,
       framesPngBase64: exportFramesPngBase64,
-      directFramesPngBase64: exportDirectFramesMap,
     },
     optionsResults: {
       duration: durationResult,
       direction: directionResult,
       colour: colourResult,
-      easing: easingResult,
+      progress: progressResult,
       uniformParams: uniformParamResults,
     },
     audioCrossfade,

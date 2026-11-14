@@ -11,6 +11,7 @@ import {
 } from './audit-metadata.mjs';
 import {
   buildLibraryMarkdownReport,
+  buildTransitionsMarkdownReport,
   computeRgbaDiffMetrics,
   computeRgbaSpread,
 } from './report.mjs';
@@ -159,5 +160,51 @@ describe('library test harness metadata and reporting', () => {
     expect(markdown).toContain('PASS Δ=1.25');
     expect(markdown).toContain('ffmpeg:native');
     expect(markdown).toContain('**PASS**');
+  });
+
+  it('reports the transition progress check from real values and keeps the known limits', () => {
+    const transitionItem = (progressPassed: boolean) => ({
+      id: 'gl:fade',
+      label: 'Dissolve',
+      category: 'basic-fades',
+      passed: progressPassed,
+      failureReasons: progressPassed ? [] : ['Transition progress is not the linear curve'],
+      preview: {
+        passed: true,
+        diffVsA: [0, 4, 8, 4, 0.5],
+        diffVsB: [8, 6, 4, 2, 0.4],
+        midFrameDiff: 8,
+      },
+      exportComparison: {
+        ok: true,
+        exportMode: 'offline-mp4',
+        points: [{ ok: true }, { ok: true }, { ok: true }, { ok: true }, { ok: true }],
+        meanDelta: 1.5,
+      },
+      optionsResults: {
+        duration: { passed: true },
+        progress: { passed: progressPassed },
+        uniformParams: [{ name: 'intensity', passed: false }],
+      },
+      audioCrossfade: { passed: true },
+      perf1080p: { meanMsPerFrame: 10 },
+    });
+    const report = (progressPassed: boolean) =>
+      buildTransitionsMarkdownReport({
+        kind: 'transitions',
+        generatedAt: '2026-11-14T00:00:00.000Z',
+        gitCommit: 'deadbeef',
+        previewResolution: { width: 960, height: 540 },
+        benchmarkResolution: { width: 1920, height: 1080 },
+        items: [transitionItem(progressPassed)],
+      });
+
+    expect(report(true)).toContain('prog:PASS');
+    expect(report(true)).toContain('params:0/1');
+    expect(report(false)).toContain('prog:FAIL');
+    expect(report(true)).not.toContain('ease:');
+    expect(report(true)).toContain('Encoded MP4 vs Preview');
+    expect(report(true)).toContain('## Known limits of this audit');
+    expect(report(true)).toContain('encoded MP4');
   });
 });
