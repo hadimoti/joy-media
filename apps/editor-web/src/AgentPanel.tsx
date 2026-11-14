@@ -224,11 +224,20 @@ const LEGACY_JOY_AGENT_TOOL_NAMES = Object.freeze([
 ] as const satisfies readonly JoyAgentHostToolName[]);
 
 /**
- * The catalog of an observation run. The three QC tools are left out: they are
- * offered only to a run that asked for a quality check and has a QC adapter.
+/**
+ * Generation (T-C04) tools are in the shared catalog, but this panel does not pass their host
+ * dependencies into createJoyAgentHostRpcMethodsForSnapshot. Offering them would let the model call a
+ * tool that no host answers. Drop a name here only in the same change that registers its host method.
+ *
+ * The three QC tools (T-B04) are left out of an observation run for a different reason: they are
+ * offered only to a run that asked for a quality check and has a QC adapter (T-B04b).
  */
+const HOST_UNREGISTERED_TOOL_NAMES: ReadonlySet<JoyAgentHostToolName> =
+  new Set<JoyAgentHostToolName>(['generate_media', 'attach_generated_media']);
 const OBSERVATION_JOY_AGENT_TOOL_NAMES: readonly JoyAgentHostToolName[] = Object.freeze(
-  JOY_AGENT_HOST_TOOL_NAMES.filter((name) => !isQcHostToolName(name)),
+  JOY_AGENT_HOST_TOOL_NAMES.filter(
+    (name) => !isQcHostToolName(name) && !HOST_UNREGISTERED_TOOL_NAMES.has(name),
+  ),
 );
 
 /** A Worker approval event held until the staged preview has actually rendered. */

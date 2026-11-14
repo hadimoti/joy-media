@@ -14,6 +14,11 @@ import {
 } from './context-snapshot.js';
 import { isJoyAgentConversationEntityReference } from './conversation-entity-references.js';
 import { validateBrowserProposal, type BrowserProposal } from './bounded-tool-loop.js';
+import {
+  GENERATION_ASPECTS,
+  GENERATION_MAX_SECONDS,
+  GENERATION_PROMPT_MAX_CHARS,
+} from './host-tool-contract.js';
 import { createLookHostRpcMethods, type PrepareLookHandler } from './look-tool-bridge.js';
 import {
   HostRpcDiagnosticError,
@@ -366,6 +371,60 @@ export interface JoyAgentQcToolAdapter {
     | Promise<JoyAgentQcFrameReviewSuccess | JoyAgentQcFrameReviewRefusal>;
 }
 
+export type JoyAgentGenerationKind = 'image' | 'video';
+export type JoyAgentGenerationAspect = (typeof GENERATION_ASPECTS)[number];
+
+export interface JoyAgentGenerateMediaRequest {
+  readonly kind: JoyAgentGenerationKind;
+  readonly prompt: string;
+  readonly aspect: JoyAgentGenerationAspect;
+  readonly seconds?: number;
+}
+
+export interface JoyAgentAttachGeneratedMediaRequest {
+  readonly jobId: string;
+  readonly target: 'library' | 'timeline';
+  readonly atSeconds?: number;
+  readonly track?: string;
+}
+
+export interface JoyAgentGenerationJobOutcome {
+  readonly jobId: string;
+  readonly kind: JoyAgentGenerationKind;
+  readonly status: 'completed' | 'failed' | 'cancelled';
+}
+
+export interface JoyAgentGeneratedAttachResult {
+  readonly assetId: string;
+  readonly placed: boolean;
+}
+
+/**
+ * Trusted host seam for generated media. The order is part of the contract:
+ * `start` is never called unless `requestApproval` resolved true, so no
+ * provider request can precede the user's Allow. There is no auto-approve
+ * path in any execution mode; every request raises a cost card.
+ */
+export interface JoyAgentGenerationToolAdapter {
+  requestApproval(
+    input: JoyAgentGenerateMediaRequest,
+    context: HostRpcHandlerContext,
+  ): boolean | Promise<boolean>;
+  start(
+    input: JoyAgentGenerateMediaRequest,
+    context: HostRpcHandlerContext,
+  ): string | Promise<string>;
+  awaitJob(
+    jobId: string,
+    context: HostRpcHandlerContext,
+  ): JoyAgentGenerationJobOutcome | Promise<JoyAgentGenerationJobOutcome>;
+  /** Attaches a job this run completed (T-C06). The bridge checks the job id first. */
+  attach(
+    input: JoyAgentAttachGeneratedMediaRequest,
+    context: HostRpcHandlerContext,
+  ): JoyAgentGeneratedAttachResult | Promise<JoyAgentGeneratedAttachResult>;
+}
+
 export interface JoyAgentHostToolBridgeOptions {
   /** Frozen, sanitized project facts retained only on the trusted main thread. */
   readonly context: JoyAgentPagedContext;
@@ -394,6 +453,8 @@ export interface JoyAgentHostToolBridgeOptions {
   readonly observation?: JoyAgentObservationToolAdapter;
   /** Available only on an explicitly scoped QC run. */
   readonly qc?: JoyAgentQcToolAdapter;
+  /** Available only when the trusted host wires generated media (T-C04). */
+  readonly generation?: JoyAgentGenerationToolAdapter;
   /**
    * Private host notification after a bounded source observation completes.
    * It is never serialized through Host RPC and cannot widen the model tool
@@ -1490,6 +1551,163 @@ function parsePreparedHostResult(value: HostRpcJson): JoyAgentPreparedHostResult
   };
 }
 
+function readNumberInRange(value: unknown, field: string, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max)
+    invalidObservationRequest(field);
+  return value;
+}
+
+function parseGenerateMediaArgs(value: HostRpcJson): JoyAgentGenerateMediaRequest {
+  const record = readObservationRecord(value, ['kind', 'prompt', 'aspect'], ['seconds']);
+  const kind = record.kind;
+  if (kind !== 'image' && kind !== 'video') invalidObservationRequest('kind');
+  const prompt = record.prompt;
+  if (
+    typeof prompt !== 'string' ||
+    prompt.trim().length === 0 ||
+    prompt.length > GENERATION_PROMPT_MAX_CHARS
+  )
+    invalidObservationRequest('prompt');
+  const aspect = record.aspect;
+  if (!GENERATION_ASPECTS.includes(aspect as JoyAgentGenerationAspect))
+    invalidObservationRequest('aspect');
+  if (record.seconds !== undefined && kind === 'image') invalidObservationRequest('seconds');
+  const seconds =
+    record.seconds === undefined
+      ? undefined
+      : readPositiveInteger(record.seconds, 'seconds', GENERATION_MAX_SECONDS);
+  return Object.freeze({
+    kind,
+    prompt,
+    aspect: aspect as JoyAgentGenerationAspect,
+    ...(seconds === undefined ? {} : { seconds }),
+  });
+}
+
+function parseAttachGeneratedMediaArgs(value: HostRpcJson): JoyAgentAttachGeneratedMediaRequest {
+  const record = readObservationRecord(value, ['jobId', 'target'], ['atSeconds', 'track']);
+  const jobId = readSafeOpaqueIdentifier(record.jobId, 'jobId');
+  const target = record.target;
+  if (target !== 'library' && target !== 'timeline') invalidObservationRequest('target');
+  if (target === 'library' && (record.atSeconds !== undefined || record.track !== undefined))
+    invalidObservationRequest('target');
+  const atSeconds =
+    record.atSeconds === undefined
+      ? undefined
+      : readNumberInRange(record.atSeconds, 'atSeconds', 0, MAX_OBSERVATION_RANGE_US / 1_000_000);
+  const track =
+    record.track === undefined ? undefined : readSafeOpaqueIdentifier(record.track, 'track');
+  return Object.freeze({
+    jobId,
+    target,
+    ...(atSeconds === undefined ? {} : { atSeconds }),
+    ...(track === undefined ? {} : { track }),
+  });
+}
+
+function generationRefusalResult(
+  code: string,
+  message: string,
+): { readonly ok: false; readonly code: string; readonly message: string } {
+  return Object.freeze({ ok: false, code, message });
+}
+
+function parseGenerationResult(value: HostRpcJson): HostRpcJson {
+  if (!isRecord(value) || typeof value.ok !== 'boolean')
+    throw diagnostic('JOY_AGENT_RPC_INVALID_REQUEST', { field: 'result' });
+  return value;
+}
+
+/**
+ * The two generation methods share one closure per run. `attach_generated_media`
+ * accepts only jobs this run's `generate_media` call saw complete, so a model
+ * cannot place an older or foreign file by guessing an id.
+ */
+function createGenerationHostRpcMethods(
+  adapter: JoyAgentGenerationToolAdapter,
+): Readonly<Record<'generate_media' | 'attach_generated_media', HostRpcMethod<unknown, unknown>>> {
+  const completedJobIds = new Set<string>();
+  const generateMedia: HostRpcMethod<JoyAgentGenerateMediaRequest, HostRpcJson> = {
+    parseArgs: parseGenerateMediaArgs,
+    execute: async (input, context) => {
+      context.signal.throwIfAborted();
+      let approved: boolean;
+      try {
+        approved = (await adapter.requestApproval(input, context)) === true;
+      } catch (error) {
+        if (context.signal.aborted) throw error;
+        return generationRefusalResult(
+          'JOY_AGENT_GENERATION_FAILED',
+          'JOY could not show the cost card, so nothing was sent.',
+        );
+      }
+      context.signal.throwIfAborted();
+      if (!approved)
+        return generationRefusalResult(
+          'JOY_AGENT_GENERATION_DECLINED',
+          'The user declined the cost card. JOY made no provider request and created nothing. Do not ask again in this run unless the user asks.',
+        );
+      let jobId: string | undefined;
+      try {
+        const started = await adapter.start(input, context);
+        if (!isSafeOpaqueIdentifier(started)) throw new RangeError('generation job id is invalid');
+        jobId = started;
+        const outcome = await adapter.awaitJob(jobId, context);
+        context.signal.throwIfAborted();
+        if (outcome.jobId !== jobId || outcome.kind !== input.kind)
+          throw new RangeError('generation outcome does not match its job');
+        if (outcome.status === 'completed') completedJobIds.add(jobId);
+        return outcome.status === 'completed'
+          ? { ok: true, jobId, kind: input.kind, status: outcome.status }
+          : {
+              ok: false,
+              jobId,
+              kind: input.kind,
+              status: outcome.status,
+              code: 'JOY_AGENT_GENERATION_FAILED',
+              message: `The ${input.kind} job ${outcome.status}. Nothing was attached.`,
+            };
+      } catch (error) {
+        if (context.signal.aborted) throw error;
+        return {
+          ok: false,
+          ...(jobId === undefined ? {} : { jobId }),
+          code: 'JOY_AGENT_GENERATION_FAILED',
+          message: 'The generation job could not be completed. Nothing was attached.',
+        };
+      }
+    },
+    parseResult: parseGenerationResult,
+  };
+  const attachGeneratedMedia: HostRpcMethod<JoyAgentAttachGeneratedMediaRequest, HostRpcJson> = {
+    parseArgs: parseAttachGeneratedMediaArgs,
+    execute: async (input, context) => {
+      context.signal.throwIfAborted();
+      if (!completedJobIds.has(input.jobId))
+        return generationRefusalResult(
+          'JOY_AGENT_GENERATION_JOB_UNAVAILABLE',
+          'That job is not a completed generation from this run, so nothing was attached.',
+        );
+      try {
+        const attached = await adapter.attach(input, context);
+        context.signal.throwIfAborted();
+        return { ok: true, assetId: attached.assetId, placed: attached.placed };
+      } catch (error) {
+        if (context.signal.aborted) throw error;
+        return generationRefusalResult(
+          'JOY_AGENT_GENERATION_ATTACH_FAILED',
+          'JOY could not attach that file. The project was not changed.',
+        );
+      }
+    },
+    parseResult: parseGenerationResult,
+  };
+  return {
+    generate_media: generateMedia as HostRpcMethod<unknown, unknown>,
+    attach_generated_media: attachGeneratedMedia as HostRpcMethod<unknown, unknown>,
+  };
+}
+
 /**
  * Build the production host method map. The Worker sees only the returned
  * JSON pages and prepared identities; the full frozen project and canonical
@@ -1634,6 +1852,7 @@ export function createJoyAgentHostRpcMethods(
           media_contact_sheet: qcContactSheet as HostRpcMethod<unknown, unknown>,
         }),
     ...(options.prepareLook === undefined ? {} : createLookHostRpcMethods(options.prepareLook)),
+    ...(options.generation === undefined ? {} : createGenerationHostRpcMethods(options.generation)),
   } as const;
   const observation = options.observation;
   if (observation === undefined) return baseMethods as HostRpcMethods;
@@ -1770,6 +1989,7 @@ export function createJoyAgentHostRpcMethodsForSnapshot(
   onObservationCompleted?: JoyAgentHostToolBridgeOptions['onObservationCompleted'],
   readLibraryCatalog?: JoyAgentHostToolBridgeOptions['readLibraryCatalog'],
   qc?: JoyAgentHostToolBridgeOptions['qc'],
+  generation?: JoyAgentHostToolBridgeOptions['generation'],
 ): HostRpcMethods {
   return createJoyAgentHostRpcMethods({
     context: createJoyAgentPagedContext(input),
@@ -1778,5 +1998,6 @@ export function createJoyAgentHostRpcMethodsForSnapshot(
     ...(onObservationCompleted === undefined ? {} : { onObservationCompleted }),
     ...(readLibraryCatalog === undefined ? {} : { readLibraryCatalog }),
     ...(qc === undefined ? {} : { qc }),
+    ...(generation === undefined ? {} : { generation }),
   });
 }

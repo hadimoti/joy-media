@@ -90,6 +90,8 @@ describe('mounted Worker bounded semantic tool exchange', () => {
       'qc_report_read',
       'media_frames_view',
       'media_contact_sheet',
+      'generate_media',
+      'attach_generated_media',
       'look_apply',
       'look_update',
       'look_reset_overrides',
