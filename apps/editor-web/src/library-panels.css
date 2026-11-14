@@ -467,7 +467,7 @@
 
 .library-card-preview .effect-preview-media,
 .library-card-preview .template-card-preview,
-.library-card-preview .transition-card-thumb {
+.library-card-preview .transition-strip {
   width: 100%;
   height: 100%;
 }
@@ -477,27 +477,71 @@
   padding: var(--space-3);
 }
 
-.library-card-preview .transition-card-thumb {
+/* A 24-frame strip shows one frame at a time: the image is 24 frames wide and slides. */
+.transition-strip {
+  position: relative;
+  overflow: hidden;
+  background: var(--joy-bg-deep);
+}
+
+.transition-strip-image {
   position: absolute;
-  inset: 0;
+  inset: 0 auto 0 0;
   display: block;
-  aspect-ratio: auto;
+  width: 2400%;
+  max-width: none;
+  height: 100%;
+}
+
+.transition-strip-scrub {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  width: 100%;
+  height: 0.7rem;
   margin: 0;
+  cursor: ew-resize;
+  opacity: 0.55;
 }
 
-.transition-card-rest-frame {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.transition-strip-scrub:hover,
+.transition-strip-scrub:focus-visible {
+  opacity: 1;
 }
 
-.library-card-preview .transition-preview-canvas {
+.transition-strip-scrub:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: -2px;
+}
+
+/* A missing preview file shows a quiet neutral tile, never a broken image. */
+.library-card-preview .is-fallback {
+  background: linear-gradient(135deg, var(--joy-bg-inset), var(--joy-bg-chrome));
+}
+
+.library-card-preview .effect-preview-media.is-fallback::after,
+.library-card-preview .transition-strip.is-fallback::after {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 0.6rem,
+    rgb(255 255 255 / 3%) 0.6rem 1.2rem
+  );
+  content: '';
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-card,
+  .library-card *,
+  .library-rail-item,
+  .library-card-favorite {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
 
 .library-compare-preview {

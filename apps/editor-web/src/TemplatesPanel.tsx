@@ -1,4 +1,12 @@
-import { useState, useMemo, useCallback, useRef, useEffect, type ComponentType } from 'react';
+import {
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  useEffect,
+  useId,
+  type ComponentType,
+} from 'react';
 import { confirmDialog, promptDialog } from './app-dialogs.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
@@ -18,7 +26,7 @@ import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import { authorTemplateCopy, deleteTemplateWithConfirmation } from './template-catalog-ui.js';
 import { TemplateCatalogCardActions } from './TemplateCatalogCardActions.js';
 import { LibraryCard } from './LibraryCard.js';
-import { LibraryRail, type LibraryRailItem } from './LibraryRail.js';
+import { LibraryRail, libraryTabPanelProps, type LibraryRailItem } from './LibraryRail.js';
 import { readTemplateFavorites, toggleTemplateFavorite } from './template-favorites.js';
 import type {
   SeededContentTemplate,
@@ -63,6 +71,7 @@ const SIDEBAR_VIEWS: readonly {
 ];
 
 export function TemplatesPanel({ onApplyTemplate, showToast, storage }: TemplatesPanelProps) {
+  const railPanelId = useId();
   const [view, setView] = useState<TemplateView>('library');
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [query, setQuery] = useState('');
@@ -238,11 +247,17 @@ export function TemplatesPanel({ onApplyTemplate, showToast, storage }: Template
       <div className="templates-content library-browser">
         <LibraryRail
           label="Template categories"
+          panelId={railPanelId}
           selectedId={view}
           onSelect={(id) => setView(id as TemplateView)}
           items={railItems}
         />
-        <div className="templates-main library-browser-main">{body}</div>
+        <div
+          className="templates-main library-browser-main"
+          {...libraryTabPanelProps(railPanelId, view)}
+        >
+          {body}
+        </div>
       </div>
     </PanelShell>
   );

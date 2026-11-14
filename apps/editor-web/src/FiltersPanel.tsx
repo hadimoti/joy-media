@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useId, useMemo, useState } from 'react';
 import {
   effectRegistry,
   registerBuiltins,
@@ -7,7 +7,7 @@ import {
 } from '@joy-media/visual-effects';
 import { EffectPreviewMedia } from './EffectPreviewMedia.js';
 import { LibraryCard } from './LibraryCard.js';
-import { LibraryRail } from './LibraryRail.js';
+import { LibraryRail, libraryTabPanelProps } from './LibraryRail.js';
 import { FilterIcon, LayersIcon, StarIcon } from './icons.js';
 import { PanelShell } from './PanelShell.js';
 import { EditorPanelContext } from './editor-panel-context.js';
@@ -72,6 +72,7 @@ export function FiltersPanel({
 }) {
   const editorContext = useContext(EditorPanelContext);
   const storage = editorContext?.storage;
+  const railPanelId = useId();
   const [group, setGroup] = useState<FilterLibraryGroupId>(DEFAULT_FILTER_GROUP);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const { query, linkedId, linkedPanel, linkToken } = useLibrarySearch();
@@ -151,6 +152,7 @@ export function FiltersPanel({
       <div className="library-browser">
         <LibraryRail
           label="Filter categories"
+          panelId={railPanelId}
           selectedId={group}
           onSelect={(id) => setGroup(id as FilterLibraryGroupId)}
           items={[
@@ -163,7 +165,7 @@ export function FiltersPanel({
             })),
           ]}
         />
-        <div className="library-browser-main">
+        <div className="library-browser-main" {...libraryTabPanelProps(railPanelId, group)}>
           <div className="filters-target" aria-live="polite">
             <span>Target</span>
             {targetLabel === undefined || targetLabel === 'No media selected' ? (

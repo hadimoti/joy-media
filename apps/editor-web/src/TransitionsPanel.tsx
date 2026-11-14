@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useId } from 'react';
 import {
   canonicalBindingKey,
   type JoyProjectV1,
@@ -18,8 +18,8 @@ import {
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { beginEditorPointerDrag } from './editor-pointer-dnd.js';
 import { LibraryCard } from './LibraryCard.js';
-import { LibraryRail } from './LibraryRail.js';
-import { TransitionPreviewCard } from './TransitionPreviewCard.js';
+import { LibraryRail, libraryTabPanelProps } from './LibraryRail.js';
+import { TransitionStripPreview } from './TransitionStripPreview.js';
 import { LayersIcon, StarIcon } from './icons.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
@@ -37,7 +37,6 @@ import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import './library-panels.css';
 
 const SHADER_CATALOG = listTransitionShaders();
-const TRANSITION_PREVIEW_REST_FRAME = '/assets/transition-preview-frame-a.svg';
 
 interface TransitionsPanelProps {
   readonly project: JoyProjectV1;
@@ -251,26 +250,17 @@ function TransitionCard({
   readonly onAdd: () => void;
   readonly onToggleFavorite: () => void;
 }) {
-  const shaderEntry = useMemo(() => SHADER_CATALOG.find((e) => e.id === entry.id), [entry.id]);
-
   return (
     <LibraryCard
       id={entry.id}
       name={entry.label}
       description={entry.description ?? entry.label}
       preview={(previewActive) => (
-        <div className="transition-card-thumb">
-          <img
-            className="transition-card-rest-frame"
-            src={TRANSITION_PREVIEW_REST_FRAME}
-            alt=""
-            width="320"
-            height="180"
-          />
-          {previewActive && shaderEntry !== undefined && (
-            <TransitionPreviewCard entry={shaderEntry} isActive={true} />
-          )}
-        </div>
+        <TransitionStripPreview
+          transitionId={entry.id}
+          label={entry.label}
+          playing={previewActive}
+        />
       )}
       isFavorite={isFavorite}
       onToggleFavorite={onToggleFavorite}
@@ -301,6 +291,7 @@ export function TransitionsPanel({
   storage,
 }: TransitionsPanelProps) {
   const rootComp = timelineProject.compositions[timelineProject.rootCompositionId];
+  const railPanelId = useId();
   const [pendingType, setPendingType] = useState('gl:fade');
   const [storedFavorites, setFavorites] = useState<Set<string>>(() =>
     storage === undefined ? new Set() : readTransitionFavorites(storage),
@@ -474,6 +465,7 @@ export function TransitionsPanel({
       <div className="library-browser transitions-browser">
         <LibraryRail
           label="Transition categories"
+          panelId={railPanelId}
           selectedId={category}
           onSelect={(id) => setCategory(id as TransitionCategoryId | 'all' | 'favorites')}
           items={[
@@ -487,7 +479,10 @@ export function TransitionsPanel({
             })),
           ]}
         />
-        <div className="library-browser-main transition-category-groups">
+        <div
+          className="library-browser-main transition-category-groups"
+          {...libraryTabPanelProps(railPanelId, category)}
+        >
           {catalogGroups.length === 0 && <p className="empty-hint">No transitions match.</p>}
           {catalogGroups.map((group) => (
             <section

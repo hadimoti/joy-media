@@ -8,12 +8,12 @@
  * five that draw over the picture moved to Effects. See `library-homes.ts`.
  */
 
-import { useState, useMemo, useCallback, useContext, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useContext, useEffect, useId, useRef } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { effectRegistry, registerBuiltins, type EffectDescriptor } from '@joy-media/visual-effects';
 import { beginEditorPointerDrag } from './editor-pointer-dnd.js';
 import { LibraryCard } from './LibraryCard.js';
-import { LibraryRail } from './LibraryRail.js';
+import { LibraryRail, libraryTabPanelProps } from './LibraryRail.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { BoltIcon, LayersIcon, PlusIcon, StarIcon, WarningIcon } from './icons.js';
@@ -98,6 +98,7 @@ export function EffectsPanel({
   const editorContext = useContext(EditorPanelContext);
   const storage = editorContext?.storage;
   const { query, linkedId, linkedPanel, linkToken } = useLibrarySearch();
+  const railPanelId = useId();
   const [category, setCategory] = useState(DEFAULT_EFFECT_CATEGORY);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [builtinsReady, setBuiltinsReady] = useState(false);
@@ -270,6 +271,7 @@ export function EffectsPanel({
       <div className="effects-panel-content library-browser">
         <LibraryRail
           label="Effect categories"
+          panelId={railPanelId}
           selectedId={category}
           onSelect={setCategory}
           items={CATEGORIES.map((entry) => {
@@ -283,7 +285,10 @@ export function EffectsPanel({
             };
           })}
         />
-        <div className="effects-panel-main library-browser-main">
+        <div
+          className="effects-panel-main library-browser-main"
+          {...libraryTabPanelProps(railPanelId, category)}
+        >
           {category === 'recipes' ? (
             <div className={`effect-recipes-list${recipes.length === 0 ? ' is-empty' : ''}`}>
               {recipes.length === 0 ? (

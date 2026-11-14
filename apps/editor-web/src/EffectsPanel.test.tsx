@@ -131,7 +131,12 @@ describe('EffectsPanel', () => {
     await mountPanel({ objectId: 'intro-title', canApplyEffects: true, onDispatch });
 
     const card = container!.querySelector<HTMLElement>('.effect-card');
-    expect(card?.getAttribute('role')).toBe('group');
+    // Named by its visible title; no redundant "library card" group label.
+    expect(card?.getAttribute('role')).toBeNull();
+    expect(card?.getAttribute('aria-label')).toBeNull();
+    expect(document.getElementById(card?.getAttribute('aria-labelledby') ?? '')?.textContent).toBe(
+      card?.querySelector('.library-card-name')?.textContent,
+    );
     expect(card?.getAttribute('aria-keyshortcuts')).toBe('Enter Space');
     await act(async () => {
       card?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));

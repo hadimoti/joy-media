@@ -1,3 +1,7 @@
+/**
+ * Markup-level checks of the shared library components. Behaviour (hover, focus,
+ * reduced motion, strips, fallback, slider, rail keys) is in LibraryCardPreview.test.tsx.
+ */
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -74,7 +78,10 @@ describe('shared visual library components', () => {
     expect(markup).toContain('class="library-rail-label">Colour &amp; Light</span>');
   });
 
-  it('keeps card text and the filter hint available at a 280px panel width', () => {
+  // This only checks that the long name is in the markup, that the narrow-panel CSS rules
+  // exist as text, and that the filter hint renders. jsdom does no layout, so whether the
+  // text really fits at 280 px is NOT measured here; that needs the attended driver run.
+  it('ships the narrow-panel CSS rules and the filter hint (layout is not measured)', () => {
     const longName = 'AQuiteLongLibraryCardNameThatMustWrapWithoutBeingCutOff';
     const card = renderToStaticMarkup(
       <div className="library-panel" style={{ width: 280 }}>

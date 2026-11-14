@@ -1,11 +1,17 @@
 import {
+  useId,
   useState,
   type KeyboardEventHandler,
   type PointerEventHandler,
   type ReactNode,
 } from 'react';
 import { PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
+import { usePrefersReducedMotion } from './usePrefersReducedMotion.js';
 
+/**
+ * A preview is a node, or a function of `isActive`: true while the pointer or keyboard
+ * focus is on the card and the system does not ask for reduced motion.
+ */
 export type LibraryCardPreview = ReactNode | ((isActive: boolean) => ReactNode);
 
 export function LibraryCard({
@@ -56,7 +62,10 @@ export function LibraryCard({
   readonly onKeyDown?: KeyboardEventHandler<HTMLElement>;
 }) {
   const [previewActive, setPreviewActive] = useState(false);
-  const previewContent = typeof preview === 'function' ? preview(previewActive) : preview;
+  const nameId = useId();
+  const reducedMotion = usePrefersReducedMotion();
+  const previewContent =
+    typeof preview === 'function' ? preview(previewActive && !reducedMotion) : preview;
   const classes = [
     'library-card',
     className,
@@ -75,8 +84,7 @@ export function LibraryCard({
       data-library-card="true"
       data-library-id={id}
       data-library-linked={linked ? 'true' : undefined}
-      role="group"
-      aria-label={`${name} library card`}
+      aria-labelledby={nameId}
       aria-describedby={ariaDescribedBy}
       aria-keyshortcuts={ariaKeyShortcuts}
       tabIndex={onKeyDown === undefined ? undefined : 0}
@@ -96,7 +104,9 @@ export function LibraryCard({
       <div className="library-card-preview">{previewContent}</div>
       <div className="library-card-content">
         <div className="library-card-copy">
-          <strong className="library-card-name">{name}</strong>
+          <strong id={nameId} className="library-card-name">
+            {name}
+          </strong>
           <span className="library-card-description">{description}</span>
         </div>
         {badges !== undefined && <div className="library-card-badges">{badges}</div>}

@@ -11647,23 +11647,6 @@ label {
   transition: border-color var(--joy-motion-hover) var(--joy-ease);
   min-width: 0;
 }
-.transition-card-thumb {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  overflow: hidden;
-  border-radius: var(--radius-xs);
-  background: var(--joy-bg-inset);
-}
-.transition-preview-canvas {
-  display: block;
-  width: 100%;
-  height: 86px;
-  object-fit: cover;
-  border-radius: var(--radius-xs);
-}
 .transition-card-fallback {
   width: 100%;
   height: 100%;
@@ -15484,13 +15467,6 @@ label {
 .transitions-panel .transition-card {
   gap: 0.14rem;
   padding: 0.14rem;
-}
-.transitions-panel .transition-card-thumb {
-  width: min(100%, 6.25rem);
-  margin-inline: auto;
-}
-.transitions-panel .transition-preview-canvas {
-  height: 100%;
 }
 .transitions-panel .transition-card-footer {
   min-height: 1rem;
