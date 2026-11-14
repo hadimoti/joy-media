@@ -116,6 +116,19 @@ describe('the Format control replaces the old export preset menu', () => {
     expect(appSource).toContain('ref={formatMenu.rootRef}');
   });
 
+  it('lists presets grouped by shape and keeps the header button and preset icons aligned', () => {
+    expect(EXPORT_PRESET_MENU_IDS.slice(0, 3)).toEqual([
+      'youtube-1080',
+      'landscape-4k',
+      'high-bitrate',
+    ]);
+    const css = readFileSync(join(SOURCE_DIR, 'app.css'), 'utf8');
+    // The header Format button sits in a stretched flex wrapper: it must centre itself.
+    expect(css).toMatch(/\.header-format-btn \{[^}]*align-self: center;/);
+    // The icon group must not take the whole row (it pushed the label to the right edge).
+    expect(css).toMatch(/\.export-preset-list \.preset-icon-group \{[^}]*width: 1\.5rem;/);
+  });
+
   it('the header Format button keeps its full read-out as an accessible name at every width', () => {
     // At 75rem and below .header-format-btn-label is display:none, so the name must be explicit.
     expect(appSource).toContain('aria-label={`Format: ${formatReadout}`}');

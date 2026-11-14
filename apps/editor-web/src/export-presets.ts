@@ -157,14 +157,15 @@ const CANVAS_MATCH_ORDER: readonly ExportPresetId[] = [
 ];
 
 export const EXPORT_PRESET_MENU_IDS: readonly ExportPresetId[] = [
+  // Grouped by shape so the list reads in order: landscape, vertical, then the rest.
+  'youtube-1080',
+  'landscape-4k',
+  'high-bitrate',
   'reels-1080',
   'shorts-1080',
-  'youtube-1080',
-  'high-bitrate',
   'tiktok-1080',
   'instagram-feed-4x5',
   'square-1080',
-  'landscape-4k',
   'custom',
 ];
 
