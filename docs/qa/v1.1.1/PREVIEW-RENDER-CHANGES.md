@@ -12,24 +12,38 @@ Preview-only parameter overrides (`PREVIEW_PARAM_OVERRIDES` in
 `tooling/previews/src/manifest.ts`) change the preview stills only. They do not change
 the clip defaults or any saved project.
 
-## 1. Shader precision headers (bug fix: blank output)
+## 1. Shader precision headers (bug fix: blank preview output)
 
 Files: `packages/renderer-pixi/src/creative-effects.ts` (`FILTER_VERT`,
 `FRAGMENT_HEADER`), `packages/renderer-pixi/src/effects-pixi.ts` (`DEFAULT_FILTER_VERT`,
 `EFFECT_FRAG_HEADER`, `VIGNETTE_FRAG`).
 
-`precision highp float;` is now declared in every creative-effects shader and in the
-shared effect headers. GLSL ES 3.00 fragment shaders have no default float precision, so
-a fragment stage without it fails to compile or link.
+`precision highp float;` is now declared in every creative-effects fragment header
+(`FRAGMENT_HEADER`), in the shared effect fragment headers (`EFFECT_FRAG_HEADER`,
+`VIGNETTE_FRAG`), and in the vertex shaders. The vertex lines are redundant with Pixi's own
+prepend (below) and were kept.
 
-- **Verified:** with the header removed from `FRAGMENT_HEADER`, the `pixelate` still
-  logs `PixiJS Error: Could not initialize shader` and renders blank. With the header
-  restored, it renders and passes the pixel gate.
+Pixi builds these programs as follows (pixi.js 8.19.0, `GlProgram` constructor). A shader
+is compiled as GLSL ES 3.00 only if its source contains `#version 300 es`. None of these
+shaders does, so they compile as GLSL ES 1.00 in any WebGL context. `ensurePrecision`
+prepends `precision <level> float;` unless the source starts with the word `precision`.
+These sources start with a newline, so Pixi always prepends: `mediump` for the fragment
+stage and `highp` for the vertex stage. Without the header line, the fragment stage stays
+`mediump`.
+
+- **Proven (SwiftShader preview build only):** with the header removed from
+  `FRAGMENT_HEADER`, `pixelate` still logs `PixiJS Error: Could not initialize shader` and
+  renders blank. With the header restored, it renders and passes the pixel gate. The GL
+  linker log was not captured, so the exact GL error is unknown.
+- **Inference (not tested):** the likely cause is a precision mismatch on `uInputSize`,
+  which both stages declare. Without the header the vertex copy is `highp` and the fragment
+  copy is `mediump`. The header makes them match. No test isolates this.
 - **Effects this fixes:** `pixelate`, `mosaic`, `radial-blur`, `tilt-shift`,
   `bayer-dither`, `halftone`, `contour-map`, `glyph-matrix`, `scatter-mosaic`,
-  `tone-geometry`, `pixel-sort`. These rendered as the flat `#181818` background before
-  (from the earlier T-V02 root-cause work). Only `pixelate` was re-tested with the header
-  removed. The other ten are covered by the pixel gate, which now passes for all of them.
+  `tone-geometry`, `pixel-sort`. In the preview build these were the flat `#181818`
+  background before (from the earlier T-V02 root-cause work). Only `pixelate` was
+  re-tested with the header removed. The other ten are covered by the pixel gate, which now
+  passes for all of them.
 - **Not compared before and after:** `posterize`, `monochrome`, `zoom-blur` and `vignette`
   also got the qualifier. They were not in the blank list. Their pre-change output was not
   re-rendered, so no before/after comparison exists for them.
@@ -42,17 +56,22 @@ Files: `packages/renderer-pixi/src/creative-effects.ts`, `HALFTONE_FRAG` and
 The antialias width changed from `max(fwidth(distanceToShape), 0.006)` to
 `max(1.5 / cellSize, 0.006)`.
 
+- **Why the swap is required:** these shaders are GLSL ES 1.00 (section 1). In ES 1.00,
+  `fwidth` is legal only after `#extension GL_OES_standard_derivatives : enable`, and these
+  shaders do not declare it. The original code was therefore not valid for them and never
+  compiled. Halftone and tone-geometry did not render in the real app before this change,
+  so no working antialiasing was replaced.
 - **Tested:** the `fwidth` version was restored and both stills were rebuilt with
   `node tooling/previews/build-previews.mjs --only=effects`. The preview renderer logged
   `'fwidth' : no matching overloaded function found`. Both stills came out as uniform
   `#181818` (64x48 stddev 0.00) and failed the pixel gate.
-- **Decision:** the swap stays. The `fwidth` form does not compile in the preview renderer
-  (Chromium with SwiftShader). Whether it compiles on a user's GPU was not tested.
+- **Decision:** the swap stays. The `fwidth` form fails to compile in the preview renderer
+  (Chromium with SwiftShader), for the reason above.
 - **Result:** the stills show the dot and circle patterns. A full rebuild reproduces the
   committed images byte for byte.
-- **Possible difference:** on a machine where `fwidth` compiles, the edge softness would
-  have followed screen-space derivatives. The fixed `1.5 / cellSize` width is a constant in
-  cell units. Nothing was measured on such a machine.
+- **Trade-off:** the fixed `1.5 / cellSize` width is a constant in cell units, so the edge
+  softness does not follow screen-space derivatives. Nothing was measured for that
+  difference.
 
 ## 3. Colour-matrix effects (bug fixes: wrong output)
 
@@ -97,7 +116,8 @@ and is not blank. Whether each matches the intended look was not checked.
 
 ## 5. Behaviour changes for saved projects (summary)
 
-- **Blank to rendered** (section 1): `pixelate`, `mosaic`, `radial-blur`, `tilt-shift`,
+- **Blank in the preview build, now rendered** (section 1; the desktop app was not checked):
+  `pixelate`, `mosaic`, `radial-blur`, `tilt-shift`,
   `bayer-dither`, `halftone`, `contour-map`, `glyph-matrix`, `scatter-mosaic`,
   `tone-geometry`, `pixel-sort`.
 - **Output changed for every project that uses the effect:** `sepia`, `vibrance`, and the
@@ -117,7 +137,8 @@ and is not blank. Whether each matches the intended look was not checked.
 - `packages/renderer-pixi/src/effect-shader-contracts.test.ts`
   - Precision: all 14 creative-effects kinds, and the 10 shader-backed Pixi kinds (the nine
     in section 4 plus `vignette`), declare `precision highp float;` in both the vertex and
-    fragment stages.
+    fragment stages. The vertex check is weak: Pixi prepends `highp` to every vertex shader,
+    so it passes even without the source line.
   - `brightness-contrast` at brightness 0 and contrast 0 is the exact 5x4 identity matrix.
     A missing param is treated as 0.
   - At contrast +1 the mid-grey row maps to itself.

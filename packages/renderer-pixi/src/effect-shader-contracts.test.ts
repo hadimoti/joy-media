@@ -58,9 +58,11 @@ function asColorMatrix(filter: Filter | undefined): readonly number[] {
 }
 
 describe('effect shader precision contract', () => {
-  // GLSL ES 3.00 fragment shaders have no default float precision. Without
-  // `precision highp float;` in the fragment stage the program fails to link and
-  // the preview renders as a blank #181818 frame.
+  // Pixi prepends its own `precision` line to each shader (these sources start with a
+  // newline), with mediump for the fragment stage. The `highp` line in the fragment stage
+  // keeps `uInputSize`, which both stages declare, at one precision. Without it the preview
+  // rendered blank (observed in the SwiftShader preview build; the mechanism is inferred).
+  // The vertex check passes without the source line because Pixi adds highp there.
   it.each(CREATIVE_KINDS)(
     'creative effect "%s" declares float precision in both stages',
     (kind) => {
