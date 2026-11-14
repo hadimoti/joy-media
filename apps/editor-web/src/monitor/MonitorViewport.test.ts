@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { monitorFrameRect, monitorZoomShortcut } from './MonitorViewport.js';
+import { monitorFrameRect, monitorZoomShortcut, zoomShortcutOf } from './MonitorViewport.js';
 
 const key = (
   keyValue: string,
@@ -41,5 +41,32 @@ describe('monitor frame rect', () => {
     expect(
       monitorFrameRect({ zoom: 0.5, panX: 12, panY: -4 }, { width: 1080, height: 1920 }),
     ).toEqual({ left: '12px', top: '-4px', width: '540px', height: '960px' });
+  });
+});
+
+describe('zoomShortcutOf (LTP-048)', () => {
+  // A real KeyboardEvent keeps key, code and the modifiers as getters on its prototype, so a spread copies none of them.
+  class FakeKeyboardEvent {
+    get key(): string {
+      return '0';
+    }
+    get code(): string {
+      return 'Digit0';
+    }
+    get ctrlKey(): boolean {
+      return true;
+    }
+    get metaKey(): boolean {
+      return false;
+    }
+    get altKey(): boolean {
+      return false;
+    }
+  }
+
+  it('reads Ctrl+0 from an event whose fields are prototype getters', () => {
+    const event = new FakeKeyboardEvent();
+    expect(monitorZoomShortcut({ ...event, code: '' } as never)).toBeUndefined();
+    expect(zoomShortcutOf(event)).toBe('fit');
   });
 });

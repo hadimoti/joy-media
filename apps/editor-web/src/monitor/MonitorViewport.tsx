@@ -94,6 +94,22 @@ export function monitorZoomShortcut(
   return undefined;
 }
 
+/**
+ * The zoom shortcut of a real keyboard event. The fields are read one by one: a spread (`{ ...event }`) of a real
+ * KeyboardEvent copies none of them, because they are getters on its prototype, so no key ever matched (LTP-048).
+ */
+export function zoomShortcutOf(
+  event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey'> & { readonly code?: string },
+): ReturnType<typeof monitorZoomShortcut> {
+  return monitorZoomShortcut({
+    key: event.key,
+    code: event.code ?? '',
+    ctrlKey: event.ctrlKey,
+    metaKey: event.metaKey,
+    altKey: event.altKey,
+  });
+}
+
 export function useMonitorView(
   frame: MonitorSize,
   scopeRef: RefObject<HTMLElement | null>,
@@ -198,9 +214,9 @@ export function useMonitorView(
       scope: MONITOR_KEY_SCOPE,
       // The zoom box and other fields in the Monitor keep these keys, as before.
       inTextFields: true,
-      match: (event) => monitorZoomShortcut({ ...event, code: event.code ?? '' }) !== undefined,
+      match: (event) => zoomShortcutOf(event) !== undefined,
       run: (event) => {
-        const action = monitorZoomShortcut({ ...event, code: event.code ?? '' });
+        const action = zoomShortcutOf(event);
         if (action === 'fit') setFit();
         else if (action === 'actual') setZoom(1);
         else if (action !== undefined) stepZoom(action === 'in' ? 1 : -1);
