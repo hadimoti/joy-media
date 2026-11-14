@@ -101,16 +101,8 @@ export function LibraryCard({
           deactivatePreview();
       }}
     >
-      <div className="library-card-preview">{previewContent}</div>
-      <div className="library-card-content">
-        <div className="library-card-copy">
-          <strong id={nameId} className="library-card-name">
-            {name}
-          </strong>
-          <span className="library-card-description">{description}</span>
-        </div>
-        {badges !== undefined && <div className="library-card-badges">{badges}</div>}
-        {status !== undefined && <div className="library-card-status">{status}</div>}
+      <div className="library-card-media">
+        <div className="library-card-preview">{previewContent}</div>
         <div className="library-card-actions">
           <button
             type="button"
@@ -144,6 +136,17 @@ export function LibraryCard({
           </button>
           {extraActions}
         </div>
+      </div>
+      <div className="library-card-content">
+        <div className="library-card-copy">
+          <strong id={nameId} className="library-card-name">
+            {name}
+          </strong>
+          {/* Screen readers keep the description; sighted users see the name only. */}
+          <span className="library-card-description sr-only">{description}</span>
+        </div>
+        {badges !== undefined && <div className="library-card-badges">{badges}</div>}
+        {status !== undefined && <div className="library-card-status">{status}</div>}
       </div>
     </article>
   );

@@ -252,8 +252,8 @@
   min-width: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 0.32rem;
-  padding: 0.42rem;
+  gap: 0.28rem;
+  padding: 0.4rem 0.42rem 0.45rem;
 }
 
 .library-card-copy {
@@ -275,11 +275,6 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
-}
-
-/* Cards show the name only; the description stays in the hover title. */
-.library-card-description {
-  display: none;
 }
 
 .library-card-badges {
@@ -340,27 +335,46 @@
   font-size: inherit;
 }
 
+/* The star and the plus sit inside the picture, lower left and lower right, so the card has no
+   empty row under the title. */
+.library-card-media {
+  position: relative;
+}
+
+.library-card-media > .library-card-preview {
+  border-bottom: 0;
+}
+
 .library-card-actions {
+  position: absolute;
+  right: 0.3rem;
+  bottom: 0.3rem;
+  left: 0.3rem;
+  z-index: 2;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.28rem;
   min-width: 0;
-  margin-top: auto;
-  padding-top: 0.12rem;
+  pointer-events: none;
+}
+
+.library-card-actions > * {
+  pointer-events: auto;
 }
 
 .library-card-favorite {
   display: inline-grid;
   flex: none;
-  width: 1.55rem;
-  height: 1.55rem;
-  min-width: 1.55rem;
-  min-height: 1.55rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
   place-items: center;
   padding: 0;
   border: 1px solid var(--joy-border-soft);
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: color-mix(in srgb, var(--joy-bg-deep) 78%, transparent);
   color: var(--joy-text-secondary);
   opacity: 0;
   pointer-events: none;
@@ -388,16 +402,18 @@
 
 .library-card-add {
   display: inline-flex;
-  flex: 1 1 auto;
+  flex: none;
   align-items: center;
   justify-content: center;
-  gap: 0.24rem;
-  min-width: 1.9rem;
-  min-height: 1.7rem;
-  padding: 0.22rem 0.45rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  margin-inline-start: auto;
+  padding: 0;
   border: 1px solid color-mix(in srgb, var(--joy-accent) 56%, var(--joy-border));
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--joy-accent) 14%, var(--joy-bg-panel));
+  background: color-mix(in srgb, var(--joy-accent) 22%, var(--joy-bg-deep));
   color: var(--joy-text);
   font: inherit;
   font-size: var(--joy-type-xs);
@@ -407,8 +423,8 @@
 
 .library-card-add svg {
   flex: none;
-  width: 0.95rem;
-  height: 0.95rem;
+  width: 0.8rem;
+  height: 0.8rem;
 }
 
 .library-card-add:hover,
