@@ -83,4 +83,29 @@ $otherArtifacts = @($manifest.artifacts | Where-Object { $_.fileName -ne "joy-me
 $manifest.artifacts = @($otherArtifacts + $setupEntry)
 [IO.File]::WriteAllText($manifestPath, (($manifest | ConvertTo-Json -Depth 10) + "`n"), [Text.UTF8Encoding]::new($false))
 Write-Host "Recorded joy-media-setup.exe in $manifestPath."
+
+# The packager hashed the manifest into SHA256SUMS.txt before this block rewrote it, so that line is stale.
+# Replace only the manifest's line with the new digest; the other lines keep their order and line endings.
+$sumsPath = Join-Path $distReleases "SHA256SUMS.txt"
+if (-not (Test-Path -LiteralPath $sumsPath -PathType Leaf)) {
+    throw "SHA256SUMS.txt not found at $sumsPath. Run desktop packager first."
+}
+$sumsText = [IO.File]::ReadAllText($sumsPath)
+$sumsEol = if ($sumsText.Contains("`r`n")) { "`r`n" } else { "`n" }
+$manifestSha256 = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$sumsLines = [System.Collections.Generic.List[string]]::new()
+$manifestLineFound = $false
+foreach ($line in ($sumsText -split "\r?\n")) {
+    if ($line -match '\sjoy-media-release-manifest\.json$') {
+        $sumsLines.Add("$manifestSha256  joy-media-release-manifest.json")
+        $manifestLineFound = $true
+    } elseif ($line.Trim() -ne "") {
+        $sumsLines.Add($line)
+    }
+}
+if (-not $manifestLineFound) {
+    throw "SHA256SUMS.txt has no line for joy-media-release-manifest.json. Run desktop packager first."
+}
+[IO.File]::WriteAllText($sumsPath, (($sumsLines -join $sumsEol) + $sumsEol), [Text.UTF8Encoding]::new($false))
+Write-Host "Updated the joy-media-release-manifest.json line in $sumsPath."
 # (MANIFEST-BLOCK-END)

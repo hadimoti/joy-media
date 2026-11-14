@@ -77,16 +77,24 @@ const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
 const DROP_FILES_ENDPOINT = 'joy-desktop-drop-files';
 const DROPPED_IMPORT_PROGRESS_CHANNEL = 'joy-desktop-dropped-import-progress';
 
-/** The JOY brand mark the editor shows in its header, for the development loading page (undefined if absent). */
-function readDevLogoDataUrl(): string | undefined {
-  try {
-    const bytes = readFileSync(
-      join(__dirname, '..', '..', '..', 'editor-web', 'public', 'assets', 'JoyCodeNew_128x128.png'),
-    );
-    return `data:image/png;base64,${bytes.toString('base64')}`;
-  } catch {
-    return undefined;
+/**
+ * The JOY brand mark for the loading pages (undefined when no copy is found, so the page shows the wordmark alone).
+ * A packaged app stages the editor build as `renderer/` beside `dist/`, and Vite publishes the editor's public
+ * `assets/` folder inside that build. A development run reads the same file from the editor's public folder.
+ */
+function readLoadingLogoDataUrl(): string | undefined {
+  const candidates = [
+    join(__dirname, '..', '..', 'renderer', 'assets', 'JoyCodeNew_128x128.png'),
+    join(__dirname, '..', '..', '..', 'editor-web', 'public', 'assets', 'JoyCodeNew_128x128.png'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return `data:image/png;base64,${readFileSync(candidate).toString('base64')}`;
+    } catch {
+      // Not at this location; try the next one.
+    }
   }
+  return undefined;
 }
 
 /**
@@ -124,7 +132,7 @@ function showPackagedWindowWhenLoaded(win: BrowserWindow): void {
     loadingWindow.once('ready-to-show', () => {
       if (!loadingWindow.isDestroyed() && !loaded) loadingWindow.show();
     });
-    const page = devLoadingPageHtml(readDevLogoDataUrl());
+    const page = devLoadingPageHtml(readLoadingLogoDataUrl());
     void loadingWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
   };
   const timer = setTimeout(openSplash, PACKAGED_LOADING_DELAY_MS);
@@ -388,10 +396,10 @@ if (!app.requestSingleInstanceLock()) {
       // Wave 2: forward to the renderer's project-open command once the local project
       // store exists. For now, focusing the existing window is the safe no-op.
     }
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
+    // Focus the main window itself: the loading window may be the first window in the list.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
     }
   });
 
@@ -566,7 +574,7 @@ if (!app.requestSingleInstanceLock()) {
       // A development window loads the editor dev server. While it does not answer, the window shows the JOY Media
       // loading page and checks the server every few seconds, then opens the editor as soon as it answers.
       const loadingPage = `data:text/html;charset=utf-8,${encodeURIComponent(
-        devLoadingPageHtml(readDevLogoDataUrl()),
+        devLoadingPageHtml(readLoadingLogoDataUrl()),
       )}`;
       let loadingShownAt = 0;
       let poll: ReturnType<typeof setInterval> | undefined;

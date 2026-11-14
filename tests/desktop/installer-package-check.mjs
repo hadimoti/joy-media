@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -31,6 +32,23 @@ function zipEntryNames(zipPath) {
     offset += 46 + nameLength + extraLength + commentLength;
   }
   return names;
+}
+
+/** The lowercase SHA-256 of a file's bytes, as SHA256SUMS.txt lists it. */
+function fileSha256(filePath) {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+}
+
+/**
+ * The digest that a SHA256SUMS.txt text lists for one file name, or undefined when it lists that name zero or
+ * more than one time. Lines follow "<64 hex>  <name>"; a name that only ends the same way does not match.
+ */
+function listedSha256(sumsText, fileName) {
+  const digests = sumsText.split(/\r?\n/).flatMap((line) => {
+    const match = /^([a-fA-F0-9]{64}) {2}(.+)$/.exec(line);
+    return match && match[2] === fileName ? [match[1].toLowerCase()] : [];
+  });
+  return digests.length === 1 ? digests[0] : undefined;
 }
 
 // 1. Verify Distribution Layout
@@ -587,6 +605,10 @@ console.log(
       installer: { script: 'Setup-JoyMedia.ps1', environment: { pathRegistered: true } },
       artifacts: [{ fileName: 'joy-media.exe', type: 'standalone-binary', sha256: 'a'.repeat(64) }],
     };
+    // The packager's SHA256SUMS.txt lists the manifest with the digest from before this block rewrote it.
+    const sumsPath = join(manifestRoot, 'SHA256SUMS.txt');
+    const otherLine = `${'c'.repeat(64)}  joy-media.exe\n`;
+    const staleLine = `${'b'.repeat(64)}  joy-media-release-manifest.json\n`;
     writeFileSync(manifestPath, JSON.stringify(stand, null, 2) + '\n', 'utf8');
 
     // No manifest yet: the block must stop, not invent one.
@@ -595,6 +617,13 @@ console.log(
 
     writeFileSync(manifestPath, JSON.stringify(stand, null, 2) + '\n', 'utf8');
     writeFileSync(join(manifestRoot, 'joy-media-setup.exe'), 'setup build 1');
+    // No SHA256SUMS.txt: the block must stop too, not invent one.
+    assert.notStrictEqual(
+      runBlock().status,
+      0,
+      'The block must fail when SHA256SUMS.txt is missing',
+    );
+    writeFileSync(sumsPath, otherLine + staleLine, 'utf8');
     const first = runBlock();
     assert.strictEqual(
       first.status,
@@ -617,9 +646,28 @@ console.log(
       'Other manifest fields must be kept',
     );
 
+    // The manifest's line in SHA256SUMS.txt is replaced with the manifest's new digest, and the other line stays.
+    const sumsAfterFirst = readFileSync(sumsPath, 'utf8');
+    assert.strictEqual(
+      listedSha256(sumsAfterFirst, 'joy-media-release-manifest.json'),
+      fileSha256(manifestPath),
+      'SHA256SUMS.txt must list the manifest with the digest of the manifest on disk',
+    );
+    assert.ok(sumsAfterFirst.includes(otherLine), 'Other SHA256SUMS.txt lines must be kept');
+    assert.strictEqual(
+      sumsAfterFirst.split('\n').filter((line) => line !== '').length,
+      2,
+      'SHA256SUMS.txt must keep its line count',
+    );
+
     writeFileSync(join(manifestRoot, 'joy-media-setup.exe'), 'setup build 2');
     const second = runBlock();
     assert.strictEqual(second.status, 0, `Re-recording the setup failed: ${second.stderr}`);
+    assert.strictEqual(
+      listedSha256(readFileSync(sumsPath, 'utf8'), 'joy-media-release-manifest.json'),
+      fileSha256(manifestPath),
+      'A rebuilt setup must update the manifest line in SHA256SUMS.txt',
+    );
     const afterSecond = JSON.parse(readFileSync(manifestPath, 'utf8'));
     const rebuilt = afterSecond.artifacts.filter((a) => a.fileName === 'joy-media-setup.exe');
     assert.strictEqual(rebuilt.length, 1, 'A rebuilt setup must replace its manifest entry');
@@ -631,6 +679,18 @@ console.log(
   } finally {
     rmSync(manifestRoot, { recursive: true, force: true });
   }
+  // The digest parser, on text: a listed digest is read back, and a missing, duplicated or look-alike name is not.
+  assert.strictEqual(
+    listedSha256(`${'A'.repeat(64)}  m.json\n`, 'm.json'),
+    'a'.repeat(64),
+    'listedSha256 must read a digest and lower-case it',
+  );
+  assert.strictEqual(listedSha256(`${'a'.repeat(64)}  other.zip\n`, 'm.json'), undefined);
+  assert.strictEqual(listedSha256(`${'a'.repeat(64)}  m.json.bak\n`, 'm.json'), undefined);
+  assert.strictEqual(
+    listedSha256(`${'a'.repeat(64)}  m.json\n${'b'.repeat(64)}  m.json\n`, 'm.json'),
+    undefined,
+  );
   console.log('✔ build-installer.ps1 lists joy-media-setup.exe in the release manifest.');
 }
 
@@ -668,6 +728,15 @@ for (const artifact of manifest.artifacts) {
     );
   }
 }
+// The manifest is rewritten by build-installer.ps1 after the packager's checksums step, so its own line in
+// SHA256SUMS.txt must be the digest of the manifest as it is on disk now.
+const manifestLineHash = listedSha256(shaSums, 'joy-media-release-manifest.json');
+assert.ok(manifestLineHash, 'SHA256SUMS.txt has no single line for the release manifest');
+assert.strictEqual(
+  manifestLineHash,
+  fileSha256(manifestPath),
+  'SHA256SUMS.txt hash for joy-media-release-manifest.json does not match the manifest on disk',
+);
 console.log('✔ Release manifest & SHA256 checksums match perfectly.');
 
 // 7. Verify build-installer.ps1 parsing
