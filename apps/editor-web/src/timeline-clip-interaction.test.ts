@@ -4,6 +4,7 @@ import type { Clip, Composition, SpikeProject } from '@joy-media/project-schema'
 import {
   buildTimelineClipInsertTransaction,
   buildTimelineClipGroupMoveTransaction,
+  buildDuplicateSelectionTransaction,
   buildTimelineClipMoveTransaction,
   nearestFreeStartUs,
   buildTimelineClipReplaceTransaction,
@@ -245,5 +246,48 @@ describe('nearestFreeStartUs (a drop on a taken spot)', () => {
     expect(nearestFreeStartUs({ clips, durationUs: 2_000_000, desiredStartUs: 1_000_000 })).toBe(
       7_000_000,
     );
+  });
+});
+
+describe('buildDuplicateSelectionTransaction (Ctrl/Cmd+D)', () => {
+  const composition = {
+    id: 'root',
+    tracks: [
+      {
+        id: 'V1',
+        locked: false,
+        clips: [
+          { ...CLIP, id: 'a', startUs: 0, durationUs: 2_000_000 },
+          { ...CLIP, id: 'b', startUs: 2_000_000, durationUs: 2_000_000 },
+        ],
+      },
+      { id: 'V2', locked: true, clips: [{ ...CLIP, id: 'c', startUs: 0, durationUs: 1_000_000 }] },
+    ],
+  } as unknown as Composition;
+
+  it('duplicates every selected clip in one transaction, copies after copies on the same track', () => {
+    const { transaction, lockedSkipped } = buildDuplicateSelectionTransaction({
+      composition,
+      selectedIds: ['a', 'b'],
+      label: () => 'clip',
+      idSuffix: 'x',
+    });
+    expect(lockedSkipped).toBe(0);
+    expect(transaction?.label).toBe('Duplicate 2 clips');
+    const starts = transaction?.commands.map(
+      (command) => (command.payload as { newStartUs: number }).newStartUs,
+    );
+    expect(starts).toEqual([4_000_000, 6_000_000]);
+  });
+
+  it('leaves out clips on a locked track and says how many', () => {
+    const { transaction, lockedSkipped } = buildDuplicateSelectionTransaction({
+      composition,
+      selectedIds: ['c'],
+      label: () => 'clip',
+      idSuffix: 'x',
+    });
+    expect(transaction).toBeUndefined();
+    expect(lockedSkipped).toBe(1);
   });
 });

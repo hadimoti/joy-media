@@ -366,40 +366,69 @@ export function buildTimelinePastePlan(input: TimelinePasteInput): TimelinePaste
   };
   const displayTracks = sortTracksForTimelineDisplay(input.composition.tracks, elementKinds);
 
-  const targetByGroup = new Map<string, string>();
-  for (const sourceTrackId of groupOrder) {
-    const group = groups.get(sourceTrackId)!;
-    const fallbackKind = timelineElementKindForClip(group[0]!.clip, elementKinds);
-    const kind: TimelineTrackKind = sourceKind(sourceTrackId) ?? fallbackKind;
-    const intervals = group.map((item) => ({
-      startUs: basePlayheadUs + item.offsetUs,
-      endUs: basePlayheadUs + item.offsetUs + item.clip.durationUs,
-    }));
-
-    // The source track first, then the other tracks of the same kind in display order.
-    const candidates = [
-      ...(trackById.has(sourceTrackId) ? [sourceTrackId] : []),
-      ...displayTracks
-        .filter(
-          (track) => track.id !== sourceTrackId && timelineTrackKind(track, elementKinds) === kind,
-        )
-        .map((track) => track.id),
-    ];
-
-    const target = candidates.find(
-      (trackId) =>
-        !isLocked(trackId) &&
-        !intervals.some((interval) => overlapsAny(interval, occupied.get(trackId) ?? [])),
+  // Where the copied clips go: at the playhead if every group finds a free track there, otherwise all together at the
+  // earliest later time that fits (the end of a clip that is in the way), so the clips keep their distances and a paste
+  // never fails only because the playhead sits on a busy spot.
+  const assignAt = (
+    shiftUs: number,
+  ):
+    | { readonly targets: Map<string, string>; readonly occupiedAfter: Map<string, Interval[]> }
+    | string => {
+    const trialOccupied = new Map<string, Interval[]>(
+      [...occupied].map(([trackId, intervals]) => [trackId, [...intervals]]),
     );
-    if (target === undefined) {
-      return {
-        ok: false,
-        reason: `No unlocked ${kind} track is free at the playhead for the copied clips.`,
-      };
+    const targets = new Map<string, string>();
+    for (const sourceTrackId of groupOrder) {
+      const group = groups.get(sourceTrackId)!;
+      const fallbackKind = timelineElementKindForClip(group[0]!.clip, elementKinds);
+      const kind: TimelineTrackKind = sourceKind(sourceTrackId) ?? fallbackKind;
+      const intervals = group.map((item) => ({
+        startUs: basePlayheadUs + shiftUs + item.offsetUs,
+        endUs: basePlayheadUs + shiftUs + item.offsetUs + item.clip.durationUs,
+      }));
+      // The source track first, then the other tracks of the same kind in display order.
+      const candidates = [
+        ...(trackById.has(sourceTrackId) ? [sourceTrackId] : []),
+        ...displayTracks
+          .filter(
+            (track) =>
+              track.id !== sourceTrackId && timelineTrackKind(track, elementKinds) === kind,
+          )
+          .map((track) => track.id),
+      ];
+      const target = candidates.find(
+        (trackId) =>
+          !isLocked(trackId) &&
+          !intervals.some((interval) => overlapsAny(interval, trialOccupied.get(trackId) ?? [])),
+      );
+      if (target === undefined) return kind;
+      targets.set(sourceTrackId, target);
+      trialOccupied.set(target, [...(trialOccupied.get(target) ?? []), ...intervals]);
     }
-    targetByGroup.set(sourceTrackId, target);
-    occupied.set(target, [...(occupied.get(target) ?? []), ...intervals]);
+    return { targets, occupiedAfter: trialOccupied };
+  };
+  const laterShifts = [
+    ...new Set(
+      [...occupied.values()]
+        .flat()
+        .map((interval) => interval.endUs - basePlayheadUs)
+        .filter((shiftUs) => shiftUs > 0),
+    ),
+  ].sort((left, right) => left - right);
+  let assignment: ReturnType<typeof assignAt> = assignAt(0);
+  let pasteShiftUs = 0;
+  for (const shiftUs of laterShifts) {
+    if (typeof assignment !== 'string') break;
+    const trial = assignAt(shiftUs);
+    if (typeof trial !== 'string') {
+      assignment = trial;
+      pasteShiftUs = shiftUs;
+    }
   }
+  if (typeof assignment === 'string') {
+    return { ok: false, reason: `No unlocked ${assignment} track is free for the copied clips.` };
+  }
+  const targetByGroup = assignment.targets;
 
   // Ids: unique against the project and against each other (loop until free).
   const taken = new Set<string>(input.reservedIds ?? []);
@@ -420,7 +449,7 @@ export function buildTimelinePastePlan(input: TimelinePasteInput): TimelinePaste
 
   const pastes: TimelinePastedClip[] = clipboard.items.map((item, index) => {
     const clipId = uniqueId(item.clip.id, index);
-    const startUs = basePlayheadUs + item.offsetUs;
+    const startUs = basePlayheadUs + pasteShiftUs + item.offsetUs;
     return {
       clipId,
       sourceClipId: item.clip.id,

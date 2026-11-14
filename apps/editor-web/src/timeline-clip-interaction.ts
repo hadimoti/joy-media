@@ -1,4 +1,5 @@
 import type { CommandTransaction } from '@joy-media/commands';
+import { duplicateClipCommand } from '@joy-media/timeline-engine';
 import type { Clip, Composition } from '@joy-media/project-schema';
 
 export const TIMELINE_KEYBOARD_NUDGE_US = 100_000;
@@ -256,5 +257,62 @@ export function buildTimelineClipReplaceTransaction(input: {
         },
       },
     ],
+  };
+}
+
+/**
+ * One undoable duplicate of every selected clip: each copy sits right after its original, on the same track, in the
+ * first free spot (later copies on that track count the earlier ones). Clips on a locked track are left out.
+ * `undefined` when nothing can be duplicated; `lockedSkipped` counts the clips left out.
+ */
+export function buildDuplicateSelectionTransaction(input: {
+  readonly composition: Composition;
+  readonly selectedIds: readonly string[];
+  readonly label: (clip: Clip) => string;
+  readonly idSuffix: string;
+}): { readonly transaction: CommandTransaction | undefined; readonly lockedSkipped: number } {
+  const selected = new Set(input.selectedIds);
+  const commands: CommandTransaction['commands'][number][] = [];
+  const copied: Clip[] = [];
+  let lockedSkipped = 0;
+  for (const track of input.composition.tracks) {
+    const occupied = track.clips.map((clip) => ({
+      id: clip.id,
+      startUs: clip.startUs,
+      durationUs: clip.durationUs,
+    }));
+    for (const clip of track.clips) {
+      if (!selected.has(clip.id)) continue;
+      if (track.locked === true) {
+        lockedSkipped += 1;
+        continue;
+      }
+      const command = duplicateClipCommand(
+        input.composition.id,
+        track.id,
+        clip,
+        occupied,
+        `${clip.id}-copy-${input.idSuffix}`,
+      );
+      commands.push(command as CommandTransaction['commands'][number]);
+      occupied.push({
+        id: `${clip.id}-copy-${input.idSuffix}`,
+        startUs: Number((command.payload as { newStartUs: number }).newStartUs),
+        durationUs: clip.durationUs,
+      });
+      copied.push(clip);
+    }
+  }
+  const first = copied[0];
+  if (first === undefined) return { transaction: undefined, lockedSkipped };
+  return {
+    transaction: {
+      label:
+        copied.length === 1
+          ? `Duplicate ${input.label(first)}`
+          : `Duplicate ${copied.length} clips`,
+      commands,
+    },
+    lockedSkipped,
   };
 }

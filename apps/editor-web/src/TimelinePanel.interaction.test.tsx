@@ -155,6 +155,8 @@ describe('TimelinePanel clip interaction semantics', () => {
     expect(markup).toContain('Ripple delete');
     expect(markup).toContain('role="separator"');
     expect(markup).toContain('data-menu-index="2"');
+    // A divider entry draws only its line: no empty row, so the drawer stays short.
+    expect(markup.match(/role="menuitem"/g)).toHaveLength(2);
   });
 
   it('renders Video and the six requested element identities in the Classic timeline', () => {

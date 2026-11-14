@@ -310,19 +310,23 @@ describe('timeline-clip-clipboard', () => {
       }
     });
 
-    it('rejects pasting when clips would overlap existing media on track', () => {
+    it('pastes after the clip in the way when the playhead sits on a busy spot (LTP-010)', () => {
       const { comp } = createSampleComposition();
-      copyTimelineClips(comp, ['clip-v1-a']); // duration 2s
+      const clipboard = copyTimelineClips(comp, ['clip-v1-a'])!; // duration 2s
 
-      // clip-v1-b exists at 5_000_000 to 8_000_000. Pasting at 4_500_000 overlaps it!
+      // clip-v1-b exists at 5_000_000 to 8_000_000. Pasting at 4_500_000 would overlap it, so the paste lands where
+      // that clip ends instead of failing.
       const plan = buildTimelinePastePlan({
         composition: comp,
+        clipboard,
         playheadUs: 4_500_000,
       });
 
-      expect(plan.ok).toBe(false);
-      if (!plan.ok) {
-        expect(plan.reason).toMatch(/no unlocked video track is free/i);
+      expect(plan.ok).toBe(true);
+      if (plan.ok) {
+        expect(plan.pastes.map((paste) => [paste.trackId, paste.clip.startUs])).toEqual([
+          ['V1', 8_000_000],
+        ]);
       }
     });
 
@@ -397,14 +401,27 @@ describe('timeline-clip-clipboard', () => {
 
       it('never moves a clip onto a track of another kind', () => {
         const { comp } = createSampleComposition();
-        // The only audio track is A1; a visual clip must not land there even when V1 is busy.
+        // The only audio track is A1; a visual clip must not land there even when V1 is busy: it waits on V1.
         const clipboard = copyTimelineClips(comp, ['clip-v1-a'])!;
         const plan = buildTimelinePastePlan({
           composition: comp,
           clipboard,
           playheadUs: 4_500_000,
         });
+        expect(plan.ok && plan.pastes.map((paste) => paste.trackId)).toEqual(['V1']);
+      });
+
+      it('refuses a paste only when no unlocked track of the kind exists at all', () => {
+        const { comp } = createSampleComposition();
+        const clipboard = copyTimelineClips(comp, ['clip-v1-a'])!;
+        const plan = buildTimelinePastePlan({
+          composition: comp,
+          clipboard,
+          playheadUs: 4_500_000,
+          tracks: [{ id: 'V1', locked: true }],
+        });
         expect(plan.ok).toBe(false);
+        if (!plan.ok) expect(plan.reason).toMatch(/no unlocked video track is free/i);
       });
 
       it('keeps several clips together on one free track with their offsets', () => {
@@ -440,10 +457,10 @@ describe('timeline-clip-clipboard', () => {
         expect(plan.ok && plan.pastes.map((p) => p.trackId)).toEqual(['V1', 'A1']);
       });
 
-      it('refuses the whole paste when the audio group has no free audio track, even if the visual group fits', () => {
+      it('moves the whole paste later together when the audio group has no free audio track at the playhead', () => {
         const { comp } = createSampleComposition();
-        // At 4.5s V1 is busy, so the visual clip goes to V2; the audio clip at 5s overlaps
-        // clip-a1-a (1.5s–5.5s) on A1, and there is no other audio track.
+        // At 4.5s the audio clip overlaps clip-a1-a on A1 and there is no other audio track, so both groups move
+        // later by the same amount: the clips keep their distance, and the audio stays on audio.
         const clipboard = copyTimelineClips(comp, ['clip-v1-a', 'clip-a1-a'])!;
         const plan = buildTimelinePastePlan({
           composition: withSecondVisualTrack(comp),
@@ -451,23 +468,17 @@ describe('timeline-clip-clipboard', () => {
           playheadUs: 4_500_000,
           idGenerator: idByIndex,
         });
-        expect(plan.ok).toBe(false);
-        if (!plan.ok) expect(plan.reason).toMatch(/no unlocked audio track is free/i);
-      });
-
-      it('refuses the whole paste when no track of the right kind has room', () => {
-        const { comp } = createSampleComposition();
-        const clipboard = copyTimelineClips(comp, ['clip-v1-a'])!;
-        const plan = buildTimelinePastePlan({
-          composition: comp,
-          clipboard,
-          playheadUs: 4_500_000,
-        });
-        expect(plan).toMatchObject({ ok: false });
-        if (!plan.ok)
-          expect(plan.reason).toBe(
-            'No unlocked video track is free at the playhead for the copied clips.',
+        expect(plan.ok).toBe(true);
+        if (plan.ok) {
+          const [visual, audio] = plan.pastes;
+          expect(audio?.trackId).toBe('A1');
+          expect(visual?.trackId).toMatch(/^V/);
+          const [sourceVisual, sourceAudio] = clipboard.items;
+          expect((audio?.clip.startUs ?? 0) - (visual?.clip.startUs ?? 0)).toBe(
+            (sourceAudio?.clip.startUs ?? 0) - (sourceVisual?.clip.startUs ?? 0),
           );
+          expect(visual?.clip.startUs).toBeGreaterThan(4_500_000);
+        }
       });
 
       it('gives every pasted clip a unique id, even when the generator repeats', () => {

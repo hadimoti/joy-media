@@ -146,6 +146,12 @@ import {
   keyboardTrimTimeUs,
   nearestFreeStartUs,
 } from './timeline-clip-interaction.js';
+import { scopedKeyTable } from './keyboard-shortcuts.js';
+import {
+  TIMELINE_KEY_SCOPE,
+  timelineToolKey,
+  type TimelineToolKeyAction,
+} from './timeline-tool-keys.js';
 import {
   registerEditorPointerDndRoot,
   type EditorPointerDropTarget,
@@ -3007,6 +3013,80 @@ export function TimelinePanel({
     showToast?.('The Assets panel is unavailable in this workspace.', 'info');
   }, [onOpenAssetLibrary, showToast]);
 
+  // The tool keys of the Timeline (scope: the pointer is over the timeline or focus is inside it). They call the
+  // same handlers as the toolbar and the clip menu, through a ref that is refreshed on every render.
+  const toolKeyActions = useRef<Record<TimelineToolKeyAction, () => void>>(
+    {} as Record<TimelineToolKeyAction, () => void>,
+  );
+  toolKeyActions.current = {
+    'tool.select': () => {
+      setSelectToolActive(true);
+      setSplitToolActive(false);
+    },
+    'tool.split': () => {
+      setSplitToolActive((active) => {
+        setSelectToolActive(active);
+        return !active;
+      });
+    },
+    'marker.add': () => onAddMarker?.(playheadUs, nextTimelineMarkerLabel(markers)),
+    'track.addVisual': () => addTrack('visual'),
+    'track.addAudio': () => addTrack('audio'),
+    'zoom.in': () => applyZoom(viewport.pixelsPerSecond * 1.25),
+    'zoom.out': () => applyZoom(viewport.pixelsPerSecond / 1.25),
+    'zoom.fit': fitToWidth,
+    'clip.freeze': () => {
+      const picked = selectedClipEntry();
+      if (picked !== undefined) dispatchFreeze(picked.track.id, picked.clip.id);
+    },
+    'clip.reverse': () => {
+      const picked = selectedClipEntry();
+      if (picked !== undefined) dispatchReverse(picked.track.id, picked.clip.id);
+    },
+    'clip.rippleDelete': () => {
+      const picked = selectedClipEntry();
+      if (picked !== undefined) dispatchDelete(picked.track.id, picked.clip.id);
+    },
+    'media.import': handleImportClick,
+  };
+  function selectedClipEntry() {
+    for (const track of composition?.tracks ?? []) {
+      const clip = track.clips.find((candidate) => selectedIds.includes(candidate.id));
+      if (clip !== undefined) return { track, clip };
+    }
+    return undefined;
+  }
+  useEffect(() => {
+    const root = pointerDndRootRef.current;
+    let pointerOver = false;
+    const enter = () => {
+      pointerOver = true;
+    };
+    const leave = () => {
+      pointerOver = false;
+    };
+    root?.addEventListener('pointerenter', enter);
+    root?.addEventListener('pointerleave', leave);
+    const removeScope = scopedKeyTable.setScope(TIMELINE_KEY_SCOPE, () => {
+      const focused = document.activeElement;
+      return pointerOver || (root !== null && focused !== null && root.contains(focused));
+    });
+    const removeKeys = scopedKeyTable.register({
+      scope: TIMELINE_KEY_SCOPE,
+      match: (event) => timelineToolKey(event) !== undefined,
+      run: (event) => {
+        const action = timelineToolKey(event);
+        if (action !== undefined) toolKeyActions.current[action]();
+      },
+    });
+    return () => {
+      root?.removeEventListener('pointerenter', enter);
+      root?.removeEventListener('pointerleave', leave);
+      removeScope();
+      removeKeys();
+    };
+  }, [pointerDndRootRef]);
+
   return (
     <article
       ref={pointerDndRootRef}
@@ -3104,7 +3184,7 @@ export function TimelinePanel({
               type="button"
               className="icon-button"
               aria-label="Add marker at playhead"
-              title="Add marker at playhead"
+              title="Add marker at playhead (M)"
               data-guide="Add marker"
               onClick={() => onAddMarker(playheadUs, nextTimelineMarkerLabel(markers))}
             >
@@ -3115,7 +3195,7 @@ export function TimelinePanel({
             type="button"
             className="icon-button"
             aria-label="Add video track"
-            title="Add video track"
+            title="Add video track (T)"
             data-guide="Add video track"
             onClick={() => addTrack('visual')}
           >
@@ -3125,7 +3205,7 @@ export function TimelinePanel({
             type="button"
             className="icon-button"
             aria-label="Add audio track"
-            title="Add audio track"
+            title="Add audio track (A)"
             data-guide="Add audio track"
             onClick={() => addTrack('audio')}
           >
@@ -3141,7 +3221,7 @@ export function TimelinePanel({
             className="icon-button"
             data-guide="Select"
             aria-label="Select tool"
-            title="Select tool"
+            title="Select tool (V)"
             aria-pressed={selectToolActive}
             onClick={() => {
               setSelectToolActive((active) => {
@@ -3158,7 +3238,7 @@ export function TimelinePanel({
             className="icon-button"
             data-guide="Split"
             aria-label="Split tool"
-            title="Split tool (S)"
+            title="Split tool (B)"
             aria-pressed={splitToolActive}
             onClick={() => {
               setSplitToolActive((active) => {
@@ -3250,7 +3330,7 @@ export function TimelinePanel({
             type="button"
             className="icon-button"
             aria-label="Zoom out"
-            title="Zoom out"
+            title="Zoom out (-)"
             onClick={() => applyZoom(viewport.pixelsPerSecond / 1.25)}
           >
             <ZoomOutIcon />
@@ -3269,7 +3349,7 @@ export function TimelinePanel({
             type="button"
             className="icon-button"
             aria-label="Zoom in"
-            title="Zoom in"
+            title="Zoom in (=)"
             onClick={() => applyZoom(viewport.pixelsPerSecond * 1.25)}
           >
             <ZoomInIcon />
@@ -3278,7 +3358,7 @@ export function TimelinePanel({
             type="button"
             className="icon-button"
             aria-label="Fit timeline to width"
-            title="Fit to width"
+            title="Fit to width (Shift+Z)"
             aria-pressed={autoFit}
             onClick={fitToWidth}
           >

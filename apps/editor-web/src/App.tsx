@@ -46,7 +46,8 @@ import type {
   Transform2D,
   VideoFrameNode,
 } from '@joy-media/render-ir';
-import { toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
+import { toggleSelection } from '@joy-media/timeline-engine';
+import { buildDuplicateSelectionTransaction } from './timeline-clip-interaction.js';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import { validateH264ExportDimensions } from '@joy-media/job-protocol';
 import type {
@@ -61,6 +62,7 @@ import type {
   AssetRecordV1,
   AnimatablePropertyV1,
   Clip,
+  Composition,
   ExportPresetId,
   JoyProjectV1,
   SpikeProject,
@@ -4077,6 +4079,25 @@ function EditorWorkspace({
     );
   }, [dispatchMediaPlacement, session, showToast, timelineTrackFlags]);
 
+  /** Ctrl/Cmd+D and Clip > Duplicate: every selected clip is copied right after itself, in one undo step. */
+  const duplicateSelectedClips = useCallback(
+    (composition: Composition, selectedIds: readonly string[]) => {
+      const { transaction, lockedSkipped } = buildDuplicateSelectionTransaction({
+        composition,
+        selectedIds,
+        label: (clip) => historyClipName(session.visualProject, clip),
+        idSuffix: String(Date.now()),
+      });
+      if (transaction === undefined) {
+        if (lockedSkipped > 0) showToast('Unlock the track before duplicating clips.', 'info');
+        return;
+      }
+      dispatchTimeline(transaction);
+      if (lockedSkipped > 0) showToast('Clips on a locked track were not duplicated.', 'info');
+    },
+    [dispatchTimeline, session.visualProject, showToast],
+  );
+
   const setSnappingPersisted = useCallback(
     (next: boolean) => {
       snappingRef.current = next;
@@ -4244,26 +4265,7 @@ function EditorWorkspace({
         }
         case 'clip.duplicate': {
           if (composition === undefined || selection === undefined) return;
-          if (selection.track.locked === true) {
-            showToast('Unlock the track before duplicating clips.', 'info');
-            return;
-          }
-          dispatchTimeline({
-            label: `Duplicate ${historyClipName(session.visualProject, selection.clip)}`,
-            commands: [
-              duplicateClipCommand(
-                composition.id,
-                selection.track.id,
-                selection.clip,
-                selection.track.clips.map((clip) => ({
-                  id: clip.id,
-                  startUs: clip.startUs,
-                  durationUs: clip.durationUs,
-                })),
-                `${selection.clip.id}-copy-${Date.now()}`,
-              ),
-            ],
-          });
+          duplicateSelectedClips(composition, current.selectedIds);
           break;
         }
         case 'clip.copy':
@@ -4300,6 +4302,7 @@ function EditorWorkspace({
   }, [
     closePopup,
     copySelectedClips,
+    duplicateSelectedClips,
     cutSelectedClips,
     dispatchTimeline,
     pasteClipsAtPlayhead,
@@ -4349,22 +4352,7 @@ function EditorWorkspace({
         return;
       }
       if (kind === 'duplicate') {
-        dispatchTimeline({
-          label: `Duplicate ${historyClipName(session.visualProject, selection.clip)}`,
-          commands: [
-            duplicateClipCommand(
-              composition.id,
-              selection.track.id,
-              selection.clip,
-              selection.track.clips.map((clip) => ({
-                id: clip.id,
-                startUs: clip.startUs,
-                durationUs: clip.durationUs,
-              })),
-              `${selection.clip.id}-copy-${Date.now()}`,
-            ),
-          ],
-        });
+        duplicateSelectedClips(composition, current.selectedIds);
         return;
       }
       const plan = buildTimelineDeletePlan({
@@ -4382,7 +4370,7 @@ function EditorWorkspace({
         selectedIds: active.selectedIds.filter((id) => !plan.clipIds.includes(id)),
       }));
     },
-    [dispatchTimeline, session, showToast, timelineTrackFlags],
+    [dispatchTimeline, duplicateSelectedClips, session, showToast, timelineTrackFlags],
   );
 
   const handleExport = useCallback(

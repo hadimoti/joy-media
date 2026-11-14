@@ -101,7 +101,8 @@ export function TimelineContextMenu({
           return (
             <div key={`${item.label}-${index}`}>
               {item.dividerBefore && <div className="timeline-context-sep" role="separator" />}
-              {item.action && (
+              {/* An entry with no label is only a divider: it draws no empty row. */}
+              {item.action && item.label !== '' && (
                 <button
                   type="button"
                   role="menuitem"

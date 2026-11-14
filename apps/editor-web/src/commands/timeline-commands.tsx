@@ -415,7 +415,7 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     id: 'clip.delete',
     label: 'Ripple delete',
     icon: TrashIcon,
-    shortcut: 'Menu action',
+    shortcut: 'Shift+Del',
     group: 'edit',
     canExecute: (ctx) => !!ctx.selectedClip,
     execute: (ctx) => {
@@ -436,7 +436,7 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     id: 'clip.freezeFrame',
     label: 'Freeze frame at playhead',
     icon: ScissorsIcon,
-    shortcut: 'F',
+    shortcut: 'Shift+F',
     group: 'edit',
     canExecute: (ctx) => {
       const clip = ctx.selectedClip?.clip;
@@ -469,6 +469,7 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     id: 'clip.reverse',
     label: 'Reverse clip',
     icon: ReverseIcon,
+    shortcut: 'Shift+R',
     group: 'edit',
     canExecute: (ctx) => {
       const clip = ctx.selectedClip?.clip;
@@ -498,7 +499,6 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     id: 'clip.setRate',
     label: 'Set playback rate',
     icon: ZoomInIcon,
-    shortcut: 'R',
     group: 'edit',
     canExecute: (ctx) => {
       const clip = ctx.selectedClip?.clip;
@@ -551,7 +551,7 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     id: 'zoom.fit',
     label: 'Fit timeline to width',
     icon: FitWidthIcon,
-    shortcut: 'Shift+F',
+    shortcut: 'Shift+Z',
     group: 'zoom',
     canExecute: () => true,
     execute: () => null, // handled by fitToWidth
@@ -661,7 +661,7 @@ export function buildClipContextMenu(
       items.push({
         label: 'Freeze frame at playhead',
         icon: ScissorsIcon,
-        shortcut: 'F',
+        shortcut: 'Shift+F',
         disabled: trackLocked,
         action: () => onExecute(result),
       });
@@ -681,6 +681,7 @@ export function buildClipContextMenu(
             ? 'Restore forward playback'
             : 'Reverse clip',
         icon: ReverseIcon,
+        shortcut: 'Shift+R',
         disabled: trackLocked,
         action: () => onExecute(result),
       });
@@ -695,7 +696,6 @@ export function buildClipContextMenu(
       items.push({
         label: 'Set playback rate…',
         icon: ZoomInIcon,
-        shortcut: 'R',
         disabled: trackLocked,
         action: () => onExecute(result),
       });
@@ -710,7 +710,7 @@ export function buildClipContextMenu(
       items.push({
         label: 'Ripple delete',
         icon: TrashIcon,
-        shortcut: 'Menu action',
+        shortcut: 'Shift+Del',
         disabled: trackLocked,
         action: () => onExecute(result),
       });
@@ -733,7 +733,6 @@ export function buildEmptyCanvasContextMenu(
     },
     {
       label: 'Add from Library...',
-      shortcut: 'L',
       action: onAddFromLibrary,
     },
   ];
@@ -758,13 +757,11 @@ export function buildTrackHeaderContextMenu(
     {
       label: 'Remove Track',
       icon: TrashIcon,
-      shortcut: 'Shift+T',
       action: onRemoveTrack,
       disabled: !canRemoveTrack,
     },
     {
       label: currentVisible ? 'Hide Track' : 'Show Track',
-      shortcut: 'E',
       action: () => onToggleVisibility(!currentVisible),
     },
   ];
