@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   SHORTCUT_REFERENCE,
+  interactiveTargetOwnsAction,
   isEditableTarget,
   isInteractiveTarget,
   resolveShortcut,
@@ -105,6 +106,27 @@ describe('isInteractiveTarget', () => {
       } as unknown as EventTarget),
     ).toBe(true);
     expect(isInteractiveTarget({ tagName: 'DIV' } as unknown as EventTarget)).toBe(false);
+  });
+
+  it('a focused control owns Space, arrows, Home, End and Delete but not the editor letter keys', () => {
+    for (const owned of [
+      'playback.toggle',
+      'playhead.back',
+      'playhead.forward',
+      'clip.delete',
+    ] as const) {
+      expect(interactiveTargetOwnsAction(owned)).toBe(true);
+    }
+    // Clicking a timeline clip leaves it focused: S, N, Ctrl+D, Ctrl+Z must still work.
+    for (const free of [
+      'clip.split',
+      'clip.duplicate',
+      'snapping.toggle',
+      'history.undo',
+      'clip.copy',
+    ] as const) {
+      expect(interactiveTargetOwnsAction(free)).toBe(false);
+    }
   });
 
   it('recognizes a control ancestor for nested icon targets', () => {

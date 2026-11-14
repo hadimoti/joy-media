@@ -75,6 +75,27 @@ export function isInteractiveTarget(target: EventTarget | null): boolean {
   return false;
 }
 
+const CONTROL_OWNED_ACTIONS: ReadonlySet<ShortcutAction> = new Set<ShortcutAction>([
+  'playback.toggle',
+  'playhead.back',
+  'playhead.forward',
+  'playhead.backFine',
+  'playhead.forwardFine',
+  'playhead.start',
+  'playhead.end',
+  'clip.delete',
+]);
+
+/**
+ * A focused button, link or menu item owns Space, the arrows, Home, End and Delete
+ * (a timeline clip and its trim handles use them). Every other shortcut (S, N,
+ * Ctrl+D, Ctrl+Z ...) still reaches the editor, because clicking a timeline clip
+ * leaves that clip focused and the editor keys must keep working after a click.
+ */
+export function interactiveTargetOwnsAction(action: ShortcutAction): boolean {
+  return CONTROL_OWNED_ACTIONS.has(action);
+}
+
 /** Resolve a keydown to an editor action, or undefined when the key is unbound. */
 export function resolveShortcut(event: ShortcutKeyEvent): ShortcutAction | undefined {
   const mod = event.ctrlKey || event.metaKey;

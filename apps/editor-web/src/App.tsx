@@ -478,6 +478,7 @@ import { PanelShell } from './PanelShell.js';
 import {
   SHORTCUT_REFERENCE,
   isEditableTarget,
+  interactiveTargetOwnsAction,
   isInteractiveTarget,
   resolveShortcut,
   scopedKeyTable,
@@ -4018,7 +4019,8 @@ function EditorWorkspace({
       // Escape must close the palette even while its search input has focus.
       if (
         action !== 'palette.close' &&
-        (isEditableTarget(event.target) || isInteractiveTarget(event.target))
+        (isEditableTarget(event.target) ||
+          (isInteractiveTarget(event.target) && interactiveTargetOwnsAction(action)))
       )
         return;
       // Space with Shift, Ctrl, Alt or Meta does nothing (no play, no hold).
