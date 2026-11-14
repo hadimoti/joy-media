@@ -44,6 +44,7 @@ import {
   SelectIcon,
   LayersIcon,
   ChevronLeftIcon,
+  WarningIcon,
 } from './icons.js';
 import {
   buildClipContextMenu,
@@ -233,10 +234,15 @@ function TimelineClip({
   snapClipStartUs,
   onDragMove,
   onRestoreSelection,
+  missingName,
+  onRelinkMissing,
 }: {
   readonly clip: Clip;
   readonly elementKind: TimelineElementKind;
   readonly displayName?: string;
+  /** Set when this clip's file is missing: the file's name, shown in the badge and tooltip (T-R03). */
+  readonly missingName?: string | undefined;
+  readonly onRelinkMissing?: (() => void) | undefined;
   readonly selected: boolean;
   readonly isDragOver: boolean;
   readonly maxStartUs: number;
@@ -379,16 +385,20 @@ function TimelineClip({
     <div
       role="button"
       tabIndex={0}
-      className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}${isDragOver ? ' is-drag-over' : ''}`}
+      className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}${isDragOver ? ' is-drag-over' : ''}${missingName !== undefined ? ' is-missing' : ''}`}
       aria-pressed={selected}
-      aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}`}
+      aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}${missingName !== undefined ? ', media missing' : ''}`}
       aria-roledescription="timeline clip"
       data-clip-id={clip.id}
       data-asset-id={'assetId' in clip ? clip.assetId : undefined}
       data-start-us={clip.startUs}
       data-editor-pointer-dnd-target="timeline-clip"
       data-element-kind={elementKind}
-      title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s${clip.kind === 'composition' ? ' · Double-click to edit the merged timeline' : ''}`}
+      title={
+        missingName !== undefined
+          ? `Media is missing: ${missingName}. Click to relink`
+          : `${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s${clip.kind === 'composition' ? ' · Double-click to edit the merged timeline' : ''}`
+      }
       style={{
         left: `${timeToPixel(displayStartUs, viewport)}px`,
         width: `${layoutWidthPx}px`,
@@ -660,6 +670,23 @@ function TimelineClip({
           <TimelineElementGlyph kind={elementKind} />
         </span>
       )}
+      {missingName !== undefined && (
+        <button
+          type="button"
+          className="timeline-clip-missing-badge"
+          aria-label={`Relink missing media: ${missingName}`}
+          title={`Media is missing: ${missingName}. Click to relink`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onRelinkMissing?.();
+          }}
+        >
+          !
+        </button>
+      )}
     </div>
   );
 }
@@ -825,6 +852,8 @@ export function TimelinePanel({
   onMediaPlaced,
   onMediaPlacement,
   assetDisplayNames,
+  missingAssetIds,
+  onRelinkMissing,
   showToast,
   trackFlags: trackFlagsProp,
   onTrackFlagsChange,
@@ -889,6 +918,10 @@ export function TimelinePanel({
   ) => void;
   /** Human labels from the creative asset catalog, keyed by opaque asset id. */
   readonly assetDisplayNames?: Readonly<Record<string, string>>;
+  /** Asset ids whose file is missing from this profile; their clips are drawn as missing (T-R03). */
+  readonly missingAssetIds?: ReadonlySet<string>;
+  /** Opens the relink step (the Assets panel's Review dialog) from a missing clip's badge or menu. */
+  readonly onRelinkMissing?: () => void;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
   /** Shared with Dual Lens so lock/visibility/solo stay one source of truth. */
   readonly trackFlags?: readonly TimelineTrackView[];
@@ -2214,6 +2247,14 @@ export function TimelinePanel({
             action: () => undefined,
             disabled: true,
           };
+    const clipMissing = 'assetId' in clip && missingAssetIds?.has(clip.assetId) === true;
+    const relinkItems: ContextMenuItem[] =
+      clipMissing && onRelinkMissing !== undefined
+        ? [
+            { label: 'Relink…', icon: WarningIcon, action: onRelinkMissing },
+            { label: '', action: () => undefined, dividerBefore: true },
+          ]
+        : [];
     const withCompound =
       clip.kind !== 'composition'
         ? [
@@ -2240,7 +2281,13 @@ export function TimelinePanel({
             { label: 'Reveal in Flow', action: () => onRevealInFlow(clip.id) },
           ];
 
-    setMenu({ x: clientX, y: clientY, items: withReveal, trackId, clipId: clip.id });
+    setMenu({
+      x: clientX,
+      y: clientY,
+      items: [...relinkItems, ...withReveal],
+      trackId,
+      clipId: clip.id,
+    });
   };
 
   const handleImportClick = useCallback(() => {
@@ -3556,6 +3603,13 @@ export function TimelinePanel({
                       {...(clip.kind !== 'composition' &&
                       assetDisplayNames?.[clip.assetId] !== undefined
                         ? { displayName: assetDisplayNames[clip.assetId] }
+                        : {})}
+                      {...(clip.kind !== 'composition' &&
+                      missingAssetIds?.has(clip.assetId) === true
+                        ? {
+                            missingName: assetDisplayNames?.[clip.assetId] ?? 'this file',
+                            ...(onRelinkMissing === undefined ? {} : { onRelinkMissing }),
+                          }
                         : {})}
                       selected={selectedIds.includes(clip.id)}
                       isDragOver={dragEffectOverClipId === clip.id}

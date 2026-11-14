@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetRecordV1 } from '@joy-media/project-schema';
-import { deriveMissingMedia, matchReplacementFiles } from './missing-media.js';
+import { emptySpikeProject, makeVideoClip, SECOND_US, withClips } from '@joy-media/test-fixtures';
+import {
+  deriveMissingMedia,
+  matchReplacementFiles,
+  missingAssetIdSet,
+  missingClipNameAt,
+} from './missing-media.js';
 import type { RelinkCache } from './media-relink.js';
 import type { OriginalAssetDescriptor } from './opfs-original-asset-cache.js';
 
@@ -136,5 +142,53 @@ describe('matchReplacementFiles', () => {
     );
     expect(result.matches.map((match) => match.assetId)).toEqual(['asset-1']);
     expect(result.unresolvedAssetIds).toEqual(['asset-2']);
+  });
+});
+
+describe('missing clips on the timeline (T-R03)', () => {
+  const entryFor = (assetId: string, displayName: string) => ({
+    assetId,
+    record: {
+      id: assetId,
+      kind: 'video' as const,
+      displayName,
+      sha256: 'a'.repeat(64),
+      bytes: 4,
+      descriptor: { mimeType: 'video/mp4' },
+    },
+  });
+
+  it('marks exactly the clip whose file is missing, using the document and the cache list', async () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-present', 0, SECOND_US, { assetId: 'asset-present' }),
+      makeVideoClip('clip-missing', SECOND_US, SECOND_US, { assetId: 'asset-missing' }),
+    ]);
+    const assets = {
+      'asset-present': await recordOf('asset-present', encode('present')),
+      'asset-missing': await recordOf('asset-missing', encode('missing')),
+    };
+    const missingIds = missingAssetIdSet(
+      await deriveMissingMedia(assets, cacheWith(['asset-present'])),
+    );
+    const marked = Object.values(project.compositions)
+      .flatMap((composition) => composition.tracks.flatMap((track) => track.clips))
+      .filter((clip) => 'assetId' in clip && missingIds.has(clip.assetId))
+      .map((clip) => clip.id);
+    expect(marked).toEqual(['clip-missing']);
+  });
+
+  it('names the missing file the monitor cannot draw at the playhead, and nothing otherwise', () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-present', 0, SECOND_US, { assetId: 'asset-present' }),
+      makeVideoClip('clip-missing', SECOND_US, SECOND_US, { assetId: 'asset-missing' }),
+    ]);
+    const missingIds = missingAssetIdSet([entryFor('asset-missing', 'take-2.mov')]);
+    const nameOf = (assetId: string) => `name of ${assetId}`;
+
+    expect(missingClipNameAt(project, missingIds, SECOND_US + 10, nameOf)).toBe(
+      'name of asset-missing',
+    );
+    expect(missingClipNameAt(project, missingIds, 10, nameOf)).toBeUndefined();
+    expect(missingClipNameAt(project, new Set(), SECOND_US + 10, nameOf)).toBeUndefined();
   });
 });

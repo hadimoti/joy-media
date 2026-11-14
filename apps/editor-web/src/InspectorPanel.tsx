@@ -193,6 +193,10 @@ interface InspectorPanelProps {
   readonly selectedKind?: string | undefined;
   readonly selectedName?: string | undefined;
   readonly selectedTrackName?: string | undefined;
+  /** True when the selected clip's source file is missing from this profile (T-R03). */
+  readonly selectedSourceMissing?: boolean | undefined;
+  /** Opens the relink step for the missing source (the Assets panel's Review dialog). */
+  readonly onRelinkSelectedSource?: (() => void) | undefined;
   readonly selectedSourceDurationUs?: number | undefined;
   readonly selectedTimelineDurationUs?: number | undefined;
   /** Present only for a selected clip whose controller can change speed. */
@@ -590,6 +594,8 @@ export function InspectorPanel({
   selectedKind,
   selectedName,
   selectedTrackName,
+  selectedSourceMissing,
+  onRelinkSelectedSource,
   selectedSourceDurationUs,
   selectedTimelineDurationUs,
   clipSpeed,
@@ -1002,6 +1008,20 @@ export function InspectorPanel({
           <strong>{formatDuration(selectedTimelineDurationUs)}</strong>
         </div>
       </div>
+      {selectedSourceMissing === true && (
+        <div className="inspector-missing-source" role="alert">
+          <span>The source file is missing</span>
+          {onRelinkSelectedSource !== undefined && (
+            <button
+              type="button"
+              className="inspector-missing-source-relink"
+              onClick={onRelinkSelectedSource}
+            >
+              Relink
+            </button>
+          )}
+        </div>
+      )}
 
       {tab === 'visual' && (
         <section className="inspector-section">

@@ -1,5 +1,6 @@
-import type { AssetRecordV1 } from '@joy-media/project-schema';
+import type { AssetRecordV1, SpikeProject } from '@joy-media/project-schema';
 import { verifyReplacementMedia, type RelinkCache } from './media-relink.js';
+import { flattenRootTimelineVideoClips } from './timeline-nested-playback.js';
 
 /** A project asset whose original is not in this browser profile's cache. */
 export interface MissingMediaEntry {
@@ -45,6 +46,33 @@ export async function deriveMissingMedia(
     if ((await cache.get(assetId)) === undefined) missing.push({ assetId, record });
   }
   return missing;
+}
+
+/**
+ * The asset ids of a missing list. A timeline clip is marked missing exactly when its asset id is in
+ * this set (T-R03), so only the clips that use the missing file are marked.
+ */
+export function missingAssetIdSet(missing: readonly MissingMediaEntry[]): ReadonlySet<string> {
+  return new Set(missing.map((entry) => entry.assetId));
+}
+
+/**
+ * The display name of the missing file that the Program Monitor cannot draw at `timeUs`, or
+ * undefined when every video clip playing then has its file. The monitor shows a "Media offline"
+ * frame with this name instead of a black or stale picture (T-R03).
+ */
+export function missingClipNameAt(
+  project: SpikeProject,
+  missingAssetIds: ReadonlySet<string>,
+  timeUs: number,
+  nameOf: (assetId: string) => string,
+): string | undefined {
+  if (missingAssetIds.size === 0) return undefined;
+  const playing = flattenRootTimelineVideoClips(project).filter(
+    (clip) => timeUs >= clip.startUs && timeUs < clip.startUs + clip.durationUs,
+  );
+  const missingClip = playing.find((clip) => missingAssetIds.has(clip.assetId));
+  return missingClip === undefined ? undefined : nameOf(missingClip.assetId);
 }
 
 /**

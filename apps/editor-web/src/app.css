@@ -19744,6 +19744,82 @@ label {
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
 }
+/* T-R03: a clip whose file is missing is hatched and greyed, with a "!" badge that opens the relink step. */
+.timeline-clip.is-missing {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.1) 0 6px,
+    rgba(0, 0, 0, 0.18) 6px 12px
+  );
+  filter: grayscale(1);
+  opacity: 0.78;
+  outline: 1px dashed var(--joy-warning);
+  outline-offset: -1px;
+}
+.timeline-clip-missing-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--joy-warning);
+  color: #1b1b1f;
+  font: 700 12px/18px var(--font-ui, system-ui, sans-serif);
+  cursor: pointer;
+}
+.timeline-clip-missing-badge:focus-visible {
+  outline: 2px solid var(--joy-text);
+  outline-offset: 1px;
+}
+.monitor-media-offline {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  background: #15161a;
+  color: var(--joy-text-secondary);
+  text-align: center;
+}
+.monitor-media-offline strong {
+  color: var(--joy-warning);
+  font-weight: 600;
+}
+.monitor-media-offline span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector-missing-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+  padding: var(--space-2);
+  border: 1px solid var(--joy-warning);
+  border-radius: 6px;
+  color: var(--joy-warning);
+}
+.inspector-missing-source-relink {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
 .missing-media-warning {
   display: flex;
   flex-wrap: wrap;

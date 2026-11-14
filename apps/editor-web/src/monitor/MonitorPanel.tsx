@@ -125,6 +125,7 @@ export function MonitorPanel({
   droppedImportProgress,
   onCancelDroppedImport,
   formatMenu,
+  mediaOfflineName,
 }: {
   readonly agentPreviewSurfaceVisible?: boolean;
   readonly onFilesDrop?: (files: readonly File[]) => void;
@@ -133,6 +134,8 @@ export function MonitorPanel({
   readonly onCancelDroppedImport?: () => void;
   /** The App-owned Format popup; the monitor bar's read-out opens the same popover. */
   readonly formatMenu: PopupControl;
+  /** Set while the video clip at the playhead has a missing file: its name, for the "Media offline" frame (T-R03). */
+  readonly mediaOfflineName?: string;
 }) {
   const context = useContext(EditorPanelContext);
   if (context === undefined)
@@ -150,6 +153,7 @@ export function MonitorPanel({
       droppedImportProgress={droppedImportProgress}
       onCancelDroppedImport={onCancelDroppedImport}
       formatMenu={formatMenu}
+      mediaOfflineName={mediaOfflineName}
     />
   );
 }
@@ -162,12 +166,14 @@ function MonitorPanelContent({
   droppedImportProgress,
   onCancelDroppedImport,
   formatMenu,
+  mediaOfflineName,
 }: {
   readonly context: EditorPanelContextValue;
   readonly agentPreviewSurfaceVisible: boolean;
   readonly onFilesDrop?: ((files: readonly File[]) => void) | undefined;
   readonly onAssetDrop?: ((asset: EditorPointerMediaAsset) => void) | undefined;
   readonly droppedImportProgress?: DroppedImportProgressState | undefined;
+  readonly mediaOfflineName?: string | undefined;
   readonly onCancelDroppedImport?: (() => void) | undefined;
   readonly formatMenu: PopupControl;
 }) {
@@ -942,6 +948,12 @@ function MonitorPanelContent({
         background={viewOptions.background}
       >
         <div ref={containerRef} className="monitor-canvas" />
+        {mediaOfflineName !== undefined && (
+          <div className="monitor-media-offline" role="status" data-monitor-media-offline="">
+            <strong>Media offline</strong>
+            <span dir="ltr">{mediaOfflineName}</span>
+          </div>
+        )}
         <MonitorOverlays
           view={monitorView.view}
           frame={frameSize}

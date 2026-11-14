@@ -271,6 +271,7 @@ import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions, selectedClipSupportsSpeed } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { createMissingMediaHost, type MissingMediaHost } from './missing-media-host.js';
+import { missingAssetIdSet, missingClipNameAt, type MissingMediaEntry } from './missing-media.js';
 import type { ProjectWriterHandle } from './project-writer.js';
 import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js';
 import { prepareTimelinePresentation } from './timeline-presentation.js';
@@ -1555,6 +1556,28 @@ function EditorWorkspace({
     );
   }
   const session = sessionRef.current;
+  // Missing project media for the timeline, the Inspector and the monitor (T-R03). The list comes
+  // from the same host as the Assets panel, so every surface agrees with the Review dialog.
+  const [missingMediaEntries, setMissingMediaEntries] = useState<readonly MissingMediaEntry[]>([]);
+  const [missingMediaTick, setMissingMediaTick] = useState(0);
+  useEffect(() => {
+    let current = true;
+    void missingMediaHostFor(session)
+      .list()
+      .then(
+        (next) => {
+          if (current) setMissingMediaEntries(next);
+        },
+        () => undefined,
+      );
+    return () => {
+      current = false;
+    };
+  }, [session, session.projectRevisionId, missingMediaTick]);
+  const missingAssetIds = useMemo(
+    () => missingAssetIdSet(missingMediaEntries),
+    [missingMediaEntries],
+  );
   const rootComposition =
     session.visualProject.compositions[session.visualProject.rootCompositionId];
   const exportCanvas = {
@@ -6169,6 +6192,14 @@ function EditorWorkspace({
               : selectedTimelineEntry?.clip?.id
           }
           selectedTrackName={selectedTimelineEntry?.track.id}
+          selectedSourceMissing={
+            selectedTimelineVideo !== undefined &&
+            missingAssetIds.has(selectedTimelineVideo.clip.assetId)
+          }
+          onRelinkSelectedSource={() => {
+            setMissingReviewRequested(true);
+            context.activatePanel('media');
+          }}
           selectedSourceDurationUs={
             selectedTimelineEntry?.clip?.kind === 'video'
               ? visualProject.assets[selectedTimelineEntry.clip.assetId]?.descriptor?.durationUs
@@ -6826,6 +6857,12 @@ function EditorWorkspace({
                 onDispatchArtifacts: context.dispatchArtifacts,
               })}
           onOpenAssetLibrary={() => context.activatePanel('media')}
+          missingAssetIds={missingAssetIds}
+          onRelinkMissing={() => {
+            // The same path as the export's Relink: the Assets panel's Review dialog opens (T-R03).
+            setMissingReviewRequested(true);
+            context.activatePanel('media');
+          }}
           onImportMedia={async (file) => {
             const asset = await importMediaFile({
               projectId: controlPlaneProject.controlPlaneProjectId,
@@ -7024,6 +7061,7 @@ function EditorWorkspace({
             onChanged: () => {
               resyncTimelineMedia();
               setRevision((current) => current + 1);
+              setMissingMediaTick((current) => current + 1);
             },
             reviewRequested: missingReviewRequested,
             onReviewRequestHandled: () => setMissingReviewRequested(false),
@@ -7103,6 +7141,15 @@ function EditorWorkspace({
           {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
           onCancelDroppedImport={cancelDroppedImport}
           formatMenu={formatMenu}
+          {...(() => {
+            const offlineName = missingClipNameAt(
+              context.timelineProject,
+              missingAssetIds,
+              state.playheadUs,
+              (assetId) => visualProject.assets[assetId]?.displayName ?? assetId,
+            );
+            return offlineName === undefined ? {} : { mediaOfflineName: offlineName };
+          })()}
         />
       );
     if (api.id === 'workflows') {
