@@ -1328,6 +1328,13 @@
   resize: vertical;
 }
 
+.agent-slot-field input:disabled,
+.agent-slot-field select:disabled,
+.agent-slot-field textarea:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .agent-slot-field input:focus,
 .agent-slot-field select:focus,
 .agent-slot-field textarea:focus {

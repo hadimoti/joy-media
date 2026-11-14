@@ -108,6 +108,31 @@ describe('AgentSlotsSection', () => {
     expect(panel.querySelector('.agent-slot-card')).toBeNull();
   });
 
+  it('keeps the model field off until a provider is chosen, then reads that provider models at once', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'desktop.agent-slots.list') {
+        return [slot({}), slot({ id: 'creative', label: 'Creative Brain' })];
+      }
+      if (channel === 'desktop.provider.models') return [{ id: 'model-a' }, { id: 'model-b' }];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.agent-slots.list', 'desktop.provider.models'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const panel = await render({ profiles: [profile], onUseSlot: vi.fn() });
+    const model = panel.querySelector<HTMLInputElement>('[aria-label="Workhorse model"]');
+    expect(model?.disabled).toBe(true);
+
+    await act(async () => {
+      typeInto(panel.querySelector('[aria-label="Workhorse profile"]'), 'profile-1');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(invoke).toHaveBeenCalledWith('desktop.provider.models', { id: 'profile-1' });
+    const picker = panel.querySelector<HTMLSelectElement>('select[aria-label="Workhorse model"]');
+    expect([...(picker?.options ?? [])].map((option) => option.value)).toContain('model-b');
+  });
+
   it('lists both slots, and saves what the owner typed for one of them', async () => {
     const invoke = vi.fn(async (channel: string) => {
       if (channel === 'desktop.agent-slots.list') {

@@ -273,9 +273,9 @@ function AgentSlotCard({
   const showPicker = offered.length > 0 && !typingModel;
   const hint = listingNote;
 
-  const refreshModels = async (): Promise<void> => {
-    if (profileId === '') return;
-    const requested = profileId;
+  const refreshModels = async (forProfileId: string = profileId): Promise<void> => {
+    if (forProfileId === '') return;
+    const requested = forProfileId;
     setListingBusy(true);
     setListingNote(SETTINGS_AGENT_SLOTS.readingModels);
     try {
@@ -353,10 +353,13 @@ function AgentSlotCard({
             aria-label={SETTINGS_AGENT_SLOTS.profileAriaLabel.replace('{label}', () => label)}
             value={profileId}
             onChange={(event) => {
-              setProfileId(event.target.value);
+              const chosen = event.target.value;
+              setProfileId(chosen);
               setModel('');
               setListingNote(undefined);
               setTypingModel(false);
+              // Choosing a provider reads its models at once; they are offered in the model list.
+              if (chosen !== '') void refreshModels(chosen);
             }}
           >
             <option value="">{SETTINGS_AGENT_SLOTS.notSet}</option>
@@ -392,6 +395,7 @@ function AgentSlotCard({
               <input
                 aria-label={SETTINGS_AGENT_SLOTS.modelAriaLabel.replace('{label}', () => label)}
                 value={model}
+                disabled={profileId === ''}
                 maxLength={256}
                 onChange={(event) => setModel(event.target.value)}
               />
@@ -501,7 +505,7 @@ function SlotIcon({ id }: { readonly id: string }) {
           <path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z" />
         </>
       ) : (
-        <path d="M14.7 6.3a4 4 0 0 0 5 5L21 12.6 12.6 21a2.1 2.1 0 0 1-3-3L18 9.6zM3 21l3-3" />
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
       )}
     </svg>
   );
