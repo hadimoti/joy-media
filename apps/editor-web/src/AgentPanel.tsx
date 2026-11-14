@@ -3815,7 +3815,22 @@ export function AgentPanel({
                   <div>
                     <strong>{message.role === 'user' ? 'You' : 'Joy Code'}</strong>
                     {message.parts !== undefined && message.parts.length > 0 ? (
-                      <JoyCodeMediaParts {...generatedMedia} parts={message.parts} />
+                      <>
+                        {/* A body that no text part repeats is still shown, so no words are lost. */}
+                        {message.body.length > 0 &&
+                          !message.parts.some((part) => part.kind === 'text') && (
+                            <p
+                              lang={
+                                message.role === 'assistant' && /[؀-ۿ]/u.test(message.body)
+                                  ? 'fa'
+                                  : undefined
+                              }
+                            >
+                              {message.body}
+                            </p>
+                          )}
+                        <JoyCodeMediaParts {...generatedMedia} parts={message.parts} />
+                      </>
                     ) : (
                       <p
                         lang={

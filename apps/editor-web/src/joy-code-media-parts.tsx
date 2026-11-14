@@ -69,15 +69,21 @@ function useJobMediaUrl(
   elementRef: RefObject<HTMLImageElement | HTMLVideoElement | null>,
 ): MediaLoad {
   const [load, setLoad] = useState<MediaLoad>({ status: 'loading' });
+  // The reader is held in a ref: a caller that passes a new inline function on every render must not make
+  // every picture reload. Only the job, a retry, or a reader appearing or vanishing restarts the read.
+  const readMediaRef = useRef(readMedia);
+  readMediaRef.current = readMedia;
+  const hasReader = readMedia !== undefined;
   useEffect(() => {
     let cancelled = false;
     let url: string | undefined;
     setLoad({ status: 'loading' });
-    if (readMedia === undefined) {
+    const read = readMediaRef.current;
+    if (read === undefined) {
       setLoad({ status: 'failed' });
       return undefined;
     }
-    readMedia(jobId).then(
+    read(jobId).then(
       (media) => {
         if (cancelled) return;
         if (media === undefined || media.bytes.byteLength === 0) {
@@ -98,7 +104,7 @@ function useJobMediaUrl(
       // eslint-disable-next-line react-hooks/exhaustive-deps
       if (url !== undefined) releaseMediaObjectUrl(elementRef.current, url);
     };
-  }, [jobId, readMedia, attempt, elementRef]);
+  }, [jobId, hasReader, attempt, elementRef]);
   return load;
 }
 
