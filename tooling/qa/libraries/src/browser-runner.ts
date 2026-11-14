@@ -1046,7 +1046,7 @@ const TRANSITION_END_TOLERANCE_FLOOR = 3;
  * and picture edges make that offset a large mean difference, so the category gets
  * a wider fraction (the other categories keep 0.25).
  */
-const TRANSITION_END_TOLERANCE_FRACTION_SLIDES = 0.75;
+const TRANSITION_END_TOLERANCE_FRACTION_SLIDES = 0.7; // measured need: 0.67 (Directional, LeftRight)
 
 const TRANSITION_IMAGE_SIZES_540 = {
   'clip-a': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
