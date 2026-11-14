@@ -956,7 +956,9 @@ function applySetClipRate(project: SpikeProject, payload: SetClipRatePayload): A
         'setClipRate: cannot preserve source range when leaving a freeze clip',
       );
     }
-    durationUs = Math.max(1, Math.round(clip.durationUs * (oldRate / payload.playbackRate)));
+    // Round down (with a hair of float slack), never up: a 2x then 1x round trip on an odd length used to grow the clip
+    // by 1 us and then overlap the next clip it touched.
+    durationUs = Math.max(1, Math.floor(clip.durationUs * (oldRate / payload.playbackRate) + 1e-6));
   }
   assertClipRange(clip.startUs, durationUs, 'setClipRate');
   assertNoOverlap(track, clip.startUs, durationUs, clip.id, 'setClipRate');

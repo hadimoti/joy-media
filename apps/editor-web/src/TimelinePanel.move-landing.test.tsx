@@ -186,3 +186,21 @@ describe('Shift+click extends the selection like Ctrl+click', () => {
     expect(cleared).toBe(1);
   });
 });
+
+describe('Shift+Delete is left to the ripple delete key', () => {
+  it('plain Delete removes the selection here; Shift+Delete is not handled as a plain delete', async () => {
+    const dispatched: CommandTransaction[] = [];
+    const host = await mountPanel(['a'], (transaction) => dispatched.push(transaction));
+    const clipA = host.querySelector<HTMLElement>('[data-clip-id="a"]')!;
+    const press = (init: KeyboardEventInit) =>
+      act(async () => {
+        clipA.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true, ...init }),
+        );
+      });
+    await press({ shiftKey: true });
+    expect(dispatched).toHaveLength(0);
+    await press({});
+    expect(dispatched).toHaveLength(1);
+  });
+});

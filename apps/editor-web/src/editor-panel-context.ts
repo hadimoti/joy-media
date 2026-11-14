@@ -183,6 +183,9 @@ export interface EditorPanelContextValue {
   readonly onTimelineTrackFlagsChange: (next: readonly TimelineTrackView[]) => void;
   readonly timelineAutoFit: boolean;
   readonly onTimelineAutoFitChange: (next: boolean) => void;
+  /** The timeline snapping switch; it travels in the context so the panel re-renders when it changes. */
+  readonly timelineSnapping: boolean;
+  readonly onTimelineSnappingChange: (next: boolean) => void;
   readonly activeTimelineCompositionId: string;
   readonly onActiveTimelineCompositionChange: (compositionId: string) => void;
   /** The Monitor's frame, J K L, in and out, loop and timecode controls (T-M10). */

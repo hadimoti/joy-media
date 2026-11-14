@@ -7155,8 +7155,8 @@ function EditorWorkspace({
           onTrackFlagsChange={context.onTimelineTrackFlagsChange}
           autoFit={context.timelineAutoFit}
           onAutoFitChange={context.onTimelineAutoFitChange}
-          snapping={snapping}
-          onSnappingChange={setSnappingPersisted}
+          snapping={context.timelineSnapping}
+          onSnappingChange={context.onTimelineSnappingChange}
           onPasteClips={pasteClipsAtPlayhead}
           visualProject={visualProject}
           markers={activeTimelineMarkers}
@@ -8142,6 +8142,8 @@ function EditorWorkspace({
               onTimelineTrackFlagsChange: setTimelineTrackFlags,
               timelineAutoFit,
               onTimelineAutoFitChange: setTimelineAutoFit,
+              timelineSnapping: snapping,
+              onTimelineSnappingChange: setSnappingPersisted,
               activeTimelineCompositionId,
               onActiveTimelineCompositionChange: setActiveTimelineCompositionId,
               monitorTransport,

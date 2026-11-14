@@ -786,3 +786,24 @@ describe('applyCommand', () => {
     expect(applyCommand(next, inverse).project).toEqual(project);
   });
 });
+
+describe('timeline.setClipRate keeps an odd length from growing', () => {
+  it('a 2x then 1x round trip on an odd length never ends longer than it began', () => {
+    const odd = 6_738_005;
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 40_100_000, odd),
+      makeVideoClip('clip-b', 40_100_000 + odd, 4 * SECOND_US),
+    ]);
+    const faster = applyCommand(project, {
+      type: 'timeline.setClipRate',
+      payload: { ...TARGET, clipId: 'clip-a', playbackRate: 2 },
+    }).project;
+    const back = applyCommand(faster, {
+      type: 'timeline.setClipRate',
+      payload: { ...TARGET, clipId: 'clip-a', playbackRate: 1 },
+    }).project;
+    const clip = back.compositions.root!.tracks[0]!.clips.find((c) => c.id === 'clip-a')!;
+    expect(clip.durationUs).toBeLessThanOrEqual(odd);
+    expect(odd - clip.durationUs).toBeLessThanOrEqual(2);
+  });
+});

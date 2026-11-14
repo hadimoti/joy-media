@@ -3198,6 +3198,8 @@ export function TimelinePanel({
       tabIndex={-1}
       onKeyDown={(event) => {
         if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+        // Shift+Delete is the ripple delete: the timeline's scoped keys own it.
+        if (event.shiftKey) return;
         const target = event.target as HTMLElement;
         if (
           target.closest('input, textarea, select, [contenteditable="true"], [role="menu"]') !==
