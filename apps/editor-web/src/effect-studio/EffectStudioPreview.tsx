@@ -3,6 +3,7 @@ import { sampleCurve } from '@joy-media/motion-core';
 import type { EffectInstanceIR } from '@joy-media/render-ir';
 import { applyHeadlessEffects } from '@joy-media/renderer-headless';
 import { effectRegistry, type EffectInstanceV1 } from '@joy-media/visual-effects';
+import { effectBeforePreviewUrl } from '../effect-preview-url.js';
 import { EyeIcon, FitWidthIcon, ZoomInIcon, ZoomOutIcon } from '../icons.js';
 
 interface EffectStudioPreviewProps {
@@ -27,7 +28,7 @@ export function EffectStudioPreview({
     [activeEffects, playheadMs],
   );
   const fallbackFilter = useMemo(() => buildCssFallbackFilter(activeEffects), [activeEffects]);
-  const imageUrl = '/effects/preview/effects-test.png';
+  const imageUrl = effectBeforePreviewUrl();
   const afterStyle = {
     '--es-split': comparisonEnabled ? `${split}%` : '0%',
   } as CSSProperties;

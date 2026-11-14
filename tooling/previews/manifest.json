@@ -1,0 +1,1662 @@
+{
+  "version": 1,
+  "builderVersion": "t-v02-v1",
+  "crop": {
+    "x": 281,
+    "y": 144,
+    "width": 920,
+    "height": 690
+  },
+  "secondSourceEffectIds": [],
+  "before": {
+    "outputPath": "apps/editor-web/public/effects/preview/before.webp",
+    "width": 320,
+    "height": 240,
+    "bytes": 8866,
+    "outputSha256": "efb260ca0a40fc2da5b4c069d20236fc5570112e25e3ab21e9f636260adfb634",
+    "inputHash": "e6028255d6f8f0c1acc80e4d13698c5795339f629f6272db41d29115fca8d8dc",
+    "inputs": {
+      "sourcePicture": "filter-preview-source-2.jpg",
+      "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+      "shaderSource": "none",
+      "defaultValues": {},
+      "builderVersion": "t-v02-v1",
+      "secondSource": false
+    }
+  },
+  "effects": [
+    {
+      "id": "brightness-contrast",
+      "outputPath": "apps/editor-web/public/effects/preview/brightness-contrast.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 9182,
+      "outputSha256": "391f845b5b1912970fe0955f5511b750d6658e338e3a58a2e1497376cf962951",
+      "inputHash": "b437d45389f73141983afad2f8db4e452defa435c9e1c84847b9e17ea3dd1792",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "brightness": 0.18,
+          "contrast": 0.32
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "hue-saturation",
+      "outputPath": "apps/editor-web/public/effects/preview/hue-saturation.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 8722,
+      "outputSha256": "d6a31cea899aa884a7c1f06210af2c8aa3ac867115ee9e851615c0967aedbaff",
+      "inputHash": "b1591e4bbeb14a9e0951e6a3fe4df3adae29026b7663f0ea0dfa81ab9d4e0900",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "hue": 0.28,
+          "saturation": 0.45
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "vibrance",
+      "outputPath": "apps/editor-web/public/effects/preview/vibrance.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 9224,
+      "outputSha256": "46ed6fcc5cbe2a9c332ea44b24ae77d8843bfe0dfddc5b837194a9c8896a09d8",
+      "inputHash": "386d493a6559dd7fddefd973c14e2b00c6b13fc56fcffc005023e9cf7baae038",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 0.85
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "vignette",
+      "outputPath": "apps/editor-web/public/effects/preview/vignette.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 8810,
+      "outputSha256": "828a80fcfc2a529425d3ff6514154a9b35866903bad1c5fd9037f0657c5e1bbb",
+      "inputHash": "3b0e7f2503452ab2e8773d388bae46a01fa8518f8fae30effad169ffc82bfe71",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 0.35
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "sepia",
+      "outputPath": "apps/editor-web/public/effects/preview/sepia.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 8302,
+      "outputSha256": "f63ca37cff74934bfefc0157f2d566c8b403d2d2512daf9872be6ba22d27e49f",
+      "inputHash": "9dddf2a4bbc13df9efa85b206a74b72dd48d0a42975dd4f7d6d19af9344b2452",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 0.5
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "gaussian-blur",
+      "outputPath": "apps/editor-web/public/effects/preview/gaussian-blur.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 2906,
+      "outputSha256": "795f577f2e779d538ce0d25f7147b0323c2de7d56cfa29c5f1a85c572a7c12fd",
+      "inputHash": "c5f156c77eb94b1c9614416a9fe891a7b8c65cdfca13a0689b718c14125f3378",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 4
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "bloom",
+      "outputPath": "apps/editor-web/public/effects/preview/bloom.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 2736,
+      "outputSha256": "b7cc085314277b7d8e11dbaf0c577914a3a4870cfa18fadc3ab8a05a3ebfad9f",
+      "inputHash": "095a8d16fca2e25b7ba819114851a3cc36c64f99921856e0e4caf6ed36964dcd",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 0.4,
+          "threshold": 0.6
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "drop-shadow",
+      "outputPath": "apps/editor-web/public/effects/preview/drop-shadow.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 2218,
+      "outputSha256": "76c30c2ccfef84b96454b587d187252a67eccb46dbe9c17970a0635a9d52e86b",
+      "inputHash": "6c5e128fc94c7205d59b0bdbac498a56b803f51533059248c913f8ae2b72f134",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "distance": 8,
+          "opacity": 0.5
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "glow",
+      "outputPath": "apps/editor-web/public/effects/preview/glow.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 3078,
+      "outputSha256": "05a23eb4236befeab13a9109c204240a16317a9c8410ecdf23c951fd16b2699c",
+      "inputHash": "b19e0a0bae62e381bd953946b8bc72cc4af16d0d41fbecf2a9b6ecb4917a4e31",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 0.4
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "noise",
+      "outputPath": "apps/editor-web/public/effects/preview/noise.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 29676,
+      "outputSha256": "7b030c006e9b629243ee4b24f3b20720acbc3a55a979dbc8e512462bf373aaef",
+      "inputHash": "16facb5cc546ab7b071d7125002b97eec0c82c1d4efbee8a55a3d49eef7398f9",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 0.2
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "posterize",
+      "outputPath": "apps/editor-web/public/effects/preview/posterize.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 9688,
+      "outputSha256": "b4738ebb184a4a6e65556eea81d9d0d2d96e5c275142c4f7246798379ba7cea0",
+      "inputHash": "19a79fd1bbddf8e5ecc204bc0dcc342cd5883cc31d8e40112043720b5ae35dad",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "levels": 8
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "pixelate",
+      "outputPath": "apps/editor-web/public/effects/preview/pixelate.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 1458,
+      "outputSha256": "32f37d78508ccb18ffbf047aefa1260be5422ee7a608c4d3f9faff845d990ffa",
+      "inputHash": "4508a3d1ec8de0b53033e9b02b89fe13ed91a8e5415d9b37bbf34c7cc1820b01",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "blockSize": 8
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "color-overlay",
+      "outputPath": "apps/editor-web/public/effects/preview/color-overlay.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 7184,
+      "outputSha256": "aa801bc1a1cb1e5ea6a1832408041bae1851560e24dc0b5206a07b6cfd602e5f",
+      "inputHash": "a3fdbd6c70a93eae4ff943eb936f31092caec468bccc1f1a144e34e1d71a0f5e",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "b": 0,
+          "g": 0,
+          "opacity": 0.3,
+          "r": 255
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "curves",
+      "outputPath": "apps/editor-web/public/effects/preview/curves.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 9264,
+      "outputSha256": "c86922c804673076ca24efea067404aa2c7c26181154aa2d2d2bcb3121c71c57",
+      "inputHash": "9c527321444e180b9c373102f277f664aae76fb32b63b5e3a6c38de7c5deace9",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "highlights": 0.24,
+          "midtones": 0.2,
+          "shadows": -0.22
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "zoom-blur",
+      "outputPath": "apps/editor-web/public/effects/preview/zoom-blur.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 5876,
+      "outputSha256": "97548e7d41d9f4bdc5a53c509583b4f5211a92bdce0d0eee2a10a0cbc86acba3",
+      "inputHash": "0c2846c3ac60744d6a4476355f4affd268b917398b97647b7bd5cdcd8bc7a4de",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 6
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "radial-blur",
+      "outputPath": "apps/editor-web/public/effects/preview/radial-blur.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 6526,
+      "outputSha256": "271eef49ff92fd1f3b1cc3a3a970886b944b23762ff238c943256c2647e9fb73",
+      "inputHash": "19a6ad0ccbd6569a57136499388b25ebe905c37c1be23f583bc406d7b7c1b275",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 5
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "tilt-shift",
+      "outputPath": "apps/editor-web/public/effects/preview/tilt-shift.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 8366,
+      "outputSha256": "c399977a2ce3765571ccb3f80d476ab7bac0493feb338ec782d4493eb931d874",
+      "inputHash": "05dbfd26b327830eb6552e25aa225f8541a0f5854a801ff1382804e107eee619",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 8,
+          "focusHeight": 0.3,
+          "focusY": 0.5
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "bulge",
+      "outputPath": "apps/editor-web/public/effects/preview/bulge.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 9662,
+      "outputSha256": "04ae514e85b54f4feb4d9782c4e1d5a3c5990c3102eb5a81015e1e51cc20224f",
+      "inputHash": "bfe69db1681ab6cf31512eea7f11c91cb4f95f371a59eae005d261d8f17b235a",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 0.65,
+          "radius": 0.4
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "twist",
+      "outputPath": "apps/editor-web/public/effects/preview/twist.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 10158,
+      "outputSha256": "81435a39b952cbc9d51d0953227cd25b6a9ae520ccd62e82adeb9e9496924abc",
+      "inputHash": "3d62d7f5730a86c897350b1a6d33dd5b797e652fcb6c83b33fa3d74dbc40a599",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "angle": 1.35,
+          "radius": 0.5
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "ripple",
+      "outputPath": "apps/editor-web/public/effects/preview/ripple.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 9800,
+      "outputSha256": "3ade24e21c35135f80400eb60dac34ad96a6efeeceb87f4fa063344a3022d5a2",
+      "inputHash": "1e2ec9b34ed05ee545a864031c02a9621fb4a64d4ee331b0887d946c14e51aaf",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amplitude": 0.02,
+          "frequency": 10
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "crt",
+      "outputPath": "apps/editor-web/public/effects/preview/crt.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 22878,
+      "outputSha256": "6889c92f21f7fd7b96c6c68bc7958870e233ab2bd87ee5e7ad3fd83466467fa2",
+      "inputHash": "9e94e1f8adc6923b22689a93e37763c4f8685ac7857f3fa54343ae69ac26139a",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "noise": 0.08,
+          "scanlines": 0.5
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "edge-detect",
+      "outputPath": "apps/editor-web/public/effects/preview/edge-detect.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 13378,
+      "outputSha256": "6a12b42166a68906697251d20a93a812303a49ff84c7c7273ef39b33648c17ce",
+      "inputHash": "b7385aa4a3344f1e7b449f4631c9735526e1d22669b21ebbadf0bdbe98f04c50",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "threshold": 0.3
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "emboss",
+      "outputPath": "apps/editor-web/public/effects/preview/emboss.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 8862,
+      "outputSha256": "2cbded27bdfea1e814797ec26064c7b64a64c56949438307a6a6eccbc1246312",
+      "inputHash": "d19351ddfbdea2ca9cc3257e705d9e5840c3bd93e300dc397afcf391adff76a7",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "strength": 1
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "mosaic",
+      "outputPath": "apps/editor-web/public/effects/preview/mosaic.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 978,
+      "outputSha256": "40073fe7a2501c2bfe15c3dc8a8335385602f5aa05e0e0d9a7ba04e340c395d2",
+      "inputHash": "bffbbfcab8ed95d0506409e6b224b661a7d03c9a4dc40d928852477c6b2024f7",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "blockSize": 16
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "unsharp-mask",
+      "outputPath": "apps/editor-web/public/effects/preview/unsharp-mask.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 11712,
+      "outputSha256": "b63f40b9ef142431898d627d8d852766a69b6a5accf9db4fb8cacd4c6006c839",
+      "inputHash": "3da565959eb3c18616baeef97f76c30045619f7f187b30e180d8df37a8f837e3",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "amount": 0.5,
+          "radius": 1,
+          "threshold": 0.05
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "monochrome",
+      "outputPath": "apps/editor-web/public/effects/preview/monochrome.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 7186,
+      "outputSha256": "daa26375a33d566ca982354d41e19f1b643edcd665885bc0e61e6c0305e87ec6",
+      "inputHash": "1f07ed6daf60720507d5abbc8c0dce5591fa923e8292bad0a741d9111140b418",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "contrast": 0.2,
+          "invert": 0,
+          "softness": 0.04,
+          "threshold": 0.5
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "bayer-dither",
+      "outputPath": "apps/editor-web/public/effects/preview/bayer-dither.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 21840,
+      "outputSha256": "93a062c9f029ca5e1922e90716b6fde76947c45ca69d23099ade088c01da8aa6",
+      "inputHash": "86efe077a7ae0ebe554113f6b55280aeca3bf9a32d50ae6b2b809d4fa3ba7bf0",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "cellSize": 2,
+          "colorMode": 0,
+          "invert": 0,
+          "levels": 2,
+          "strength": 1
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "halftone",
+      "outputPath": "apps/editor-web/public/effects/preview/halftone.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 20416,
+      "outputSha256": "18056367e6d8a58f5ee07154b274c1713033911675675dfe5bee724b79d67355",
+      "inputHash": "002662a05322ff1e84258a944bdade61c4d6d4ea6ed1cab2354c8aaf763835af",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "angle": 22.5,
+          "cellSize": 10,
+          "colorMode": 0,
+          "dotScale": 1,
+          "invert": 0,
+          "shape": 0
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "contour-map",
+      "outputPath": "apps/editor-web/public/effects/preview/contour-map.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 13614,
+      "outputSha256": "66448e1e18e9a0877314b55da5696ac96be56719928ad7da1931fa254e87ad8e",
+      "inputHash": "919cbd79dcf685625b8fdc0bd31964eafe0896fbcf6025f2177214294443d85a",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "detail": 1,
+          "edgeBoost": 0.75,
+          "invert": 0,
+          "spacing": 9,
+          "thickness": 0.16
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "glyph-matrix",
+      "outputPath": "apps/editor-web/public/effects/preview/glyph-matrix.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 17674,
+      "outputSha256": "208a98910fe9e12193dd19bd5fc3fa5b3451925c9d46dd8a6fa1f490e8115d19",
+      "inputHash": "0e55108c7aff150d87bb09c45652f1dcc0d8d9f941d607ec9a5a1d43e0d4cd9d",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "cellHeight": 14,
+          "cellWidth": 10,
+          "colorMode": 0,
+          "contrast": 0.3,
+          "density": 1,
+          "flow": 0,
+          "foregroundB": 155,
+          "foregroundG": 255,
+          "foregroundR": 110,
+          "invert": 0,
+          "style": 1
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "scatter-mosaic",
+      "outputPath": "apps/editor-web/public/effects/preview/scatter-mosaic.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 2346,
+      "outputSha256": "365c90d5de910e38b15e10ba3f1a65f72adcb94c55ff0e9df6922f7ca52600f4",
+      "inputHash": "e29597181d34ebacb2b26322876144626fb0ebf92e2e34aefd29177daeb9b86a",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "cellSize": 12,
+          "colorMode": 1,
+          "levels": 8,
+          "scatter": 0.75,
+          "seed": 3
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "tone-geometry",
+      "outputPath": "apps/editor-web/public/effects/preview/tone-geometry.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 11862,
+      "outputSha256": "7822db3e9bf58504a773363000e6bc60cae6061185b6aca3c92553271f239bc7",
+      "inputHash": "a774caadf54e03df3ee4405af5979b94034224b3fc001fd36f967b8b10846f23",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "angle": 0,
+          "cellSize": 14,
+          "colorMode": 0,
+          "invert": 0,
+          "scale": 1,
+          "shape": 0
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    },
+    {
+      "id": "pixel-sort",
+      "outputPath": "apps/editor-web/public/effects/preview/pixel-sort.webp",
+      "width": 320,
+      "height": 240,
+      "bytes": 14422,
+      "outputSha256": "e1db8fb47d807bf0b59a4d05b2258a0d5a645a170ec02a4daa7f97a1a3a361ce",
+      "inputHash": "40c1b4b522ee27a2e5d1ac5811764d4ad65a7d071c50c8079486427052a0baf3",
+      "inputs": {
+        "sourcePicture": "filter-preview-source-2.jpg",
+        "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
+        "shaderSource": "286d5aaba204069f13329639a3f57210b87fa0bf4bd95e2051e9af6d06c0f917",
+        "defaultValues": {
+          "colorMode": 1,
+          "direction": 1,
+          "highThreshold": 0.9,
+          "intensity": 1,
+          "length": 72,
+          "lowThreshold": 0.18
+        },
+        "builderVersion": "t-v02-v1",
+        "secondSource": false
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "id": "gl:fade",
+      "safeId": "gl-fade",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-fade.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 40634,
+      "outputSha256": "f889632aff012bd5799a33ada051dbda1de10a4f7453d94bb4ec3d11280725bc",
+      "inputHash": "8c391aa8812de56d1a6c303c84ecc6a2df924a2f2ed0dd79a633eee8c26d5fd4",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "318b271996f407341688479360cd9a807a0bf979feadabb4c67c855e9180e973",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:fadegrayscale",
+      "safeId": "gl-fadegrayscale",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-fadegrayscale.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 37246,
+      "outputSha256": "2194267d488a5ee99e834fa7fb720b4a333de2a66999503529ecba5407339118",
+      "inputHash": "f52faebcb476071feb94a6108ba919c28198ff549d316769f674d8f9275b0f50",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "cd916ef061362b64c2e6c881c9b7e0a7e3e4b33a62170a497f7db48adc35377e",
+        "defaultValues": {
+          "intensity": 0.3
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "joy:dipToBlack",
+      "safeId": "joy-dipToBlack",
+      "outputPath": "apps/editor-web/public/transitions/preview/joy-dipToBlack.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 26906,
+      "outputSha256": "2a6d258b2fe85559ff2bfeb2dd1c5b6cfcac4dc5734a2bc94d7bf11499115d70",
+      "inputHash": "8ec25580fb1ea6d55c07569324943f0739d8745d9c93530e52529114d4d55ccb",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "dc2d235c25d1e788f91be75a9188e513182771385573bc184906e9e7a00226cf",
+        "defaultValues": {
+          "colorPhase": 0.4
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "joy:dipToWhite",
+      "safeId": "joy-dipToWhite",
+      "outputPath": "apps/editor-web/public/transitions/preview/joy-dipToWhite.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 26914,
+      "outputSha256": "255271510e7c16589640d0ff0b8fdd96c89427950eeb140da736d6724a4ab390",
+      "inputHash": "89a50ec36369d3ad7232802eb89ae0b7902510dd66b337e6c06849efff288861",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "6f76930b0d81f0fa7786ffe225978b70b89e5beecc0b82a961ffd096c6479210",
+        "defaultValues": {
+          "colorPhase": 0.4
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "joy:dipToColour",
+      "safeId": "joy-dipToColour",
+      "outputPath": "apps/editor-web/public/transitions/preview/joy-dipToColour.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 27362,
+      "outputSha256": "d1beac4e151efbcd191b3761f97171a232ac512d61f175fc0af83f93f85650ec",
+      "inputHash": "6ee6e83f2d090980ac2a90c933feccf6fa303e4832736e5a78e1cd5f41ad7d6e",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "6a70b46545dd7d83106665691516e3ed1c0ca0a4a9044d41ee0cc0b393f870ec",
+        "defaultValues": {
+          "colorB": 0.2,
+          "colorG": 0.4,
+          "colorPhase": 0.4,
+          "colorR": 0.9
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:wipeLeft",
+      "safeId": "gl-wipeLeft",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-wipeLeft.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 39166,
+      "outputSha256": "786ce0b913d348b64a1382edb8a0ecea124fac54f8729a9fb5cf72b65c57d729",
+      "inputHash": "6a2b85619d3d92472623f585053e1812e2ddd07ce5c7a91de5cd8f66fb9d7e6a",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "55cd8e887337d1725b4a70a46b053411897727dc574d6fe17fb69cc857795c57",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:wipeRight",
+      "safeId": "gl-wipeRight",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-wipeRight.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 36644,
+      "outputSha256": "f6323aeedf06cfde07fde5f8af10838f9319267b780ab0bf7e27f1c49665c574",
+      "inputHash": "dad4ba4a97cdbf4f9f77551d58ddd869ff14eaa926b0d7337e6a693ca5e77fe3",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "a670d0f7e84cd330691fff27bf8e687af6e6f6f2733d50b4f4323cdf8d374fbd",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:wipeUp",
+      "safeId": "gl-wipeUp",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-wipeUp.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 37928,
+      "outputSha256": "2f817d2137ecc7d56b28357628c98857d2ec02001d005734cfc5d12084cd1cae",
+      "inputHash": "65884f23819ba89df986583e07823393418501c62a663a2e4400a70b561af004",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "0cb9370620c3658349a3abdfd768fdf0afde0537a085473a36db91c154b6435e",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:wipeDown",
+      "safeId": "gl-wipeDown",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-wipeDown.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 39070,
+      "outputSha256": "d69111aa5f9f641e860e1f65e781a7cfceeddaea758f9c70e138513b4e0fae6b",
+      "inputHash": "7754357ece91558f3b7af0784f2084960d7946bf70e5e6bdbcc13532a2076298",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "eab507e939ba30c54bdaa0ab75a19477ce19aa7821cb64553eeb1667da34cffa",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:RadialWipe",
+      "safeId": "gl-RadialWipe",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-RadialWipe.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 38588,
+      "outputSha256": "71afd056980e7a23b01aa66727034b12220c2ed7fd342ee0b7bb1915eac3c24c",
+      "inputHash": "87c7e3fb607a3b1252ca25ceca3f5c817ba458217bff11ae78a85ec3302a49ea",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "072205c5a48c61cc732178c4192cbb09ba3dcf067d455a813311cbaf857c6aff",
+        "defaultValues": {
+          "smoothness": 1
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:BrushWipe",
+      "safeId": "gl-BrushWipe",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-BrushWipe.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 40414,
+      "outputSha256": "b9a582a17181d3f5aae30b77de2b480b4598e8f920fb0ff0dcb8b964ff6708dc",
+      "inputHash": "1810314adbbdfca9ca9cf438d80e6dd2afa42f695d2aad97d9df24354c804221",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "161e0834da1440037a437e7768dcdb403458e3d0ef420a49c5d9b6852dd2c9cb",
+        "defaultValues": {
+          "angle": -7,
+          "roughness": 0.6,
+          "strokes": 4,
+          "waviness": 0.5
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:Directional",
+      "safeId": "gl-Directional",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-Directional.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 36986,
+      "outputSha256": "58ac029a1335e99a76969045d4658e21e5d0a0700f152cd76ba76cfe2d73bf39",
+      "inputHash": "dab0cd0af991aeb737ee38b6a9e6a6ac76aa032dfc28750bd83becf0c84731a8",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "afd281bb004f437904dab647e1f790ebe159b048d82766ecc15fb6e5c888c75d",
+        "defaultValues": {
+          "direction": [1, 0]
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:SlideAwayRight",
+      "safeId": "gl-SlideAwayRight",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-SlideAwayRight.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 35468,
+      "outputSha256": "af60c6715008e02e4707ad7c1dcb28bc5e24ff3a079ca65f02a75635295be852",
+      "inputHash": "45315ab217411c5a5a0aea77d4f7402282ec169a9856fc6793a8b6581a862a45",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "d651118ad16f41dd3bfc1ebd9b936f6c3a6e0c2fa7bd0099fa833d4a757ea06c",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:LeftRight",
+      "safeId": "gl-LeftRight",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-LeftRight.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 34010,
+      "outputSha256": "d90be93f0d2da81507d397d258dc669f95a173fc6a1f7bceab96124a04996fab",
+      "inputHash": "8178346d95f21291712ea6742bbd4343a4208d9354d01b8c97ae60710c73e28c",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "01f318c022b3d57fca14a8ac3406265b304c2ad25d7e57cbcae4d9a18a1d5090",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:TopBottom",
+      "safeId": "gl-TopBottom",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-TopBottom.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 34750,
+      "outputSha256": "f0ed8cc6a7daea22f02faeb07cb5ed130705a53c682e992b2f88b98e58a4a194",
+      "inputHash": "601fdd72e0c8ebb003c7a4ec71666b1fde9fd1366d2d1f92a9e14c8205e73d2b",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "60be5467a09189de5d0e3e82ef0ccb4300299f7da080a78c0c4ed646f8397fbc",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:CrossZoom",
+      "safeId": "gl-CrossZoom",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-CrossZoom.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 33124,
+      "outputSha256": "c0db64897f1f9ab0bada13c163a2b5c5218d5e80338a67aaf2e44e973ffc1bba",
+      "inputHash": "f94e645379f992718bd49663e7d8ba8adf76ec5ed528af69430d731a14728790",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "630391aaf2b82dff45ba076ae8eb72b84bb31e5e4c62058411404aeba7b2962f",
+        "defaultValues": {
+          "strength": 0.4
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:SimpleZoom",
+      "safeId": "gl-SimpleZoom",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-SimpleZoom.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 35326,
+      "outputSha256": "4e4dab2f636492f1b0a891cccf52c9f8d6f6517520817df32649124f0f4074cd",
+      "inputHash": "03db49c9b1470887c1dbde1c1c8d06bf924ec6375ef4cb5cf1f92ca8197500e5",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "ac29bc0a8732c4d4569d82297d8db9bdcd7d18fa0d53284e8a450e68ec11a539",
+        "defaultValues": {
+          "zoom_quickness": 0.8
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:ZoomInCircles",
+      "safeId": "gl-ZoomInCircles",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-ZoomInCircles.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 31048,
+      "outputSha256": "a14e0727a830f1a4c472ecbcef95a7e2ebc73e2ac694fd91b6dd401a74052171",
+      "inputHash": "d35bd0ce70f5d7e77ef731a5dd21cc55563c72342122a232ca1b458c4eac848c",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "b550072841daacc5ef1d15ae19ad41e75fb338bd9620b805723a663f2cf6501f",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:Pinwheel",
+      "safeId": "gl-Pinwheel",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-Pinwheel.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 47052,
+      "outputSha256": "c760b093bdb089e8a2578d6c6a566b1e285e65518019de6fdc033d1d609584ce",
+      "inputHash": "7aca2dd056ccac39d0c9c2180c09256d6c183db3c2d648beabf0870bafaf8155",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "72196f3a36280d808dd3b791b64974d011c2a2076a02e5120285c72573b4facb",
+        "defaultValues": {
+          "speed": 2
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:WhipSpin",
+      "safeId": "gl-WhipSpin",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-WhipSpin.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 34582,
+      "outputSha256": "4baaef78bfa850c5f0aaf4a8faa22ba0f9e1ca196dc79531eadedd7efc65d1b4",
+      "inputHash": "9a51d8650d9c839ac1c544c633de31da8295fff4aade49a3b34447796392c3f4",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "870165e8df8c4b27e64c4e51ff02c7966ec7858b3b2f8c402cb746b7e82b274e",
+        "defaultValues": {
+          "blur": 0.5,
+          "chroma": 0.6,
+          "turns": 1,
+          "zoom": 0.25
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:CircleCrop",
+      "safeId": "gl-CircleCrop",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-CircleCrop.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 23744,
+      "outputSha256": "f5a36e42f8f5c55822eec7a0fc6610642f3d97af81db3224a86716db8454b41f",
+      "inputHash": "6297de84180e3a4afd5425b8d2861cc120a6f467e7228e812bc85eebcfc3438b",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "af3acb6adce6a0a822b65fe7c210677b761b8c365400dac424974195c09f5728",
+        "defaultValues": {
+          "bgcolor": [0, 0, 0, 1]
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:HorizontalOpen",
+      "safeId": "gl-HorizontalOpen",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-HorizontalOpen.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 41206,
+      "outputSha256": "7b01fdab0f0cc5a2ca54f02471f333a9acda01cc85d6cf6e5735f205f6b9ad37",
+      "inputHash": "74ca9de39cc07224ae19e0ba39e91870af6f758d4fad72f758ba24502b2c6d01",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "793bf81176f102df1ad97eb70e89194cd274510ab2e1588bb94197d91e63d232",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:VerticalOpen",
+      "safeId": "gl-VerticalOpen",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-VerticalOpen.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 40240,
+      "outputSha256": "f994af4fa2176eb0a2d84d76f9cab5e51e2b3615d81436cc6b44e75b3cf90b8a",
+      "inputHash": "716eca625baab321e14ece8b2212459346ef785ea95cefb5cc877398f9817d6b",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "ef91c90afd73dc3cf77833f45b21b0fbf5f867a33fe8be28c67bf197ede7c639",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:Chessboard",
+      "safeId": "gl-Chessboard",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-Chessboard.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 47474,
+      "outputSha256": "0e17e1fc0ef1681a46229f85783f4796264b40637b0b0adce8b53d3ce4859a2f",
+      "inputHash": "879adb1c4f6678542cb3bd7faf202426c87cb599366f4bb2c1b1d128c31a8da1",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "8a13b768631bf7121f9de1ef53577db5b69a73bbffddc70d8ee9eeee0310b6f3",
+        "defaultValues": {
+          "grid_num": 10
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:windowslice",
+      "safeId": "gl-windowslice",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-windowslice.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 38434,
+      "outputSha256": "e80c50c6fbb5fd659904b5a9256848ca7a1ccb016719bbf013d75b6ad3a400ac",
+      "inputHash": "9289d5320b528b673f3d124c1a7875a7771ae69dabf8e47dfd249faceaaa3709",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "8cf52fdefcffe721da0f0bbe22fad8452f09f15df594b3b351d4b4f611b9e00f",
+        "defaultValues": {
+          "count": 10,
+          "smoothness": 0.5
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:GlitchDisplace",
+      "safeId": "gl-GlitchDisplace",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-GlitchDisplace.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 41756,
+      "outputSha256": "ddfd94f1d9c012efbba7c1cbc7893663b4023b335f7cd76b570e200323d05631",
+      "inputHash": "cba652f57099ed0ee5fcd72dd25f260b4fb3bd870ed4d9b99c5e85b9e365fdf7",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "4f2915b7062818ef68f205530e0ec47de91b3ab275b4b7e292952d4056a5071c",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:GlitchMemories",
+      "safeId": "gl-GlitchMemories",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-GlitchMemories.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 37502,
+      "outputSha256": "06ab0026689026d58b9c879ec2e03bd35b603e91f03cf669dcef80a74bfb413e",
+      "inputHash": "0904339ab51a04665c8ed8c4577da66cbd60f7ecfb94dae04bd7d672b2a207b3",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "25513b5a818a46b04e0f6861995c957da0a3df8d9eace30fb9dbebd39dfc52e7",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:TvStatic",
+      "safeId": "gl-TvStatic",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-TvStatic.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 143846,
+      "outputSha256": "d15da1956ebc588fe050dcc47ca087de37db02304f1a87c48642b455ed5e8fe3",
+      "inputHash": "f864c7327a8ee6f32c77ea07d98aedaaf616215fd8b83265190441031b66af0f",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "785516ee616bb33ef876ec7956a0041b9fb9d136f2fd6e73c2797c8d5648ab71",
+        "defaultValues": {
+          "offset": 0.05
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:Dreamy",
+      "safeId": "gl-Dreamy",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-Dreamy.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 37640,
+      "outputSha256": "9e0ed8d9aa55b012adf3c588f1eb1db3c1296daf4b5a9b12746280928ea4e776",
+      "inputHash": "0c8e289ef83f745a3d16ac71dd115663e34af1de2941aaa095421cca54d9414c",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "f9107e09786a9847404b1f00d81d32889f9820e1128c6600d84ce871096ecca4",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:LinearBlur",
+      "safeId": "gl-LinearBlur",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-LinearBlur.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 31292,
+      "outputSha256": "e2c1f17bf6ebbf40017e5dbe4e834c59d8d254cb9fd7be59b91fb2fb95bb8d85",
+      "inputHash": "dec4c96f01d8ec19ba76ec1f57a4622ecdc0f77d68ed87f99d6e1dd3ee7f0030",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "ad98d86582d22882483ff29a0a6927467b061e96a71e2dc8facd18868f65d6a3",
+        "defaultValues": {
+          "intensity": 0.1
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:Overexposure",
+      "safeId": "gl-Overexposure",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-Overexposure.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 48064,
+      "outputSha256": "2f70a72f86b0d5f4bf3202c07a481903299932e19753c110e30751d5e1d4fdb2",
+      "inputHash": "f852303230b6e573113b33a62c75d3a34986008b4b5b0bdb2b9871f225e759fb",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "f161d4a810131acb09d40c1d7098aa94586b5235199be3eeac0aaf88fc9c1065",
+        "defaultValues": {
+          "strength": 0.6
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:EdgeGlow",
+      "safeId": "gl-EdgeGlow",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-EdgeGlow.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 39164,
+      "outputSha256": "b2b46fab04b4200680a651af4233912442ea670fa907ec47e1d659198781c9fa",
+      "inputHash": "4095b7688bff46bd392c5256b225755e8276d5f3ff522eafd0479e6e4e5004b7",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "8ed8a0f6f216a53b3b96d7cd8b50d53f36a22b2793133d78cb579da4b73add75",
+        "defaultValues": {
+          "edge_brightness": 8,
+          "edge_thickness": 0.001
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:morph",
+      "safeId": "gl-morph",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-morph.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 42100,
+      "outputSha256": "a303103e590415f3125c667e02c04066604343e467a296fbb2708913c2c99d56",
+      "inputHash": "a8a416c6066c3f95f74430a99eeb881f4996c1fb62abab21c7f5d1e879ccd9f2",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "983618d49f758ee9ff035a158e764f409b40bd586daf2b88ee6dc18b5ad8127e",
+        "defaultValues": {
+          "strength": 0.1
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:crosswarp",
+      "safeId": "gl-crosswarp",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-crosswarp.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 42694,
+      "outputSha256": "28b18a3cc81cb0b75ca55f523820f473e8b2e1a42d3f9f5e2790bc01545032bd",
+      "inputHash": "30f3101f7f0fd728a59f33046865c9425106ca9a33683bec322bff01e84a1d33",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "caaf4b48f9108e610cf45d3efd4589c3c4c9936a2ad4867c2163757f3927b3fe",
+        "defaultValues": {},
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:ButterflyWaveScrawler",
+      "safeId": "gl-ButterflyWaveScrawler",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-ButterflyWaveScrawler.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 49650,
+      "outputSha256": "ea0217968955614706a214b756b8622521584af7366f83706154f688cab64c64",
+      "inputHash": "84458c39fad6d73bd89f0ca0e9aa732d49edcfc43719175fe0ea5ec39c9c39e7",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "be24c481106a3796ec0519796cb01ee115446b18b9bd087607b65910582f9f8f",
+        "defaultValues": {
+          "amplitude": 1,
+          "colorSeparation": 0.3,
+          "waves": 30
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:Kaleidoscope",
+      "safeId": "gl-Kaleidoscope",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-Kaleidoscope.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 38878,
+      "outputSha256": "1bab873c2ab520880535423a2fdddb1c0bb024dd63be34f2cef734a693370394",
+      "inputHash": "62dd23ad6109869616645f8fcfbb018bbe124cf16e98b17d729ed29bc23c4753",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "47c40f266bfbe64e1e7027f3ff1c2d5e615601373e3e853a2f23d07b2a1f9ba8",
+        "defaultValues": {
+          "angle": 1,
+          "power": 1.5,
+          "speed": 1
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:Ripple",
+      "safeId": "gl-Ripple",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-Ripple.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 36896,
+      "outputSha256": "c59d2bc8e8b897b2c06adb5074b2646d64af3d78e7679cdfe4e5781bb2fc21d0",
+      "inputHash": "8f2d476d6920ae678fe7608e4f2413df1c0a807e35db887a42243aaff8accb33",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "7c9a98435c3242d280fd6c28b0128b98156d23cfb64856fbe88eb61308f7cb64",
+        "defaultValues": {
+          "amplitude": 100,
+          "speed": 50
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    },
+    {
+      "id": "gl:InkBleed",
+      "safeId": "gl-InkBleed",
+      "outputPath": "apps/editor-web/public/transitions/preview/gl-InkBleed.webp",
+      "frameCount": 24,
+      "frameWidth": 144,
+      "frameHeight": 108,
+      "width": 3456,
+      "height": 108,
+      "bytes": 40208,
+      "outputSha256": "5ca1c77043ff60dbb42be462a7a24508700a5b01d776e00cc08948dacab16bc0",
+      "inputHash": "000ec52e5447c1d4759fc033f15e9bbb17c4215938b84da8b648b54de891a2d5",
+      "inputs": {
+        "sourcePictures": ["transition-preview-pic1.jpg", "transition-preview-pic2.jpg"],
+        "sourceSha256s": [
+          "4a13d1923ef85d5457b1c853ea31e42dde425d863a083abcafaf50daf908bc3c",
+          "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97"
+        ],
+        "shaderSource": "3d136397b092cba62b019b13cc2f1fd90613343c916b8c25d34576f5de4f5b91",
+        "defaultValues": {
+          "drops": 4,
+          "rim": 0.5,
+          "seed": 3,
+          "tendrils": 0.7
+        },
+        "builderVersion": "t-v02-v1"
+      }
+    }
+  ],
+  "summary": {
+    "stillsCount": 34,
+    "stillsTotalBytes": 338870,
+    "transitionsCount": 38,
+    "transitionsTotalBytes": 1534006,
+    "maxTransitionBytes": 143846,
+    "totalBytes": 1872876
+  }
+}

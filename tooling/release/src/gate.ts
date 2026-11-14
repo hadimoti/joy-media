@@ -21,7 +21,9 @@ export const REQUIRED_EDITOR_STATIC_ASSETS = [
   'assets/transition-preview-frame-b.svg',
 ] as const;
 export const MINIMUM_EFFECT_PREVIEW_COUNT = 33;
-export const REQUIRED_EFFECT_MOTION_PREVIEW_COUNT = 19;
+/** Counted as a baseline, never as one of the effect previews the floor above measures. */
+export const EFFECT_PREVIEW_BASELINE_PATH = 'effects/preview/before.webp';
+export const REQUIRED_EFFECT_MOTION_PREVIEW_COUNT = 0;
 
 const PUBLIC_STATIC_ROOT = 'apps/editor-web/public' as const;
 const EDITOR_DIST_ROOT = 'apps/editor-web/dist' as const;
@@ -42,6 +44,7 @@ const STATIC_ASSET_EXTENSIONS = new Set([
   '.svg',
   '.ttf',
   '.webm',
+  '.webp',
   '.woff',
   '.woff2',
 ]);
@@ -223,6 +226,7 @@ export interface ReleaseStaticAssetRecord {
     | 'built-asset'
     | 'required-transition-frame'
     | 'effect-preview'
+    | 'effect-preview-baseline'
     | 'effect-motion-preview';
   readonly mimeType: string;
   readonly signature: string;
@@ -1035,6 +1039,8 @@ function classifyStaticAsset(path: string): ReleaseStaticAssetRecord['kind'] {
   )
     return 'required-transition-frame';
   if (path.startsWith('effects/preview-motion/')) return 'effect-motion-preview';
+  // before.webp is the unfiltered baseline still used for pixel comparison, not one of the effect previews.
+  if (path === EFFECT_PREVIEW_BASELINE_PATH) return 'effect-preview-baseline';
   if (path.startsWith('effects/preview/')) return 'effect-preview';
   return 'copied-public-asset';
 }
@@ -1064,6 +1070,8 @@ function mimeTypeForAsset(path: string): string {
       return 'font/ttf';
     case '.webm':
       return 'video/webm';
+    case '.webp':
+      return 'image/webp';
     case '.woff':
       return 'font/woff';
     case '.woff2':
@@ -1080,6 +1088,8 @@ function signatureForAsset(path: string, value: Buffer): string {
       return value.subarray(0, 8).toString('hex');
     case '.webm':
       return value.subarray(0, 4).toString('hex');
+    case '.webp':
+      return `${value.subarray(0, 4).toString('ascii')}:${value.subarray(8, 12).toString('ascii')}`;
     case '.woff':
     case '.woff2':
     case '.svg':
@@ -1120,6 +1130,12 @@ function validAssetSignature(path: string, value: Buffer): boolean {
       return value.subarray(0, 4).equals(Buffer.from([0x00, 0x01, 0x00, 0x00]));
     case '.webm':
       return value.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+    case '.webp':
+      return (
+        value.length >= 12 &&
+        value.subarray(0, 4).toString('ascii') === 'RIFF' &&
+        value.subarray(8, 12).toString('ascii') === 'WEBP'
+      );
     case '.woff':
       return value.subarray(0, 4).toString('utf8') === 'wOFF';
     case '.woff2':
@@ -1300,7 +1316,7 @@ function staticAssetMessage(input: ReleaseGateInput): string {
   )
     return `expected ${REQUIRED_EDITOR_STATIC_ASSETS.length} transition frames in inventory`;
   if (input.staticAssetInventory.summary.effectPreviewCount < MINIMUM_EFFECT_PREVIEW_COUNT)
-    return `expected at least ${MINIMUM_EFFECT_PREVIEW_COUNT} effect preview PNGs in inventory`;
+    return `expected at least ${MINIMUM_EFFECT_PREVIEW_COUNT} effect previews in inventory`;
   if (
     input.staticAssetInventory.summary.effectMotionPreviewCount !==
     REQUIRED_EFFECT_MOTION_PREVIEW_COUNT
@@ -1309,7 +1325,7 @@ function staticAssetMessage(input: ReleaseGateInput): string {
   if (input.staticAssetInventory.htmlEntryPoints.length === 0)
     return 'editor build HTML entry points are missing from the static asset inventory';
   const summary = input.staticAssetInventory.summary;
-  return `static asset inventory recorded ${summary.copiedSourceAssetCount} copied public assets, ${summary.builtAssetCount} built assets, ${summary.effectPreviewCount} effect preview PNGs, and ${summary.effectMotionPreviewCount} motion previews`;
+  return `static asset inventory recorded ${summary.copiedSourceAssetCount} copied public assets, ${summary.builtAssetCount} built assets, ${summary.effectPreviewCount} effect previews, and ${summary.effectMotionPreviewCount} motion previews`;
 }
 
 // The release-candidate-v3 hosted-verify job (plan section 3.4) runs the typecheck, lint, format, goldens and Vitest
