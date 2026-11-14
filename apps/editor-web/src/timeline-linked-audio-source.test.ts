@@ -35,6 +35,15 @@ describe('collectLinkedAudioInputs', () => {
     });
   });
 
+  it('puts the strips on the first audio row that is shown when A1 is hidden', () => {
+    const tracks = [
+      track('v1', 1, 'visual', { clips: [makeVideoClip('clip-a', 0, 2 * SECOND_US)] }),
+      track('a-hidden', 3, 'audio', { enabled: false }),
+      track('a-shown', 2, 'audio'),
+    ];
+    expect(collectLinkedAudioInputs(tracks).a1TrackId).toBe('a-shown');
+  });
+
   it('has no A1 row when the timeline has no audio row', () => {
     const inputs = collectLinkedAudioInputs([
       track('v1', 0, 'visual', { clips: [makeVideoClip('clip-a', 0, SECOND_US)] }),

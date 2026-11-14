@@ -27,7 +27,7 @@ export interface LinkedAudioVideoClip extends LinkedAudioSourceClip {
 }
 
 export interface LinkedAudioLaneInputs {
-  /** The first audio row in display order (A1), or `undefined` when there is none. */
+  /** The first shown audio row in display order (A1), or `undefined` when there is none. */
   readonly a1TrackId: string | undefined;
   readonly a1Clips: readonly LinkedAudioLaneSpan[];
   readonly videoClips: readonly LinkedAudioVideoClip[];
@@ -43,7 +43,10 @@ export function collectLinkedAudioInputs(
   elementKinds: TimelineElementKindMap = {},
 ): LinkedAudioLaneInputs {
   const ordered = sortTracksForTimelineDisplay(tracks, elementKinds);
-  const a1 = ordered.find((track) => timelineTrackFamily(track, elementKinds) === 'audio');
+  // A hidden audio row draws nothing, so the strips go to the first audio row that is shown.
+  const a1 = ordered.find(
+    (track) => timelineTrackFamily(track, elementKinds) === 'audio' && track.enabled !== false,
+  );
   const videoClips: LinkedAudioVideoClip[] = [];
   for (const track of ordered) {
     if (timelineTrackFamily(track, elementKinds) !== 'visual') continue;
