@@ -39,7 +39,8 @@ describe('Inspector effects ordering controls', () => {
 
     expect(markup).toContain('aria-label="Effects"');
     expect(markup).toContain('No effects applied');
-    expect(markup).toContain('Effects tab');
+    // Names only: the old instruction sentence under it is gone on purpose (T-D10).
+    expect(markup).not.toContain('Effects tab');
   });
 
   it('renders drag hooks and keyboard-accessible move actions', () => {
