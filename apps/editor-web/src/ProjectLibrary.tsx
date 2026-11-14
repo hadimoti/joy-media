@@ -22,6 +22,7 @@ import {
   TrashIcon,
 } from './icons.js';
 import { JOY_MEDIA_NAME } from './product-identity.js';
+import { projectCardView } from './project-card.js';
 import {
   CUSTOM_CANVAS_MAX_SIDE,
   CUSTOM_CANVAS_MIN_SIDE,
@@ -259,6 +260,13 @@ export function ProjectLibrary({
     resetCreateForm();
   };
 
+  const startCreate = () => {
+    setCreateError(undefined);
+    setCreating(true);
+  };
+
+  const now = new Date();
+
   const openMenu = (entry: ProjectCatalogEntry, trigger: HTMLButtonElement) => {
     triggerRefs.current.set(entry.id, trigger);
     setMenuEntryId(entry.id);
@@ -311,21 +319,6 @@ export function ProjectLibrary({
               Trash ({trashedCount})
             </button>
           </div>
-          {!showTrash && (
-            <button
-              type="button"
-              className="project-library-new"
-              aria-label="New project"
-              data-guide="New project"
-              onClick={() => {
-                setCreateError(undefined);
-                setCreating(true);
-              }}
-            >
-              <PlusIcon />
-              <span>New project</span>
-            </button>
-          )}
         </div>
       </header>
 
@@ -525,7 +518,7 @@ export function ProjectLibrary({
           </form>
         )}
 
-        {projects.length === 0 ? (
+        {projects.length === 0 && (
           <div className="project-library-empty" role="status">
             <strong>{showTrash ? 'Trash is empty' : 'No projects yet'}</strong>
             <span>
@@ -534,10 +527,26 @@ export function ProjectLibrary({
                 : 'Create a project to get started.'}
             </span>
           </div>
-        ) : (
+        )}
+        {(projects.length > 0 || !showTrash) && (
           <ul className={`project-library-grid${view === 'list' ? ' is-list' : ''}`}>
+            {!showTrash && (
+              <li>
+                <button
+                  type="button"
+                  className="project-library-new-tile"
+                  aria-label="New project"
+                  data-guide="New project"
+                  onClick={startCreate}
+                >
+                  <PlusIcon />
+                  <span>New project</span>
+                </button>
+              </li>
+            )}
             {projects.map((entry) => {
               const busy = busyProjectId === entry.id;
+              const card = projectCardView(entry, now, showTrash);
               return (
                 <li
                   key={entry.id}
@@ -551,17 +560,29 @@ export function ProjectLibrary({
                       if (!showTrash) onOpen(entry);
                     }}
                   >
-                    <span className="project-library-card-title">
-                      <strong dir="auto">{entry.title}</strong>
+                    <span className="project-library-card-thumb" aria-hidden="true">
+                      {card.coverUrl !== undefined ? (
+                        <img
+                          className="project-library-card-cover"
+                          src={card.coverUrl}
+                          alt=""
+                          decoding="async"
+                          draggable={false}
+                        />
+                      ) : (
+                        <span
+                          className={`project-library-card-placeholder ${card.aspect >= PLACEHOLDER_WIDE_ASPECT ? 'is-wide' : 'is-tall'}`}
+                          style={{ aspectRatio: String(card.aspect) }}
+                        >
+                          {card.format}
+                        </span>
+                      )}
                     </span>
-                    <span className="project-library-card-thumb" aria-hidden="true" />
                     <span className="project-library-card-body">
-                      <span>
-                        {showTrash && entry.trashedAt !== undefined
-                          ? `Moved to Trash: ${formatUpdated(entry.trashedAt)}`
-                          : `Last updated: ${formatUpdated(entry.updatedAt)}`}
+                      <span className="project-library-card-title">
+                        <strong dir="auto">{entry.title}</strong>
                       </span>
-                      <span>Local project · Ready to edit</span>
+                      <span className="project-library-card-meta">{card.meta}</span>
                     </span>
                   </button>
                   <button
@@ -859,14 +880,5 @@ function uniqueCopyTitle(title: string, projects: readonly ProjectCatalogEntry[]
   return `${base} ${index}`;
 }
 
-function formatUpdated(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+/** At or above this width / height the placeholder frame is sized by its width, below by its height. */
+const PLACEHOLDER_WIDE_ASPECT = 1.55;

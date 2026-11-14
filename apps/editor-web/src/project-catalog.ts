@@ -23,6 +23,29 @@ export interface ProjectCatalogEntry {
   readonly timelineProjectId: string;
   readonly visualProjectId: string;
   readonly trashedAt?: string;
+  /** Card facts (T-D07): saved with the project so the library can show them without opening it. */
+  readonly canvas?: { readonly width: number; readonly height: number };
+  readonly durationUs?: number;
+  /** A small cover picture as a `data:image/…` URL. Absent until the project has been saved once. */
+  readonly coverDataUrl?: string;
+}
+
+/** The card facts a project save may update. `coverDataUrl: undefined` keeps the old cover. */
+export interface ProjectCardPatch {
+  readonly canvas?: { readonly width: number; readonly height: number };
+  readonly durationUs?: number;
+  readonly coverDataUrl?: string | undefined;
+}
+
+/** Only the card fields of an entry, for a copy that should look like its source. */
+export function projectCardFields(
+  entry: ProjectCatalogEntry,
+): Pick<ProjectCatalogEntry, 'canvas' | 'durationUs' | 'coverDataUrl'> {
+  return {
+    ...(entry.canvas === undefined ? {} : { canvas: entry.canvas }),
+    ...(entry.durationUs === undefined ? {} : { durationUs: entry.durationUs }),
+    ...(entry.coverDataUrl === undefined ? {} : { coverDataUrl: entry.coverDataUrl }),
+  };
 }
 
 interface CatalogDatabase {
@@ -68,6 +91,35 @@ export function upsertCatalogProject(
     projects: { ...database.projects, [entry.id]: entry },
   });
   return entry;
+}
+
+/**
+ * Merges card facts into one entry. It does not change `updatedAt` (the edit time
+ * stays the time of the last edit) and writes nothing when nothing changed.
+ */
+export function updateCatalogProjectCard(
+  storage: BrowserKeyValueStore,
+  projectId: string,
+  patch: ProjectCardPatch,
+): ProjectCatalogEntry | undefined {
+  const database = readCatalog(storage);
+  const entry = database.projects[projectId];
+  if (entry === undefined) return undefined;
+  const next: ProjectCatalogEntry = {
+    ...entry,
+    ...(patch.canvas === undefined ? {} : { canvas: { ...patch.canvas } }),
+    ...(patch.durationUs === undefined ? {} : { durationUs: patch.durationUs }),
+    ...(patch.coverDataUrl === undefined ? {} : { coverDataUrl: patch.coverDataUrl }),
+  };
+  if (
+    next.canvas?.width === entry.canvas?.width &&
+    next.canvas?.height === entry.canvas?.height &&
+    next.durationUs === entry.durationUs &&
+    next.coverDataUrl === entry.coverDataUrl
+  )
+    return entry;
+  writeCatalog(storage, { version: 4, projects: { ...database.projects, [projectId]: next } });
+  return next;
 }
 
 export function trashCatalogProject(storage: BrowserKeyValueStore, projectId: string): void {

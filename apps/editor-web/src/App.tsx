@@ -926,6 +926,9 @@ export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
         updatedAt: now,
         timelineProjectId: id,
         visualProjectId: id,
+        // The card shows the format before the project is first saved (T-D07).
+        canvas: { width: spec.canvas.width, height: spec.canvas.height },
+        durationUs: 0,
       };
       upsertCatalogProject(storage, entry);
       saveActiveProjectId(storage, id);

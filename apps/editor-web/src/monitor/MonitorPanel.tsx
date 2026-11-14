@@ -31,6 +31,7 @@ import {
   type PreviewQuality,
 } from '../preview-quality.js';
 import { timelineEffectiveDurationUs } from '../timeline-layout.js';
+import { COVER_MAX_SIDE, saveProjectCard } from '../project-card-save.js';
 import { AgentPreviewBadge } from '../AgentPreviewBadge.js';
 import { useAgentPreviewSnapshot } from '../agent-preview-store.js';
 import {
@@ -118,6 +119,9 @@ import {
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
  * Monitor preview and direct-manipulation surface, moved out of App.tsx (T-M02a).
  */
+
+/** How long the project stays unchanged before its library card is refreshed. */
+const PROJECT_CARD_SAVE_DELAY_MS = 3000;
 
 export function MonitorPanel({
   agentPreviewSurfaceVisible = true,
@@ -301,6 +305,30 @@ function MonitorPanelContent({
     (maxWidth: number, maxHeight: number) => rendererRef.current?.readPixels(maxWidth, maxHeight),
     [],
   );
+  // Project card (T-D07): keep the library card's format, length and cover up to date.
+  // A short wait after the last change, and once more when the editor closes. The
+  // cover is the frame on show; a failed capture keeps the old cover (see saveProjectCard).
+  const cardSnapshotRef = useRef<() => void>(() => undefined);
+  cardSnapshotRef.current = () => {
+    const rootId = timelineProject.rootCompositionId;
+    const timelineComposition = timelineProject.compositions[rootId];
+    const visualComposition = visualProject.compositions[visualProject.rootCompositionId];
+    if (timelineComposition === undefined || visualComposition === undefined) return;
+    saveProjectCard(storage, {
+      projectId: visualProject.id,
+      canvas: { width: visualComposition.width, height: visualComposition.height },
+      durationUs: timelineEffectiveDurationUs(timelineComposition),
+      readFrame: () => rendererRef.current?.readPixels(COVER_MAX_SIDE, COVER_MAX_SIDE),
+    });
+  };
+  useEffect(() => {
+    const timer = window.setTimeout(() => cardSnapshotRef.current(), PROJECT_CARD_SAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [visualProject, timelineProject]);
+  useEffect(() => {
+    const flush = cardSnapshotRef;
+    return () => flush.current();
+  }, []);
   const devicePixelRatio = useDevicePixelRatio();
   // Selection (T-M04): the Monitor keeps none of its own. It reads the shared
   // `state.selectedIds` and writes through the shared setters; the elements
