@@ -145,6 +145,7 @@ import {
   type JoyCodeMessageKey,
 } from './joy-code-messages.js';
 import { JoyCodeFailureCard } from './joy-code-failure-card.js';
+import { JoyCodeMediaParts, type JoyCodeMediaPartsProps } from './joy-code-media-parts.js';
 import {
   createJoyCodeRetryTargets,
   joyCodeMessageWithoutRetry,
@@ -569,6 +570,7 @@ export function AgentPanel({
   resolveAudioAssetUrl,
   storage,
   onOpenSettings,
+  generatedMedia,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -606,6 +608,12 @@ export function AgentPanel({
   /** Writer-fenced browser persistence owned by the writable editor root. */
   readonly storage: ProjectWriterStorage;
   readonly onOpenSettings?: () => void;
+  /**
+   * Picture and video messages: the bytes reader (by job id, never by path) and
+   * the handlers for Cancel, Add to library, Place on timeline, Save as and
+   * Discard. Absent handlers do nothing (T-C06 wires the real ones).
+   */
+  readonly generatedMedia?: Omit<JoyCodeMediaPartsProps, 'parts'>;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -3806,15 +3814,19 @@ export function AgentPanel({
                   )}
                   <div>
                     <strong>{message.role === 'user' ? 'You' : 'Joy Code'}</strong>
-                    <p
-                      lang={
-                        message.role === 'assistant' && /[\u0600-\u06ff]/u.test(message.body)
-                          ? 'fa'
-                          : undefined
-                      }
-                    >
-                      {message.body}
-                    </p>
+                    {message.parts !== undefined && message.parts.length > 0 ? (
+                      <JoyCodeMediaParts {...generatedMedia} parts={message.parts} />
+                    ) : (
+                      <p
+                        lang={
+                          message.role === 'assistant' && /[\u0600-\u06ff]/u.test(message.body)
+                            ? 'fa'
+                            : undefined
+                        }
+                      >
+                        {message.body}
+                      </p>
+                    )}
                   </div>
                 </article>
               ),
