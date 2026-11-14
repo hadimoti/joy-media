@@ -61,7 +61,6 @@ import {
   ownerDefaultLibrary,
   ownerLibraryRefusal,
   parseRunArgs,
-  reportWithFolderChanges,
   runFolderProblem,
   samePath,
 } from './scenario-rules.mjs';

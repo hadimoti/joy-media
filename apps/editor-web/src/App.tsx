@@ -4747,23 +4747,43 @@ function EditorWorkspace({
         // browser can do it for this frame size and sample rate. Otherwise the real-time recorder
         // below runs, exactly as before. The choice is made once, here.
         let offlineCapability: OfflineMp4Capability;
-        try {
-          const { detectOfflineMp4Capability } = await import('./offline-mp4-export.js');
-          offlineCapability = await detectOfflineMp4Capability({
-            width,
-            height,
-            frameRate,
-            needsAudio: true,
-            audioSampleRate,
-            audioChannels: audio.channels,
-            audioBitrate: audio.bitrate,
-            bitrate: videoBitrate,
-          });
-        } catch (error) {
+        const forceRecorderFallback =
+          typeof window !== 'undefined' &&
+          Boolean(
+            (window as unknown as { __JOY_MEDIA_FORCE_RECORDER_FALLBACK__?: boolean })
+              .__JOY_MEDIA_FORCE_RECORDER_FALLBACK__,
+          );
+        if (forceRecorderFallback) {
           offlineCapability = {
             ok: false,
-            reason: error instanceof Error ? error.message : String(error),
+            reason: 'Forced by __JOY_MEDIA_FORCE_RECORDER_FALLBACK__',
           };
+        } else {
+          try {
+            const { detectOfflineMp4Capability } = await import('./offline-mp4-export.js');
+            offlineCapability = await detectOfflineMp4Capability({
+              width,
+              height,
+              frameRate,
+              needsAudio: true,
+              audioSampleRate,
+              audioChannels: audio.channels,
+              audioBitrate: audio.bitrate,
+              bitrate: videoBitrate,
+            });
+          } catch (error) {
+            offlineCapability = {
+              ok: false,
+              reason: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }
+        if (typeof window !== 'undefined') {
+          (
+            window as unknown as { __JOY_MEDIA_LAST_EXPORT_ROUTE__?: string }
+          ).__JOY_MEDIA_LAST_EXPORT_ROUTE__ = offlineCapability.ok
+            ? 'offline-mp4'
+            : 'recorder-fallback';
         }
         if (!offlineCapability.ok)
           console.warn(
@@ -4800,7 +4820,7 @@ function EditorWorkspace({
         const recorderCanvas = document.createElement('canvas');
         recorderCanvas.width = width;
         recorderCanvas.height = height;
-        const recorderContext = recorderCanvas.getContext('2d');
+        const recorderContext = recorderCanvas.getContext('2d', { colorSpace: 'srgb' });
         if (recorderContext === null)
           throw new Error('Unable to create the deterministic export capture canvas');
         activeRecorderCanvas = recorderCanvas;
