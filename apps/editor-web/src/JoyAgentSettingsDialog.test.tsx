@@ -464,10 +464,8 @@ describe('JOY Agent Settings media capability probe', () => {
 
     expect(probe).not.toHaveBeenCalled();
     expect(rendered.textContent).toContain('three tiny test clips');
-    expect(rendered.textContent).toContain('Your project and your media are never sent');
-    expect(rendered.textContent).toContain(
-      'Your provider may still charge for these three small requests',
-    );
+    expect(rendered.textContent).toContain('never your project or media');
+    expect(rendered.textContent).toContain('Your provider may charge for them');
 
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');

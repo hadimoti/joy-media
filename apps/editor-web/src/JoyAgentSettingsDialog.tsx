@@ -191,7 +191,6 @@ const TAB_CONFIG: {
   readonly icon: ReactNode;
   readonly kicker: string;
   readonly title: string;
-  readonly description: string;
 }[] = [
   {
     id: 'models',
@@ -199,7 +198,6 @@ const TAB_CONFIG: {
     icon: <BoltIcon />,
     kicker: SETTINGS_PAGES.models.kicker,
     title: SETTINGS_PAGES.models.title,
-    description: SETTINGS_PAGES.models.description,
   },
   {
     id: 'execution',
@@ -207,7 +205,6 @@ const TAB_CONFIG: {
     icon: <ShieldIcon />,
     kicker: SETTINGS_PAGES.execution.kicker,
     title: SETTINGS_PAGES.execution.title,
-    description: SETTINGS_PAGES.execution.description,
   },
   {
     id: 'experience',
@@ -215,7 +212,6 @@ const TAB_CONFIG: {
     icon: <EyeIcon />,
     kicker: SETTINGS_PAGES.experience.kicker,
     title: SETTINGS_PAGES.experience.title,
-    description: SETTINGS_PAGES.experience.description,
   },
   {
     id: 'permissions',
@@ -223,7 +219,6 @@ const TAB_CONFIG: {
     icon: <WrenchIcon />,
     kicker: SETTINGS_PAGES.permissions.kicker,
     title: SETTINGS_PAGES.permissions.title,
-    description: SETTINGS_PAGES.permissions.description,
   },
   {
     id: 'diagnostics',
@@ -231,7 +226,6 @@ const TAB_CONFIG: {
     icon: <FlaskIcon />,
     kicker: SETTINGS_PAGES.diagnostics.kicker,
     title: SETTINGS_PAGES.diagnostics.title,
-    description: SETTINGS_PAGES.diagnostics.description,
   },
 ];
 
@@ -1118,67 +1112,34 @@ export function JoyAgentSettingsDialog({
             <div className="joy-settings-section-header">
               <span className="joy-settings-section-kicker">{activeTabMeta?.kicker ?? ''}</span>
               <h3 className="joy-settings-section-title">{activeTabMeta?.title ?? ''}</h3>
-              <p className="joy-settings-section-desc">{activeTabMeta?.description ?? ''}</p>
             </div>
 
-            {/* TAB 1: AI MODELS & APIS */}
-            {activeTab === 'models' ? (
-              <AgentSlotsSection
-                profiles={profiles}
-                onUseSlot={useAgentSlot}
-                onProfilesChanged={() => loadProfiles()}
-              />
-            ) : null}
+            {/* TAB 1: AI MODELS. The order a person works in: the status of the connection, the two
+                profile cards, the connections (saved list, sign-in, own key), then the media check. */}
             {activeTab === 'models' && (
-              <div className="joy-accordion">
-                {onOpenModelDrawer && (
-                  <button
-                    className="button-secondary"
-                    onClick={onOpenModelDrawer}
-                    aria-label={SETTINGS_MODELS.browseButton}
-                  >
-                    {SETTINGS_MODELS.browseButton}
-                  </button>
-                )}
-                {/* Studio Presets Picker */}
-                <div className="joy-studio-preset-bar">
-                  <button type="button" className="button-secondary joy-preset-tab is-active">
-                    <span className="joy-preset-icon">
-                      <ToolsIcon />
-                    </span>
-                    <div className="joy-preset-text">
-                      <strong>{SETTINGS_MODELS.presetTitle}</strong>
-                      <span>{SETTINGS_MODELS.presetHint}</span>
-                    </div>
-                  </button>
-                </div>
-
-                {/* Active Connection Banner */}
+              <div className="joy-settings-page">
+                {/* (a) The connection status, on one line. */}
                 <div className="joy-settings-active-banner">
-                  <div className="joy-settings-active-info">
-                    <div className="joy-settings-active-icon">
-                      <BoltIcon />
-                    </div>
-                    <div className="joy-settings-active-details">
-                      <strong>
-                        {connectionStatus?.modelId
-                          ? SETTINGS_MODELS.activeModel.replace(
-                              '{model}',
-                              () => connectionStatus.modelId,
-                            )
-                          : SETTINGS_MODELS.noModel}
-                      </strong>
-                      <span role="status">
-                        {connectionStatus?.capability === 'tool-loop'
-                          ? SETTINGS_MODELS.readyToEdit
-                          : connectionStatus?.capability === 'plan-only'
-                            ? SETTINGS_MODELS.briefOnly
-                            : connectionStatus?.capability === 'incompatible'
-                              ? SETTINGS_MODELS.connectionFailed
-                              : SETTINGS_MODELS.connectBelow}
-                      </span>
-                    </div>
-                  </div>
+                  <span className="joy-settings-active-icon">
+                    <BoltIcon />
+                  </span>
+                  <strong className="joy-settings-active-name">
+                    {connectionStatus?.modelId
+                      ? SETTINGS_MODELS.activeModel.replace(
+                          '{model}',
+                          () => connectionStatus.modelId,
+                        )
+                      : SETTINGS_MODELS.noModel}
+                  </strong>
+                  <span role="status" className="joy-settings-active-state">
+                    {connectionStatus?.capability === 'tool-loop'
+                      ? SETTINGS_MODELS.readyToEdit
+                      : connectionStatus?.capability === 'plan-only'
+                        ? SETTINGS_MODELS.briefOnly
+                        : connectionStatus?.capability === 'incompatible'
+                          ? SETTINGS_MODELS.connectionFailed
+                          : SETTINGS_MODELS.connectBelow}
+                  </span>
                   {connectionStatus?.modelId && (
                     <button type="button" className="button-secondary button-sm" onClick={clear}>
                       {SETTINGS_MODELS.disconnect}
@@ -1186,437 +1147,483 @@ export function JoyAgentSettingsDialog({
                   )}
                 </div>
 
-                {/* Saved Vault Profiles Bar */}
-                {profiles.length > 0 && (
-                  <div className="joy-settings-vault-profiles">
-                    <div className="joy-settings-vault-profiles-header">
-                      <span>
-                        {SETTINGS_MODELS.savedConnections} ({profiles.length})
-                      </span>
-                    </div>
-                    <div className="joy-settings-vault-profiles-grid">
-                      {profiles.map((prof) => {
-                        const disabledLegacy = prof.state === 'disabled-legacy';
-                        // What this card's provider can make in JOY Media; nothing when it can make neither (T-C07).
-                        const canMake = canMakeLabel(
-                          generationSupport(prof.provider, 'image').supported,
-                          generationSupport(prof.provider, 'video').supported,
-                        );
-                        return (
-                          <div
-                            key={prof.id}
-                            data-profile-state={prof.state ?? 'active'}
-                            className={`joy-settings-provider-card ${savedProfile?.id === prof.id ? 'is-active' : ''} ${disabledLegacy ? 'is-disabled-legacy' : ''}`}
-                          >
-                            <div className="joy-settings-provider-meta">
-                              <strong>{profileLabel(prof)}</strong>
-                              <span>{displayModelId(prof.modelId)}</span>
-                              {canMake !== undefined && (
-                                <span className="joy-settings-can-make">{canMake}</span>
-                              )}
-                              {disabledLegacy && (
-                                <span className="joy-settings-legacy-status">
-                                  {SETTINGS_MODELS.legacyProfile}
-                                </span>
-                              )}
-                              {prof.state === 'credential-unavailable' && (
-                                <span className="joy-settings-legacy-status">
-                                  {SETTINGS_MODELS.keyUnreadable}
-                                </span>
-                              )}
-                              {prof.bound === false &&
-                                !disabledLegacy &&
-                                prof.state !== 'credential-unavailable' && (
+                {/* (b) The two profile cards, then (c) the connections card, which the slot section places after them. */}
+                <AgentSlotsSection
+                  profiles={profiles}
+                  onUseSlot={useAgentSlot}
+                  onProfilesChanged={() => loadProfiles()}
+                  connectionsTitle={SETTINGS_MODELS.connectionsTitle}
+                  connectionsAction={
+                    onOpenModelDrawer ? (
+                      <button
+                        type="button"
+                        className="button-secondary button-sm"
+                        onClick={onOpenModelDrawer}
+                        aria-label={SETTINGS_MODELS.browseButton}
+                      >
+                        {SETTINGS_MODELS.browseButton}
+                      </button>
+                    ) : undefined
+                  }
+                >
+                  {/* The saved connections: one row each, name at the left, actions at the right. */}
+                  {profiles.length > 0 && (
+                    <div className="joy-settings-vault-profiles">
+                      <div className="joy-settings-vault-profiles-header">
+                        <span>
+                          {SETTINGS_MODELS.savedConnections} ({profiles.length})
+                        </span>
+                      </div>
+                      <div className="joy-settings-vault-profiles-grid">
+                        {profiles.map((prof) => {
+                          const disabledLegacy = prof.state === 'disabled-legacy';
+                          // What this row's provider can make in JOY Media; nothing when it can make neither (T-C07).
+                          const canMake = canMakeLabel(
+                            generationSupport(prof.provider, 'image').supported,
+                            generationSupport(prof.provider, 'video').supported,
+                          );
+                          return (
+                            <div
+                              key={prof.id}
+                              data-profile-state={prof.state ?? 'active'}
+                              className={`joy-settings-provider-card ${savedProfile?.id === prof.id ? 'is-active' : ''} ${disabledLegacy ? 'is-disabled-legacy' : ''}`}
+                            >
+                              <div className="joy-settings-provider-meta">
+                                <strong>{profileLabel(prof)}</strong>
+                                <span>{displayModelId(prof.modelId)}</span>
+                                {canMake !== undefined && (
+                                  <span className="joy-settings-can-make">{canMake}</span>
+                                )}
+                                {disabledLegacy && (
                                   <span className="joy-settings-legacy-status">
-                                    {SETTINGS_MODELS.keyConfirmAgain}
+                                    {SETTINGS_MODELS.legacyProfile}
                                   </span>
                                 )}
-                            </div>
-                            <div className="joy-settings-provider-actions">
-                              {disabledLegacy ? (
-                                <button
-                                  type="button"
-                                  className="button-secondary button-sm"
-                                  onClick={() => void deferLegacyProfile(prof)}
-                                  disabled={working || prof.decision === 'later'}
-                                >
-                                  {SETTINGS_MODELS.laterButton}
-                                </button>
-                              ) : (
-                                <>
+                                {prof.state === 'credential-unavailable' && (
+                                  <span className="joy-settings-legacy-status">
+                                    {SETTINGS_MODELS.keyUnreadable}
+                                  </span>
+                                )}
+                                {prof.bound === false &&
+                                  !disabledLegacy &&
+                                  prof.state !== 'credential-unavailable' && (
+                                    <span className="joy-settings-legacy-status">
+                                      {SETTINGS_MODELS.keyConfirmAgain}
+                                    </span>
+                                  )}
+                              </div>
+                              <div className="joy-settings-provider-actions">
+                                {disabledLegacy ? (
                                   <button
                                     type="button"
                                     className="button-secondary button-sm"
-                                    disabled={working || profileActionId !== undefined}
-                                    onClick={() => void connectSavedProfile(prof)}
+                                    onClick={() => void deferLegacyProfile(prof)}
+                                    disabled={working || prof.decision === 'later'}
                                   >
-                                    {SETTINGS_MODELS.useButton}
+                                    {SETTINGS_MODELS.laterButton}
                                   </button>
-                                  {prof.provider === 'chatgpt' && (
-                                    <>
-                                      <button
-                                        type="button"
-                                        className="button-secondary button-sm"
-                                        disabled={working || profileActionId !== undefined}
-                                        onClick={() => void reauthorizeChatGptProfile(prof)}
-                                      >
-                                        {profileActionId === prof.id
-                                          ? SETTINGS_MODELS.working
-                                          : SETTINGS_MODELS.signInAgain}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="button-danger button-sm"
-                                        disabled={working || profileActionId !== undefined}
-                                        onClick={() => void signOutChatGptProfile(prof)}
-                                      >
-                                        {SETTINGS_MODELS.signOutAndRevoke}
-                                      </button>
-                                    </>
-                                  )}
-                                  <button
-                                    type="button"
-                                    className="icon-button joy-settings-remove-btn"
-                                    disabled={profileActionId !== undefined}
-                                    onClick={() => void removeProfile(prof)}
-                                    aria-label={
-                                      prof.provider === 'chatgpt'
-                                        ? SETTINGS_MODELS.removeChatGptLabel
-                                        : removeProfileLabel(profileLabel(prof))
-                                    }
-                                  >
-                                    ✕
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* ACCORDION 1: Connection Endpoint & Credentials */}
-                <div
-                  className={`agent-settings-section joy-accordion-item ${openAccordions['models-endpoint'] ? 'is-open' : ''}`}
-                >
-                  <button
-                    type="button"
-                    className="button-secondary joy-accordion-trigger"
-                    onClick={() => toggleAccordion('models-endpoint')}
-                    aria-expanded={openAccordions['models-endpoint']}
-                  >
-                    <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">
-                        <PlugIcon />
-                      </span>
-                      <span>{SETTINGS_MODELS.connectionTitle}</span>
-                    </div>
-                    <div className="joy-accordion-trigger-meta">
-                      <span className="joy-accordion-tag">
-                        {provider === ''
-                          ? SETTINGS_MODELS.providerTagNone
-                          : provider === 'openrouter'
-                            ? SETTINGS_MODELS.providerTagOpenRouter
-                            : SETTINGS_MODELS.yourOwnEndpoint}
-                      </span>
-                      <span className="joy-accordion-chevron">
-                        <ChevronDownIcon />
-                      </span>
-                    </div>
-                  </button>
-
-                  {openAccordions['models-endpoint'] && (
-                    <div className="joy-accordion-content">
-                      <ProviderSignInPanel
-                        onSignedIn={() => void loadProfiles()}
-                        onSaved={() => void loadProfiles()}
-                      />
-                      <div className="joy-settings-form-grid">
-                        <div className="joy-settings-field">
-                          <label>
-                            <span>{SETTINGS_MODELS.providerLabel}</span>
-                            <select
-                              value={provider}
-                              onChange={(e) =>
-                                handleProviderChange(e.target.value as DialogProvider)
-                              }
-                            >
-                              <option value="" disabled>
-                                {SETTINGS_MODELS.chooseProvider}
-                              </option>
-                              <option value="openrouter">{SETTINGS_MODELS.openRouterOption}</option>
-                              {/* The legacy Grok row uses xAI's API route, whose key entry lives in the xAI accordion.
-                                  Source: D22 step 2 brief (2026-10-30) and registry rows `grok`/`xai`. */}
-                              {PROVIDER_REGISTRY.filter(
-                                (item) =>
-                                  item.id !== 'openrouter' &&
-                                  item.id !== 'grok' &&
-                                  !SIGN_IN_PROVIDER_IDS.has(item.id) &&
-                                  item.signInOnly !== true,
-                              ).map((item) => (
-                                <option key={item.id} value={item.id}>
-                                  {item.label}
-                                </option>
-                              ))}
-                              <option value="openai-compatible">
-                                {SETTINGS_MODELS.otherProviderOption}
-                              </option>
-                            </select>
-                          </label>
-                          {(findRegistryProvider(provider)?.regions.length ?? 0) > 1 && (
-                            <label>
-                              <span>{SETTINGS_MODELS.regionLabel}</span>
-                              <select
-                                value={region}
-                                onChange={(e) => {
-                                  const next = findRegistryProvider(provider)?.regions.find(
-                                    (item) => item.id === e.target.value,
-                                  );
-                                  if (next === undefined) return;
-                                  clearTypedKey();
-                                  setRegion(next.id);
-                                  setBaseUrl(next.baseUrl);
-                                }}
-                              >
-                                {findRegistryProvider(provider)?.regions.map((item) => (
-                                  <option key={item.id} value={item.id}>
-                                    {item.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          )}
-                          {findRegistryProvider(provider) !== undefined && (
-                            <small>
-                              {SETTINGS_MODELS.getKeyAt}{' '}
-                              {findRegistryProvider(provider)?.regions.find(
-                                (item) => item.id === region,
-                              )?.keyUrl ?? ''}
-                            </small>
-                          )}
-                        </div>
-
-                        <div className="joy-settings-field">
-                          <label>
-                            <span>{SETTINGS_MODELS.connectionNameLabel}</span>
-                            <input
-                              type="text"
-                              placeholder={SETTINGS_MODELS.connectionNamePlaceholder}
-                              value={connectionName}
-                              onChange={(e) => setConnectionName(e.target.value)}
-                            />
-                          </label>
-                        </div>
-
-                        <div className="joy-settings-field-full joy-settings-field">
-                          <label>
-                            <span>{SETTINGS_MODELS.serviceAddressLabel}</span>
-                            <input
-                              type="text"
-                              placeholder={SETTINGS_MODELS.serviceAddressPlaceholder}
-                              value={baseUrl}
-                              onChange={(e) => {
-                                setBaseUrl(e.target.value);
-                                setCustomDisclosure(false);
-                              }}
-                            />
-                          </label>
-                        </div>
-
-                        <div className="joy-settings-field-full joy-settings-field">
-                          <label>
-                            <span>{SETTINGS_MODELS.keyLabel}</span>
-                            <input
-                              ref={keyRef}
-                              type="password"
-                              placeholder={
-                                canUseStoredKey(matchedProfile)
-                                  ? SETTINGS_MODELS.savedKeyPlaceholder
-                                  : SETTINGS_MODELS.keyPlaceholder
-                              }
-                              defaultValue=""
-                              autoComplete="off"
-                              spellCheck={false}
-                              onChange={(event) => {
-                                // The scope is the endpoint in force when the key was started. Later edits keep
-                                // it, so an endpoint edited in between cannot take the key over. An empty field
-                                // starts afresh.
-                                if (event.target.value === '') keyScopeRef.current = undefined;
-                                else if (keyScopeRef.current === undefined)
-                                  keyScopeRef.current = keyScopeFor(provider, baseUrl);
-                              }}
-                            />
-                          </label>
-                          {matchedProfile !== undefined &&
-                            matchedProfile.state !== 'credential-unavailable' && (
-                              <span className="joy-settings-hint-success">
-                                ({SETTINGS_STORAGE.savedNote})
-                              </span>
-                            )}
-                          <span className="joy-settings-hint-muted">
-                            <LockIcon /> {SETTINGS_STORAGE.keyNote}
-                          </span>
-                        </div>
-
-                        {requiresCustomEndpointConsent(provider, baseUrl) && (
-                          <div className="joy-settings-field-full joy-settings-field">
-                            <label className="agent-toggle joy-settings-hint-muted joy-settings-consent">
-                              <input
-                                type="checkbox"
-                                checked={customDisclosure}
-                                onChange={(event) => {
-                                  const checked = event.target.checked;
-                                  setCustomDisclosure(checked);
-                                  if (!checked) {
-                                    // Unchecking withdraws consent for this URL, including any
-                                    // saved-profile-bound acknowledgement.
-                                    revokeCustomEndpointAcknowledgementsForUrl(baseUrl);
-                                    // Withdrawn consent must also stop an already configured
-                                    // connection from being used.
-                                    if (connectionStatus) clear();
-                                  }
-                                  if (checked) {
-                                    const normalized = normalizeProviderBaseUrl(baseUrl);
-                                    // The acknowledgement belongs to the saved profile the form chose, not to
-                                    // another profile that happens to share this endpoint.
-                                    acknowledgeCustomEndpoint({
-                                      provider: 'custom',
-                                      baseUrl: normalized,
-                                      profileId: matchedProfile?.id,
-                                    });
-                                  }
-                                }}
-                                disabled={working || mediaProbeWorking}
-                              />
-                              {SETTINGS_MODELS.customEndpointConsent}
-                            </label>
-                          </div>
-                        )}
-
-                        {/* Model ID Text Input with Model Drawer Trigger */}
-                        <div className="joy-settings-field-full joy-settings-field">
-                          <label>
-                            <div className="joy-settings-field-row">
-                              <span>{SETTINGS_MODELS.modelIdLabel}</span>
-                              <button
-                                type="button"
-                                className="button-link joy-settings-text-btn"
-                                onClick={() => {
-                                  toggleAccordion('models-drawer');
-                                  if (discoveredModels.length === 0) {
-                                    void discoverModels();
-                                  }
-                                }}
-                              >
-                                {openAccordions['models-drawer'] ? (
-                                  <>
-                                    <ChevronUpIcon /> {SETTINGS_MODELS.hideModelList}
-                                  </>
                                 ) : (
                                   <>
-                                    <BoltIcon /> {SETTINGS_MODELS.showModelList} <ChevronDownIcon />
+                                    {prof.provider === 'chatgpt' && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="button-secondary button-sm"
+                                          disabled={working || profileActionId !== undefined}
+                                          onClick={() => void reauthorizeChatGptProfile(prof)}
+                                        >
+                                          {profileActionId === prof.id
+                                            ? SETTINGS_MODELS.working
+                                            : SETTINGS_MODELS.signInAgain}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="button-danger button-sm"
+                                          disabled={working || profileActionId !== undefined}
+                                          onClick={() => void signOutChatGptProfile(prof)}
+                                        >
+                                          {SETTINGS_MODELS.signOutAndRevoke}
+                                        </button>
+                                      </>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="button-secondary button-sm"
+                                      disabled={working || profileActionId !== undefined}
+                                      onClick={() => void connectSavedProfile(prof)}
+                                    >
+                                      {SETTINGS_MODELS.useButton}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="icon-button joy-settings-remove-btn"
+                                      disabled={profileActionId !== undefined}
+                                      onClick={() => void removeProfile(prof)}
+                                      aria-label={
+                                        prof.provider === 'chatgpt'
+                                          ? SETTINGS_MODELS.removeChatGptLabel
+                                          : removeProfileLabel(profileLabel(prof))
+                                      }
+                                    >
+                                      ✕
+                                    </button>
                                   </>
                                 )}
-                              </button>
+                              </div>
                             </div>
-                            <div className="joy-settings-input-with-action">
-                              <input
-                                type="text"
-                                aria-label={SETTINGS_MODELS.modelIdName}
-                                placeholder={SETTINGS_MODELS.modelIdPlaceholder}
-                                value={modelId}
-                                onChange={(e) => setModelId(e.target.value)}
-                              />
-                              <button
-                                type="button"
-                                className="button-secondary"
-                                onClick={() => void discoverModels()}
-                                disabled={isDiscovering || working}
-                                title={SETTINGS_MODELS.findModelsTooltip}
-                              >
-                                <SearchIcon />{' '}
-                                {isDiscovering
-                                  ? SETTINGS_MODELS.findingModels
-                                  : SETTINGS_MODELS.findModels}
-                              </button>
-                            </div>
-                          </label>
-                        </div>
-                      </div>
-
-                      {/* Connection Actions */}
-                      <div className="joy-settings-actions-bar">
-                        <div className="joy-settings-actions-row">
-                          <button
-                            type="button"
-                            className="button-primary"
-                            onClick={() => void connect()}
-                            disabled={working}
-                          >
-                            {working ? SETTINGS_MODELS.connecting : SETTINGS_MODELS.connect}
-                          </button>
-                          {connectionStatus?.capability && (
-                            <button
-                              type="button"
-                              className="button-secondary"
-                              onClick={clear}
-                              disabled={working}
-                            >
-                              {SETTINGS_MODELS.clearConnection}
-                            </button>
-                          )}
-                        </div>
-
-                        {connectionNotice && (
-                          <div
-                            className={`joy-settings-notice ${connectionNotice.kind === 'error' ? 'is-error' : connectionNotice.kind === 'success' ? 'is-success' : 'is-info'}`}
-                            role={connectionNotice.kind === 'error' ? 'alert' : 'status'}
-                          >
-                            {connectionNotice.message}
-                          </div>
-                        )}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
-                </div>
 
-                {/* ACCORDION 2: Discovered Models Palette / Selection Drawer */}
-                <div
-                  className={`agent-settings-section joy-accordion-item joy-model-drawer-item ${openAccordions['models-drawer'] ? 'is-open' : ''}`}
-                >
-                  <button
-                    type="button"
-                    className="button-secondary joy-accordion-trigger"
-                    onClick={() => toggleAccordion('models-drawer')}
-                    aria-expanded={openAccordions['models-drawer']}
+                  {/* Connection and sign-in: the ChatGPT, Kimi and xAI rows, then your own API key. */}
+                  <div
+                    className={`joy-accordion-item ${openAccordions['models-endpoint'] ? 'is-open' : ''}`}
                   >
-                    <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">
-                        <PaletteIcon />
-                      </span>
-                      <span>{SETTINGS_MODELS.modelsTitle}</span>
-                    </div>
-                    <div className="joy-accordion-trigger-meta">
-                      {discoveredModels.length > 0 ? (
-                        <span className="joy-accordion-tag is-success">
-                          <CheckIcon /> {modelsReadyTag(discoveredModels.length)}
+                    <button
+                      type="button"
+                      className="button-secondary joy-accordion-trigger"
+                      onClick={() => toggleAccordion('models-endpoint')}
+                      aria-expanded={openAccordions['models-endpoint']}
+                    >
+                      <div className="joy-accordion-trigger-title">
+                        <span className="joy-accordion-icon">
+                          <PlugIcon />
                         </span>
-                      ) : (
-                        <span className="joy-accordion-tag">{SETTINGS_MODELS.openToFind}</span>
-                      )}
-                      <span className="joy-accordion-chevron">
-                        <ChevronDownIcon />
-                      </span>
-                    </div>
-                  </button>
+                        <span>{SETTINGS_MODELS.connectionTitle}</span>
+                      </div>
+                      <div className="joy-accordion-trigger-meta">
+                        <span className="joy-accordion-tag">
+                          {provider === ''
+                            ? SETTINGS_MODELS.providerTagNone
+                            : provider === 'openrouter'
+                              ? SETTINGS_MODELS.providerTagOpenRouter
+                              : SETTINGS_MODELS.yourOwnEndpoint}
+                        </span>
+                        <span className="joy-accordion-chevron">
+                          <ChevronDownIcon />
+                        </span>
+                      </div>
+                    </button>
 
-                  {openAccordions['models-drawer'] && (
-                    <div className="joy-accordion-content joy-model-drawer-content">
-                      <div className="joy-model-drawer-header">
-                        <p className="joy-model-drawer-hint">{SETTINGS_MODELS.modelsHint}</p>
-                        <div className="joy-settings-actions-row-tight">
+                    {openAccordions['models-endpoint'] && (
+                      <div className="joy-accordion-content">
+                        <ProviderSignInPanel
+                          onSignedIn={() => void loadProfiles()}
+                          onSaved={() => void loadProfiles()}
+                        />
+
+                        {/* Your own API key: the add form. */}
+                        <section className="joy-own-key" aria-label={SETTINGS_MODELS.presetTitle}>
+                          <div className="joy-own-key-head">
+                            <button
+                              type="button"
+                              className="button-secondary joy-preset-tab is-active"
+                              aria-pressed="true"
+                            >
+                              <span className="joy-preset-icon">
+                                <ToolsIcon />
+                              </span>
+                              <strong>{SETTINGS_MODELS.presetTitle}</strong>
+                            </button>
+                          </div>
+
+                          <div className="joy-settings-form-grid">
+                            <div className="joy-settings-field">
+                              <label>
+                                <span>{SETTINGS_MODELS.providerLabel}</span>
+                                <select
+                                  value={provider}
+                                  onChange={(e) =>
+                                    handleProviderChange(e.target.value as DialogProvider)
+                                  }
+                                >
+                                  <option value="" disabled>
+                                    {SETTINGS_MODELS.chooseProvider}
+                                  </option>
+                                  <option value="openrouter">
+                                    {SETTINGS_MODELS.openRouterOption}
+                                  </option>
+                                  {/* The legacy Grok row uses xAI's API route, whose key entry lives in the xAI accordion.
+                                  Source: D22 step 2 brief (2026-10-30) and registry rows `grok`/`xai`. */}
+                                  {PROVIDER_REGISTRY.filter(
+                                    (item) =>
+                                      item.id !== 'openrouter' &&
+                                      item.id !== 'grok' &&
+                                      !SIGN_IN_PROVIDER_IDS.has(item.id) &&
+                                      item.signInOnly !== true,
+                                  ).map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                      {item.label}
+                                    </option>
+                                  ))}
+                                  <option value="openai-compatible">
+                                    {SETTINGS_MODELS.otherProviderOption}
+                                  </option>
+                                </select>
+                              </label>
+                            </div>
+
+                            <div className="joy-settings-field">
+                              <label>
+                                <span>{SETTINGS_MODELS.connectionNameLabel}</span>
+                                <input
+                                  type="text"
+                                  placeholder={SETTINGS_MODELS.connectionNamePlaceholder}
+                                  value={connectionName}
+                                  onChange={(e) => setConnectionName(e.target.value)}
+                                />
+                              </label>
+                            </div>
+
+                            {(findRegistryProvider(provider)?.regions.length ?? 0) > 1 && (
+                              <div className="joy-settings-field-full joy-settings-field">
+                                <label>
+                                  <span>{SETTINGS_MODELS.regionLabel}</span>
+                                  <select
+                                    value={region}
+                                    onChange={(e) => {
+                                      const next = findRegistryProvider(provider)?.regions.find(
+                                        (item) => item.id === e.target.value,
+                                      );
+                                      if (next === undefined) return;
+                                      clearTypedKey();
+                                      setRegion(next.id);
+                                      setBaseUrl(next.baseUrl);
+                                    }}
+                                  >
+                                    {findRegistryProvider(provider)?.regions.map((item) => (
+                                      <option key={item.id} value={item.id}>
+                                        {item.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                            )}
+
+                            <div className="joy-settings-field-full joy-settings-field">
+                              <label>
+                                <span>{SETTINGS_MODELS.serviceAddressLabel}</span>
+                                <input
+                                  type="text"
+                                  placeholder={SETTINGS_MODELS.serviceAddressPlaceholder}
+                                  value={baseUrl}
+                                  onChange={(e) => {
+                                    setBaseUrl(e.target.value);
+                                    setCustomDisclosure(false);
+                                  }}
+                                />
+                              </label>
+                              {findRegistryProvider(provider) !== undefined && (
+                                <small className="joy-settings-hint-muted">
+                                  {SETTINGS_MODELS.getKeyAt}{' '}
+                                  {findRegistryProvider(provider)?.regions.find(
+                                    (item) => item.id === region,
+                                  )?.keyUrl ?? ''}
+                                </small>
+                              )}
+                            </div>
+
+                            <div className="joy-settings-field-full joy-settings-field">
+                              <label>
+                                <span>{SETTINGS_MODELS.keyLabel}</span>
+                                <input
+                                  ref={keyRef}
+                                  type="password"
+                                  placeholder={
+                                    canUseStoredKey(matchedProfile)
+                                      ? SETTINGS_MODELS.savedKeyPlaceholder
+                                      : SETTINGS_MODELS.keyPlaceholder
+                                  }
+                                  defaultValue=""
+                                  autoComplete="off"
+                                  spellCheck={false}
+                                  onChange={(event) => {
+                                    // The scope is the endpoint in force when the key was started. Later edits keep
+                                    // it, so an endpoint edited in between cannot take the key over. An empty field
+                                    // starts afresh.
+                                    if (event.target.value === '') keyScopeRef.current = undefined;
+                                    else if (keyScopeRef.current === undefined)
+                                      keyScopeRef.current = keyScopeFor(provider, baseUrl);
+                                  }}
+                                />
+                              </label>
+                              <span className="joy-settings-hint-muted joy-settings-hint-line">
+                                <LockIcon /> {SETTINGS_STORAGE.keyNote}
+                                {matchedProfile !== undefined &&
+                                  matchedProfile.state !== 'credential-unavailable' && (
+                                    <span className="joy-settings-hint-success">
+                                      ({SETTINGS_STORAGE.savedNote})
+                                    </span>
+                                  )}
+                              </span>
+                            </div>
+
+                            {requiresCustomEndpointConsent(provider, baseUrl) && (
+                              <div className="joy-settings-field-full joy-settings-field">
+                                <label className="agent-toggle joy-settings-hint-muted joy-settings-consent">
+                                  <input
+                                    type="checkbox"
+                                    checked={customDisclosure}
+                                    onChange={(event) => {
+                                      const checked = event.target.checked;
+                                      setCustomDisclosure(checked);
+                                      if (!checked) {
+                                        // Unchecking withdraws consent for this URL, including any
+                                        // saved-profile-bound acknowledgement.
+                                        revokeCustomEndpointAcknowledgementsForUrl(baseUrl);
+                                        // Withdrawn consent must also stop an already configured
+                                        // connection from being used.
+                                        if (connectionStatus) clear();
+                                      }
+                                      if (checked) {
+                                        const normalized = normalizeProviderBaseUrl(baseUrl);
+                                        // The acknowledgement belongs to the saved profile the form chose, not to
+                                        // another profile that happens to share this endpoint.
+                                        acknowledgeCustomEndpoint({
+                                          provider: 'custom',
+                                          baseUrl: normalized,
+                                          profileId: matchedProfile?.id,
+                                        });
+                                      }
+                                    }}
+                                    disabled={working || mediaProbeWorking}
+                                  />
+                                  {SETTINGS_MODELS.customEndpointConsent}
+                                </label>
+                              </div>
+                            )}
+
+                            {/* Model ID Text Input with Model Drawer Trigger */}
+                            <div className="joy-settings-field-full joy-settings-field">
+                              <label>
+                                <div className="joy-settings-field-row">
+                                  <span>{SETTINGS_MODELS.modelIdLabel}</span>
+                                  <button
+                                    type="button"
+                                    className="button-link joy-settings-text-btn"
+                                    onClick={() => {
+                                      toggleAccordion('models-drawer');
+                                      if (discoveredModels.length === 0) {
+                                        void discoverModels();
+                                      }
+                                    }}
+                                  >
+                                    {openAccordions['models-drawer'] ? (
+                                      <>
+                                        <ChevronUpIcon /> {SETTINGS_MODELS.hideModelList}
+                                      </>
+                                    ) : (
+                                      <>
+                                        <BoltIcon /> {SETTINGS_MODELS.showModelList}{' '}
+                                        <ChevronDownIcon />
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                                <div className="joy-settings-input-with-action">
+                                  <input
+                                    type="text"
+                                    aria-label={SETTINGS_MODELS.modelIdName}
+                                    placeholder={SETTINGS_MODELS.modelIdPlaceholder}
+                                    value={modelId}
+                                    onChange={(e) => setModelId(e.target.value)}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="button-secondary"
+                                    onClick={() => void discoverModels()}
+                                    disabled={isDiscovering || working}
+                                    title={SETTINGS_MODELS.findModelsTooltip}
+                                  >
+                                    <SearchIcon />{' '}
+                                    {isDiscovering
+                                      ? SETTINGS_MODELS.findingModels
+                                      : SETTINGS_MODELS.findModels}
+                                  </button>
+                                </div>
+                              </label>
+                            </div>
+                          </div>
+
+                          {connectionNotice && (
+                            <div
+                              className={`joy-settings-notice ${connectionNotice.kind === 'error' ? 'is-error' : connectionNotice.kind === 'success' ? 'is-success' : 'is-info'}`}
+                              role={connectionNotice.kind === 'error' ? 'alert' : 'status'}
+                            >
+                              {connectionNotice.message}
+                            </div>
+                          )}
+
+                          {/* The actions stand in a footer row at the right; the primary one is right-most. */}
+                          <div className="joy-card-footer">
+                            {connectionStatus?.capability && (
+                              <button
+                                type="button"
+                                className="button-secondary"
+                                onClick={clear}
+                                disabled={working}
+                              >
+                                {SETTINGS_MODELS.clearConnection}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="button-primary"
+                              onClick={() => void connect()}
+                              disabled={working}
+                            >
+                              {working ? SETTINGS_MODELS.connecting : SETTINGS_MODELS.connect}
+                            </button>
+                          </div>
+                        </section>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* The models found on this service. */}
+                  <div
+                    className={`joy-accordion-item joy-model-drawer-item ${openAccordions['models-drawer'] ? 'is-open' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      className="button-secondary joy-accordion-trigger"
+                      onClick={() => toggleAccordion('models-drawer')}
+                      aria-expanded={openAccordions['models-drawer']}
+                    >
+                      <div className="joy-accordion-trigger-title">
+                        <span className="joy-accordion-icon">
+                          <PaletteIcon />
+                        </span>
+                        <span>{SETTINGS_MODELS.modelsTitle}</span>
+                      </div>
+                      <div className="joy-accordion-trigger-meta">
+                        {discoveredModels.length > 0 ? (
+                          <span className="joy-accordion-tag is-success">
+                            <CheckIcon /> {modelsReadyTag(discoveredModels.length)}
+                          </span>
+                        ) : (
+                          <span className="joy-accordion-tag">{SETTINGS_MODELS.openToFind}</span>
+                        )}
+                        <span className="joy-accordion-chevron">
+                          <ChevronDownIcon />
+                        </span>
+                      </div>
+                    </button>
+
+                    {openAccordions['models-drawer'] && (
+                      <div className="joy-accordion-content joy-model-drawer-content">
+                        <div className="joy-model-drawer-header">
+                          <div className="joy-model-drawer-search">
+                            <input
+                              type="text"
+                              placeholder={SETTINGS_MODELS.filterPlaceholder}
+                              value={modelFilter}
+                              onChange={(e) => setModelFilter(e.target.value)}
+                            />
+                          </div>
                           <button
                             type="button"
                             className="button-secondary button-sm"
@@ -1631,83 +1638,72 @@ export function JoyAgentSettingsDialog({
                               : SETTINGS_MODELS.lookAgain}
                           </button>
                         </div>
-                      </div>
 
-                      {discoveryError && (
-                        <div className="joy-settings-notice is-error joy-settings-block-gap">
-                          {discoveryError}
-                        </div>
-                      )}
-
-                      <div className="joy-model-drawer-search">
-                        <input
-                          type="text"
-                          placeholder={SETTINGS_MODELS.filterPlaceholder}
-                          value={modelFilter}
-                          onChange={(e) => setModelFilter(e.target.value)}
-                        />
-                      </div>
-
-                      {/* Quick Filter Tag Buttons */}
-                      <div className="joy-model-drawer-tags">
-                        <button
-                          type="button"
-                          className={`button-secondary joy-model-tag ${modelFilter === '' ? 'is-active' : ''}`}
-                          onClick={() => setModelFilter('')}
-                        >
-                          {SETTINGS_MODELS.filterAll}
-                        </button>
-                        <button
-                          type="button"
-                          className={`button-secondary joy-model-tag ${modelFilter === 'free' ? 'is-active' : ''}`}
-                          onClick={() => setModelFilter('free')}
-                        >
-                          {SETTINGS_MODELS.filterFree}
-                        </button>
-                        <button
-                          type="button"
-                          className={`button-secondary joy-model-tag ${modelFilter === 'claude' ? 'is-active' : ''}`}
-                          onClick={() => setModelFilter('claude')}
-                        >
-                          {SETTINGS_MODELS.filterClaude}
-                        </button>
-                        <button
-                          type="button"
-                          className={`button-secondary joy-model-tag ${modelFilter === 'gpt' ? 'is-active' : ''}`}
-                          onClick={() => setModelFilter('gpt')}
-                        >
-                          {SETTINGS_MODELS.filterGpt}
-                        </button>
-                      </div>
-
-                      {/* Interactive Model Chips Grid */}
-                      <div className="joy-settings-model-chips">
-                        {filteredDiscoveredModels.length > 0 ? (
-                          filteredDiscoveredModels.slice(0, 80).map((m) => (
-                            <button
-                              key={m}
-                              type="button"
-                              className={`button-secondary joy-settings-model-chip ${modelId === m ? 'is-selected' : ''}`}
-                              onClick={() => setModelId(m)}
-                            >
-                              {m}
-                            </button>
-                          ))
-                        ) : (
-                          <div className="joy-model-drawer-empty">
-                            {isDiscovering
-                              ? SETTINGS_MODELS.lookingForModels
-                              : discoveredModels.length === 0
-                                ? SETTINGS_MODELS.noModelsYet
-                                : SETTINGS_MODELS.noModelMatches}
-                          </div>
+                        {discoveryError && (
+                          <div className="joy-settings-notice is-error">{discoveryError}</div>
                         )}
-                      </div>
-                    </div>
-                  )}
-                </div>
 
-                {/* ACCORDION 3: Synthetic Media Capability Diagnostics */}
+                        {/* Quick Filter Tag Buttons */}
+                        <div className="joy-model-drawer-tags">
+                          <button
+                            type="button"
+                            className={`button-secondary joy-model-tag ${modelFilter === '' ? 'is-active' : ''}`}
+                            onClick={() => setModelFilter('')}
+                          >
+                            {SETTINGS_MODELS.filterAll}
+                          </button>
+                          <button
+                            type="button"
+                            className={`button-secondary joy-model-tag ${modelFilter === 'free' ? 'is-active' : ''}`}
+                            onClick={() => setModelFilter('free')}
+                          >
+                            {SETTINGS_MODELS.filterFree}
+                          </button>
+                          <button
+                            type="button"
+                            className={`button-secondary joy-model-tag ${modelFilter === 'claude' ? 'is-active' : ''}`}
+                            onClick={() => setModelFilter('claude')}
+                          >
+                            {SETTINGS_MODELS.filterClaude}
+                          </button>
+                          <button
+                            type="button"
+                            className={`button-secondary joy-model-tag ${modelFilter === 'gpt' ? 'is-active' : ''}`}
+                            onClick={() => setModelFilter('gpt')}
+                          >
+                            {SETTINGS_MODELS.filterGpt}
+                          </button>
+                        </div>
+
+                        {/* Interactive Model Chips Grid */}
+                        <div className="joy-settings-model-chips">
+                          {filteredDiscoveredModels.length > 0 ? (
+                            filteredDiscoveredModels.slice(0, 80).map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                className={`button-secondary joy-settings-model-chip ${modelId === m ? 'is-selected' : ''}`}
+                                onClick={() => setModelId(m)}
+                              >
+                                {m}
+                              </button>
+                            ))
+                          ) : (
+                            <div className="joy-model-drawer-empty">
+                              {isDiscovering
+                                ? SETTINGS_MODELS.lookingForModels
+                                : discoveredModels.length === 0
+                                  ? SETTINGS_MODELS.noModelsYet
+                                  : SETTINGS_MODELS.noModelMatches}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </AgentSlotsSection>
+
+                {/* (d) The media support check, last. */}
                 <div
                   className={`agent-settings-section joy-accordion-item ${openAccordions['models-probe'] ? 'is-open' : ''}`}
                 >
@@ -1741,33 +1737,9 @@ export function JoyAgentSettingsDialog({
 
                   {openAccordions['models-probe'] && (
                     <div className="joy-accordion-content">
-                      <p className="joy-settings-hint-muted joy-settings-hint-block">
-                        {SETTINGS_MEDIA_CHECK.modelsHint}
-                      </p>
-
-                      <div className="joy-settings-actions-row joy-settings-block-gap">
-                        <button
-                          type="button"
-                          className="button-secondary"
-                          onClick={() => void probeMediaCapabilities()}
-                          disabled={!canProbeMediaCapabilities || working || mediaProbeWorking}
-                        >
-                          {mediaProbeWorking
-                            ? SETTINGS_MEDIA_CHECK.checking
-                            : SETTINGS_MEDIA_CHECK.check}
-                        </button>
-                        {mediaProbeNotice && (
-                          <span
-                            className={`joy-settings-inline-notice ${mediaProbeNotice.kind === 'error' ? 'is-error' : 'is-success'}`}
-                          >
-                            {mediaProbeNotice.message}
-                          </span>
-                        )}
-                      </div>
-
                       {mediaCapabilities !== undefined && (
                         <div className="agent-media-capability-result joy-settings-media-result">
-                          <p className="joy-settings-hint-strong joy-settings-hint-block">
+                          <p className="joy-settings-hint-strong">
                             {SETTINGS_MEDIA_CHECK.configuredModel} {mediaCapabilities.modelId}
                           </p>
                           <dl className="agent-media-capability-list joy-settings-probe-grid">
@@ -1786,12 +1758,35 @@ export function JoyAgentSettingsDialog({
                           </dl>
                         </div>
                       )}
+
+                      <div className="joy-card-footer joy-card-footer-split">
+                        <span className="joy-settings-hint-muted">
+                          {mediaProbeNotice ? (
+                            <span
+                              className={`joy-settings-inline-notice ${mediaProbeNotice.kind === 'error' ? 'is-error' : 'is-success'}`}
+                            >
+                              {mediaProbeNotice.message}
+                            </span>
+                          ) : (
+                            SETTINGS_MEDIA_CHECK.modelsHint
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          onClick={() => void probeMediaCapabilities()}
+                          disabled={!canProbeMediaCapabilities || working || mediaProbeWorking}
+                        >
+                          {mediaProbeWorking
+                            ? SETTINGS_MEDIA_CHECK.checking
+                            : SETTINGS_MEDIA_CHECK.check}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
               </div>
             )}
-
             {/* TAB 2: EXECUTION & SAFETY */}
             {activeTab === 'execution' && (
               <div className="joy-accordion">

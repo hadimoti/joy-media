@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { confirmDialog } from './app-dialogs.js';
 import {
   fetchDesktopProviderModels,
@@ -24,6 +24,15 @@ export interface AgentSlotsSectionProps {
   readonly onUseSlot: (slot: DesktopAgentSlot, profile: DesktopProviderProfile) => Promise<void>;
   /** Reads the saved profiles again after a ChatGPT sign-in, sign-in again or log out. */
   readonly onProfilesChanged?: () => unknown;
+  /**
+   * The connections the page keeps under the two profile cards (the saved list, the sign-in routes, the own-key form).
+   * They stand in the same card as the ChatGPT subscription row, so the page reads in the order a person works in.
+   */
+  readonly children?: ReactNode;
+  /** The heading of that card. Without it the card has no heading line. */
+  readonly connectionsTitle?: string;
+  /** A small control at the right end of the card's heading line. */
+  readonly connectionsAction?: ReactNode;
 }
 
 /**
@@ -35,6 +44,9 @@ export function AgentSlotsSection({
   profiles,
   onUseSlot,
   onProfilesChanged,
+  children,
+  connectionsTitle,
+  connectionsAction,
 }: AgentSlotsSectionProps) {
   const [slots, setSlots] = useState<readonly DesktopAgentSlot[]>([]);
   const [loadError, setLoadError] = useState<string>();
@@ -61,6 +73,7 @@ export function AgentSlotsSection({
     return (
       <section className="agent-slots" aria-label={SETTINGS_AGENT_SLOTS.sectionLabel}>
         <p className="agent-slots-note">{SETTINGS_AGENT_SLOTS.desktopNote}</p>
+        {renderConnections(connectionsTitle, connectionsAction, undefined, children)}
       </section>
     );
   }
@@ -114,6 +127,55 @@ export function AgentSlotsSection({
     }
   };
 
+  const accountElement = (
+    <section className="agent-slot-account" aria-label={SETTINGS_AGENT_SLOTS.accountLabel}>
+      <div className="agent-slot-account-name">
+        <h4>{SETTINGS_AGENT_SLOTS.accountLabel}</h4>
+        <p className="agent-slots-note">
+          {chatGpt === undefined
+            ? SETTINGS_AGENT_SLOTS.accountDisconnected
+            : SETTINGS_AGENT_SLOTS.accountConnected}
+        </p>
+      </div>
+      <div className="agent-slot-actions">
+        {chatGpt === undefined ? (
+          <button
+            type="button"
+            className="button-primary"
+            disabled={accountBusy}
+            onClick={() => void signInChatGpt()}
+          >
+            {SETTINGS_AGENT_SLOTS.connectChatGpt}
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="button-secondary"
+              disabled={accountBusy}
+              onClick={() => void signInChatGpt(chatGpt.id)}
+            >
+              {SETTINGS_AGENT_SLOTS.logInAgain}
+            </button>
+            <button
+              type="button"
+              className="button-secondary"
+              disabled={accountBusy}
+              onClick={() => void logOutChatGpt(chatGpt)}
+            >
+              {SETTINGS_AGENT_SLOTS.logOut}
+            </button>
+          </>
+        )}
+      </div>
+      {accountStatus !== undefined && (
+        <p role="status" className="agent-slot-account-status">
+          {accountStatus}
+        </p>
+      )}
+    </section>
+  );
+
   return (
     <section className="agent-slots" aria-label={SETTINGS_AGENT_SLOTS.sectionLabel}>
       {loadError !== undefined && (
@@ -121,46 +183,6 @@ export function AgentSlotsSection({
           {SETTINGS_AGENT_SLOTS.loadFailure.replace('{reason}', () => loadError)}
         </p>
       )}
-      <section className="agent-slot-account" aria-label={SETTINGS_AGENT_SLOTS.accountLabel}>
-        <h4>{SETTINGS_AGENT_SLOTS.accountLabel}</h4>
-        <p className="agent-slots-note">
-          {chatGpt === undefined
-            ? SETTINGS_AGENT_SLOTS.accountDisconnected
-            : SETTINGS_AGENT_SLOTS.accountConnected}
-        </p>
-        <div className="agent-slot-actions">
-          {chatGpt === undefined ? (
-            <button
-              type="button"
-              className="button-primary"
-              disabled={accountBusy}
-              onClick={() => void signInChatGpt()}
-            >
-              {SETTINGS_AGENT_SLOTS.connectChatGpt}
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="button-secondary"
-                disabled={accountBusy}
-                onClick={() => void signInChatGpt(chatGpt.id)}
-              >
-                {SETTINGS_AGENT_SLOTS.logInAgain}
-              </button>
-              <button
-                type="button"
-                className="button-secondary"
-                disabled={accountBusy}
-                onClick={() => void logOutChatGpt(chatGpt)}
-              >
-                {SETTINGS_AGENT_SLOTS.logOut}
-              </button>
-            </>
-          )}
-        </div>
-        {accountStatus !== undefined && <p role="status">{accountStatus}</p>}
-      </section>
       {slots.map((slot) => (
         <AgentSlotCard
           key={slot.id}
@@ -173,6 +195,29 @@ export function AgentSlotsSection({
           onProfilesChanged={onProfilesChanged}
         />
       ))}
+      {renderConnections(connectionsTitle, connectionsAction, accountElement, children)}
+    </section>
+  );
+}
+
+/** The connections card: its heading line, the ChatGPT subscription row (desktop only), then the page's connections. */
+function renderConnections(
+  title: string | undefined,
+  action: ReactNode,
+  account: ReactNode,
+  children: ReactNode,
+): ReactNode {
+  if (title === undefined && account === undefined && children === undefined) return null;
+  return (
+    <section className="agent-settings-card joy-connections-card" aria-label={title}>
+      {title !== undefined && (
+        <header className="joy-card-head">
+          <h4>{title}</h4>
+          {action}
+        </header>
+      )}
+      {account}
+      {children}
     </section>
   );
 }
@@ -223,9 +268,7 @@ function AgentSlotCard({
       ? listing.ids
       : (chosenProfile?.cachedModels ?? []);
   const showPicker = offered.length > 0 && !typingModel;
-  const hint =
-    listingNote ??
-    (profileId !== '' && offered.length === 0 ? SETTINGS_AGENT_SLOTS.modelListHint : undefined);
+  const hint = listingNote;
 
   const refreshModels = async (): Promise<void> => {
     if (profileId === '') return;
@@ -294,90 +337,84 @@ function AgentSlotCard({
 
   return (
     <article
-      className="agent-slot-card"
+      className="agent-settings-card agent-slot-card"
       aria-label={SETTINGS_AGENT_SLOTS.slotLabel.replace('{label}', () => label)}
     >
-      <h4>{label}</h4>
-      <label className="agent-slot-field">
-        <span>{SETTINGS_AGENT_SLOTS.profileLabel}</span>
-        <select
-          aria-label={SETTINGS_AGENT_SLOTS.profileAriaLabel.replace('{label}', () => label)}
-          value={profileId}
-          onChange={(event) => {
-            setProfileId(event.target.value);
-            setModel('');
-            setListingNote(undefined);
-            setTypingModel(false);
-          }}
-        >
-          <option value="">{SETTINGS_AGENT_SLOTS.notSet}</option>
-          {profiles.map((profile) => (
-            <option key={profile.id} value={profile.id}>
-              {profileLabel(profile)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="agent-slot-field">
-        <span>{SETTINGS_AGENT_SLOTS.modelLabel}</span>
-        {showPicker ? (
+      <header className="joy-card-head">
+        <h4>{label}</h4>
+      </header>
+      <div className="joy-card-grid">
+        <label className="agent-slot-field agent-slot-field-full">
+          <span>{SETTINGS_AGENT_SLOTS.profileLabel}</span>
           <select
-            aria-label={SETTINGS_AGENT_SLOTS.modelAriaLabel.replace('{label}', () => label)}
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
+            aria-label={SETTINGS_AGENT_SLOTS.profileAriaLabel.replace('{label}', () => label)}
+            value={profileId}
+            onChange={(event) => {
+              setProfileId(event.target.value);
+              setModel('');
+              setListingNote(undefined);
+              setTypingModel(false);
+            }}
           >
-            <option value="">{SETTINGS_AGENT_SLOTS.chooseModel}</option>
-            {model !== '' && !offered.includes(model) && (
-              <option value={model}>
-                {SETTINGS_AGENT_SLOTS.savedModel.replace('{model}', () => model)}
-              </option>
-            )}
-            {offered.map((id) => (
-              <option key={id} value={id}>
-                {id}
+            <option value="">{SETTINGS_AGENT_SLOTS.notSet}</option>
+            {profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profileLabel(profile)}
               </option>
             ))}
           </select>
-        ) : (
-          <input
-            aria-label={SETTINGS_AGENT_SLOTS.modelAriaLabel.replace('{label}', () => label)}
-            value={model}
-            maxLength={256}
-            onChange={(event) => setModel(event.target.value)}
-          />
-        )}
-      </label>
-      <div className="agent-slot-actions">
-        {offered.length > 0 && (
-          <button
-            type="button"
-            className="button-secondary"
-            onClick={() => setTypingModel((current) => !current)}
-          >
-            {typingModel ? SETTINGS_AGENT_SLOTS.chooseFromList : SETTINGS_AGENT_SLOTS.typeModelId}
-          </button>
-        )}
-        <button
-          type="button"
-          className="button-secondary"
-          disabled={busy || listingBusy || profileId === ''}
-          onClick={() => void refreshModels()}
-        >
-          {SETTINGS_AGENT_SLOTS.refreshModels}
-        </button>
-      </div>
-      {hint !== undefined && <p className="agent-slot-note">{hint}</p>}
-      <label className="agent-slot-field">
-        <span>{SETTINGS_AGENT_SLOTS.instructionsLabel}</span>
-        <textarea
-          aria-label={SETTINGS_AGENT_SLOTS.instructionsAriaLabel.replace('{label}', () => label)}
-          value={instructions}
-          maxLength={4000}
-          rows={4}
-          onChange={(event) => setInstructions(event.target.value)}
-        />
-      </label>
-      <div className="agent-slot-settings">
+        </label>
+        <div className="agent-slot-field agent-slot-field-full">
+          <span>{SETTINGS_AGENT_SLOTS.modelLabel}</span>
+          <div className="agent-slot-model-row">
+            {showPicker ? (
+              <select
+                aria-label={SETTINGS_AGENT_SLOTS.modelAriaLabel.replace('{label}', () => label)}
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+              >
+                <option value="">{SETTINGS_AGENT_SLOTS.chooseModel}</option>
+                {model !== '' && !offered.includes(model) && (
+                  <option value={model}>
+                    {SETTINGS_AGENT_SLOTS.savedModel.replace('{model}', () => model)}
+                  </option>
+                )}
+                {offered.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                aria-label={SETTINGS_AGENT_SLOTS.modelAriaLabel.replace('{label}', () => label)}
+                value={model}
+                maxLength={256}
+                onChange={(event) => setModel(event.target.value)}
+              />
+            )}
+            {offered.length > 0 && (
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => setTypingModel((current) => !current)}
+              >
+                {typingModel
+                  ? SETTINGS_AGENT_SLOTS.chooseFromList
+                  : SETTINGS_AGENT_SLOTS.typeModelId}
+              </button>
+            )}
+            <button
+              type="button"
+              className="button-secondary"
+              disabled={busy || listingBusy || profileId === ''}
+              onClick={() => void refreshModels()}
+            >
+              {SETTINGS_AGENT_SLOTS.refreshModels}
+            </button>
+          </div>
+          {hint !== undefined && <p className="agent-slot-note">{hint}</p>}
+        </div>
         <label className="agent-slot-field">
           <span>{SETTINGS_AGENT_SLOTS.temperatureLabel}</span>
           <input
@@ -405,26 +442,45 @@ function AgentSlotCard({
             onChange={(event) => setMaxOutputTokens(event.target.value)}
           />
         </label>
+        <label className="agent-slot-field agent-slot-field-full">
+          <span>{SETTINGS_AGENT_SLOTS.instructionsLabel}</span>
+          <textarea
+            aria-label={SETTINGS_AGENT_SLOTS.instructionsAriaLabel.replace('{label}', () => label)}
+            value={instructions}
+            maxLength={4000}
+            rows={4}
+            onChange={(event) => setInstructions(event.target.value)}
+          />
+        </label>
       </div>
-      <div className="agent-slot-actions">
-        <button
-          type="button"
-          className="button-primary"
-          disabled={busy}
-          onClick={() => void save()}
-        >
-          {SETTINGS_AGENT_SLOTS.saveSlot.replace('{label}', () => label)}
-        </button>
-        <button
-          type="button"
-          className="button-primary"
-          disabled={busy || !slot.ready}
-          onClick={() => void use()}
-        >
-          {SETTINGS_AGENT_SLOTS.useForAgent}
-        </button>
+      {/* The footer row: the state at the left, the actions at the right, the primary action right-most. */}
+      <div className="joy-card-footer joy-card-footer-split">
+        {status !== undefined ? (
+          <p role="status" className="agent-slot-status">
+            {status}
+          </p>
+        ) : (
+          <span />
+        )}
+        <div className="agent-slot-actions">
+          <button
+            type="button"
+            className="button-secondary"
+            disabled={busy}
+            onClick={() => void save()}
+          >
+            {SETTINGS_AGENT_SLOTS.saveSlot.replace('{label}', () => label)}
+          </button>
+          <button
+            type="button"
+            className="button-primary"
+            disabled={busy || !slot.ready}
+            onClick={() => void use()}
+          >
+            {SETTINGS_AGENT_SLOTS.useForAgent}
+          </button>
+        </div>
       </div>
-      {status !== undefined && <p role="status">{status}</p>}
     </article>
   );
 }

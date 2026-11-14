@@ -355,7 +355,7 @@ function ProviderRouteAccordion({
                   </div>
                 )}
 
-                <div className="joy-settings-field">
+                <div className="joy-settings-field-full joy-settings-field">
                   <label>
                     <span>{SETTINGS_PROVIDER_SIGN_IN.baseUrlLabel}</span>
                     <input
@@ -371,13 +371,6 @@ function ProviderRouteAccordion({
                 </div>
 
                 <div className="joy-settings-field">
-                  <span>{SETTINGS_PROVIDER_SIGN_IN.apiKeyLabel}</span>
-                  <a href={selectedRegion.keyUrl} target="_blank" rel="noreferrer">
-                    {SETTINGS_PROVIDER_SIGN_IN.createApiKey}
-                  </a>
-                </div>
-
-                <div className="joy-settings-field-full joy-settings-field">
                   <label>
                     <span>{SETTINGS_PROVIDER_SIGN_IN.apiSecretKeyLabel}</span>
                     <input
@@ -395,7 +388,7 @@ function ProviderRouteAccordion({
                   </label>
                 </div>
 
-                <div className="joy-settings-field-full joy-settings-field">
+                <div className="joy-settings-field">
                   <label>
                     <span>{SETTINGS_PROVIDER_SIGN_IN.modelIdLabel}</span>
                     <input
@@ -414,7 +407,13 @@ function ProviderRouteAccordion({
                   </label>
                 </div>
 
-                <div className="joy-settings-field-full">
+                <div className="joy-settings-field-full joy-card-footer joy-card-footer-split">
+                  <span className="joy-settings-hint-muted joy-provider-key-link">
+                    {SETTINGS_PROVIDER_SIGN_IN.apiKeyLabel}{' '}
+                    <a href={selectedRegion.keyUrl} target="_blank" rel="noreferrer">
+                      {SETTINGS_PROVIDER_SIGN_IN.createApiKey}
+                    </a>
+                  </span>
                   <button
                     type="button"
                     className="button-primary button-sm"
@@ -423,8 +422,12 @@ function ProviderRouteAccordion({
                   >
                     {SETTINGS_PROVIDER_SIGN_IN.saveApiKey}
                   </button>
-                  {apiKeyMessage !== undefined && <p role="status">{apiKeyMessage}</p>}
                 </div>
+                {apiKeyMessage !== undefined && (
+                  <p role="status" className="joy-settings-field-full">
+                    {apiKeyMessage}
+                  </p>
+                )}
               </div>
             )}
           </section>

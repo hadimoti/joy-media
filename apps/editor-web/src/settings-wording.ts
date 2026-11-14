@@ -39,8 +39,6 @@ export interface SettingsPageWording {
   readonly kicker: string;
   /** The heading on the right. */
   readonly title: string;
-  /** The line under the heading. */
-  readonly description: string;
 }
 
 /** The five pages, in plain words. */
@@ -49,33 +47,26 @@ export const SETTINGS_PAGES: Readonly<Record<SettingsPageId, SettingsPageWording
     name: 'AI models',
     kicker: 'Models and connections',
     title: 'AI models',
-    description: 'Choose the model Joy Code uses, and the service and key it connects with.',
   },
   execution: {
     name: 'Safety and limits',
     kicker: 'How much Joy Code does on its own',
     title: 'Safety and limits',
-    description:
-      'Choose how much Joy Code does on its own, and when it should ask you before it spends.',
   },
   experience: {
     name: 'Live preview',
     kicker: 'What you see while it works',
     title: 'Live preview',
-    description: 'Choose whether you see a live preview on the canvas while Joy Code works.',
   },
   permissions: {
     name: 'Tools and permissions',
     kicker: 'What Joy Code may change',
     title: 'Tools and permissions',
-    description: 'Choose what Joy Code is allowed to read and change.',
   },
   diagnostics: {
     name: 'Media support check',
     kicker: 'How your computer handles it',
     title: 'Media support check',
-    description:
-      'Check that your computer draws the picture, and that the model understands pictures, sound and video.',
   },
 };
 
@@ -191,7 +182,7 @@ export const SETTINGS_STORAGE = {
 export const SETTINGS_MEDIA_CHECK = {
   modelsTitle: 'Media support check',
   modelsHint:
-    'Sends three tiny test clips to the model to see whether it understands pictures, sound and video. Your project and your media are never sent. Your provider may still charge for these three small requests.',
+    'Sends three tiny test clips, never your project or media. Your provider may charge for them.',
   checkedTag: 'Checked',
   notCheckedTag: 'Not checked yet',
   diagnosticsTitle: 'Does the model understand media?',
@@ -259,8 +250,8 @@ export const SETTINGS_DIAGNOSTICS = {
 /** The models page: the connection, the key, the models and the check. */
 export const SETTINGS_MODELS = {
   browseButton: 'Browse models and connections',
+  connectionsTitle: 'Connections',
   presetTitle: 'Your own API key',
-  presetHint: 'One provider, with a key you enter here',
   noModel: 'No model connected',
   activeModel: 'Active: {model}',
   readyToEdit: 'Ready to edit your project',
@@ -316,7 +307,6 @@ export const SETTINGS_MODELS = {
   modelsTitle: 'Models found on this service',
   modelsReady: '{count} models ready',
   openToFind: 'Open to find models',
-  modelsHint: 'Choose a model to fill in the model ID, or type a word to filter the list.',
   checkingAgain: 'Checking again…',
   lookingForModels: 'Looking for models…',
   noModelsYet:
@@ -384,7 +374,6 @@ export const SETTINGS_AGENT_SLOTS = {
   loggingOut: 'Logging out of ChatGPT…',
   loggedOut: 'Logged out of ChatGPT. The connection was removed.',
   logOutFailed: 'ChatGPT did not confirm the log out, so the connection was kept: {reason}',
-  modelListHint: 'Refresh models to choose from the list this account offers, or type a model ID.',
   readingModels: 'Reading the models this profile offers…',
   noModels: 'This profile offers no models. Type a model ID.',
   readingModelsFailed: 'The models could not be read: {reason}',

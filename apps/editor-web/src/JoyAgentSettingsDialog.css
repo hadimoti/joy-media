@@ -224,24 +224,36 @@
 
 /* ─── The page ──────────────────────────────────────────────────────────── */
 
+/* One grid for every page: 8 px from a label to its input, 16 px between fields and inside a
+   card, 24 px between cards. Labels stand above their inputs, left aligned. */
+.joy-agent-settings-dialog {
+  --joy-gap-label: 8px;
+  --joy-gap-field: 16px;
+  --joy-pad-card: 16px;
+  --joy-gap-card: 24px;
+  --joy-control-height: 36px;
+}
+
 .joy-agent-settings-main {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--joy-gap-card);
   min-width: 0;
-  padding: 20px 24px;
+  padding: var(--joy-gap-card);
   overflow-y: auto;
   background: var(--joy-bg-elevated);
+  /* A part that does not fit is hidden by a container query below, never cut. */
+  container-type: inline-size;
 }
 
 .joy-settings-section-header {
-  margin-bottom: 2px;
+  text-align: left;
 }
 
 .joy-settings-section-kicker {
   display: block;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
   color: var(--joy-accent);
   font-size: var(--joy-type-2xs);
   font-weight: 700;
@@ -256,23 +268,25 @@
   font-weight: 600;
 }
 
-.joy-settings-section-desc {
-  margin: 3px 0 0;
-  color: var(--joy-text-secondary);
-  font-size: var(--joy-type-md);
-  line-height: 1.45;
-}
-
-/* Every card in the dialog is the frame's card, so the pages read as one set
-   of sections rather than as a private screen. The accordion items are the
-   sections of a page, and they take the same card. */
-.joy-agent-settings-dialog .agent-settings-section,
-.joy-agent-settings-dialog .joy-accordion-item {
+/* The sections of a page, one under the other. */
+.joy-settings-page,
+.agent-slots,
+.joy-accordion {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: var(--joy-gap-card);
   min-width: 0;
-  padding: 13px;
+}
+
+/* A card: the frame's card with one padding. The accordion items that stand alone on a page
+   are cards too; their rows carry the padding. */
+.agent-settings-card,
+.joy-agent-settings-dialog .agent-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--joy-gap-field);
+  min-width: 0;
+  padding: var(--joy-pad-card);
   overflow: hidden;
   border: 1px solid var(--joy-border-subtle);
   border-radius: var(--radius-md);
@@ -282,14 +296,65 @@
     box-shadow 0.2s ease;
 }
 
-/* ─── The active connection banner ──────────────────────────────────────── */
+.joy-agent-settings-dialog .agent-settings-section.joy-accordion-item {
+  gap: 0;
+  padding: 0;
+}
 
-.joy-settings-active-banner {
+/* The heading line of a card: the name at the left, any badge or small control at the right. */
+.joy-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
+  min-height: 28px;
+}
+
+.joy-card-head h4 {
+  margin: 0;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
+  font-weight: 600;
+  text-align: left;
+}
+
+/* Two equal columns; a field that needs the whole width says so. */
+.joy-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--joy-gap-field);
+}
+
+/* The footer row of a card: the actions at the right, the primary action right-most. */
+.joy-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: var(--joy-gap-field);
+  border-top: 1px solid var(--joy-border-subtle);
+}
+
+.joy-card-footer-split {
+  justify-content: space-between;
+}
+
+.joy-card-footer-split > p,
+.joy-card-footer-split > span:first-child {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+/* ─── The connection status ─────────────────────────────────────────────── */
+
+/* One line: the icon, the name, the state at the right. */
+.joy-settings-active-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 12px var(--joy-pad-card);
   border: 1px solid color-mix(in srgb, var(--joy-accent) 25%, transparent);
   border-radius: var(--radius-md);
   background: linear-gradient(
@@ -299,42 +364,87 @@
   );
 }
 
-.joy-settings-active-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
 .joy-settings-active-icon {
   display: grid;
   flex: none;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--joy-accent) 15%, transparent);
   color: var(--joy-accent);
 }
 
-.joy-settings-active-details strong {
-  display: block;
+.joy-settings-active-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.joy-settings-active-name {
+  min-width: 0;
   color: var(--joy-text);
   font-size: var(--joy-type-md);
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
-.joy-settings-active-details span {
+.joy-settings-active-state {
+  margin-left: auto;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  white-space: nowrap;
+}
+
+/* On a narrow page the state is hidden whole; the name and the Disconnect button stay. */
+@container (max-width: 560px) {
+  .joy-settings-active-state {
+    display: none;
+  }
+}
+
+/* ─── The connections card ──────────────────────────────────────────────── */
+
+/* Its parts are rows that share the card's padding and stand under a divider. */
+.joy-connections-card > .agent-slot-account,
+.joy-connections-card > .joy-settings-vault-profiles,
+.joy-connections-card > .joy-accordion-item {
+  padding-top: var(--joy-gap-field);
+  border-top: 1px solid var(--joy-border-subtle);
+}
+
+/* The ChatGPT subscription: the name and its state at the left, the actions at the right. */
+.agent-slot-account {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px var(--joy-gap-field);
+}
+
+.agent-slot-account-name h4 {
+  margin: 0;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
+  font-weight: 600;
+  text-align: left;
+}
+
+.agent-slot-account-name .agent-slots-note {
+  margin-top: 2px;
+}
+
+.agent-slot-account-status {
+  grid-column: 1 / -1;
+  margin: 0;
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
 }
 
-/* ─── Saved profiles ────────────────────────────────────────────────────── */
+/* ─── Saved connections ─────────────────────────────────────────────────── */
 
 .joy-settings-vault-profiles {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--joy-gap-label);
 }
 
 .joy-settings-vault-profiles-header {
@@ -345,32 +455,28 @@
   text-transform: uppercase;
 }
 
+/* A tidy list: one row each, the same height, a divider between rows. */
 .joy-settings-vault-profiles-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
 }
 
 .joy-settings-provider-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 58px;
-  padding: 9px 12px;
-  border: 1px solid var(--joy-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--joy-bg-raised);
-  transition: border-color 0.15s ease;
+  gap: var(--joy-gap-field);
+  min-height: 56px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--joy-border-subtle);
 }
 
-.joy-settings-provider-card:hover {
-  border-color: var(--joy-border-hover);
+.joy-settings-provider-card:last-child {
+  border-bottom: 0;
 }
 
-.joy-settings-provider-card.is-active {
-  border-color: color-mix(in srgb, var(--joy-accent) 45%, transparent);
-  background: color-mix(in srgb, var(--joy-accent) 5%, var(--joy-bg-raised));
+.joy-settings-provider-card.is-active .joy-settings-provider-meta strong {
+  color: var(--joy-accent);
 }
 
 .joy-settings-provider-card.is-disabled-legacy {
@@ -378,13 +484,20 @@
 }
 
 .joy-settings-provider-meta {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
   min-width: 0;
+  text-align: left;
 }
 
 .joy-settings-provider-meta strong {
-  display: block;
+  flex-basis: 100%;
   color: var(--joy-text);
   font-size: var(--joy-type-md);
+  font-weight: 600;
 }
 
 .joy-settings-provider-meta span {
@@ -393,34 +506,40 @@
 }
 
 .joy-settings-legacy-status {
-  display: block;
-  margin-top: 2px;
   color: var(--joy-warning);
   font-size: var(--joy-type-xs);
 }
 
+.joy-settings-provider-meta .joy-settings-legacy-status {
+  color: var(--joy-warning);
+}
+
 /* ─── Accordions ────────────────────────────────────────────────────────── */
 
-.joy-accordion {
+.joy-accordion-item {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  min-width: 0;
 }
 
 .joy-accordion-item.is-open {
   border-color: color-mix(in srgb, var(--joy-accent) 30%, transparent);
+}
+
+.joy-agent-settings-dialog .agent-settings-section.joy-accordion-item.is-open {
   background: var(--joy-bg-raised);
   box-shadow: 0 4px 20px color-mix(in srgb, var(--joy-bg-deep) 35%, transparent);
 }
 
-/* The disclosure row. It carries the standard button class and looks like a
-   quiet row until it is opened. */
+/* The disclosure row: the name at the left, the badge and the chevron at the right, on one centred line. */
 .joy-agent-settings-dialog .joy-accordion-trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   width: 100%;
-  padding: 12px 16px;
+  min-height: 48px;
+  padding: 12px var(--joy-pad-card);
   border: 0;
   background: transparent;
   color: var(--joy-text);
@@ -438,7 +557,7 @@
 .joy-accordion-trigger-title {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   color: var(--joy-text);
   font-size: var(--joy-type-md);
   font-weight: 600;
@@ -449,8 +568,8 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   color: var(--joy-text-secondary);
 }
 
@@ -459,7 +578,7 @@
   height: 16px;
 }
 
-.joy-accordion-item.is-open .joy-accordion-icon {
+.joy-accordion-item.is-open > .joy-accordion-trigger .joy-accordion-icon {
   color: var(--joy-accent);
 }
 
@@ -470,7 +589,10 @@
 }
 
 .joy-accordion-tag {
-  padding: 2px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
   border: 1px solid var(--joy-border-subtle);
   border-radius: var(--radius-xs);
   background: var(--joy-bg-control);
@@ -506,86 +628,77 @@
   transform: rotate(0deg);
 }
 
+/* The content stands left aligned, on the same padding and gap as a card. */
 .joy-accordion-content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px 16px;
+  align-items: stretch;
+  gap: var(--joy-gap-field);
+  padding: var(--joy-pad-card);
   border-top: 1px solid var(--joy-border-subtle);
+  text-align: left;
+}
+
+/* An accordion inside the connections card is a flat row of that card, not a card of its own. */
+.joy-connections-card .joy-accordion-item {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.joy-connections-card .joy-accordion-trigger {
+  padding: 8px 0;
+  min-height: 40px;
+  background: transparent;
+}
+
+.joy-connections-card .joy-accordion-trigger:hover {
+  background: transparent;
+}
+
+.joy-connections-card .joy-accordion-content {
+  padding: var(--joy-gap-field) 0 0;
+  border-top: 0;
+  background: transparent;
 }
 
 /* ─── Provider routes ───────────────────────────────────────────────────── */
 
-.joy-provider-route {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
+/* The ChatGPT, Kimi and xAI rows: the same rows as the accordions around them. */
 .joy-provider-route-accordions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.joy-provider-route + .joy-provider-route {
-  padding-top: 12px;
-  border-top: 1px solid var(--joy-border-subtle);
-}
-
-.joy-provider-route-title {
-  margin: 0;
-  color: var(--joy-text);
-  font-size: var(--joy-type-md);
-  font-weight: 600;
-}
-
-.joy-provider-risk-notice {
-  margin: 0;
-  color: var(--joy-text-secondary);
-  font-size: var(--joy-type-xs);
-  line-height: 1.5;
-}
-
-/* The provider sign-in stack: centered, on the editor's gray tokens. */
-.joy-provider-route-accordions {
   width: 100%;
-  max-width: 640px;
-  margin: 0 auto;
 }
 
 .joy-provider-route-accordions .joy-accordion-item {
-  border: 1px solid var(--joy-border);
-  border-radius: var(--joy-radius-inner);
-  background: var(--joy-bg-raised);
-  box-shadow: none;
+  border-top: 1px solid var(--joy-border-subtle);
 }
 
-.joy-provider-route-accordions .joy-accordion-item.is-open {
-  border-color: var(--joy-border-hover);
-  background: var(--joy-bg-raised);
-  box-shadow: none;
+.joy-provider-route-accordions .joy-accordion-item:first-child {
+  border-top: 0;
 }
 
 .joy-provider-route-accordions .joy-accordion-trigger {
-  /* The name stands at the left; the badge and the chevron stand at the right. */
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--joy-text);
+  padding: 8px 0;
+  min-height: 40px;
+  background: transparent;
 }
 
 .joy-provider-route-accordions .joy-accordion-trigger:hover {
-  background: var(--joy-bg-hover);
+  background: transparent;
 }
 
-.joy-provider-route-accordions .joy-accordion-trigger-title {
-  color: var(--joy-text);
+.joy-provider-route-accordions .joy-accordion-content {
+  padding: var(--joy-gap-field) 0;
+  border-top: 0;
+  background: transparent;
 }
 
 .joy-provider-route-accordions .joy-accordion-tag {
   border-color: var(--joy-border-strong);
-  background: var(--joy-bg-control);
-  color: var(--joy-text-secondary);
 }
 
 .joy-provider-route-accordions .joy-accordion-chevron,
@@ -596,56 +709,127 @@
   color: var(--joy-text-faint);
 }
 
-.joy-provider-route-accordions .joy-accordion-content {
+/* A route: its name at the left, its sign-in action at the right of the same line; everything else below. */
+.joy-provider-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+  gap: var(--joy-gap-field);
+  text-align: left;
+}
+
+.joy-provider-route > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.joy-provider-route > .joy-provider-route-title {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.joy-provider-route > button.button-primary {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.joy-provider-route + .joy-provider-route {
+  padding-top: var(--joy-gap-field);
   border-top: 1px solid var(--joy-border-subtle);
-  background: var(--joy-bg-panel);
-  text-align: center;
 }
 
-.joy-provider-route-accordions .joy-provider-route,
-.joy-provider-route-accordions .joy-provider-route-title {
-  align-items: center;
+.joy-provider-route-title {
+  margin: 0;
+  min-height: 32px;
   color: var(--joy-text);
-  text-align: center;
+  font-size: var(--joy-type-md);
+  font-weight: 600;
+  line-height: 32px;
+  text-align: left;
 }
 
-.joy-provider-route-accordions .joy-provider-route + .joy-provider-route {
-  border-top-color: var(--joy-border-subtle);
-}
-
-.joy-provider-route-accordions .joy-provider-risk-notice {
-  max-width: 52ch;
-  margin: 0 auto;
+.joy-provider-risk-notice,
+.joy-provider-capability-note {
+  margin: 0;
   color: var(--joy-text-secondary);
-  text-align: center;
+  font-size: var(--joy-type-xs);
+  line-height: 1.45;
+  text-align: left;
+}
+
+.joy-provider-sign-in-waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.joy-provider-sign-in-waiting p {
+  flex: 1;
+  margin: 0;
+}
+
+.joy-provider-route p[role='status'] {
+  margin: 0;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+}
+
+.joy-provider-key-link a {
+  color: var(--joy-accent);
+}
+
+/* Your own API key: the add form. */
+.joy-own-key {
+  display: flex;
+  flex-direction: column;
+  gap: var(--joy-gap-field);
+}
+
+.joy-provider-route-accordions + .joy-own-key {
+  padding-top: var(--joy-gap-field);
+  border-top: 1px solid var(--joy-border-subtle);
+}
+
+.joy-own-key-head {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
 }
 
 /* ─── Forms ─────────────────────────────────────────────────────────────── */
 
 .joy-settings-form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--joy-gap-field);
 }
 
 .joy-settings-field-full {
   grid-column: 1 / -1;
 }
 
+.joy-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--joy-gap-label);
+  min-width: 0;
+}
+
 .joy-settings-field label {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--joy-gap-label);
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   font-weight: 500;
+  text-align: left;
 }
 
-.joy-settings-field input,
+.joy-settings-field input:not([type='checkbox']):not([type='radio']),
 .joy-settings-field select {
   box-sizing: border-box;
   width: 100%;
+  min-height: var(--joy-control-height);
   padding: 7px 11px;
   border: 1px solid var(--joy-border-strong);
   border-radius: var(--radius-sm);
@@ -671,6 +855,7 @@
   cursor: pointer;
 }
 
+/* An input with its action beside it, on one centred line. */
 .joy-settings-input-with-action {
   display: flex;
   align-items: center;
@@ -679,6 +864,13 @@
 
 .joy-settings-input-with-action input {
   flex: 1;
+  min-width: 0;
+}
+
+.joy-settings-input-with-action > button {
+  flex: none;
+  min-height: var(--joy-control-height);
+  white-space: nowrap;
 }
 
 /* A quiet text action, e.g. the model drawer toggle. */
@@ -702,26 +894,13 @@
   vertical-align: -2px;
 }
 
-.joy-settings-pro-card {
-  padding: 10px 14px;
-  border: 1px solid color-mix(in srgb, var(--joy-accent) 20%, transparent);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--joy-accent) 6%, transparent);
-}
-
-.joy-settings-actions-bar {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 4px;
-}
-
 /* ─── Notices ───────────────────────────────────────────────────────────── */
 
 .joy-settings-notice {
   padding: 8px 12px;
   border-radius: var(--radius-sm);
   font-size: var(--joy-type-md);
+  text-align: left;
 }
 
 .joy-settings-notice.is-error {
@@ -754,38 +933,30 @@
   color: var(--joy-ok);
 }
 
-/* ─── The model drawer ──────────────────────────────────────────────────── */
+/* ─── The models found on this service ──────────────────────────────────── */
 
-.joy-model-drawer-item {
-  border-color: color-mix(in srgb, var(--joy-accent) 20%, transparent);
-}
-
-.joy-model-drawer-content {
-  border-radius: 0 0 var(--radius-md) var(--radius-md);
-  background: var(--joy-bg-inset);
-}
-
+/* The search field at the left, Look again at the right, on one centred line. */
 .joy-model-drawer-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
-.joy-model-drawer-hint {
-  margin: 0;
-  color: var(--joy-text-secondary);
-  font-size: var(--joy-type-xs);
+.joy-model-drawer-search {
+  flex: 1;
+  min-width: 0;
 }
 
 .joy-model-drawer-search input {
+  box-sizing: border-box;
   width: 100%;
-  padding: 6px 10px;
-  border: 1px solid var(--joy-border);
+  min-height: var(--joy-control-height);
+  padding: 7px 11px;
+  border: 1px solid var(--joy-border-strong);
   border-radius: var(--radius-sm);
   background: var(--joy-bg-input);
   color: var(--joy-text);
-  font-size: var(--joy-type-sm);
+  font-size: var(--joy-type-md);
   outline: none;
 }
 
@@ -797,7 +968,7 @@
 .joy-model-drawer-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* A filter chip. It carries the standard button class and looks like a chip. */
@@ -830,13 +1001,13 @@
   padding: 12px;
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
-  text-align: center;
+  text-align: left;
 }
 
 .joy-settings-model-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   max-height: 150px;
   padding: 8px;
   overflow-y: auto;
@@ -873,16 +1044,24 @@
 /* ─── The media support check ───────────────────────────────────────────── */
 
 .joy-settings-media-result {
-  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--joy-gap-label);
+  padding: 12px var(--joy-pad-card);
   border: 1px solid var(--joy-border-subtle);
   border-radius: var(--radius-sm);
   background: var(--joy-bg-inset);
+  text-align: left;
+}
+
+.joy-settings-media-result p {
+  margin: 0;
 }
 
 .joy-settings-probe-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--joy-gap-field);
   margin: 0;
   padding: 0;
 }
@@ -892,7 +1071,7 @@
 }
 
 .joy-settings-probe-grid dt {
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
 }
@@ -920,19 +1099,20 @@
 
 .joy-settings-mode-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--joy-gap-field);
 }
 
 .joy-settings-mode-card {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-height: 64px;
-  padding: 10px 12px;
+  padding: 12px var(--joy-pad-card);
   border: 1px solid var(--joy-border-subtle);
   border-radius: var(--radius-sm);
   background: var(--joy-bg-inset);
+  text-align: left;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -967,8 +1147,8 @@
 
 .joy-settings-capabilities-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--joy-gap-field);
 }
 
 .joy-settings-cap-item {
@@ -976,7 +1156,7 @@
   align-items: center;
   gap: 8px;
   min-height: 38px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--joy-border-subtle);
   border-radius: var(--radius-sm);
   background: var(--joy-bg-inset);
@@ -991,8 +1171,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   min-height: 38px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--joy-border-subtle);
   border-radius: var(--radius-sm);
   background: var(--joy-bg-inset);
@@ -1000,7 +1181,7 @@
 }
 
 .joy-settings-diagnostic-status {
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: var(--radius-xs);
   font-size: var(--joy-type-xs);
   font-weight: 600;
@@ -1043,134 +1224,46 @@
   color: var(--joy-text-secondary);
 }
 
-/* ─── The studio preset bar ─────────────────────────────────────────────── */
+/* ─── Your own API key: the one tab of the add form ─────────────────────── */
 
-.joy-studio-preset-bar {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-/* A preset. It carries the standard button class and looks like a card. */
+/* It carries the standard button class and looks like the heading of the form. */
 .joy-agent-settings-dialog .joy-preset-tab {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  min-height: 84px;
-  padding: 12px 14px;
-  border: 1px solid var(--joy-border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--joy-bg-panel);
-  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
   text-align: left;
-  cursor: pointer;
-  transition: all 0.2s ease;
+  cursor: default;
 }
 
 .joy-agent-settings-dialog .joy-preset-tab:hover {
-  border-color: var(--joy-border-hover);
-  background: var(--joy-bg-raised);
-}
-
-.joy-agent-settings-dialog .joy-preset-tab.is-active {
-  border-color: color-mix(in srgb, var(--joy-accent) 45%, transparent);
-  background: color-mix(in srgb, var(--joy-accent) 6%, var(--joy-bg-panel));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 22%, transparent);
+  background: transparent;
 }
 
 .joy-preset-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 6px;
   color: var(--joy-accent);
 }
 
 .joy-preset-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 
-.joy-preset-tab .joy-preset-text strong {
-  display: block;
-  margin-bottom: 2px;
+.joy-preset-tab strong {
   color: var(--joy-text);
   font-size: var(--joy-type-md);
-}
-
-.joy-preset-tab .joy-preset-text span {
-  color: var(--joy-text-secondary);
-  font-size: var(--joy-type-xs);
-  line-height: 1.4;
-}
-
-.joy-preset-tag {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  padding: 2px 6px;
-  border: 1px solid color-mix(in srgb, var(--joy-accent) 30%, transparent);
-  border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--joy-accent) 16%, transparent);
-  color: var(--joy-accent);
-  font-size: var(--joy-type-2xs);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-/* ─── The two brains ────────────────────────────────────────────────────── */
-
-.joy-settings-dual-brain-banner {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--joy-border-subtle);
-}
-
-.joy-dual-brain-chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 6px 10px;
-  border: 1px solid var(--joy-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--joy-bg-inset);
-  font-size: var(--joy-type-md);
-}
-
-.joy-chip-label {
-  color: var(--joy-text-secondary);
-  font-weight: 600;
-}
-
-.joy-chip-val {
-  color: var(--joy-accent);
-  font-family: var(--joy-font-mono);
-}
-
-.joy-chip-badge {
-  margin-left: auto;
-  padding: 2px 6px;
-  border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--joy-ok) 15%, transparent);
-  color: var(--joy-ok);
-  font-size: var(--joy-type-xs);
   font-weight: 600;
 }
 
 /* ─── The Workhorse and Creative Brain cards ────────────────────────────── */
-/* These live in AgentSlotsSection, which had no stylesheet at all. */
-
-.agent-slots {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+/* These live in AgentSlotsSection. The two cards are identical: one grid, one footer row. */
 
 .agent-slots-error {
   padding: 8px 12px;
@@ -1187,33 +1280,22 @@
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   line-height: 1.45;
-}
-
-.agent-slot-account,
-.agent-slot-card {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  padding: 13px;
-  border: 1px solid var(--joy-border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--joy-bg-panel);
-}
-
-.agent-slot-account h4 {
-  margin: 0;
-  color: var(--joy-text);
-  font-size: var(--joy-type-md);
-  font-weight: 600;
+  text-align: left;
 }
 
 .agent-slot-field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--joy-gap-label);
+  min-width: 0;
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   font-weight: 500;
+  text-align: left;
+}
+
+.agent-slot-field-full {
+  grid-column: 1 / -1;
 }
 
 .agent-slot-field input,
@@ -1221,6 +1303,7 @@
 .agent-slot-field textarea {
   box-sizing: border-box;
   width: 100%;
+  min-height: var(--joy-control-height);
   padding: 7px 11px;
   border: 1px solid var(--joy-border-strong);
   border-radius: var(--radius-sm);
@@ -1245,22 +1328,46 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 22%, transparent);
 }
 
-.agent-slot-actions {
+/* The model, with its buttons beside it on one centred line. */
+.agent-slot-model-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
-.agent-slot-settings {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 9px;
+.agent-slot-model-row input,
+.agent-slot-model-row select {
+  flex: 1 1 200px;
+  width: auto;
+  min-width: 0;
+}
+
+.agent-slot-model-row > button {
+  flex: none;
+  min-height: var(--joy-control-height);
+  white-space: nowrap;
+}
+
+.agent-slot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.agent-slot-status {
+  margin: 0;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  text-align: left;
 }
 
 .agent-toggle {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
 }
@@ -1272,7 +1379,7 @@
 .joy-settings-actions-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .joy-settings-actions-row-tight {
@@ -1290,31 +1397,40 @@
 .joy-settings-actions-column-wide {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--joy-gap-field);
 }
 
 .joy-settings-field-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
 .joy-settings-provider-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
+  flex-wrap: nowrap;
+  align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 8px;
 }
 
 .joy-settings-block-gap {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .joy-settings-hint-muted {
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);
   line-height: 1.45;
+  text-align: left;
+}
+
+.joy-settings-hint-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .joy-settings-hint-strong {
@@ -1324,7 +1440,6 @@
 }
 
 .joy-settings-hint-success {
-  margin-top: 2px;
   color: var(--joy-ok);
   font-size: var(--joy-type-xs);
 }
@@ -1340,8 +1455,8 @@
 
 .joy-settings-hint-muted svg,
 .joy-settings-hint-block svg {
+  flex: none;
   vertical-align: -2px;
-  margin-right: 3px;
 }
 
 /* The small remove button on a saved profile. It keeps the "✕" label the
