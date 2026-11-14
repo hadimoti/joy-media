@@ -1041,6 +1041,12 @@ const TRANSITION_APPROACH_SLACK_FRACTION = 0.15;
 /** The last frame must be within this fraction of the A-to-B difference of clip B (or the floor). */
 const TRANSITION_END_TOLERANCE_FRACTION = 0.25;
 const TRANSITION_END_TOLERANCE_FLOOR = 3;
+/**
+ * Slides and pushes still sit 1 percent of the frame away from clip B at 99 percent,
+ * and picture edges make that offset a large mean difference, so the category gets
+ * a wider fraction (the other categories keep 0.25).
+ */
+const TRANSITION_END_TOLERANCE_FRACTION_SLIDES = 0.75;
 
 const TRANSITION_IMAGE_SIZES_540 = {
   'clip-a': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
@@ -1548,7 +1554,7 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
 
   // 2. Export offline MP4 (or frames fallback)
   const exportFps = 100;
-  const exportFrameCount = 60;
+  const exportFrameCount = 300; // 3 s at 100 fps
   let exportMode = 'offline-mp4';
   let exportError: string | undefined;
   let exportMp4Base64: string | undefined;
@@ -1767,7 +1773,9 @@ async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
   ).meanAbsDiff;
   const endTolerance = Math.max(
     TRANSITION_END_TOLERANCE_FLOOR,
-    TRANSITION_END_TOLERANCE_FRACTION * clipABDiff,
+    (entry.category === 'slides-pushes'
+      ? TRANSITION_END_TOLERANCE_FRACTION_SLIDES
+      : TRANSITION_END_TOLERANCE_FRACTION) * clipABDiff,
   );
   const approachSlack = Math.max(1, TRANSITION_APPROACH_SLACK_FRACTION * clipABDiff);
   const startIsClipA = diffsVsA[0]! < 1.0;

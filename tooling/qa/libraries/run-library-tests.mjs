@@ -19,7 +19,7 @@ const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 const AUDIT_MD_PATH = resolve(REPO_ROOT, 'docs/qa/v1.1.1/LIBRARY-AUDIT.md');
 const BROWSER_RUNNER_PATH = resolve(import.meta.dirname, 'src/browser-runner.ts');
 const EXPORT_COMPARE_MAX_MEAN_DELTA = 12.0;
-/** Seek a little before the wanted frame (the transition export runs at 20 fps = 50 ms per frame). */
+/** Seek a little before the wanted frame (the transition export runs at 100 fps = 10 ms per frame). */
 const EXPORT_SEEK_LEAD_SEC = 0.005;
 
 function printUsage() {
@@ -288,13 +288,13 @@ async function main() {
         const itemDir = join(outDir, 'transitions', id.replace(/[:/]/g, '_'));
         mkdirSync(itemDir, { recursive: true });
 
-        // The window is [1 s, 2 s); the last frame inside it is 1.95 s (95 percent).
+        // The window is [1 s, 2 s); the last frame inside it is 1.99 s (99 percent).
         const pFrames = [
           { key: '000', pct: 0, timeSec: 1.0, b64: browserResult.preview.p0Base64 },
           { key: '025', pct: 25, timeSec: 1.25, b64: browserResult.preview.p25Base64 },
           { key: '050', pct: 50, timeSec: 1.5, b64: browserResult.preview.p50Base64 },
           { key: '075', pct: 75, timeSec: 1.75, b64: browserResult.preview.p75Base64 },
-          { key: '095', pct: 95, timeSec: 1.95, b64: browserResult.preview.pEndBase64 },
+          { key: '099', pct: 99, timeSec: 1.99, b64: browserResult.preview.pEndBase64 },
         ];
 
         for (const pf of pFrames) {
@@ -314,7 +314,7 @@ async function main() {
               Buffer.from(b64, 'base64'),
             );
           });
-          encodePngFramesToMp4(framesDir, exportPath, 20);
+          encodePngFramesToMp4(framesDir, exportPath, 100);
         }
 
         const compareDir = join(itemDir, 'compare');
@@ -401,12 +401,12 @@ async function main() {
           if (!pv.startIsClipA) parts.push('the first frame is not clip A');
           if (!pv.lastFrameIsClipB) {
             parts.push(
-              `the last frame inside the window (95%) is not close to clip B (Δ to B=${pv.diffVsB[4].toFixed(2)}, allowed ${pv.endTolerance.toFixed(2)})`,
+              `the last frame inside the window (99%) is not close to clip B (Δ to B=${pv.diffVsB[4].toFixed(2)}, allowed ${pv.endTolerance.toFixed(2)})`,
             );
           }
           if (!pv.approachesClipB) {
             parts.push(
-              `the picture moves away from clip B between 50%, 75% and 95% (Δ to B: ${pv.diffVsB[2].toFixed(2)}, ${pv.diffVsB[3].toFixed(2)}, ${pv.diffVsB[4].toFixed(2)}; slack ${pv.approachSlack.toFixed(2)})`,
+              `the picture moves away from clip B between 50%, 75% and 99% (Δ to B: ${pv.diffVsB[2].toFixed(2)}, ${pv.diffVsB[3].toFixed(2)}, ${pv.diffVsB[4].toFixed(2)}; slack ${pv.approachSlack.toFixed(2)})`,
             );
           }
           if (!pv.middleDiffersFromBoth)
@@ -433,7 +433,7 @@ async function main() {
         const prog = browserResult.optionsResults.progress;
         if (!prog.passed) {
           failureReasons.push(
-            `Transition progress is not the linear curve at 0/25/50/75/95% (expected ${prog.expected.join(', ')}; got ${prog.sampled.join(', ')})`,
+            `Transition progress is not the linear curve at 0/25/50/75/99% (expected ${prog.expected.join(', ')}; got ${prog.sampled.join(', ')})`,
           );
         }
         const failedUniforms = (browserResult.optionsResults.uniformParams ?? []).filter(
@@ -640,7 +640,7 @@ async function main() {
       previewResolution: { width: 960, height: 540 },
       benchmarkResolution: { width: 1920, height: 1080 },
       exportDurationSec: options.kind === 'transitions' ? 3 : 2,
-      exportFps: options.kind === 'transitions' ? 20 : 30,
+      exportFps: options.kind === 'transitions' ? 100 : 30,
       offlineCapability: initResult.offlineCapability,
       knownTestFramePath: knownFramePath,
       beforePreviewPath,
