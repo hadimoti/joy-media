@@ -96,6 +96,9 @@ const BLACK_FRAME_YMAX = 40;
 const NEUTRAL_CHROMA = 128;
 /** ffmpeg's answer when a filter is missing from this build. scdet needs FFmpeg 4.4 or later. */
 const UNKNOWN_FILTER_PATTERN = /no such filter|unknown filter|filter not found/i;
+const SCENE_CUTS_UNAVAILABLE =
+  'scene cuts were not checked: this FFmpeg build has no scdet filter (FFmpeg 4.4 or later)';
+/** Audio checks in the order audioFilterChain runs them. */
 const AUDIO_CHECKS: readonly QcFileFindingType[] = ['silence', 'clipping', 'loudness'];
 
 const NUM = String.raw`-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?`;
@@ -293,6 +296,16 @@ export function parseScdet(text: string): QcSceneCut[] {
       out.push({ timeUs: Math.max(0, timeUs), score });
   }
   return out;
+}
+
+/**
+ * True when ffmpeg refused the named filter as unknown: how a build without it answers, e.g.
+ * `No such filter: 'scdet'`. The filter name must be on the same line, so another failure is not mistaken for it.
+ */
+export function unknownFilterNamed(text: string, filter: string): boolean {
+  return text
+    .split(/\r?\n/)
+    .some((line) => UNKNOWN_FILTER_PATTERN.test(line) && line.includes(filter));
 }
 
 /** `silence_start: 6` then `silence_end: 8 | silence_duration: 2`. An open stretch ends at `openEndUs`. */
@@ -835,6 +848,8 @@ export interface ProcessOutcome {
   readonly stderr: string;
   /** True when captured output was cut to its size limit. */
   readonly truncated: boolean;
+  /** The system error code when the program could not start: `ENOENT` means it is not installed. */
+  readonly errorCode?: string;
 }
 
 interface ProcessLimits {
@@ -861,7 +876,11 @@ export function runProcess(
     let timer: ReturnType<typeof setTimeout> | undefined;
     // eslint-disable-next-line prefer-const
     let poll: ReturnType<typeof setInterval> | undefined;
-    const finish = (state: ProcessOutcome['state'], exitCode: number | null): void => {
+    const finish = (
+      state: ProcessOutcome['state'],
+      exitCode: number | null,
+      errorCode?: string,
+    ): void => {
       if (settled) return;
       settled = true;
       if (timer !== undefined) clearTimeout(timer);
@@ -872,6 +891,7 @@ export function runProcess(
         stdout: stdout.text(),
         stderr: stderr.text(),
         truncated: stdout.truncated || stderr.truncated,
+        ...(errorCode === undefined ? {} : { errorCode }),
       });
     };
     let child: ReturnType<typeof spawn>;
@@ -898,7 +918,9 @@ export function runProcess(
     child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => stdout.push(chunk));
     child.stderr?.on('data', (chunk: string) => stderr.push(chunk));
-    child.once('error', () => finish('failed', null));
+    child.once('error', (error: Error) =>
+      finish('failed', null, (error as NodeJS.ErrnoException).code),
+    );
     child.once('close', (code) => finish(intent ?? (code === 0 ? 'completed' : 'failed'), code));
   });
 }
@@ -972,8 +994,10 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
   const truncated: string[] = [];
   let incomplete = false;
 
-  const run = async (
+  /** Runs one process and returns its outcome whatever it was. A missing program is named as such. */
+  const execute = async (
     label: string,
+    tool: 'FFmpeg' | 'FFprobe',
     command: string,
     args: readonly string[],
     timeoutCapMs = Number.POSITIVE_INFINITY,
@@ -993,17 +1017,55 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
       stderrTailBytes: STDERR_TAIL_BYTES,
     });
     if (outcome.state === 'cancelled' || options.cancelled()) throw new Error('canceled');
+    if (outcome.errorCode === 'ENOENT') throw new Error(`${tool} is not installed`);
+    return outcome;
+  };
+
+  /** Judges a finished pass: a failure throws, a pass cut short or with cut output is marked incomplete. */
+  const settle = (label: string, outcome: ProcessOutcome): void => {
     if (outcome.state === 'failed')
       throw new Error(`${label} failed (exit ${outcome.exitCode ?? 'signal'})`);
     if (outcome.state === 'timed-out') {
       truncated.push(`${label} stopped at the time limit; its results are partial`);
       incomplete = true;
-    } else if (outcome.truncated) truncated.push(`${label} output was cut to its size limit`);
+    } else if (outcome.truncated) {
+      // The middle of the log is gone, so a black or freeze line in it would be lost without a trace.
+      truncated.push(`${label} output was cut to its size limit; lines in the middle may be lost`);
+      incomplete = true;
+    }
+  };
+
+  const run = async (
+    label: string,
+    tool: 'FFmpeg' | 'FFprobe',
+    command: string,
+    args: readonly string[],
+    timeoutCapMs = Number.POSITIVE_INFINITY,
+  ): Promise<ProcessOutcome | undefined> => {
+    const outcome = await execute(label, tool, command, args, timeoutCapMs);
+    if (outcome !== undefined) settle(label, outcome);
     return outcome;
   };
 
+  const videoArgs = (filters: readonly string[]): string[] => [
+    ...COMMON_FFMPEG_ARGS,
+    '-i',
+    options.sourcePath,
+    '-map',
+    '0:v:0',
+    '-an',
+    '-sn',
+    '-dn',
+    '-vf',
+    filters.join(','),
+    '-f',
+    'null',
+    '-',
+  ];
+
   await options.progress(5);
   const probed = await run(
+    'FFprobe',
     'FFprobe',
     ffprobe,
     [
@@ -1041,61 +1103,54 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
     );
     checksRun.push('frozen');
   }
-  if (probe.hasVideo && checks.has('scene-cut')) {
-    videoChain.push(`scdet=t=${thresholds.sceneCutThreshold}`);
-    checksRun.push('scene-cut');
-  }
+  const wantSceneCuts = probe.hasVideo && checks.has('scene-cut');
+  if (wantSceneCuts) videoChain.push(`scdet=t=${thresholds.sceneCutThreshold}`);
   let black: QcInterval[] | undefined;
   let frozen: QcInterval[] | undefined;
   let sceneCuts: QcSceneCut[] | undefined;
+  let sceneCutsUnavailable = false;
   if (videoChain.length > 0) {
     await options.progress(10);
-    const outcome = await run('the video check', ffmpeg, [
-      ...COMMON_FFMPEG_ARGS,
-      '-i',
-      options.sourcePath,
-      '-map',
-      '0:v:0',
-      '-an',
-      '-sn',
-      '-dn',
-      '-vf',
-      videoChain.join(','),
-      '-f',
-      'null',
-      '-',
-    ]);
+    let outcome = await execute('the video check', 'FFmpeg', ffmpeg, videoArgs(videoChain));
+    // scdet needs FFmpeg 4.4 or later. An older build refuses it before it reads a frame, so the pass runs
+    // again without it: black and freeze are still wanted, and the report says scene cuts were not checked.
+    if (
+      outcome?.state === 'failed' &&
+      wantSceneCuts &&
+      unknownFilterNamed(outcome.stderr, 'scdet')
+    ) {
+      sceneCutsUnavailable = true;
+      truncated.push(SCENE_CUTS_UNAVAILABLE);
+      const withoutScdet = videoChain.filter((filter) => !filter.startsWith('scdet='));
+      outcome =
+        withoutScdet.length === 0
+          ? undefined
+          : await execute('the video check', 'FFmpeg', ffmpeg, videoArgs(withoutScdet));
+    }
     if (outcome !== undefined) {
+      settle('the video check', outcome);
       const partial = outcome.state === 'timed-out';
       const text = outcome.stderr;
       if (checks.has('black')) black = parseBlackdetect(text, durationUs);
       if (checks.has('frozen')) frozen = parseFreezedetect(text, durationUs, openEnd(partial));
-      if (checks.has('scene-cut')) sceneCuts = parseScdet(text);
+      if (wantSceneCuts && !sceneCutsUnavailable) sceneCuts = parseScdet(text);
     }
   }
+  if (wantSceneCuts && !sceneCutsUnavailable) checksRun.push('scene-cut');
 
-  // Audio pass: loudness, silence, clipping.
-  const audioChain: string[] = [];
-  if (probe.hasAudio && checks.has('loudness')) {
-    audioChain.push('ebur128=peak=true:framelog=quiet');
-    checksRun.push('loudness');
-  }
-  if (probe.hasAudio && checks.has('silence')) {
-    audioChain.push(
-      `silencedetect=n=${thresholds.silenceDb}dB:d=${thresholds.silenceMinDurationSec}`,
-    );
-    checksRun.push('silence');
-  }
-  if (probe.hasAudio && checks.has('clipping')) {
-    audioChain.push('astats');
-    checksRun.push('clipping');
+  // Audio pass: silence, clipping, loudness. audioFilterChain keeps ebur128 last.
+  const audioChain = probe.hasAudio ? audioFilterChain(checks, thresholds) : [];
+  if (probe.hasAudio) {
+    for (const check of AUDIO_CHECKS) {
+      if (checks.has(check)) checksRun.push(check);
+    }
   }
   let silence: QcInterval[] | undefined;
   let loudness: QcLoudness | undefined;
   let audioStats: QcAudioStats | undefined;
   if (audioChain.length > 0) {
     await options.progress(40);
-    const outcome = await run('the audio check', ffmpeg, [
+    const outcome = await run('the audio check', 'FFmpeg', ffmpeg, [
       ...COMMON_FFMPEG_ARGS,
       '-i',
       options.sourcePath,
@@ -1134,7 +1189,7 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
       seconds > 0 ? Math.min(MAX_SAMPLE_FPS, MAX_SAMPLED_FRAMES / seconds) : 1,
     );
     sampleIntervalUs = Math.round(1_000_000 / Number(fps.toFixed(4)));
-    const outcome = await run('the picture check', ffmpeg, [
+    const outcome = await run('the picture check', 'FFmpeg', ffmpeg, [
       ...COMMON_FFMPEG_ARGS,
       '-i',
       options.sourcePath,

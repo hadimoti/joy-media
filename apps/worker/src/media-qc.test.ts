@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_QC_THRESHOLDS,
+  MAX_QC_REPORT_BYTES,
   analysePicture,
+  audioFilterChain,
   buildQcReport,
   parseAstatsOverall,
   parseBlackdetect,
@@ -16,14 +18,21 @@ import {
   parseScdet,
   parseSignalstats,
   parseSilencedetect,
+  pictureFilterGraph,
   qcFindings,
   runMediaQc,
   runProcess,
+  unknownFilterNamed,
   type QcMeasurements,
   type QcSignalFrame,
 } from './media-qc.js';
 
 const SECOND = 1_000_000;
+/**
+ * The most JSON the desktop's complete route reads (apps/desktop/src/jobs/local-job-api.ts MAX_JSON_BYTES, 64 KiB).
+ * Kept as a number here because the desktop package is not imported into the Worker's tests.
+ */
+const TRANSPORT_JSON_LIMIT = 64 * 1024;
 
 describe('ffmpeg output parsers', () => {
   it('reads blackdetect runs in microseconds and keeps them inside the file', () => {
@@ -169,6 +178,42 @@ describe('ffmpeg output parsers', () => {
       ),
     ).toEqual({ durationUs: 3 * SECOND, hasVideo: true, hasAudio: false });
     expect(() => parseProbe('not json')).toThrow('unreadable');
+  });
+});
+
+describe('filter graphs and filter support', () => {
+  it('puts format=yuv420p before signalstats, so a 10-bit clip is measured on the 8-bit scale', () => {
+    const graph = pictureFilterGraph(2);
+    expect(graph).toBe('fps=2.0000,format=yuv420p,signalstats,metadata=mode=print:file=-');
+    expect(graph.indexOf('format=yuv420p')).toBeLessThan(graph.indexOf('signalstats'));
+  });
+
+  it('keeps ebur128 last in the audio chain, so silencedetect and astats see the audio unaltered', () => {
+    const all = new Set([
+      'black',
+      'frozen',
+      'scene-cut',
+      'loudness',
+      'silence',
+      'clipping',
+    ] as const);
+    expect(audioFilterChain(all, DEFAULT_QC_THRESHOLDS)).toEqual([
+      'silencedetect=n=-50dB:d=0.5',
+      'astats',
+      'ebur128=peak=true:framelog=quiet',
+    ]);
+    expect(audioFilterChain(new Set(['loudness'] as const), DEFAULT_QC_THRESHOLDS)).toEqual([
+      'ebur128=peak=true:framelog=quiet',
+    ]);
+  });
+
+  it('recognises an older build refusing scdet by its name, and nothing else', () => {
+    expect(unknownFilterNamed("[AVFilterGraph @ 0x1] No such filter: 'scdet'", 'scdet')).toBe(true);
+    expect(unknownFilterNamed("[AVFilterGraph @ 0x1] Unknown filter 'scdet'", 'scdet')).toBe(true);
+    expect(unknownFilterNamed("[AVFilterGraph @ 0x1] No such filter: 'blackdetect'", 'scdet')).toBe(
+      false,
+    );
+    expect(unknownFilterNamed('Error opening filters!', 'scdet')).toBe(false);
   });
 });
 
@@ -373,6 +418,40 @@ describe('QC report', () => {
     expect(report.technical?.truncated.some((reason) => /not listed/.test(reason))).toBe(true);
   });
 
+  it('builds a report at the size cap whose complete POST body still fits the transport limit', () => {
+    const cuts = Array.from({ length: 1000 }, (_, index) => ({
+      timeUs: index * 1000,
+      score: 20 + (index % 7),
+    }));
+    const blackRuns = Array.from({ length: 40 }, (_, index) => ({
+      startUs: index * 5 * SECOND,
+      endUs: index * 5 * SECOND + 3_500_000,
+    }));
+    const input = {
+      ...base,
+      thresholds: { ...DEFAULT_QC_THRESHOLDS, maxSceneCuts: 1000 },
+      measurements: measurements({ sceneCuts: cuts, black: blackRuns }),
+    };
+    // Without the cap the same measurements would not fit the complete route at all.
+    const uncapped = buildQcReport({ ...input, maxReportBytes: Number.MAX_SAFE_INTEGER });
+    expect(Buffer.byteLength(JSON.stringify(uncapped))).toBeGreaterThan(TRANSPORT_JSON_LIMIT);
+
+    const report = buildQcReport(input);
+    expect(Buffer.byteLength(JSON.stringify(report))).toBeLessThanOrEqual(MAX_QC_REPORT_BYTES);
+    // The Worker posts { leaseToken, result: { kind, assetId, report } }; the envelope counts too.
+    const body = JSON.stringify({
+      leaseToken: 'l'.repeat(43),
+      result: { kind: 'media.qc', assetId: 'asset-1', report },
+    });
+    expect(Buffer.byteLength(body)).toBeLessThan(TRANSPORT_JSON_LIMIT);
+    expect(report.findings.some((finding) => finding.type === 'black')).toBe(true);
+    // Hard cuts go first, so some are dropped and the major black runs are all kept.
+    const cutsKept = report.findings.filter((finding) => finding.type === 'scene-cut').length;
+    expect(cutsKept).toBeLessThan(1000);
+    expect(report.findings.filter((finding) => finding.type === 'black')).toHaveLength(40);
+    expect(report.technical?.truncated.some((reason) => /not listed/.test(reason))).toBe(true);
+  });
+
   it('lists no more hard cuts than the setting and says how many were left out', () => {
     const cuts = Array.from({ length: 10 }, (_, index) => ({ timeUs: index * SECOND, score: 30 }));
     const report = buildQcReport({
@@ -474,6 +553,7 @@ describe('bounded process runner', () => {
     expect(failed).toMatchObject({ state: 'failed', exitCode: 3 });
     const missing = await runProcess('joy-media-no-such-program', [], limits);
     expect(missing.state).toBe('failed');
+    expect(missing.errorCode).toBe('ENOENT');
   });
 
   it('stops a process that runs past its time cap', async () => {
@@ -525,7 +605,7 @@ describe('runMediaQc without ffmpeg', () => {
     ).rejects.toThrow('canceled');
   });
 
-  it('fails with a plain message when FFprobe cannot run, and never names the file', async () => {
+  it('says FFprobe is not installed when it cannot be started, and never names the file', async () => {
     const run = runMediaQc({
       jobId: 'job-1',
       assetId: 'asset-1',
@@ -534,7 +614,7 @@ describe('runMediaQc without ffmpeg', () => {
       progress: async () => undefined,
       ffprobePath: 'joy-media-no-such-program',
     });
-    await expect(run).rejects.toThrow('FFprobe failed');
+    await expect(run).rejects.toThrow('FFprobe is not installed');
     await run.catch((error: unknown) => {
       expect(String(error)).not.toContain('private');
     });

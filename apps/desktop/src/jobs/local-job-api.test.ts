@@ -259,6 +259,86 @@ describe('local job API', () => {
     expect(database.jobDispatch.get('job-http')).toMatchObject({ status: 'done', progress: 100 });
   });
 
+  describe('media.qc report on the complete route', () => {
+    async function queueQcAndLease(id: string): Promise<{ leaseToken: string }> {
+      await postJson(`/v1/workers/${WORKER}/hello`, { capabilities: ['media.qc'], assetIds: [] });
+      database.jobDispatch.insert({
+        id,
+        kind: 'media.qc',
+        jobType: 'media.qc',
+        refId: 'ref-1',
+        status: 'queued',
+        createdAt: '2026-11-14T00:00:00.000Z',
+        updatedAt: '2026-11-14T00:00:00.000Z',
+        error: undefined,
+        progress: 0,
+        attempts: 0,
+        workerId: undefined,
+        leaseToken: undefined,
+        leaseExpiresAt: undefined,
+        cancelRequested: false,
+        derivative: undefined,
+        resultJson: undefined,
+        profileId: undefined,
+      });
+      const response = await postJson(`/v1/workers/${WORKER}/leases`, { durationMs: 30_000 });
+      return ((await response.json()) as { data: { leaseToken: string } }).data;
+    }
+
+    /** A report of about `bytes` JSON bytes, with the shape the Worker writes, padded with hard-cut findings. */
+    function reportOfAtLeast(bytes: number): Record<string, unknown> {
+      const findings: unknown[] = [];
+      const report = {
+        version: 1,
+        reportId: 'qc-report-job-qc',
+        createdAt: '2026-11-14T00:00:00.000Z',
+        target: { kind: 'file', assetId: 'ref-1' },
+        findings,
+        notes: [],
+        modelComprehensionGuaranteed: false,
+      };
+      while (Buffer.byteLength(JSON.stringify(report)) < bytes) {
+        const index = findings.length + 1;
+        findings.push({
+          id: `qc-finding-${index}`,
+          type: 'scene-cut',
+          state: 'measured',
+          severity: 'minor',
+          startUs: index * 1000,
+          endUs: index * 1000,
+          label: 'Hard cut at 00:01.',
+          measured: { score: 21.5 },
+          fixable: false,
+          evidenceIds: [],
+        });
+      }
+      return report;
+    }
+
+    it('takes a report at the Worker size cap through the complete route and stores it', async () => {
+      const leased = await queueQcAndLease('job-qc');
+      // The Worker caps the report at 48 KB (MAX_QC_REPORT_BYTES in media-qc.ts); this is just under it.
+      const body = {
+        leaseToken: leased.leaseToken,
+        result: { kind: 'media.qc', assetId: 'ref-1', report: reportOfAtLeast(47 * 1024) },
+      };
+      expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(64 * 1024);
+      const completed = await postJson(`/v1/workers/${WORKER}/jobs/job-qc/complete`, body);
+      expect(completed.status).toBe(200);
+      expect(database.jobDispatch.get('job-qc')).toMatchObject({ status: 'done' });
+    });
+
+    it('refuses a complete body over the 64 KiB JSON limit, and the job stays running', async () => {
+      const leased = await queueQcAndLease('job-qc');
+      const completed = await postJson(`/v1/workers/${WORKER}/jobs/job-qc/complete`, {
+        leaseToken: leased.leaseToken,
+        result: { kind: 'media.qc', assetId: 'ref-1', report: reportOfAtLeast(65 * 1024) },
+      });
+      expect(completed.status).toBe(422);
+      expect(database.jobDispatch.get('job-qc')).toMatchObject({ status: 'running' });
+    });
+  });
+
   it('turns a Worker-reported failure into a failed job with its message', async () => {
     const leased = await queueThumbnailAndLease();
     const response = await postJson(`/v1/workers/${WORKER}/jobs/job-http/fail`, {
