@@ -23,6 +23,12 @@ const waveforms = new BoundedFrameStore<string, readonly WaveformBucket[]>({
 });
 const pendingBlobs = new Map<string, Promise<Blob | undefined>>();
 const pendingFrames = new Map<string, Promise<string | undefined>>();
+/** The source length (microseconds) a peaks array covers, so a trimmed clip can show its own part. */
+const waveformSourceDurationUs = new WeakMap<readonly WaveformBucket[], number>();
+export function getWaveformSourceDurationUs(peaks: readonly WaveformBucket[]): number | undefined {
+  return waveformSourceDurationUs.get(peaks);
+}
+
 const pendingWaveforms = new Map<string, Promise<readonly WaveformBucket[] | undefined>>();
 
 export type FilmstripFrameLoader = (
@@ -256,7 +262,9 @@ export async function decodeTimelineWaveform(
       for (let channel = 0; channel < wrapped.buffer.numberOfChannels; channel += 1)
         peaks.add(wrapped.buffer.getChannelData(channel), offset);
     }
-    return peaks.finish();
+    const finished = peaks.finish();
+    waveformSourceDurationUs.set(finished, Math.round(durationSeconds * 1_000_000));
+    return finished;
   } finally {
     input.dispose();
   }

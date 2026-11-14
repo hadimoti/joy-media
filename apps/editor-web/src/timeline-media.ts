@@ -65,3 +65,33 @@ export function scheduleFilmstripFrameTimes({
     return Math.max(0, Math.round(sourceUs));
   });
 }
+
+/**
+ * The part of a whole-file waveform that a trimmed clip plays: its source in-point to its source
+ * out-point, flipped for a reversed clip. Without a known source length the peaks are returned as they are.
+ */
+export function sliceWaveformPeaks<T>(
+  peaks: readonly T[],
+  sourceDurationUs: number | undefined,
+  options: Pick<
+    FilmstripScheduleOptions,
+    'sourceInUs' | 'durationUs' | 'playbackRate' | 'reversed'
+  >,
+): readonly T[] {
+  if (sourceDurationUs === undefined || sourceDurationUs <= 0 || peaks.length === 0) return peaks;
+  const rate = options.playbackRate ?? 1;
+  const span = options.durationUs * (rate > 0 ? rate : 0);
+  // A reversed clip plays from its in-point backwards.
+  const fromUs = options.reversed === true ? options.sourceInUs - span : options.sourceInUs;
+  const toUs = options.reversed === true ? options.sourceInUs : options.sourceInUs + span;
+  const first = Math.max(
+    0,
+    Math.min(peaks.length - 1, Math.floor((fromUs / sourceDurationUs) * peaks.length)),
+  );
+  const last = Math.max(
+    first + 1,
+    Math.min(peaks.length, Math.ceil((toUs / sourceDurationUs) * peaks.length)),
+  );
+  const part = peaks.slice(first, last);
+  return options.reversed === true ? [...part].reverse() : part;
+}

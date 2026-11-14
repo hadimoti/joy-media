@@ -18,10 +18,12 @@ import {
   decodeTimelineWaveform,
   getCachedFilmstripFrames,
   getCachedWaveformPeaks,
+  getWaveformSourceDurationUs,
   loadTimelineAssetBlob,
 } from './timeline-media-cache.js';
 import {
   scheduleFilmstripFrameTimes,
+  sliceWaveformPeaks,
   visibleFilmstripTiles,
   type TimelineElementMediaSource,
 } from './timeline-media.js';
@@ -233,7 +235,13 @@ export const TimelineElementMedia = memo(function TimelineElementMedia({
         pixelsPerSecond={pixelsPerSecond}
         peaks={
           waveformState !== undefined && waveformState.assetId === assetId
-            ? waveformState.peaks
+            ? media === undefined
+              ? waveformState.peaks
+              : sliceWaveformPeaks(
+                  waveformState.peaks,
+                  getWaveformSourceDurationUs(waveformState.peaks),
+                  media,
+                )
             : undefined
         }
         hostRef={mediaRef}

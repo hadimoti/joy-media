@@ -4,7 +4,11 @@ import {
   getCachedFilmstripFrames,
   getCachedWaveformPeaks,
 } from './timeline-media-cache.js';
-import { scheduleFilmstripFrameTimes, visibleFilmstripTiles } from './timeline-media.js';
+import {
+  scheduleFilmstripFrameTimes,
+  sliceWaveformPeaks,
+  visibleFilmstripTiles,
+} from './timeline-media.js';
 
 describe('timeline media scheduling', () => {
   it('starts at the source in-point and spaces frames across the clip at the current zoom', () => {
@@ -89,5 +93,30 @@ describe('filmstrip tiles', () => {
     expect(visibleFilmstripTiles(30 + 4 + 26 * 3 + 2 * 2)).toBe(3);
     expect(visibleFilmstripTiles(30 + 4 + 26 * 3 + 2 * 2 - 1)).toBe(2);
     expect(visibleFilmstripTiles(Number.NaN)).toBe(0);
+  });
+});
+
+describe('waveform slice', () => {
+  const peaks = Array.from({ length: 100 }, (_, index) => index);
+  it('keeps only the part a trimmed clip plays', () => {
+    const part = sliceWaveformPeaks(peaks, 60_000_000, {
+      sourceInUs: 12_000_000,
+      durationUs: 6_000_000,
+    });
+    expect(part[0]).toBe(20);
+    expect(part.length).toBe(10);
+  });
+  it('flips a reversed clip and scales by speed', () => {
+    const part = sliceWaveformPeaks(peaks, 60_000_000, {
+      sourceInUs: 30_000_000,
+      durationUs: 5_000_000,
+      playbackRate: 2,
+      reversed: true,
+    });
+    expect(part[0]).toBeGreaterThan(part[part.length - 1]!);
+    expect(part.length).toBe(17);
+  });
+  it('returns the peaks unchanged when the source length is unknown', () => {
+    expect(sliceWaveformPeaks(peaks, undefined, { sourceInUs: 1, durationUs: 1 })).toBe(peaks);
   });
 });
