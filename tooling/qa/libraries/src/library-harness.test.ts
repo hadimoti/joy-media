@@ -38,7 +38,8 @@ describe('library test harness metadata and reporting', () => {
     expect(parsed.outDir).toBe('./tmp-out');
     expect(parsed.facePath).toBe('./face.png');
 
-    expect(() => parseCliArgs(['--kind', 'transitions'])).toThrow(/Invalid --kind/);
+    expect(parseCliArgs(['--kind', 'transitions']).kind).toBe('transitions');
+    expect(() => parseCliArgs(['--kind', 'unknown-kind'])).toThrow(/Invalid --kind/);
     expect(() => parseCliArgs(['--limit', '0'])).toThrow(/Invalid --limit/);
     expect(() => parseCliArgs(['--items'])).toThrow(/Missing value/);
     expect(() => parseCliArgs(['--bogus'])).toThrow(/Unknown CLI argument/);

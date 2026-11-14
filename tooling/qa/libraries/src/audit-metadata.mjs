@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 
-export const VALID_KINDS = ['filters', 'effects'];
+export const VALID_KINDS = ['filters', 'effects', 'transitions'];
 
 /**
  * Parse CLI arguments for the library test harness.

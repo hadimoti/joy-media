@@ -635,4 +635,46 @@ describe('transition timing', () => {
     if (node?.kind !== 'transition') throw new Error('expected transition');
     expect(node.params).toEqual({ intensity: 0.5 });
   });
+
+  it('automatically resolves transitions and clipTimes in buildRenderFrameIRFromProject', () => {
+    const project = {
+      rootCompositionId: 'comp-1',
+      compositions: {
+        'comp-1': {
+          id: 'comp-1',
+          width: 960,
+          height: 540,
+          fps: 30,
+          tracks: [
+            {
+              id: 'track-v',
+              kind: 'video',
+              clips: [
+                { id: 'left', startUs: 0, durationUs: 5_000_000 },
+                { id: 'right', startUs: 5_000_000, durationUs: 5_000_000 },
+              ],
+            },
+          ],
+        },
+      },
+      visualObjects: {},
+      transitions: [
+        {
+          id: 't-proj',
+          trackId: 'track-v',
+          leftClipId: 'left',
+          rightClipId: 'right',
+          type: 'gl:fade',
+          durationUs: 1_000_000,
+        },
+      ],
+    } as unknown as JoyProjectV1;
+
+    const frame = buildRenderFrameIRFromProject(project, 'comp-1', 4_500_000, 960, 540);
+    const node = frame.nodes.find((item) => item.kind === 'transition');
+    expect(node?.kind).toBe('transition');
+    if (node?.kind !== 'transition') throw new Error('expected transition node');
+    expect(node.progress).toBe(0.5);
+    expect(node.shaderId).toBe('gl:fade');
+  });
 });

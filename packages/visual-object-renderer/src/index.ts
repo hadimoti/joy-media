@@ -110,6 +110,8 @@ export function buildRenderFrameIRFromProject(
   return buildRenderFrameIR(compositionId, timeUs, width, height, resolvedObjects, {
     ...options,
     propertyAnimations: options.propertyAnimations ?? project.propertyAnimations,
+    transitions: options.transitions ?? project.transitions,
+    clipTimes: options.clipTimes ?? clipTimesFromTracks(composition.tracks),
     ...(options.colorGrade === undefined && project.colorGrade !== undefined
       ? {
           colorGrade:
