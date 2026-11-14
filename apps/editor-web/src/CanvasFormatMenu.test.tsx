@@ -127,6 +127,9 @@ describe('the Format control replaces the old export preset menu', () => {
     expect(css).toMatch(/\.header-format-btn \{[^}]*align-self: center;/);
     // The icon group must not take the whole row (it pushed the label to the right edge).
     expect(css).toMatch(/\.export-preset-list \.preset-icon-group \{[^}]*width: 1\.5rem;/);
+    // The monitor footer is one centred line: no stretch, and no scrollbar that lifts the time controls.
+    expect(css).toMatch(/\.monitor-transport \{[^}]*align-items: center;/);
+    expect(css).toMatch(/\.monitor-time-controls \{[^}]*scrollbar-width: none;/);
   });
 
   it('the header Format button keeps its full read-out as an accessible name at every width', () => {

@@ -2137,12 +2137,19 @@ h2 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   flex: none;
-  align-items: stretch;
+  align-items: center;
   gap: 0.25rem;
   height: 1.75rem;
   padding: 0 var(--space-2);
   border-top: 1px solid var(--joy-border);
   background: var(--joy-bg-panel);
+}
+/* One line, one centre: every group fills the bar height and centres its own items. */
+.monitor-transport-controls,
+.monitor-transport-end,
+.monitor-transport-start {
+  height: 100%;
+  align-items: center;
 }
 .monitor-transport-start {
   min-width: 0;
@@ -2152,23 +2159,39 @@ h2 {
 }
 .monitor-transport-controls {
   display: inline-flex;
-  align-items: stretch;
+  align-items: center;
   gap: 0.1rem;
 }
 .monitor-transport-end {
   min-width: 0;
   display: flex;
   justify-content: flex-end;
-  align-items: stretch;
+  align-items: center;
+}
+/* Items with a divider keep the full bar height; their content centres itself. */
+.monitor-transport-end > .monitor-preview-control,
+.monitor-transport-end > .monitor-performance-readout,
+.monitor-transport-end > .monitor-view-root {
+  align-self: stretch;
+}
+.monitor-view-root {
+  align-items: center;
 }
 .monitor-time-controls {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
   min-width: 0;
+  height: 100%;
   overflow-x: auto;
-  scrollbar-width: thin;
+  overflow-y: hidden;
+  /* A visible scrollbar here took height from the row and lifted the time controls above the
+     transport buttons; the row still scrolls with the wheel or keyboard. */
+  scrollbar-width: none;
   padding-left: 0.25rem;
+}
+.monitor-time-controls::-webkit-scrollbar {
+  display: none;
 }
 .monitor-time-group {
   display: inline-flex;

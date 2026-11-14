@@ -183,7 +183,7 @@ export function CanvasFormatPopover({
                 onClick={() => choosePreset(id)}
               >
                 <span className="preset-icon-group" aria-hidden="true">
-                  {id === 'youtube-1080' ? (
+                  {id === 'youtube-1080' || id === 'landscape-4k' ? (
                     <YoutubeIcon />
                   ) : id === 'high-bitrate' ? (
                     <HighBitrateIcon />
