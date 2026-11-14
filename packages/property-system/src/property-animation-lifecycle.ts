@@ -112,6 +112,125 @@ export function removeClipPropertyAnimations(project: JoyProjectV1, clipId: stri
   return removePropertyAnimations(project, clipPropertyAnimationOwners(clipId));
 }
 
+/**
+ * Clones the clip-owned animations of one clip, plus the animations owned by its
+ * bound visual object when `objectId` is given, for a clipboard snapshot. The
+ * entries keep their owner ids, so a cut can take them before it removes them.
+ */
+export function snapshotClipPropertyAnimations(
+  project: JoyProjectV1,
+  clipId: string,
+  objectId?: string,
+): readonly PropertyAnimationV2[] {
+  if (project.propertyAnimations === undefined) return [];
+  const owners: PropertyAnimationOwner[] = [
+    ...clipPropertyAnimationOwners(clipId),
+    ...(objectId === undefined ? [] : [{ ownerKind: 'visual-object' as const, ownerId: objectId }]),
+  ];
+  const ownerSet = new Set(owners.map(ownerKey));
+  return Object.values(normalized(project))
+    .filter((animation) => ownerSet.has(ownerKey(animation.binding)))
+    .map((animation) => cloneAnimation(animation));
+}
+
+/**
+ * Re-creates snapshot entries for a new clip. Clip-owned entries move to `clipId`;
+ * visual-object entries move to `objectId` and are skipped when no object is given
+ * (a shared, already-owned object must not gain copies). Other owner kinds are
+ * skipped. Throws when a target key already exists.
+ */
+export function restoreClipPropertyAnimations(
+  project: JoyProjectV1,
+  entries: readonly PropertyAnimationV2[],
+  target: { readonly clipId: string; readonly objectId?: string },
+): JoyProjectV1 {
+  if (entries.length === 0) return project;
+  const animations = normalized(project);
+  let changed = false;
+  for (const entry of entries) {
+    const ownerId =
+      entry.binding.ownerKind === 'visual-object'
+        ? target.objectId
+        : (CLIP_OWNER_KINDS as readonly string[]).includes(entry.binding.ownerKind)
+          ? target.clipId
+          : undefined;
+    if (ownerId === undefined) continue;
+    const binding = { ...entry.binding, ownerId };
+    const id = canonicalBindingKey(binding);
+    if (animations[id] !== undefined) {
+      throw new RangeError(`property animation target "${id}" already exists`);
+    }
+    animations[id] = {
+      binding,
+      value: JSON.parse(JSON.stringify(entry.value)) as AnimationValueV2,
+    };
+    changed = true;
+  }
+  return changed ? withAnimations(project, animations) : project;
+}
+
+/**
+ * Moves the timeline-time entries of a snapshot by `shiftUs`, the distance the
+ * clip moved, so their keys stay in the clip's window. Timeline time is the
+ * `composition` domain and the `audio-timeline` domain (audio clip gain, pan and
+ * mute, which the evaluator reads as playhead time). A positive shift moves every
+ * key. A negative shift rebases each curve at the cut, so its value at time 0 is
+ * the value the original curve had there. Clip-local entries are only cloned.
+ */
+export function shiftCompositionPropertyAnimations(
+  entries: readonly PropertyAnimationV2[],
+  shiftUs: number,
+): PropertyAnimationV2[] {
+  if (!Number.isSafeInteger(shiftUs)) throw new RangeError('shiftUs must be a safe integer');
+  return entries.map((entry) =>
+    !isTimelineTimeDomain(entry.binding.timeDomain) || shiftUs === 0
+      ? cloneAnimation(entry)
+      : {
+          binding: { ...entry.binding },
+          value: moveAnimationValue(entry.value, shiftUs),
+        },
+  );
+}
+
+function moveAnimationValue(value: AnimationValueV2, shiftUs: number): AnimationValueV2 {
+  if (shiftUs < 0) return rebaseAnimationValue(value, -shiftUs);
+  switch (value.kind) {
+    case 'scalar':
+    case 'angle':
+    case 'hue':
+      return { ...value, curve: moveCurve(value.curve, shiftUs) };
+    case 'vector':
+    case 'color':
+      return {
+        ...value,
+        curve: Object.fromEntries(
+          Object.entries(value.curve).map(([name, curve]) => [name, moveCurve(curve, shiftUs)]),
+        ),
+      };
+    case 'boolean':
+    case 'string':
+      return {
+        ...value,
+        keys: value.keys.map((key) => ({ ...key, timeUs: key.timeUs + shiftUs })),
+      } as AnimationValueV2;
+    case 'curve-snapshot':
+      return {
+        ...value,
+        samples: value.samples.map((sample) => ({ ...sample, timeUs: sample.timeUs + shiftUs })),
+      };
+  }
+}
+
+function moveCurve(curve: AnimationCurveV1, shiftUs: number): AnimationCurveV1 {
+  return {
+    keyframes: curve.keyframes.map((key) => ({ ...key, timeUs: key.timeUs + shiftUs })),
+  };
+}
+
+function cloneAnimation(animation: PropertyAnimationV2): PropertyAnimationV2 {
+  return JSON.parse(JSON.stringify(animation)) as PropertyAnimationV2;
+}
+
 /** Clones selected owner-bound entries to new owners; source entries remain unchanged. */
 export function clonePropertyAnimations(
   project: JoyProjectV1,
@@ -229,6 +348,10 @@ function rebaseCurve(curve: AnimationCurveV1, offsetUs: number, sampled: number)
 
 function isClipLocalDomain(domain: AnimationTimeDomainV2): boolean {
   return domain === 'clip-local' || domain === 'caption-clip-local';
+}
+
+function isTimelineTimeDomain(domain: AnimationTimeDomainV2): boolean {
+  return domain === 'composition' || domain === 'audio-timeline';
 }
 
 function normalized(project: JoyProjectV1): Record<string, PropertyAnimationV2> {

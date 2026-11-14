@@ -27,6 +27,16 @@ describe('editor UI preferences', () => {
     expect(store.getItem('joy-media.view-mode.v1')).toBe('widescreen');
   });
 
+  it('remembers the timeline snapping switch, on unless it was saved as off', () => {
+    expect(DEFAULT_EDITOR_UI_PREFERENCES.timelineSnapping).toBe(true);
+    const off = storage();
+    saveEditorUiPreferences(off, { ...DEFAULT_EDITOR_UI_PREFERENCES, timelineSnapping: false });
+    expect(loadEditorUiPreferences(off).timelineSnapping).toBe(false);
+
+    const missing = storage({ [EDITOR_UI_PREFERENCES_KEY]: '{"version":2}' });
+    expect(loadEditorUiPreferences(missing).timelineSnapping).toBe(true);
+  });
+
   it('rejects malformed preferences and falls back safely', () => {
     const store = storage({ [EDITOR_UI_PREFERENCES_KEY]: '{"version":2}' });
     expect(loadEditorUiPreferences(store)).toEqual(DEFAULT_EDITOR_UI_PREFERENCES);

@@ -27,6 +27,8 @@ export function itemDisabled(item: AppMenuItem, props: MenuRuleState): boolean {
       return !props.canUndo;
     case 'edit.redo':
       return !props.canRedo;
+    case 'clip.copy':
+    case 'clip.cut':
     case 'clip.delete':
     case 'clip.duplicate':
     case 'clip.split':

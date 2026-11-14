@@ -276,6 +276,7 @@ import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js'
 import { prepareTimelinePresentation } from './timeline-presentation.js';
 import {
   applyTimelineMediaPlacement,
+  type TimelineClipCopy,
   type TimelineMediaPlacement,
 } from './timeline-media-placement.js';
 import { TimelinePanel } from './TimelinePanel.js';
@@ -293,6 +294,13 @@ import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
 import { findFirstPartyScene } from '@joy-media/html-scene-runtime/first-party';
 import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
+import {
+  buildTimelineCutPlan,
+  buildTimelinePastePlan,
+  copyTimelineClips,
+  projectIdsInUse,
+  timelinePastePlacements,
+} from './timeline-clip-clipboard.js';
 import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection } from './dual-lens-model.js';
 import { primaryNodeIdForClip, type LensRevealRequest } from './dual-lens-reveal.js';
@@ -1245,6 +1253,12 @@ function EditorWorkspace({
     }[]
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
+  // The timeline snapping switch is a per-profile view preference (see ui-preferences.ts).
+  const [snapping, setSnapping] = useState(
+    () => loadEditorUiPreferences(storage).timelineSnapping !== false,
+  );
+  const snappingRef = useRef(snapping);
+  snappingRef.current = snapping;
   // A dialog that opens closes every header popup and the palette (OB-18).
   usePopupsClosedWhile(
     keyboardShortcutsOpen || agentSettingsOpen || modelDrawerOpen || assetLibrarySettingsOpen,
@@ -2935,8 +2949,18 @@ function EditorWorkspace({
     [resyncTimelineMedia, session],
   );
   const dispatchMediaPlacement = useCallback(
-    (placements: readonly TimelineMediaPlacement[], transaction: CommandTransaction) => {
-      const nextAudio = applyTimelineMediaPlacement(session, audioState, transaction, placements);
+    (
+      placements: readonly TimelineMediaPlacement[],
+      transaction: CommandTransaction,
+      copies: readonly TimelineClipCopy[] = [],
+    ) => {
+      const nextAudio = applyTimelineMediaPlacement(
+        session,
+        audioState,
+        transaction,
+        placements,
+        copies,
+      );
       invalidateAgentPreviewAfterEdit(session);
       setAudioStateRaw(nextAudio);
       resyncTimelineMedia();
@@ -3783,7 +3807,13 @@ function EditorWorkspace({
   );
 
   const persistUiPreferences = useCallback(
-    (next: Partial<{ workspacePreset: WorkspacePresetId; viewMode: EditorViewMode }>) => {
+    (
+      next: Partial<{
+        workspacePreset: WorkspacePresetId;
+        viewMode: EditorViewMode;
+        timelineSnapping: boolean;
+      }>,
+    ) => {
       const current = loadEditorUiPreferences(storage);
       saveEditorUiPreferences(storage, {
         ...current,
@@ -3844,6 +3874,96 @@ function EditorWorkspace({
     },
     [projectId, storage],
   );
+  // Clipboard and snapping commands. The keyboard, the Edit/Clip menus and the timeline
+  // toolbar all run these, so each command behaves the same wherever it is started.
+  const copySelectedClips = useCallback(() => {
+    const current = stateRef.current;
+    const composition =
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+    if (composition === undefined || current.selectedIds.length === 0) return;
+    const data = copyTimelineClips(composition, current.selectedIds, session.visualProject);
+    if (data && data.items.length > 0) {
+      showToast(`Copied ${data.items.length} clip${data.items.length === 1 ? '' : 's'}.`, 'info');
+    }
+  }, [session, showToast]);
+
+  const cutSelectedClips = useCallback(() => {
+    const current = stateRef.current;
+    const composition =
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+    if (composition === undefined || current.selectedIds.length === 0) return;
+    const plan = buildTimelineCutPlan({
+      composition,
+      selectedClipIds: current.selectedIds,
+      tracks: timelineTrackFlags,
+      visualProject: session.visualProject,
+    });
+    if (!plan.ok) {
+      showToast(plan.reason, 'info');
+      return;
+    }
+    dispatchTimeline(plan.transaction);
+    setState((active) => ({
+      ...active,
+      selectedIds: active.selectedIds.filter((id) => !plan.removedClipIds.includes(id)),
+    }));
+    showToast(
+      `Cut ${plan.removedClipIds.length} clip${plan.removedClipIds.length === 1 ? '' : 's'}.`,
+      'info',
+    );
+  }, [dispatchTimeline, session, showToast, timelineTrackFlags]);
+
+  const pasteClipsAtPlayhead = useCallback(() => {
+    const current = stateRef.current;
+    const composition =
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+    if (composition === undefined) return;
+    const plan = buildTimelinePastePlan({
+      composition,
+      playheadUs: current.playheadUs,
+      tracks: timelineTrackFlags,
+      elementKinds: readTimelineElementKindMap(session.visualProject),
+      reservedIds: projectIdsInUse(session.timelineProject, session.visualProject),
+    });
+    if (!plan.ok) {
+      showToast(plan.reason, 'info');
+      return;
+    }
+    // One undo step: the timeline insert, the copied clip state and the media bindings.
+    dispatchMediaPlacement(
+      timelinePastePlacements(plan.pastes, session.visualProject.assets, {
+        width: composition.width,
+        height: composition.height,
+      }),
+      plan.transaction,
+      plan.pastes.map((paste) => ({
+        sourceClipId: paste.sourceClipId,
+        clipId: paste.clipId,
+        ...(paste.state === undefined ? {} : { state: paste.state }),
+      })),
+    );
+    setState((active) => ({ ...active, selectedIds: plan.pastedClipIds }));
+    showToast(
+      `Pasted ${plan.pastedClipIds.length} clip${plan.pastedClipIds.length === 1 ? '' : 's'}.`,
+      'info',
+    );
+  }, [dispatchMediaPlacement, session, showToast, timelineTrackFlags]);
+
+  const setSnappingPersisted = useCallback(
+    (next: boolean) => {
+      snappingRef.current = next;
+      setSnapping(next);
+      persistUiPreferences({ timelineSnapping: next });
+    },
+    [persistUiPreferences],
+  );
+
+  const toggleSnapping = useCallback(() => {
+    const next = !snappingRef.current;
+    setSnappingPersisted(next);
+    showToast(`Snapping ${next ? 'enabled' : 'disabled'}.`, 'info');
+  }, [setSnappingPersisted, showToast]);
+
   useEffect(() => {
     // Space (ADR-0046 section 3): a tap under 250 ms with no pointer down plays
     // or pauses on key-up; a hold lends the Monitor the Hand and does not play;
@@ -4017,6 +4137,18 @@ function EditorWorkspace({
           });
           break;
         }
+        case 'clip.copy':
+          copySelectedClips();
+          break;
+        case 'clip.cut':
+          cutSelectedClips();
+          break;
+        case 'clip.paste':
+          pasteClipsAtPlayhead();
+          break;
+        case 'snapping.toggle':
+          toggleSnapping();
+          break;
       }
       event.preventDefault();
     };
@@ -4038,7 +4170,10 @@ function EditorWorkspace({
     };
   }, [
     closePopup,
+    copySelectedClips,
+    cutSelectedClips,
     dispatchTimeline,
+    pasteClipsAtPlayhead,
     redo,
     seek,
     session,
@@ -4046,6 +4181,7 @@ function EditorWorkspace({
     timelineTrackFlags,
     togglePlayback,
     togglePopup,
+    toggleSnapping,
     undo,
   ]);
 
@@ -5472,6 +5608,18 @@ function EditorWorkspace({
         case 'clip.split':
           runSelectedClipAction('split');
           break;
+        case 'clip.copy':
+          copySelectedClips();
+          break;
+        case 'clip.cut':
+          cutSelectedClips();
+          break;
+        case 'clip.paste':
+          pasteClipsAtPlayhead();
+          break;
+        case 'snapping.toggle':
+          toggleSnapping();
+          break;
         case 'agent.open':
           activatePanel('agent');
           break;
@@ -5514,13 +5662,17 @@ function EditorWorkspace({
     },
     [
       activatePanel,
+      copySelectedClips,
+      cutSelectedClips,
       exportEditableProject,
       handleExport,
       issueAgentPanelCommand,
       onBackToLibrary,
       openPopup,
+      pasteClipsAtPlayhead,
       redo,
       runSelectedClipAction,
+      toggleSnapping,
       undo,
     ],
   );
@@ -6816,6 +6968,10 @@ function EditorWorkspace({
           onTrackFlagsChange={context.onTimelineTrackFlagsChange}
           autoFit={context.timelineAutoFit}
           onAutoFitChange={context.onTimelineAutoFitChange}
+          snapping={snapping}
+          onSnappingChange={setSnappingPersisted}
+          onPasteClips={pasteClipsAtPlayhead}
+          visualProject={visualProject}
           markers={activeTimelineMarkers}
           onRevealInFlow={context.revealInFlow}
           {...(context.dataLanes === undefined || context.artifacts === undefined

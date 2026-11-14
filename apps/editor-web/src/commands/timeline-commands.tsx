@@ -208,8 +208,27 @@ export function ZoomOutIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-import { FitWidthIcon } from '../icons.js';
-export { FitWidthIcon };
+import { CopyIcon, CutIcon, PasteIcon, FitWidthIcon } from '../icons.js';
+import { copyTimelineClips } from '../timeline-clip-clipboard.js';
+export { CopyIcon, CutIcon, PasteIcon, FitWidthIcon };
+
+export function MagnetIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="16"
+      height="16"
+    >
+      <path d="M6 3v7a6 6 0 0 0 12 0V3" />
+      <line x1="4" y1="7" x2="8" y2="7" />
+      <line x1="16" y1="7" x2="20" y2="7" />
+    </svg>
+  );
+}
 
 // --- Command Registry ---
 export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
@@ -318,8 +337,57 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     },
     toggleState: () => false, // handled by toolbar state
   },
+  {
+    id: 'tool.snapping',
+    label: 'Toggle snapping',
+    icon: MagnetIcon,
+    shortcut: 'N',
+    group: 'tools',
+    canExecute: () => true,
+    execute: () => null,
+    toggleState: () => false,
+  },
 
   // EDIT GROUP
+  {
+    id: 'clip.copy',
+    label: 'Copy clip',
+    icon: CopyIcon,
+    shortcut: 'Ctrl+C',
+    group: 'edit',
+    canExecute: (ctx) => !!ctx.selectedClip,
+    execute: () => null,
+  },
+  {
+    id: 'clip.cut',
+    label: 'Cut clip',
+    icon: CutIcon,
+    shortcut: 'Ctrl+X',
+    group: 'edit',
+    canExecute: (ctx) => !!ctx.selectedClip,
+    execute: (ctx) => {
+      const clip = ctx.selectedClip?.clip;
+      const track = ctx.selectedClip?.track;
+      if (!clip || !track) return null;
+      return {
+        type: 'timeline.removeClip',
+        payload: {
+          compositionId: ctx.compositionId,
+          trackId: track.id,
+          clipId: clip.id,
+        },
+      };
+    },
+  },
+  {
+    id: 'clip.paste',
+    label: 'Paste clip',
+    icon: PasteIcon,
+    shortcut: 'Ctrl+V',
+    group: 'edit',
+    canExecute: (ctx) => !!ctx.project.compositions[ctx.compositionId],
+    execute: () => null,
+  },
   {
     id: 'clip.duplicate',
     label: 'Duplicate clip',
@@ -506,10 +574,21 @@ export interface ContextMenuItem {
   readonly dividerBefore?: boolean;
 }
 
+/**
+ * Copy and Cut from the clip menu. The panel passes callbacks that act on the whole
+ * selection; without them, Copy copies the one clip and Cut is shown disabled (a
+ * cut is a multi-clip transaction, which a single command cannot carry).
+ */
+export interface ClipContextClipboardActions {
+  readonly copy: () => void;
+  readonly cut: () => void;
+}
+
 export function buildClipContextMenu(
   ctx: CommandContext,
   onExecute: (cmd: SpikeCommand) => void,
   trackLocked = false,
+  clipboardActions?: ClipContextClipboardActions,
 ): readonly ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
 
@@ -541,6 +620,35 @@ export function buildClipContextMenu(
         action: () => onExecute(result),
       });
     }
+  }
+
+  // Copy
+  const copyCmd = TIMELINE_COMMANDS.find((c) => c.id === 'clip.copy')!;
+  if (copyCmd.canExecute(ctx)) {
+    const clip = ctx.selectedClip?.clip;
+    const comp = ctx.project.compositions[ctx.compositionId];
+    items.push({
+      label: 'Copy clip',
+      icon: CopyIcon,
+      shortcut: 'Ctrl+C',
+      disabled: trackLocked,
+      action: () => {
+        if (clipboardActions) clipboardActions.copy();
+        else if (comp && clip) copyTimelineClips(comp, [clip.id]);
+      },
+    });
+  }
+
+  // Cut
+  const cutCmd = TIMELINE_COMMANDS.find((c) => c.id === 'clip.cut')!;
+  if (cutCmd.canExecute(ctx)) {
+    items.push({
+      label: 'Cut clip',
+      icon: CutIcon,
+      shortcut: 'Ctrl+X',
+      disabled: trackLocked || clipboardActions === undefined,
+      action: () => clipboardActions?.cut(),
+    });
   }
 
   items.push({ label: '', action: () => {}, dividerBefore: true });
@@ -615,8 +723,9 @@ export function buildClipContextMenu(
 export function buildEmptyCanvasContextMenu(
   onImportClick: () => void,
   onAddFromLibrary: () => void,
+  onPaste?: () => void,
 ): readonly ContextMenuItem[] {
-  return [
+  const items: ContextMenuItem[] = [
     {
       label: 'Import Media...',
       shortcut: 'Cmd/Ctrl+I',
@@ -628,6 +737,14 @@ export function buildEmptyCanvasContextMenu(
       action: onAddFromLibrary,
     },
   ];
+  if (onPaste) {
+    items.push({
+      label: 'Paste at playhead',
+      shortcut: 'Ctrl+V',
+      action: onPaste,
+    });
+  }
+  return items;
 }
 
 export function buildTrackHeaderContextMenu(

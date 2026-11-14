@@ -39,6 +39,8 @@ export interface EditorUiPreferencesV2 {
   };
   /** The Monitor's View menu (overlays, guides, background); per user, never project data. */
   readonly monitorView?: MonitorViewOptions;
+  /** The timeline snapping switch (N). Missing means on. Per user, never project data. */
+  readonly timelineSnapping?: boolean;
 }
 
 export interface UiPreferenceStorage {
@@ -67,6 +69,7 @@ export const DEFAULT_EDITOR_UI_PREFERENCES: EditorUiPreferencesV2 = {
   disclosures: {},
   monitorPreview: { quality: 'auto' },
   monitorView: DEFAULT_MONITOR_VIEW_OPTIONS,
+  timelineSnapping: true,
 };
 
 export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiPreferencesV2 {
@@ -83,6 +86,8 @@ export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiP
           ...parsed,
           monitorPreview,
           monitorView: sanitizeMonitorViewOptions(parsed.monitorView),
+          // Only an explicit false turns snapping off; anything else is the default on.
+          timelineSnapping: parsed.timelineSnapping !== false,
         };
       }
     } catch {
