@@ -13,7 +13,7 @@ import { Readable } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createMemorySecretStore } from '@joy-media/provider-sdk';
+import { createMemorySecretStore, isPrivateOrInternalHost } from '@joy-media/provider-sdk';
 import {
   createProviderBroker,
   endpointBindingDigest,
@@ -82,6 +82,10 @@ const { FAKE_MEDIA_HOST, reply, startGenerationServer } = fake;
 
 const NOW = Date.UTC(2026, 10, 14);
 const KEY = 'not-a-real-key-for-tests';
+/**
+ * The MiniMax origin is only the profile binding (its endpoint digest) and the origin fetchToFake matches on. It is never
+ * contacted: fetchToFake sends this origin to the fake and rejects every other origin.
+ */
 const MINIMAX_ORIGIN = 'https://api.minimax.io';
 const MINIMAX_BASE = `${MINIMAX_ORIGIN}/v1`;
 // A 1x1 PNG, as the picture reply carries it in base64. It is a real file that ffprobe classifies as a picture.
@@ -182,25 +186,36 @@ async function downloadFromFake(
   };
 }
 
+interface RigOptions {
+  readonly maxImageBytes?: number;
+  readonly maxVideoBytes?: number;
+  readonly videoTimeoutMs?: number;
+  readonly pollIntervalMs?: number;
+}
+
+interface RestartOptions {
+  readonly now?: () => number;
+  readonly pollIntervalMs?: number;
+}
+
 interface Rig {
   readonly server: GenerationServer;
   readonly manager: GenerationJobs;
   readonly store: GenerationJobStore;
   readonly generatedDirectory: string;
   readonly broker: ReturnType<typeof createProviderBroker>;
+  /** A new job manager on the same store, broker and folder: what the app builds after a restart. */
+  restart(extra?: RestartOptions): GenerationJobs;
 }
 
-const rigs: Rig[] = [];
+/** Undo steps for every rig, run last in first out after each test. Each is pushed as soon as its resource exists. */
+const cleanups: Array<() => void | Promise<void>> = [];
 
-async function rig(
-  options: {
-    readonly maxImageBytes?: number;
-    readonly maxVideoBytes?: number;
-    readonly videoTimeoutMs?: number;
-  } = {},
-): Promise<Rig> {
+async function rig(options: RigOptions = {}): Promise<Rig> {
   const server = await startGenerationServer({ expectedKey: KEY });
+  cleanups.push(() => server.close());
   const generatedDirectory = mkdtempSync(path.join(tmpdir(), 'joy-generation-suite-'));
+  cleanups.push(() => rmSync(generatedDirectory, { recursive: true, force: true }));
   const secrets = createMemorySecretStore();
   await secrets.set(BROKER_PROFILE.secretHandleId, KEY);
   const broker = createProviderBroker({
@@ -217,44 +232,55 @@ async function rig(
   });
   const store = memoryStore();
   let nextId = 0;
-  const manager = createGenerationJobs({
+  const newId = (): string => {
+    nextId += 1;
+    return `job-${nextId}`;
+  };
+  const build = (extra: RestartOptions = {}): GenerationJobs => {
+    const manager = createGenerationJobs({
+      store,
+      getProfile: (id) => (id === PROFILE.id ? PROFILE : undefined),
+      broker,
+      generatedDirectory,
+      download: (url, signal) => downloadFromFake(server, url, signal),
+      probe: probeGeneratedMedia,
+      pollIntervalMs: extra.pollIntervalMs ?? options.pollIntervalMs ?? 5,
+      videoTimeoutMs: options.videoTimeoutMs ?? 60_000,
+      newId,
+      ...(extra.now === undefined ? {} : { now: extra.now }),
+      ...(options.maxImageBytes === undefined ? {} : { maxImageBytes: options.maxImageBytes }),
+      ...(options.maxVideoBytes === undefined ? {} : { maxVideoBytes: options.maxVideoBytes }),
+    });
+    cleanups.push(() => manager.stop());
+    return manager;
+  };
+  return {
+    server,
+    manager: build(),
     store,
-    getProfile: (id) => (id === PROFILE.id ? PROFILE : undefined),
-    broker,
     generatedDirectory,
-    download: (url, signal) => downloadFromFake(server, url, signal),
-    probe: probeGeneratedMedia,
-    pollIntervalMs: 5,
-    videoTimeoutMs: options.videoTimeoutMs ?? 60_000,
-    newId: () => {
-      nextId += 1;
-      return `job-${nextId}`;
-    },
-    ...(options.maxImageBytes === undefined ? {} : { maxImageBytes: options.maxImageBytes }),
-    ...(options.maxVideoBytes === undefined ? {} : { maxVideoBytes: options.maxVideoBytes }),
-  });
-  const made: Rig = { server, manager, store, generatedDirectory, broker };
-  rigs.push(made);
-  return made;
+    broker,
+    restart: build,
+  };
 }
 
 afterEach(async () => {
-  for (const made of rigs.splice(0)) {
-    made.manager.stop();
-    await made.server.close();
-    rmSync(made.generatedDirectory, { recursive: true, force: true });
-  }
+  for (const undo of cleanups.splice(0).reverse()) await undo();
 });
 
-/** Polls the job record until `done` holds, or fails with the last state the job was in. */
+/**
+ * Polls the job record until `done` holds, or fails with the last state the job was in. `manager` defaults to the rig's
+ * own manager; a restart test passes the manager it built after the restart.
+ */
 async function waitForJob(
   made: Rig,
   id: string,
   done: (job: GenerationJobRecord) => boolean,
+  manager: GenerationJobs = made.manager,
 ): Promise<GenerationJobRecord> {
   const deadline = Date.now() + 5000;
   for (;;) {
-    const job = made.manager.status(id);
+    const job = manager.status(id);
     if (job !== undefined && done(job)) return job;
     if (Date.now() > deadline) {
       throw new Error(
@@ -490,6 +516,12 @@ describe('generation against the fake MiniMax server: videos', () => {
       'file-link',
       'download',
     ]);
+    expect(made.server.requests.find((request) => request.label === 'video-create')).toMatchObject({
+      method: 'POST',
+      path: '/v2/video_generation',
+      authorizationOk: true,
+      body: { model: 'MiniMax-H3-Lite', prompt: 'a slow pan', resolution: '480P', duration: 4 },
+    });
     const keyed = made.server.requests.filter((request) => request.label !== 'download');
     expect(keyed.every((request) => request.authorizationOk)).toBe(true);
   });
@@ -513,6 +545,12 @@ describe('generation against the fake MiniMax server: videos', () => {
     const job = await waitForJob(made, started.id, finished);
 
     expect(job).toMatchObject({ state: 'completed', route: 'legacy', model: 'MiniMax-Hailuo-02' });
+    expect(made.server.requests.find((request) => request.label === 'video-create-legacy')).toMatchObject({
+      method: 'POST',
+      path: '/v1/video_generation',
+      authorizationOk: true,
+      body: { model: 'MiniMax-Hailuo-02', prompt: 'a slow pan', resolution: '512P', duration: 6 },
+    });
     expect(labels(made)).toContain('video-create-legacy');
     expect(labels(made)).toContain('video-query-legacy');
     expect(labels(made)).not.toContain('video-cancel');
@@ -576,6 +614,37 @@ describe('generation against the fake MiniMax server: videos', () => {
       path: '/v2/video_generation/task-5',
       authorizationOk: true,
     });
+  });
+
+  it('abandons a current-route video locally when the provider refuses the cancel', async () => {
+    const made = await rig();
+    made.server.reply('video-create', reply({ json: { task_id: 'task-14' } }));
+    made.server.reply('video-query', reply({ json: { status: 'queued' } }));
+    made.server.reply('video-cancel', reply({ status: 500, json: {} }));
+
+    const started = await made.manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    await waitForJob(
+      made,
+      started.id,
+      (job) => job.state === 'queued' && job.providerTaskId !== undefined,
+    );
+    const cancelled = await made.manager.cancel(started.id);
+
+    expect(cancelled).toMatchObject({
+      state: 'abandoned-locally',
+      error: 'The local job was abandoned. Provider work may continue.',
+    });
+    expect(made.manager.status(started.id)?.state).toBe('abandoned-locally');
+    expect(made.server.requests.find((request) => request.label === 'video-cancel')).toMatchObject({
+      method: 'DELETE',
+      path: '/v2/video_generation/task-14',
+      authorizationOk: true,
+    });
+    expect(made.server.pending('video-cancel')).toBe(0);
   });
 
   it('abandons a legacy video locally and sends no cancel, because the legacy route has none', async () => {
@@ -734,13 +803,81 @@ describe('generation against the fake MiniMax server: videos', () => {
     const downloader = createPinnedGenerationDownloader();
     const controller = new AbortController();
 
+    // The loopback fake is plain HTTP, so the protocol check refuses it before any connection is made.
     await expect(
       downloader(`${made.server.origin}/download/file.mp4`, controller.signal),
-    ).rejects.toThrow('The video download address was refused.');
+    ).rejects.toThrow(/^The video download address was refused\.$/);
+    // This address passes the protocol check, so the refusal must come from the private-host check. The exact-message
+    // regex fails the test if the request is attempted instead (port 443 here, not the fake).
+    expect(isPrivateOrInternalHost('127.0.0.1')).toBe(true);
     await expect(
       downloader('https://127.0.0.1/download/file.mp4', controller.signal),
-    ).rejects.toThrow('The video download address was refused.');
+    ).rejects.toThrow(/^The video download address was refused\.$/);
     expect(labels(made)).toEqual([]);
+  });
+});
+
+describe('generation against the fake MiniMax server: restarts', () => {
+  it('resumes a video that was queued when the app stopped, and saves its file', async () => {
+    // The first run never polls: its first poll is a minute away and stop() clears it. Every status read comes after
+    // the restart, so the polling that finishes the job is the restarted manager's.
+    const made = await rig({ pollIntervalMs: 60_000 });
+    made.server.reply('video-create', reply({ json: { task_id: 'task-30' } }));
+    made.server.reply(
+      'video-query',
+      reply({ json: { status: 'running' } }),
+      reply({ json: { status: 'succeeded', file_id: 'file-30' } }),
+    );
+    made.server.reply('download', reply({ body: VIDEO_BYTES }));
+
+    const started = await made.manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    made.manager.stop();
+    expect(labels(made)).toEqual(['video-create']);
+
+    const restarted = made.restart({ pollIntervalMs: 5 });
+    restarted.resume();
+    const job = await waitForJob(made, started.id, finished, restarted);
+
+    expect(job).toMatchObject({
+      state: 'completed',
+      kind: 'video',
+      route: 'current',
+      providerTaskId: 'task-30',
+    });
+    expect(readFileSync(job.filePath ?? '').equals(VIDEO_BYTES)).toBe(true);
+    expect(labels(made)).toEqual([
+      'video-create',
+      'video-query',
+      'video-query',
+      'file-link',
+      'download',
+    ]);
+  });
+
+  it('times out an overdue video on resume, without asking the provider', async () => {
+    const made = await rig({ pollIntervalMs: 60_000, videoTimeoutMs: 15 * 60 * 1000 });
+    made.server.reply('video-create', reply({ json: { task_id: 'task-31' } }));
+
+    const started = await made.manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    made.manager.stop();
+
+    // The restart happens sixteen minutes after the job was created, past the fifteen-minute limit.
+    const restarted = made.restart({ now: () => Date.now() + 16 * 60 * 1000 });
+    restarted.resume();
+
+    expect(restarted.status(started.id)).toMatchObject({
+      state: 'timed-out',
+      error: 'The video task exceeded the 15-minute limit.',
+    });
+    expect(labels(made)).toEqual(['video-create']);
   });
 });
 
