@@ -2,6 +2,10 @@
 
 `node tooling/qa/libraries/run-library-tests.mjs` renders library items (effects, filters) with the real Pixi renderer in headless Chromium, reads the pixels back and compares them per channel. It also exports through the app's own `exportOfflineMp4` and compares frame 1.0 s from the export with the preview.
 
+## Transitions (T-V10)
+
+`node tooling/qa/libraries/run-library-tests.mjs --kind transitions --out <dir> --pic1 <left picture> --pic2 <right picture>` (or set `JOY_TRANSITION_PIC1` and `JOY_TRANSITION_PIC2`; there is no built-in picture path). The export frames are extracted with ffmpeg from the encoded MP4. A full run writes `docs/qa/v1.1.1/TRANSITIONS.md`; a run with `--items` or `--limit` only writes into `--out`. `JOY_HARNESS_VERBOSE=1` prints the browser console. The limits of the transition checks are listed in the generated report.
+
 ## Known limits
 
 - Only gaussian-blur, sepia and vignette are wired and proven (3 of 3 passed). The `--kind effects` smoke run reported a blank preview for brightness-contrast and no change for `contrast`; this may be a harness mismatch and is not yet resolved, so the effects kind is unproven.

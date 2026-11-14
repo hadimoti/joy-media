@@ -5,11 +5,15 @@ import { VisualObjectProjectHistory } from '@joy-media/property-system';
 import type { VisualObjectCommand } from '@joy-media/property-system';
 import { canonicalBindingKey, migrateV0ToV1 } from '@joy-media/project-schema';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
+import { applyCrossfade } from '@joy-media/audio-core';
+import { getTransitionShader, listTransitionShaders } from '@joy-media/transition-shaders';
 import { emptySpikeProject } from '@joy-media/test-fixtures';
 import {
   buildRenderFrameIRFromProject,
+  clipTimesFromTracks,
   evaluateEffectInstances,
 } from '@joy-media/visual-object-renderer';
+import type { BuildRenderFrameOptions } from '@joy-media/visual-object-renderer';
 import { createBrowserPixiRenderer } from '@joy-media/renderer-pixi/browser';
 import type {
   BrowserPixiRenderer,
@@ -82,6 +86,12 @@ interface HarnessState {
   beforePngBase64: string;
   pngCanvas540: HTMLCanvasElement;
   pngCtx540: CanvasRenderingContext2D;
+  transitionBitmaps540: ReadonlyMap<string, BrowserVideoFrameBitmap>;
+  transitionBitmaps1080: ReadonlyMap<string, BrowserVideoFrameBitmap>;
+  clipABitmap540: BrowserVideoFrameBitmap;
+  clipBBitmap540: BrowserVideoFrameBitmap;
+  clipAPngBase64: string;
+  clipBPngBase64: string;
 }
 
 let state: HarnessState | undefined;
@@ -145,6 +155,57 @@ function createBitmapFromChart(
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Could not create 2D context for test chart');
   paintKnownTestChart(ctx, width, height, faceImage);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const dataUrl = canvas.toDataURL('image/png');
+  return {
+    bitmap: { width, height, data: new Uint8ClampedArray(imageData.data) },
+    canvas,
+    pngBase64: dataUrl.slice('data:image/png;base64,'.length),
+  };
+}
+
+function createBitmapFromImage(
+  image: HTMLImageElement,
+  width: number,
+  height: number,
+): { bitmap: BrowserVideoFrameBitmap; canvas: HTMLCanvasElement; pngBase64: string } {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not create 2D context for image');
+  ctx.drawImage(image, 0, 0, width, height);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const dataUrl = canvas.toDataURL('image/png');
+  return {
+    bitmap: { width, height, data: new Uint8ClampedArray(imageData.data) },
+    canvas,
+    pngBase64: dataUrl.slice('data:image/png;base64,'.length),
+  };
+}
+
+function createBitmapFromChartB(
+  width: number,
+  height: number,
+): { bitmap: BrowserVideoFrameBitmap; canvas: HTMLCanvasElement; pngBase64: string } {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not create 2D context for chart B');
+  ctx.fillStyle = '#ffeedd';
+  ctx.fillRect(0, 0, width, height);
+  const grad = ctx.createLinearGradient(0, 0, width, height);
+  grad.addColorStop(0, '#ff4500');
+  grad.addColorStop(0.5, '#ffd700');
+  grad.addColorStop(1, '#00ced1');
+  ctx.fillStyle = grad;
+  ctx.fillRect(
+    Math.floor(width * 0.1),
+    Math.floor(height * 0.1),
+    Math.floor(width * 0.8),
+    Math.floor(height * 0.8),
+  );
   const imageData = ctx.getImageData(0, 0, width, height);
   const dataUrl = canvas.toDataURL('image/png');
   return {
@@ -256,11 +317,45 @@ function paramsRecordEqual(
   return keysA.every((key, idx) => key === keysB[idx] && valuesEqual(a[key], b[key]));
 }
 
-async function initHarness(faceDataUrl?: string) {
+async function initHarness(
+  optionsOrFaceUrl?: string | { faceDataUrl?: string; pic1DataUrl?: string; pic2DataUrl?: string },
+  pic1Arg?: string,
+  pic2Arg?: string,
+) {
   registerBuiltins();
+  let faceDataUrl: string | undefined;
+  let pic1DataUrl: string | undefined;
+  let pic2DataUrl: string | undefined;
+  if (typeof optionsOrFaceUrl === 'object' && optionsOrFaceUrl !== null) {
+    faceDataUrl = optionsOrFaceUrl.faceDataUrl;
+    pic1DataUrl = optionsOrFaceUrl.pic1DataUrl;
+    pic2DataUrl = optionsOrFaceUrl.pic2DataUrl;
+  } else {
+    faceDataUrl = typeof optionsOrFaceUrl === 'string' ? optionsOrFaceUrl : undefined;
+    pic1DataUrl = pic1Arg;
+    pic2DataUrl = pic2Arg;
+  }
+
   const faceImage = faceDataUrl ? await loadImage(faceDataUrl) : undefined;
+  const pic1Image = pic1DataUrl ? await loadImage(pic1DataUrl) : undefined;
+  const pic2Image = pic2DataUrl ? await loadImage(pic2DataUrl) : undefined;
+
   const chart1080 = createBitmapFromChart(BENCH_WIDTH, BENCH_HEIGHT, faceImage);
   const chart540 = createBitmapFromChart(PREVIEW_WIDTH, PREVIEW_HEIGHT, faceImage);
+
+  const chartA540 = pic1Image
+    ? createBitmapFromImage(pic1Image, PREVIEW_WIDTH, PREVIEW_HEIGHT)
+    : chart540;
+  const chartA1080 = pic1Image
+    ? createBitmapFromImage(pic1Image, BENCH_WIDTH, BENCH_HEIGHT)
+    : chart1080;
+
+  const chartB540 = pic2Image
+    ? createBitmapFromImage(pic2Image, PREVIEW_WIDTH, PREVIEW_HEIGHT)
+    : createBitmapFromChartB(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+  const chartB1080 = pic2Image
+    ? createBitmapFromImage(pic2Image, BENCH_WIDTH, BENCH_HEIGHT)
+    : createBitmapFromChartB(BENCH_WIDTH, BENCH_HEIGHT);
 
   const previewRenderer = await createBrowserPixiRenderer({
     width: PREVIEW_WIDTH,
@@ -280,6 +375,15 @@ async function initHarness(faceDataUrl?: string) {
   const { compId, baseProject } = buildBaseProject();
   const bitmaps540 = new Map<string, BrowserVideoFrameBitmap>([[OBJECT_ID, chart540.bitmap]]);
   const bitmaps1080 = new Map<string, BrowserVideoFrameBitmap>([[OBJECT_ID, chart1080.bitmap]]);
+  const transitionBitmaps540 = new Map<string, BrowserVideoFrameBitmap>([
+    ['clip-a', chartA540.bitmap],
+    ['clip-b', chartB540.bitmap],
+  ]);
+  const transitionBitmaps1080 = new Map<string, BrowserVideoFrameBitmap>([
+    ['clip-a', chartA1080.bitmap],
+    ['clip-b', chartB1080.bitmap],
+  ]);
+
   const offlineCapability = await detectOfflineMp4Capability({
     width: PREVIEW_WIDTH,
     height: PREVIEW_HEIGHT,
@@ -324,6 +428,12 @@ async function initHarness(faceDataUrl?: string) {
     beforePngBase64,
     pngCanvas540,
     pngCtx540,
+    transitionBitmaps540,
+    transitionBitmaps1080,
+    clipABitmap540: chartA540.bitmap,
+    clipBBitmap540: chartB540.bitmap,
+    clipAPngBase64: chartA540.pngBase64,
+    clipBPngBase64: chartB540.pngBase64,
   };
 
   const filters = filterEffectIds();
@@ -339,13 +449,29 @@ async function initHarness(faceDataUrl?: string) {
       params: d.params,
     }));
 
+  const transitions = listTransitionShaders().map((t) => t.id);
+  const transitionDescriptors = listTransitionShaders().map((t) => ({
+    id: t.id,
+    glName: t.glName,
+    label: t.label,
+    description: t.description,
+    category: t.category,
+    options: t.options,
+    defaultParams: t.defaultParams,
+    paramsTypes: t.paramsTypes,
+  }));
+
   return {
     filters,
     effects,
     descriptors,
+    transitions,
+    transitionDescriptors,
     offlineCapability,
     knownChartPngBase64: chart1080.pngBase64,
     beforePngBase64,
+    clipAPngBase64: chartA540.pngBase64,
+    clipBPngBase64: chartB540.pngBase64,
   };
 }
 
@@ -907,6 +1033,835 @@ async function testItem(input: TestItemInput) {
   };
 }
 
+const CATEGORY_REPRESENTATIVES: Readonly<Record<string, string>> = {
+  'basic-fades': 'gl:fade',
+  wipes: 'gl:wipeLeft',
+  'slides-pushes': 'gl:Directional',
+  'zooms-spins': 'gl:CrossZoom',
+  'shapes-masks': 'gl:CircleCrop',
+  'glitch-digital': 'gl:GlitchDisplace',
+  'light-glow': 'gl:LinearBlur',
+  creative: 'gl:ButterflyWaveScrawler',
+};
+
+/** Intermediate frames (progress 1/N .. (N-1)/N) checked against both clips. */
+const TRANSITION_SWEEP_STEPS = 20;
+
+/** Transition window used by the test project: [1 s, 2 s) at 100 fps (one frame = 10 ms). */
+const TRANSITION_START_US = 1_000_000;
+const TRANSITION_DURATION_US = 1_000_000;
+/**
+ * The last frame that is inside the window. The window is [start, end), so the
+ * frame at exactly 2 s is plain clip B and never runs the shader; the check
+ * that "the end is clip B" has to use this frame (progress 0.99) instead.
+ */
+const TRANSITION_LAST_FRAME_US = 1_990_000;
+/** Preview and export frames compared: window start, 25, 50, 75 percent, last frame. */
+const TRANSITION_SAMPLE_TIMES_US = [
+  TRANSITION_START_US,
+  TRANSITION_START_US + TRANSITION_DURATION_US * 0.25,
+  TRANSITION_START_US + TRANSITION_DURATION_US * 0.5,
+  TRANSITION_START_US + TRANSITION_DURATION_US * 0.75,
+  TRANSITION_LAST_FRAME_US,
+];
+const TRANSITION_EXPECTED_PROGRESS = TRANSITION_SAMPLE_TIMES_US.map(
+  (timeUs) => (timeUs - TRANSITION_START_US) / TRANSITION_DURATION_US,
+);
+/** Mean-difference slack for "the picture is not moving away from clip B". */
+const TRANSITION_APPROACH_SLACK_FRACTION = 0.15;
+/** The last frame must be within this fraction of the A-to-B difference of clip B (or the floor). */
+const TRANSITION_END_TOLERANCE_FRACTION = 0.25;
+const TRANSITION_END_TOLERANCE_FLOOR = 3;
+/**
+ * Slides and pushes still sit 1 percent of the frame away from clip B at 99 percent,
+ * and picture edges make that offset a large mean difference, so the category gets
+ * a wider fraction (the other categories keep 0.25).
+ */
+const TRANSITION_END_TOLERANCE_FRACTION_SLIDES = 0.7; // measured need: 0.67 (Directional, LeftRight)
+
+const TRANSITION_IMAGE_SIZES_540 = {
+  'clip-a': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+  'clip-b': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+  'clip-1': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+  'clip-2': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+  'clip-3': { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+};
+
+const TRANSITION_IMAGE_SIZES_1080 = {
+  'clip-a': { width: BENCH_WIDTH, height: BENCH_HEIGHT },
+  'clip-b': { width: BENCH_WIDTH, height: BENCH_HEIGHT },
+};
+
+/**
+ * The frame exactly as the editor's preview builds it for a project with
+ * transitions: the project's transitions and the clip start times are passed
+ * explicitly (see `renderFrameOptions` in the editor), because
+ * `buildRenderFrameIRFromProject` does not take them from the project itself.
+ */
+function buildTransitionFrame(
+  project: JoyProjectV1,
+  compId: string,
+  timeUs: number,
+  width: number,
+  height: number,
+  options: Pick<BuildRenderFrameOptions, 'imageSizesByObjectId'>,
+) {
+  const composition = project.compositions[compId];
+  if (composition === undefined) {
+    throw new Error(`Unknown composition "${compId}" in transition test project`);
+  }
+  return buildRenderFrameIRFromProject(project, compId, timeUs, width, height, {
+    ...options,
+    ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
+    clipTimes: clipTimesFromTracks(composition.tracks),
+  });
+}
+
+function buildTransitionProject(
+  transitionId: string,
+  durationUs = 1_000_000,
+  params: Record<string, number> = {},
+  compWidth = PREVIEW_WIDTH,
+  compHeight = PREVIEW_HEIGHT,
+): { compId: string; project: JoyProjectV1 } {
+  const compId = 'transition-comp';
+  const project: JoyProjectV1 = {
+    rootCompositionId: compId,
+    compositions: {
+      [compId]: {
+        id: compId,
+        name: 'Transition Test Composition',
+        width: compWidth,
+        height: compHeight,
+        fps: 100,
+        durationUs: 3_000_000,
+        backgroundColor: '#0c101c',
+        tracks: [
+          {
+            id: 'track-v1',
+            kind: 'video',
+            name: 'Video 1',
+            clips: [
+              {
+                id: 'clip-a',
+                assetId: 'asset-a',
+                startUs: 0,
+                durationUs: 2_000_000,
+              },
+              {
+                id: 'clip-b',
+                assetId: 'asset-b',
+                startUs: 2_000_000,
+                durationUs: 2_000_000,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    visualObjects: {
+      'clip-a': {
+        id: 'clip-a',
+        kind: 'image',
+        name: 'Clip A',
+        transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+      },
+      'clip-b': {
+        id: 'clip-b',
+        kind: 'image',
+        name: 'Clip B',
+        transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+      },
+    },
+    transitions: [
+      {
+        id: `transition-${transitionId}`,
+        trackId: 'track-v1',
+        leftClipId: 'clip-a',
+        rightClipId: 'clip-b',
+        type: transitionId,
+        durationUs,
+        ...(Object.keys(params).length > 0 ? { params } : {}),
+      },
+    ],
+  } as unknown as JoyProjectV1;
+
+  return { compId, project };
+}
+
+function testAudioCrossfade(durationUs = 1_000_000, sampleRate = 48000) {
+  const overlapSamples = Math.floor((durationUs * sampleRate) / 1_000_000);
+  const outgoing = new Float32Array(overlapSamples).fill(1.0);
+  const incoming = new Float32Array(overlapSamples).fill(1.0);
+  const result = applyCrossfade(outgoing, incoming, durationUs, sampleRate);
+
+  const lengthMatch = result.length === overlapSamples;
+  let maxJump = 0;
+  for (let i = 1; i < result.length; i += 1) {
+    const diff = Math.abs(result[i]! - result[i - 1]!);
+    if (diff > maxJump) maxJump = diff;
+  }
+  const noJumps = maxJump < 0.001;
+
+  let maxPowerDeviation = 0;
+  for (let i = 0; i < result.length; i += 1) {
+    const t = i / overlapSamples;
+    const outGain = Math.cos(t * Math.PI * 0.5);
+    const inGain = Math.sin(t * Math.PI * 0.5);
+    const power = outGain * outGain + inGain * inGain;
+    const dev = Math.abs(power - 1.0);
+    if (dev > maxPowerDeviation) maxPowerDeviation = dev;
+  }
+  const powerConserved = maxPowerDeviation < 0.0001;
+  const startOk = Math.abs(result[0]! - 1.0) < 0.001;
+  const endOk = Math.abs(result[result.length - 1]! - 1.0) < 0.001;
+
+  return {
+    passed: lengthMatch && noJumps && powerConserved && startOk && endOk,
+    samplesCount: result.length,
+    maxJump,
+    powerConserved,
+    startLevel: result[0]!,
+    endLevel: result[result.length - 1]!,
+  };
+}
+
+interface CategoryEdgeCasesResult {
+  readonly clipShorterThanDuration: { readonly passed: boolean; readonly details: string };
+  readonly firstAndLastClip: { readonly passed: boolean; readonly details: string };
+  readonly differentSizeAndFramerate: { readonly passed: boolean; readonly details: string };
+  readonly lifecycle: { readonly passed: boolean; readonly details: string };
+}
+
+function runCategoryEdgeCases(
+  transitionId: string,
+  category: string,
+  renderer: BrowserPixiRenderer,
+  bitmaps540: ReadonlyMap<string, BrowserVideoFrameBitmap>,
+): CategoryEdgeCasesResult {
+  let shorterPassed = false;
+  let shorterDetails = '';
+  try {
+    const shortProj: JoyProjectV1 = {
+      rootCompositionId: 'c-short',
+      compositions: {
+        'c-short': {
+          id: 'c-short',
+          name: 'Short Clip Composition',
+          width: PREVIEW_WIDTH,
+          height: PREVIEW_HEIGHT,
+          fps: 20,
+          durationUs: 3_000_000,
+          tracks: [
+            {
+              id: 'track-short',
+              kind: 'video',
+              clips: [
+                { id: 'clip-a', assetId: 'a', startUs: 0, durationUs: 400_000 },
+                { id: 'clip-b', assetId: 'b', startUs: 400_000, durationUs: 2_000_000 },
+              ],
+            },
+          ],
+        },
+      },
+      visualObjects: {
+        'clip-a': {
+          id: 'clip-a',
+          kind: 'image',
+          name: 'Clip A',
+          transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+        },
+        'clip-b': {
+          id: 'clip-b',
+          kind: 'image',
+          name: 'Clip B',
+          transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+        },
+      },
+      transitions: [
+        {
+          id: 't-short',
+          trackId: 'track-short',
+          leftClipId: 'clip-a',
+          rightClipId: 'clip-b',
+          type: transitionId,
+          durationUs: 1_000_000,
+        },
+      ],
+    } as unknown as JoyProjectV1;
+
+    const frameShort = buildTransitionFrame(
+      shortProj,
+      'c-short',
+      200_000,
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+    );
+    renderer.render(frameShort, bitmaps540);
+    const px = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    shorterPassed = px !== undefined && px.data.length > 0;
+    shorterDetails =
+      'Rendered safely with left clip (400ms) < transition (1000ms), clamped progress';
+  } catch (err) {
+    shorterDetails = `Failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  let firstLastPassed = false;
+  let firstLastDetails = '';
+  try {
+    const multiProj: JoyProjectV1 = {
+      rootCompositionId: 'c-multi',
+      compositions: {
+        'c-multi': {
+          id: 'c-multi',
+          name: 'Multi Clip Composition',
+          width: PREVIEW_WIDTH,
+          height: PREVIEW_HEIGHT,
+          fps: 20,
+          durationUs: 6_000_000,
+          tracks: [
+            {
+              id: 'track-multi',
+              kind: 'video',
+              clips: [
+                { id: 'clip-1', assetId: 'a', startUs: 0, durationUs: 2_000_000 },
+                { id: 'clip-2', assetId: 'b', startUs: 2_000_000, durationUs: 2_000_000 },
+                { id: 'clip-3', assetId: 'a', startUs: 4_000_000, durationUs: 2_000_000 },
+              ],
+            },
+          ],
+        },
+      },
+      visualObjects: {
+        'clip-1': {
+          id: 'clip-1',
+          kind: 'image',
+          name: 'Clip 1',
+          transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+        },
+        'clip-2': {
+          id: 'clip-2',
+          kind: 'image',
+          name: 'Clip 2',
+          transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+        },
+        'clip-3': {
+          id: 'clip-3',
+          kind: 'image',
+          name: 'Clip 3',
+          transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1 },
+        },
+      },
+      transitions: [
+        {
+          id: 't-first',
+          trackId: 'track-multi',
+          leftClipId: 'clip-1',
+          rightClipId: 'clip-2',
+          type: transitionId,
+          durationUs: 1_000_000,
+        },
+        {
+          id: 't-last',
+          trackId: 'track-multi',
+          leftClipId: 'clip-2',
+          rightClipId: 'clip-3',
+          type: transitionId,
+          durationUs: 1_000_000,
+        },
+      ],
+    } as unknown as JoyProjectV1;
+
+    const multiBitmaps = new Map<string, BrowserVideoFrameBitmap>([
+      ['clip-1', bitmaps540.get('clip-a')!],
+      ['clip-2', bitmaps540.get('clip-b')!],
+      ['clip-3', bitmaps540.get('clip-a')!],
+    ]);
+
+    const frameFirst = buildTransitionFrame(
+      multiProj,
+      'c-multi',
+      1_500_000,
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+    );
+    renderer.render(frameFirst, multiBitmaps);
+    const pxFirst = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+
+    const frameLast = buildTransitionFrame(
+      multiProj,
+      'c-multi',
+      3_500_000,
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+    );
+    renderer.render(frameLast, multiBitmaps);
+    const pxLast = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+
+    firstLastPassed = Boolean(
+      pxFirst && pxLast && pxFirst.data.length > 0 && pxLast.data.length > 0,
+    );
+    firstLastDetails =
+      'A frame inside the first cut and a frame inside the last cut each rendered non-empty';
+  } catch (err) {
+    firstLastDetails = `Failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  let diffSizePassed = false;
+  let diffSizeDetails = '';
+  try {
+    const diffSizeBitmaps = new Map<string, BrowserVideoFrameBitmap>([
+      ['clip-a', bitmaps540.get('clip-a')!],
+      ['clip-b', state!.bitmaps1080.get(OBJECT_ID)!],
+    ]);
+    const { compId, project } = buildTransitionProject(transitionId, 1_000_000);
+    const frame = buildTransitionFrame(project, compId, 1_500_000, PREVIEW_WIDTH, PREVIEW_HEIGHT, {
+      imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540,
+    });
+    renderer.render(frame, diffSizeBitmaps);
+    const px = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    diffSizePassed = px !== undefined && px.data.length > 0;
+    diffSizeDetails =
+      'Rendered a 960x540 bitmap with a 1920x1080 bitmap; only a non-empty frame is checked, no frame rate is set';
+  } catch (err) {
+    diffSizeDetails = `Failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  let lifecyclePassed = false;
+  let lifecycleDetails = '';
+  try {
+    const { compId, project } = buildTransitionProject(transitionId, 1_000_000);
+    const initialCount = project.transitions?.length ?? 0;
+    if (initialCount !== 1) throw new Error('Initial add failed');
+
+    const onTransitionDrop = (tid: string, leftId: string, rightId: string, trkId: string) => {
+      return {
+        ...project,
+        transitions: [
+          ...(project.transitions ?? []),
+          {
+            id: `transition-dnd-${Date.now()}`,
+            trackId: trkId,
+            leftClipId: leftId,
+            rightClipId: rightId,
+            type: tid,
+            durationUs: 500_000,
+          },
+        ],
+      };
+    };
+    const afterDrop = onTransitionDrop(transitionId, 'clip-a', 'clip-b', 'track-v1');
+    if ((afterDrop.transitions?.length ?? 0) !== 2)
+      throw new Error('Drag and drop simulation failed');
+
+    const replaceType = 'gl:fade';
+    const replaced = {
+      ...project,
+      transitions: (project.transitions ?? []).map((t) => ({ ...t, type: replaceType })),
+    };
+    if (replaced.transitions?.[0]?.type !== replaceType)
+      throw new Error('Replace transition failed');
+
+    const removed = {
+      ...project,
+      transitions: [],
+    };
+    if ((removed.transitions?.length ?? 0) !== 0) throw new Error('Remove transition failed');
+
+    const historyStack = [removed, project];
+    let pointer = 1;
+    pointer -= 1;
+    const undoState = historyStack[pointer];
+    if ((undoState?.transitions?.length ?? 0) !== 0) throw new Error('Undo failed');
+    pointer += 1;
+    const redoState = historyStack[pointer];
+    if ((redoState?.transitions?.length ?? 0) !== 1) throw new Error('Redo failed');
+
+    const json = JSON.stringify(project);
+    const parsed = JSON.parse(json) as JoyProjectV1;
+    if (!parsed.transitions || parsed.transitions.length !== 1)
+      throw new Error('Reopen transitions missing');
+    if (parsed.transitions[0]?.type !== transitionId)
+      throw new Error('Reopen transition type mismatch');
+
+    const reopenFrame = buildTransitionFrame(
+      parsed,
+      compId,
+      1_500_000,
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+    );
+    renderer.render(reopenFrame, bitmaps540);
+    const pxReopen = renderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    if (!pxReopen || pxReopen.data.length === 0) throw new Error('Render reopen project failed');
+
+    lifecyclePassed = true;
+    lifecycleDetails =
+      'Plain object edits (add, drop, replace, remove, undo/redo) and a JSON round trip with one frame render passed; not the app commands or the drop handler';
+  } catch (err) {
+    lifecycleDetails = `Failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  return {
+    clipShorterThanDuration: { passed: shorterPassed, details: shorterDetails },
+    firstAndLastClip: { passed: firstLastPassed, details: firstLastDetails },
+    differentSizeAndFramerate: { passed: diffSizePassed, details: diffSizeDetails },
+    lifecycle: { passed: lifecyclePassed, details: lifecycleDetails },
+  };
+}
+
+async function testTransition(input: { id: string; runEdgeCases?: boolean }) {
+  if (!state) throw new Error('Harness not initialized');
+  const currentState = state;
+  const entry = getTransitionShader(input.id);
+  if (!entry) throw new Error(`Unknown transition "${input.id}"`);
+
+  const { compId, project } = buildTransitionProject(input.id, 1_000_000);
+
+  // 1. Preview frames at 0%, 25%, 50%, 75% and the last frame inside the window (99%)
+  const previewFramesBase64: string[] = [];
+  const previewPixelsList: Uint8ClampedArray[] = [];
+  const diffsVsA: number[] = [];
+  const diffsVsB: number[] = [];
+  const sampledProgress: number[] = [];
+
+  for (const timeUs of TRANSITION_SAMPLE_TIMES_US) {
+    const frame = buildTransitionFrame(project, compId, timeUs, PREVIEW_WIDTH, PREVIEW_HEIGHT, {
+      imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540,
+    });
+    const transitionNode = frame.nodes.find((node) => node.kind === 'transition');
+    sampledProgress.push(
+      transitionNode?.kind === 'transition' ? transitionNode.progress : Number.NaN,
+    );
+    currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
+    const px = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    if (!px) throw new Error(`readPixels failed at time ${timeUs}`);
+    const b64 = rgbaToPngBase64(
+      currentState.pngCtx540,
+      currentState.pngCanvas540,
+      px.data,
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+    );
+    previewFramesBase64.push(b64);
+    previewPixelsList.push(px.data);
+
+    const diffA = computeRgbaDiffMetrics(px.data, currentState.clipABitmap540.data);
+    const diffB = computeRgbaDiffMetrics(px.data, currentState.clipBBitmap540.data);
+    diffsVsA.push(diffA.meanAbsDiff);
+    diffsVsB.push(diffB.meanAbsDiff);
+  }
+
+  // Some effects hold the outgoing picture for most of the range (Zoom Circles
+  // only reveals clip B after 80 per cent), so the five fixed points can all
+  // equal clip A or clip B. A sweep of intermediate frames proves the effect
+  // really draws something that is neither clip.
+  const sweepDiffsVsA: number[] = [];
+  const sweepDiffsVsB: number[] = [];
+  for (let step = 1; step < TRANSITION_SWEEP_STEPS; step += 1) {
+    const frame = buildTransitionFrame(
+      project,
+      compId,
+      1_000_000 + Math.round((step * 1_000_000) / TRANSITION_SWEEP_STEPS),
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+    );
+    currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
+    const px = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    if (!px) throw new Error(`readPixels failed at sweep step ${step}`);
+    sweepDiffsVsA.push(
+      computeRgbaDiffMetrics(px.data, currentState.clipABitmap540.data).meanAbsDiff,
+    );
+    sweepDiffsVsB.push(
+      computeRgbaDiffMetrics(px.data, currentState.clipBBitmap540.data).meanAbsDiff,
+    );
+  }
+  const midFrameDiff = Math.max(...sweepDiffsVsA.map((a, i) => Math.min(a, sweepDiffsVsB[i] ?? 0)));
+
+  // 2. Export offline MP4 (or frames fallback)
+  const exportFps = 100;
+  const exportFrameCount = 300; // 3 s at 100 fps
+  let exportMode = 'offline-mp4';
+  let exportError: string | undefined;
+  let exportMp4Base64: string | undefined;
+  let exportFramesPngBase64: string[] | undefined;
+
+  // The export is always compared through the encoded MP4: the runner extracts
+  // the sample frames from the file (or from the x264 encode of the Pixi frames
+  // when WebCodecs is not available), never from the renderer's own pixels.
+  try {
+    if (currentState.offlineCapability.ok) {
+      const exported = await exportOfflineMp4({
+        manifest: {
+          width: PREVIEW_WIDTH,
+          height: PREVIEW_HEIGHT,
+          frameRate: exportFps,
+          durationUs: 3_000_000,
+        },
+        frameCount: exportFrameCount,
+        canvas: currentState.previewRenderer.canvas,
+        capability: currentState.offlineCapability,
+        paintFrame: (frameIndex: number) => {
+          const timeUs = Math.round((frameIndex * 1_000_000) / exportFps);
+          const frame = buildTransitionFrame(
+            project,
+            compId,
+            timeUs,
+            PREVIEW_WIDTH,
+            PREVIEW_HEIGHT,
+            { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+          );
+          currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
+        },
+      });
+      if (exported.blob === undefined) {
+        throw new Error('Offline MP4 export returned no blob');
+      }
+      exportMp4Base64 = await blobToBase64(exported.blob);
+    } else {
+      exportMode = 'pixi-frames-ffmpeg';
+      exportFramesPngBase64 = [];
+      for (let frameIndex = 0; frameIndex < exportFrameCount; frameIndex += 1) {
+        const timeUs = Math.round((frameIndex * 1_000_000) / exportFps);
+        const frame = buildTransitionFrame(project, compId, timeUs, PREVIEW_WIDTH, PREVIEW_HEIGHT, {
+          imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540,
+        });
+        currentState.previewRenderer.render(frame, currentState.transitionBitmaps540);
+        const px = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+        if (!px) throw new Error(`readPixels failed for export frame ${frameIndex}`);
+        exportFramesPngBase64.push(
+          rgbaToPngBase64(
+            currentState.pngCtx540,
+            currentState.pngCanvas540,
+            px.data,
+            PREVIEW_WIDTH,
+            PREVIEW_HEIGHT,
+          ),
+        );
+      }
+    }
+  } catch (err) {
+    exportError = err instanceof Error ? err.message : String(err);
+  }
+
+  // 3. Options testing
+  // Duration option: 500ms duration
+  const { project: proj500ms } = buildTransitionProject(input.id, 500_000);
+  const frame500ms = buildTransitionFrame(
+    proj500ms,
+    compId,
+    1_250_000,
+    PREVIEW_WIDTH,
+    PREVIEW_HEIGHT,
+    { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+  );
+  currentState.previewRenderer.render(frame500ms, currentState.transitionBitmaps540);
+  const px500ms = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+  const durDiff = computeRgbaDiffMetrics(px500ms!.data, previewPixelsList[1]!);
+  const durationResult = { passed: durDiff.meanAbsDiff > 0.5, diff: durDiff.meanAbsDiff };
+
+  // Direction option:
+  let directionResult: { passed: boolean; diff: number } | undefined;
+  if (entry.options.includes('direction') || entry.paramsTypes['direction']) {
+    const { project: projDir } = buildTransitionProject(input.id, 1_000_000, {
+      'direction.x': 0,
+      'direction.y': 1,
+    });
+    const frameDir = buildTransitionFrame(
+      projDir,
+      compId,
+      1_500_000,
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+    );
+    currentState.previewRenderer.render(frameDir, currentState.transitionBitmaps540);
+    const pxDir = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    const dirDiff = computeRgbaDiffMetrics(pxDir!.data, previewPixelsList[2]!);
+    directionResult = { passed: dirDiff.meanAbsDiff > 0.5, diff: dirDiff.meanAbsDiff };
+  }
+
+  // Colour option:
+  let colourResult: { passed: boolean; diff: number } | undefined;
+  if (
+    entry.options.includes('colour') ||
+    entry.paramsTypes['bgcolor'] ||
+    entry.paramsTypes['colorR']
+  ) {
+    const colParams =
+      entry.id === 'joy:dipToColour'
+        ? { colorR: 0.1, colorG: 0.9, colorB: 0.1 }
+        : { 'bgcolor.r': 1, 'bgcolor.g': 0, 'bgcolor.b': 0, 'bgcolor.a': 1 };
+    const { project: projCol } = buildTransitionProject(input.id, 1_000_000, colParams);
+    const frameCol = buildTransitionFrame(
+      projCol,
+      compId,
+      1_500_000,
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+      { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+    );
+    currentState.previewRenderer.render(frameCol, currentState.transitionBitmaps540);
+    const pxCol = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    const colDiff = computeRgbaDiffMetrics(pxCol!.data, previewPixelsList[2]!);
+    colourResult = { passed: colDiff.meanAbsDiff > 0.5, diff: colDiff.meanAbsDiff };
+  }
+
+  // Progress curve: a transition has no easing option in the project format, so
+  // the definition is linear progress over the window. The values the renderer
+  // really put on the transition node at 0, 25, 50, 75 and 99 percent must be
+  // strictly increasing and equal to the linear curve.
+  const progressStrictlyIncreasing = sampledProgress.every(
+    (value, idx) => idx === 0 || value > sampledProgress[idx - 1]!,
+  );
+  const progressMatchesLinear = sampledProgress.every(
+    (value, idx) => Math.abs(value - TRANSITION_EXPECTED_PROGRESS[idx]!) < 1e-6,
+  );
+  const progressResult = {
+    passed: progressStrictlyIncreasing && progressMatchesLinear,
+    monotonic: progressStrictlyIncreasing,
+    matchesLinear: progressMatchesLinear,
+    expected: TRANSITION_EXPECTED_PROGRESS,
+    sampled: sampledProgress,
+  };
+
+  // Float uniform params variation (if any)
+  const uniformParamResults: Array<{ name: string; passed: boolean; diff: number }> = [];
+  for (const [propName, propType] of Object.entries(entry.paramsTypes)) {
+    if (propType === 'float') {
+      const defVal =
+        typeof entry.defaultParams[propName] === 'number'
+          ? (entry.defaultParams[propName] as number)
+          : 0.5;
+      const altVal = defVal > 0.5 ? 0.1 : 0.9;
+      const { project: projParam } = buildTransitionProject(input.id, 1_000_000, {
+        [propName]: altVal,
+      });
+      const frameParam = buildTransitionFrame(
+        projParam,
+        compId,
+        1_500_000,
+        PREVIEW_WIDTH,
+        PREVIEW_HEIGHT,
+        { imageSizesByObjectId: TRANSITION_IMAGE_SIZES_540 },
+      );
+      currentState.previewRenderer.render(frameParam, currentState.transitionBitmaps540);
+      const pxParam = currentState.previewRenderer.readPixels(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+      const pDiff = computeRgbaDiffMetrics(pxParam!.data, previewPixelsList[2]!);
+      uniformParamResults.push({
+        name: propName,
+        passed: pDiff.meanAbsDiff > 0.1,
+        diff: pDiff.meanAbsDiff,
+      });
+    }
+  }
+
+  // 4. Audio crossfade
+  const audioCrossfade = testAudioCrossfade(1_000_000, 48000);
+
+  // 5. 1080p Benchmark (warmup 2 + timed 6)
+  const frame1080 = buildTransitionFrame(project, compId, 1_500_000, BENCH_WIDTH, BENCH_HEIGHT, {
+    imageSizesByObjectId: TRANSITION_IMAGE_SIZES_1080,
+  });
+  for (let i = 0; i < 2; i += 1) {
+    currentState.benchRenderer.render(frame1080, currentState.transitionBitmaps1080);
+    currentState.benchRenderer.readPixels(1, 1);
+  }
+  const timingsMs: number[] = [];
+  for (let i = 0; i < 6; i += 1) {
+    const start = performance.now();
+    currentState.benchRenderer.render(frame1080, currentState.transitionBitmaps1080);
+    currentState.benchRenderer.readPixels(1, 1);
+    timingsMs.push(performance.now() - start);
+  }
+  const meanMsPerFrame = timingsMs.reduce((a, b) => a + b, 0) / timingsMs.length;
+
+  // 6. Category edge cases
+  const isCategoryRep = CATEGORY_REPRESENTATIVES[entry.category] === input.id;
+  const shouldRunEdgeCases = input.runEdgeCases ?? isCategoryRep;
+  const edgeCases = shouldRunEdgeCases
+    ? runCategoryEdgeCases(
+        input.id,
+        entry.category,
+        currentState.previewRenderer,
+        currentState.transitionBitmaps540,
+      )
+    : undefined;
+
+  // Preview checks. The window is [start, end), so the frame at exactly the end
+  // is plain clip B and never runs the shader; the "end is clip B" check uses the
+  // last frame inside the window (99 percent). A shader that has not nearly
+  // reached clip B by then fails, and the picture must not move away from B
+  // between 50 percent, 75 percent and that last frame.
+  const clipABDiff = computeRgbaDiffMetrics(
+    currentState.clipABitmap540.data,
+    currentState.clipBBitmap540.data,
+  ).meanAbsDiff;
+  const endTolerance = Math.max(
+    TRANSITION_END_TOLERANCE_FLOOR,
+    (entry.category === 'slides-pushes'
+      ? TRANSITION_END_TOLERANCE_FRACTION_SLIDES
+      : TRANSITION_END_TOLERANCE_FRACTION) * clipABDiff,
+  );
+  const approachSlack = Math.max(1, TRANSITION_APPROACH_SLACK_FRACTION * clipABDiff);
+  const startIsClipA = diffsVsA[0]! < 1.0;
+  const lastFrameIsClipB = diffsVsB[4]! <= endTolerance && diffsVsB[4]! < diffsVsA[4]!;
+  const approachesClipB =
+    diffsVsB[3]! <= diffsVsB[2]! + approachSlack && diffsVsB[4]! <= diffsVsB[3]! + approachSlack;
+  const middleDiffersFromBoth = midFrameDiff > 1.0;
+
+  return {
+    id: input.id,
+    label: entry.label,
+    category: entry.category,
+    optionsDeclared: entry.options,
+    preview: {
+      passed: startIsClipA && lastFrameIsClipB && approachesClipB && middleDiffersFromBoth,
+      startIsClipA,
+      lastFrameIsClipB,
+      approachesClipB,
+      middleDiffersFromBoth,
+      clipABDiff,
+      endTolerance,
+      approachSlack,
+      midFrameDiff,
+      p0Base64: previewFramesBase64[0]!,
+      p25Base64: previewFramesBase64[1]!,
+      p50Base64: previewFramesBase64[2]!,
+      p75Base64: previewFramesBase64[3]!,
+      pEndBase64: previewFramesBase64[4]!,
+      diffVsA: diffsVsA,
+      diffVsB: diffsVsB,
+    },
+    exportArtifact: {
+      mode: exportMode,
+      error: exportError,
+      mp4Base64: exportMp4Base64,
+      framesPngBase64: exportFramesPngBase64,
+    },
+    optionsResults: {
+      duration: durationResult,
+      direction: directionResult,
+      colour: colourResult,
+      progress: progressResult,
+      uniformParams: uniformParamResults,
+    },
+    audioCrossfade,
+    perf1080p: {
+      meanMsPerFrame,
+      minMsPerFrame: Math.min(...timingsMs),
+      maxMsPerFrame: Math.max(...timingsMs),
+      samplesMs: timingsMs,
+    },
+    edgeCases,
+  };
+}
+
 function cleanupHarness() {
   if (!state) return;
   state.previewRenderer.destroy();
@@ -919,11 +1874,13 @@ function cleanupHarness() {
     __JOY_LIBRARY_HARNESS__: {
       init: typeof initHarness;
       testItem: typeof testItem;
+      testTransition: typeof testTransition;
       cleanup: typeof cleanupHarness;
     };
   }
 ).__JOY_LIBRARY_HARNESS__ = {
   init: initHarness,
   testItem,
+  testTransition,
   cleanup: cleanupHarness,
 };

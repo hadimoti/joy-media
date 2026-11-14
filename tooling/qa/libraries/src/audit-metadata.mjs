@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 
-export const VALID_KINDS = ['filters', 'effects'];
+export const VALID_KINDS = ['filters', 'effects', 'transitions'];
 
 /**
  * Parse CLI arguments for the library test harness.
@@ -21,6 +21,8 @@ export function parseCliArgs(argv) {
     limit: undefined,
     outDir: undefined,
     facePath: undefined,
+    pic1Path: undefined,
+    pic2Path: undefined,
     help: false,
   };
 
@@ -67,6 +69,14 @@ export function parseCliArgs(argv) {
       parsed.facePath = nextValue();
     } else if (token.startsWith('--face=')) {
       parsed.facePath = token.slice('--face='.length);
+    } else if (token === '--pic1') {
+      parsed.pic1Path = nextValue();
+    } else if (token.startsWith('--pic1=')) {
+      parsed.pic1Path = token.slice('--pic1='.length);
+    } else if (token === '--pic2') {
+      parsed.pic2Path = nextValue();
+    } else if (token.startsWith('--pic2=')) {
+      parsed.pic2Path = token.slice('--pic2='.length);
     } else {
       throw new Error(`Unknown CLI argument: ${token}`);
     }

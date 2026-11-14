@@ -414,7 +414,7 @@ export function sampleTransitionParams(
   const defaults = mergeTransitionParams(transition.type, transition.params);
   if (right === undefined) return numericParams(defaults);
   const range = {
-    startUs: right.startUs - transition.durationUs,
+    startUs: Math.max(0, right.startUs - transition.durationUs),
     durationUs: transition.durationUs,
   };
   const params: Record<string, number> = {};

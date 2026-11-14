@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* global window */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { extname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,12 +13,14 @@ import {
   planParameterVariations,
   selectKeyframePlan,
 } from './src/audit-metadata.mjs';
-import { writeLibraryReports } from './src/report.mjs';
+import { buildTransitionsMarkdownReport, writeLibraryReports } from './src/report.mjs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 const AUDIT_MD_PATH = resolve(REPO_ROOT, 'docs/qa/v1.1.1/LIBRARY-AUDIT.md');
 const BROWSER_RUNNER_PATH = resolve(import.meta.dirname, 'src/browser-runner.ts');
 const EXPORT_COMPARE_MAX_MEAN_DELTA = 12.0;
+/** Seek a little before the wanted frame (the transition export runs at 100 fps = 10 ms per frame). */
+const EXPORT_SEEK_LEAD_SEC = 0.005;
 
 function printUsage() {
   console.log(
@@ -26,12 +28,15 @@ function printUsage() {
       'Usage: node tooling/qa/libraries/run-library-tests.mjs [options]',
       '',
       'Options:',
-      '  --kind filters|effects   Library panel kind to test (default: filters)',
-      '  --items id1,id2          Comma-separated subset of effect ids to run',
-      '  --limit N                Max number of items to run after filtering',
-      '  --out <dir>              Directory for reports, renders, and exported clips',
-      '  --face <path>            Optional portrait photo for bottom-right quadrant',
-      '  -h, --help               Show this help text',
+      '  --kind filters|effects|transitions   Library panel kind to test (default: filters)',
+      '  --items id1,id2                      Comma-separated subset of item ids to run',
+      '  --limit N                            Max number of items to run after filtering',
+      '  --out <dir>                          Directory for reports, renders, and exported clips',
+      '  --face <path>                        Optional portrait photo for bottom-right quadrant',
+      '  --pic1 <path>                        First clip picture for transitions (Left/From); or env JOY_TRANSITION_PIC1',
+      '  --pic2 <path>                        Second clip picture for transitions (Right/To); or env JOY_TRANSITION_PIC2',
+      '  (env JOY_HARNESS_VERBOSE=1 prints the browser console; a run with --items or --limit does not write the tracked docs)',
+      '  -h, --help                           Show this help text',
     ].join('\n'),
   );
 }
@@ -47,11 +52,11 @@ function resolveGitCommit() {
   }
 }
 
-function readFaceDataUrl(facePath) {
-  if (!facePath) return undefined;
-  const resolved = resolve(facePath);
+function readImageDataUrl(imagePath, what) {
+  if (!imagePath) return undefined;
+  const resolved = resolve(imagePath);
   if (!existsSync(resolved)) {
-    throw new Error(`--face file not found: ${resolved}`);
+    throw new Error(`${what} picture not found: ${resolved}`);
   }
   const ext = extname(resolved).toLowerCase();
   const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
@@ -177,7 +182,22 @@ async function main() {
   const outDir = resolve(options.outDir);
   mkdirSync(outDir, { recursive: true });
   const auditMap = parseLibraryAuditMarkdown(readFileSync(AUDIT_MD_PATH, 'utf8'));
-  const faceDataUrl = readFaceDataUrl(options.facePath);
+  const faceDataUrl = readImageDataUrl(options.facePath, 'Face');
+
+  // The two clip pictures for transitions come from --pic1/--pic2 or from the
+  // JOY_TRANSITION_PIC1 / JOY_TRANSITION_PIC2 environment variables; there is no
+  // built-in path. Other kinds do not use them.
+  const pic1Path = options.pic1Path || process.env.JOY_TRANSITION_PIC1;
+  const pic2Path = options.pic2Path || process.env.JOY_TRANSITION_PIC2;
+  if (options.kind === 'transitions' && (!pic1Path || !pic2Path)) {
+    throw new Error(
+      'Transitions need two clip pictures: pass --pic1 <path> and --pic2 <path>, or set JOY_TRANSITION_PIC1 and JOY_TRANSITION_PIC2.',
+    );
+  }
+  const pic1DataUrl = readImageDataUrl(pic1Path, 'First clip (--pic1)');
+  const pic2DataUrl = readImageDataUrl(pic2Path, 'Second clip (--pic2)');
+  const verbose = process.env.JOY_HARNESS_VERBOSE === '1';
+  const fullRun = options.items === undefined && options.limit === undefined;
 
   console.log(`Starting Vite server for library harness (${options.kind})...`);
   const { server, url } = await startHarnessViteServer();
@@ -193,14 +213,14 @@ async function main() {
     const runtimePageErrors = [];
     let settledStartup = false;
     page.on('console', (msg) => {
+      if (verbose) console.log(`[browser ${msg.type()}]`, msg.text());
       if (msg.type() === 'error') {
         runtimeConsoleErrors.push(msg.text());
-        if (!settledStartup) console.error('[browser console.error]', msg.text());
       }
     });
     page.on('pageerror', (err) => {
       runtimePageErrors.push(err.message);
-      if (!settledStartup) console.error('[browser pageerror]', err.message);
+      console.error('[browser pageerror]', err.message);
     });
     page.on('response', (res) => {
       if (res.status() >= 400 && !settledStartup) {
@@ -214,17 +234,23 @@ async function main() {
     });
     settledStartup = true;
 
-    const initResult = await page.evaluate(
-      (arg) => window.__JOY_LIBRARY_HARNESS__.init(arg),
+    const initResult = await page.evaluate((arg) => window.__JOY_LIBRARY_HARNESS__.init(arg), {
       faceDataUrl,
-    );
+      pic1DataUrl,
+      pic2DataUrl,
+    });
 
     const knownFramePath = join(outDir, 'known-test-frame-1080p.png');
     writeFileSync(knownFramePath, Buffer.from(initResult.knownChartPngBase64, 'base64'));
     const beforePreviewPath = join(outDir, 'before-540p.png');
     writeFileSync(beforePreviewPath, Buffer.from(initResult.beforePngBase64, 'base64'));
 
-    const allIdsForKind = options.kind === 'filters' ? initResult.filters : initResult.effects;
+    const allIdsForKind =
+      options.kind === 'filters'
+        ? initResult.filters
+        : options.kind === 'effects'
+          ? initResult.effects
+          : initResult.transitions;
     let selectedIds = [...allIdsForKind];
     if (options.items) {
       const missing = options.items.filter((id) => !allIdsForKind.includes(id));
@@ -242,42 +268,41 @@ async function main() {
     const descriptorMap = new Map(initResult.descriptors.map((d) => [d.id, d]));
     const itemReports = [];
 
-    for (const id of selectedIds) {
-      const consoleStart = runtimeConsoleErrors.length;
-      const pageErrStart = runtimePageErrors.length;
-      const descriptor = descriptorMap.get(id);
-      if (!descriptor) {
-        throw new Error(`Descriptor missing for ${id}`);
-      }
-      const auditEntry = auditMap.get(id);
-      const paramVariations = planParameterVariations(descriptor);
-      const keyframePlan = selectKeyframePlan(descriptor, auditEntry);
-
-      console.log(`Testing [${options.kind}] ${id} (${descriptor.label})...`);
-      const browserResult = await page.evaluate(
-        (payload) => window.__JOY_LIBRARY_HARNESS__.testItem(payload),
-        { id, paramVariations, keyframePlan },
-      );
-
-      const itemDir = join(outDir, options.kind, id);
-      mkdirSync(itemDir, { recursive: true });
-      const previewPath = join(itemDir, 'preview.png');
-      writeFileSync(previewPath, Buffer.from(browserResult.previewPngBase64, 'base64'));
-
-      const exportPath = join(itemDir, 'export.mp4');
-      const exportFramePath = join(itemDir, 'export-frame.png');
-      const compareDir = join(itemDir, 'compare');
-      mkdirSync(compareDir, { recursive: true });
-
-      let exportComparison;
-      if (browserResult.exportArtifact.error) {
-        exportComparison = {
-          ok: false,
-          exportMode: browserResult.exportArtifact.mode,
-          ffmpegBackendNative: browserResult.ffmpegBackendNative,
-          error: browserResult.exportArtifact.error,
+    if (options.kind === 'transitions') {
+      for (const id of selectedIds) {
+        const consoleStart = runtimeConsoleErrors.length;
+        const pageErrStart = runtimePageErrors.length;
+        const descriptor = descriptorMap.get(id) || {
+          id,
+          label: id,
+          category: 'transitions',
+          options: ['duration'],
         };
-      } else {
+
+        console.log(`Testing [transitions] ${id} (${descriptor.label})...`);
+        const browserResult = await page.evaluate(
+          (payload) => window.__JOY_LIBRARY_HARNESS__.testTransition(payload),
+          { id },
+        );
+
+        const itemDir = join(outDir, 'transitions', id.replace(/[:/]/g, '_'));
+        mkdirSync(itemDir, { recursive: true });
+
+        // The window is [1 s, 2 s); the last frame inside it is 1.99 s (99 percent).
+        const pFrames = [
+          { key: '000', pct: 0, timeSec: 1.0, b64: browserResult.preview.p0Base64 },
+          { key: '025', pct: 25, timeSec: 1.25, b64: browserResult.preview.p25Base64 },
+          { key: '050', pct: 50, timeSec: 1.5, b64: browserResult.preview.p50Base64 },
+          { key: '075', pct: 75, timeSec: 1.75, b64: browserResult.preview.p75Base64 },
+          { key: '099', pct: 99, timeSec: 1.99, b64: browserResult.preview.pEndBase64 },
+        ];
+
+        for (const pf of pFrames) {
+          writeFileSync(join(itemDir, `preview-${pf.key}.png`), Buffer.from(pf.b64, 'base64'));
+        }
+
+        const exportPath = join(itemDir, 'export.mp4');
+        rmSync(exportPath, { force: true });
         if (browserResult.exportArtifact.mp4Base64) {
           writeFileSync(exportPath, Buffer.from(browserResult.exportArtifact.mp4Base64, 'base64'));
         } else if (browserResult.exportArtifact.framesPngBase64) {
@@ -289,86 +314,321 @@ async function main() {
               Buffer.from(b64, 'base64'),
             );
           });
-          encodePngFramesToMp4(framesDir, exportPath, 30);
-        } else {
-          throw new Error(`No export artifact produced for ${id}`);
+          encodePngFramesToMp4(framesDir, exportPath, 100);
         }
 
-        extractExportFrame(exportPath, 1.0, exportFramePath, { width: 960, height: 540 });
-        const cmp = await compareFrames(previewPath, exportFramePath, compareDir);
-        const exportMatchesPreview = cmp.meanAbsoluteChannelDelta <= EXPORT_COMPARE_MAX_MEAN_DELTA;
-        exportComparison = {
-          ok: exportMatchesPreview,
+        const compareDir = join(itemDir, 'compare');
+        mkdirSync(compareDir, { recursive: true });
+        const pointComparisons = [];
+        let exportAllPointsMatch = true;
+        let sumDelta = 0;
+        let maxDelta = 0;
+
+        for (const pf of pFrames) {
+          const previewFramePath = join(itemDir, `preview-${pf.key}.png`);
+          const exportFramePath = join(itemDir, `export-${pf.key}.png`);
+          rmSync(exportFramePath, { force: true }); // never compare a frame left by an earlier run
+
+          // The export frame always comes out of the encoded MP4. The -ss time is
+          // placed a few milliseconds before the frame so that ffmpeg picks that
+          // frame (the first one at or after the seek time), not the next one.
+          if (existsSync(exportPath)) {
+            try {
+              await extractExportFrame(
+                exportPath,
+                Math.max(0, pf.timeSec - EXPORT_SEEK_LEAD_SEC),
+                exportFramePath,
+                { width: 960, height: 540 },
+              );
+            } catch (err) {
+              console.error(
+                `Could not extract ${pf.pct}% frame from ${exportPath}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          }
+
+          if (existsSync(exportFramePath)) {
+            const cmp = await compareFrames(
+              previewFramePath,
+              exportFramePath,
+              join(compareDir, pf.key),
+            );
+            const matches = cmp.meanAbsoluteChannelDelta <= EXPORT_COMPARE_MAX_MEAN_DELTA;
+            if (!matches) exportAllPointsMatch = false;
+            sumDelta += cmp.meanAbsoluteChannelDelta;
+            if (cmp.maxChannelDelta > maxDelta) maxDelta = cmp.maxChannelDelta;
+            pointComparisons.push({
+              percent: pf.pct,
+              delta: cmp.meanAbsoluteChannelDelta,
+              maxDelta: cmp.maxChannelDelta,
+              status: cmp.status,
+              ok: matches,
+            });
+          } else {
+            exportAllPointsMatch = false;
+            pointComparisons.push({
+              percent: pf.pct,
+              delta: 999,
+              maxDelta: 999,
+              status: 'missing-frame',
+              ok: false,
+            });
+          }
+        }
+
+        const meanDelta = sumDelta / pFrames.length;
+        const exportComparison = {
+          ok: exportAllPointsMatch && !browserResult.exportArtifact.error,
           exportMode: browserResult.exportArtifact.mode,
-          ffmpegBackendNative: browserResult.ffmpegBackendNative,
-          ffmpegFilterGraphPresent: browserResult.ffmpegFilterGraphPresent,
-          auditExportFlag: auditEntry?.exportFlag ?? 'unknown',
-          strictCompareStatus: cmp.status,
-          meanAbsoluteChannelDelta: cmp.meanAbsoluteChannelDelta,
-          maxChannelDelta: cmp.maxChannelDelta,
-          differingChannels: cmp.differingChannels,
-          totalChannels: cmp.totalChannels,
-          sideBySidePath: cmp.sideBySide,
-          error: exportMatchesPreview
-            ? undefined
-            : `Export delta ${cmp.meanAbsoluteChannelDelta.toFixed(2)} exceeds ${EXPORT_COMPARE_MAX_MEAN_DELTA}`,
+          frameSource: 'frames extracted from the encoded MP4',
+          points: pointComparisons,
+          meanDelta,
+          maxDelta,
+          error:
+            browserResult.exportArtifact.error ??
+            (exportAllPointsMatch
+              ? undefined
+              : 'Export comparison exceeded delta threshold on one or more points'),
         };
-      }
 
-      const itemConsoleErrors = runtimeConsoleErrors.slice(consoleStart);
-      const itemPageErrors = runtimePageErrors.slice(pageErrStart);
+        const itemConsoleErrors = runtimeConsoleErrors.slice(consoleStart);
+        const itemPageErrors = runtimePageErrors.slice(pageErrStart);
 
-      const failureReasons = [];
-      if (!browserResult.preview.passed) {
-        failureReasons.push(
-          browserResult.preview.isBlankFrame
-            ? 'Preview rendered blank/uniform frame'
-            : `Preview identical to Before (meanAbsDiff=${browserResult.preview.vsBeforeMeanDiff.toFixed(3)})`,
+        const failureReasons = [];
+        const pv = browserResult.preview;
+        if (!pv.passed) {
+          const parts = [];
+          if (!pv.startIsClipA) parts.push('the first frame is not clip A');
+          if (!pv.lastFrameIsClipB) {
+            parts.push(
+              `the last frame inside the window (99%) is not close to clip B (Δ to B=${pv.diffVsB[4].toFixed(2)}, allowed ${pv.endTolerance.toFixed(2)})`,
+            );
+          }
+          if (!pv.approachesClipB) {
+            parts.push(
+              `the picture moves away from clip B between 50%, 75% and 99% (Δ to B: ${pv.diffVsB[2].toFixed(2)}, ${pv.diffVsB[3].toFixed(2)}, ${pv.diffVsB[4].toFixed(2)}; slack ${pv.approachSlack.toFixed(2)})`,
+            );
+          }
+          if (!pv.middleDiffersFromBoth)
+            parts.push('no intermediate frame differs from both clips');
+          failureReasons.push(
+            `Preview did not transition from clip A to clip B: ${parts.join('; ')}`,
+          );
+        }
+        if (!exportComparison.ok) {
+          failureReasons.push(`Export comparison failed: ${exportComparison.error}`);
+        }
+        if (!browserResult.optionsResults.duration.passed) {
+          failureReasons.push('Duration option variation did not alter rendering');
+        }
+        if (
+          browserResult.optionsResults.direction &&
+          !browserResult.optionsResults.direction.passed
+        ) {
+          failureReasons.push('Direction option variation did not alter rendering');
+        }
+        if (browserResult.optionsResults.colour && !browserResult.optionsResults.colour.passed) {
+          failureReasons.push('Colour option variation did not alter rendering');
+        }
+        const prog = browserResult.optionsResults.progress;
+        if (!prog.passed) {
+          failureReasons.push(
+            `Transition progress is not the linear curve at 0/25/50/75/99% (expected ${prog.expected.join(', ')}; got ${prog.sampled.join(', ')})`,
+          );
+        }
+        const failedUniforms = (browserResult.optionsResults.uniformParams ?? []).filter(
+          (p) => !p.passed,
         );
-      }
-      if (!exportComparison.ok) {
-        failureReasons.push(`Export comparison failed: ${exportComparison.error}`);
-      }
-      const failedParams = browserResult.paramChecks.filter((p) => !p.passed);
-      if (failedParams.length > 0) {
-        failureReasons.push(
-          `Parameter sweep had no rendered change for: ${failedParams.map((p) => p.key).join(', ')}`,
-        );
-      }
-      if (!browserResult.resetUndoRedo.passed) {
-        failureReasons.push(`Reset/Undo/Redo failed: ${browserResult.resetUndoRedo.reason}`);
-      }
-      if (!browserResult.keyframes.passed) {
-        failureReasons.push(
-          `Keyframes mid frame did not differ from both ends (startΔ=${browserResult.keyframes.midVsStartMeanDiff.toFixed(3)}, endΔ=${browserResult.keyframes.midVsEndMeanDiff.toFixed(3)})`,
-        );
-      }
-      if (itemConsoleErrors.length > 0 || itemPageErrors.length > 0) {
-        failureReasons.push(
-          `Captured ${itemConsoleErrors.length} console errors and ${itemPageErrors.length} page errors`,
-        );
-      }
+        if (failedUniforms.length > 0) {
+          failureReasons.push(
+            `Parameter variation did not alter rendering for: ${failedUniforms.map((p) => p.name).join(', ')}`,
+          );
+        }
+        if (!browserResult.audioCrossfade.passed) {
+          failureReasons.push(
+            `Audio crossfade failed: ${browserResult.audioCrossfade.reason ?? 'level jump or power deviation'}`,
+          );
+        }
+        if (browserResult.edgeCases) {
+          const ec = browserResult.edgeCases;
+          if (!ec.clipShorterThanDuration.passed) {
+            failureReasons.push(
+              `Edge case clipShorterThanDuration failed: ${ec.clipShorterThanDuration.details}`,
+            );
+          }
+          if (!ec.firstAndLastClip.passed) {
+            failureReasons.push(
+              `Edge case firstAndLastClip failed: ${ec.firstAndLastClip.details}`,
+            );
+          }
+          if (!ec.differentSizeAndFramerate.passed) {
+            failureReasons.push(
+              `Edge case differentSizeAndFramerate failed: ${ec.differentSizeAndFramerate.details}`,
+            );
+          }
+          if (!ec.lifecycle.passed) {
+            failureReasons.push(`Edge case lifecycle failed: ${ec.lifecycle.details}`);
+          }
+        }
+        if (itemConsoleErrors.length > 0 || itemPageErrors.length > 0) {
+          failureReasons.push(
+            `Captured ${itemConsoleErrors.length} console errors and ${itemPageErrors.length} page errors`,
+          );
+        }
 
-      itemReports.push({
-        id: browserResult.id,
-        label: browserResult.label,
-        category: browserResult.category,
-        passed: failureReasons.length === 0,
-        failureReasons,
-        preview: browserResult.preview,
-        exportComparison,
-        paramChecks: browserResult.paramChecks,
-        resetUndoRedo: browserResult.resetUndoRedo,
-        keyframes: browserResult.keyframes,
-        perf1080p: browserResult.perf1080p,
-        consoleErrors: itemConsoleErrors,
-        pageErrors: itemPageErrors,
-        artifacts: {
-          previewPath,
-          exportPath,
-          exportFramePath,
-        },
-      });
+        itemReports.push({
+          id: browserResult.id,
+          label: browserResult.label,
+          category: browserResult.category,
+          passed: failureReasons.length === 0,
+          failureReasons,
+          preview: browserResult.preview,
+          exportComparison,
+          optionsResults: browserResult.optionsResults,
+          audioCrossfade: browserResult.audioCrossfade,
+          perf1080p: browserResult.perf1080p,
+          edgeCases: browserResult.edgeCases,
+          consoleErrors: itemConsoleErrors,
+          pageErrors: itemPageErrors,
+          artifacts: {
+            previewFrames: pFrames.map((pf) => join(itemDir, `preview-${pf.key}.png`)),
+            exportPath,
+          },
+        });
+      }
+    } else {
+      for (const id of selectedIds) {
+        const consoleStart = runtimeConsoleErrors.length;
+        const pageErrStart = runtimePageErrors.length;
+        const descriptor = descriptorMap.get(id);
+        if (!descriptor) {
+          throw new Error(`Descriptor missing for ${id}`);
+        }
+        const auditEntry = auditMap.get(id);
+        const paramVariations = planParameterVariations(descriptor);
+        const keyframePlan = selectKeyframePlan(descriptor, auditEntry);
+
+        console.log(`Testing [${options.kind}] ${id} (${descriptor.label})...`);
+        const browserResult = await page.evaluate(
+          (payload) => window.__JOY_LIBRARY_HARNESS__.testItem(payload),
+          { id, paramVariations, keyframePlan },
+        );
+
+        const itemDir = join(outDir, options.kind, id);
+        mkdirSync(itemDir, { recursive: true });
+        const previewPath = join(itemDir, 'preview.png');
+        writeFileSync(previewPath, Buffer.from(browserResult.previewPngBase64, 'base64'));
+
+        const exportPath = join(itemDir, 'export.mp4');
+        const exportFramePath = join(itemDir, 'export-frame.png');
+        const compareDir = join(itemDir, 'compare');
+        mkdirSync(compareDir, { recursive: true });
+
+        let exportComparison;
+        if (browserResult.exportArtifact.error) {
+          exportComparison = {
+            ok: false,
+            exportMode: browserResult.exportArtifact.mode,
+            ffmpegBackendNative: browserResult.ffmpegBackendNative,
+            error: browserResult.exportArtifact.error,
+          };
+        } else {
+          if (browserResult.exportArtifact.mp4Base64) {
+            writeFileSync(
+              exportPath,
+              Buffer.from(browserResult.exportArtifact.mp4Base64, 'base64'),
+            );
+          } else if (browserResult.exportArtifact.framesPngBase64) {
+            const framesDir = join(itemDir, 'frames');
+            mkdirSync(framesDir, { recursive: true });
+            browserResult.exportArtifact.framesPngBase64.forEach((b64, idx) => {
+              writeFileSync(
+                join(framesDir, `frame-${String(idx + 1).padStart(3, '0')}.png`),
+                Buffer.from(b64, 'base64'),
+              );
+            });
+            encodePngFramesToMp4(framesDir, exportPath, 30);
+          } else {
+            throw new Error(`No export artifact produced for ${id}`);
+          }
+
+          extractExportFrame(exportPath, 1.0, exportFramePath, { width: 960, height: 540 });
+          const cmp = await compareFrames(previewPath, exportFramePath, compareDir);
+          const exportMatchesPreview =
+            cmp.meanAbsoluteChannelDelta <= EXPORT_COMPARE_MAX_MEAN_DELTA;
+          exportComparison = {
+            ok: exportMatchesPreview,
+            exportMode: browserResult.exportArtifact.mode,
+            ffmpegBackendNative: browserResult.ffmpegBackendNative,
+            ffmpegFilterGraphPresent: browserResult.ffmpegFilterGraphPresent,
+            auditExportFlag: auditEntry?.exportFlag ?? 'unknown',
+            strictCompareStatus: cmp.status,
+            meanAbsoluteChannelDelta: cmp.meanAbsoluteChannelDelta,
+            maxChannelDelta: cmp.maxChannelDelta,
+            differingChannels: cmp.differingChannels,
+            totalChannels: cmp.totalChannels,
+            sideBySidePath: cmp.sideBySide,
+            error: exportMatchesPreview
+              ? undefined
+              : `Export delta ${cmp.meanAbsoluteChannelDelta.toFixed(2)} exceeds ${EXPORT_COMPARE_MAX_MEAN_DELTA}`,
+          };
+        }
+
+        const itemConsoleErrors = runtimeConsoleErrors.slice(consoleStart);
+        const itemPageErrors = runtimePageErrors.slice(pageErrStart);
+
+        const failureReasons = [];
+        if (!browserResult.preview.passed) {
+          failureReasons.push(
+            browserResult.preview.isBlankFrame
+              ? 'Preview rendered blank/uniform frame'
+              : `Preview identical to Before (meanAbsDiff=${browserResult.preview.vsBeforeMeanDiff.toFixed(3)})`,
+          );
+        }
+        if (!exportComparison.ok) {
+          failureReasons.push(`Export comparison failed: ${exportComparison.error}`);
+        }
+        const failedParams = browserResult.paramChecks.filter((p) => !p.passed);
+        if (failedParams.length > 0) {
+          failureReasons.push(
+            `Parameter sweep had no rendered change for: ${failedParams.map((p) => p.key).join(', ')}`,
+          );
+        }
+        if (!browserResult.resetUndoRedo.passed) {
+          failureReasons.push(`Reset/Undo/Redo failed: ${browserResult.resetUndoRedo.reason}`);
+        }
+        if (!browserResult.keyframes.passed) {
+          failureReasons.push(
+            `Keyframes mid frame did not differ from both ends (startΔ=${browserResult.keyframes.midVsStartMeanDiff.toFixed(3)}, endΔ=${browserResult.keyframes.midVsEndMeanDiff.toFixed(3)})`,
+          );
+        }
+        if (itemConsoleErrors.length > 0 || itemPageErrors.length > 0) {
+          failureReasons.push(
+            `Captured ${itemConsoleErrors.length} console errors and ${itemPageErrors.length} page errors`,
+          );
+        }
+
+        itemReports.push({
+          id: browserResult.id,
+          label: browserResult.label,
+          category: browserResult.category,
+          passed: failureReasons.length === 0,
+          failureReasons,
+          preview: browserResult.preview,
+          exportComparison,
+          paramChecks: browserResult.paramChecks,
+          resetUndoRedo: browserResult.resetUndoRedo,
+          keyframes: browserResult.keyframes,
+          perf1080p: browserResult.perf1080p,
+          consoleErrors: itemConsoleErrors,
+          pageErrors: itemPageErrors,
+          artifacts: {
+            previewPath,
+            exportPath,
+            exportFramePath,
+          },
+        });
+      }
     }
 
     await page.evaluate(() => window.__JOY_LIBRARY_HARNESS__.cleanup());
@@ -379,8 +639,8 @@ async function main() {
       gitCommit: resolveGitCommit(),
       previewResolution: { width: 960, height: 540 },
       benchmarkResolution: { width: 1920, height: 1080 },
-      exportDurationSec: 2,
-      exportFps: 30,
+      exportDurationSec: options.kind === 'transitions' ? 3 : 2,
+      exportFps: options.kind === 'transitions' ? 100 : 30,
       offlineCapability: initResult.offlineCapability,
       knownTestFramePath: knownFramePath,
       beforePreviewPath,
@@ -388,6 +648,18 @@ async function main() {
     };
 
     const { jsonPath, markdownPath } = writeLibraryReports(outDir, options.kind, reportPayload);
+    if (options.kind === 'transitions') {
+      if (fullRun) {
+        const docPath = resolve(REPO_ROOT, 'docs/qa/v1.1.1/TRANSITIONS.md');
+        const md = buildTransitionsMarkdownReport(reportPayload);
+        writeFileSync(docPath, md, 'utf8');
+        console.log(`Documented report written: ${docPath}`);
+      } else {
+        console.log(
+          'Partial run (--items or --limit): the tracked docs/qa/v1.1.1/TRANSITIONS.md was not written; the report is in the --out folder.',
+        );
+      }
+    }
     const failed = itemReports.filter((item) => !item.passed);
     console.log('');
     console.log(
