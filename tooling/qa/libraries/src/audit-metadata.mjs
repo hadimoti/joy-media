@@ -180,6 +180,17 @@ function snapToStep(value, min, max, step) {
   return clamped;
 }
 
+/** Enable the companion parameter needed to make a parameter probe visible. */
+export function testContextParamsFor(effectId, paramKey) {
+  const contexts = {
+    'bulge.radius': { amount: 0.65 },
+    'twist.radius': { angle: 1.25 },
+    'tone-geometry.angle': { shape: 3 },
+  };
+  const context = contexts[`${effectId}.${paramKey}`];
+  return context === undefined ? undefined : { ...context };
+}
+
 /**
  * Plan low / default / high test values and a guaranteed non-default reset seed
  * for every parameter on an EffectDescriptor.
@@ -196,15 +207,19 @@ export function planParameterVariations(descriptor) {
         typeof param.defaultValue === 'number' && Number.isFinite(param.defaultValue)
           ? param.defaultValue
           : min;
-      const low = snapToStep(min, min, max, param.step);
-      const high = snapToStep(max, min, max, param.step);
+      const isAngleInDegrees = param.key === 'angle' && param.unit === 'deg' && max > min;
+      const angleOffset = (max - min) * 0.13;
+      const low = snapToStep(isAngleInDegrees ? def - angleOffset : min, min, max, param.step);
+      const high = snapToStep(isAngleInDegrees ? def + angleOffset : max, min, max, param.step);
       const resetSeed = Math.abs(high - def) >= Math.abs(low - def) ? high : low;
+      const contextParams = testContextParamsFor(descriptor.id, param.key);
       return {
         key: param.key,
         label: param.label,
         type: param.type,
         defaultValue: def,
         resetSeed,
+        ...(contextParams === undefined ? {} : { contextParams }),
         cases: [
           { tag: 'low', value: low },
           { tag: 'default', value: def },
@@ -350,13 +365,34 @@ export function selectKeyframePlan(descriptor, auditEntry) {
     chosen ??= numericAnimatable[0];
   }
 
+  const startValue =
+    chosen.key === 'angle' && chosen.unit === 'deg'
+      ? snapToStep(
+          chosen.min + (chosen.max - chosen.min) * 0.31,
+          chosen.min,
+          chosen.max,
+          chosen.step,
+        )
+      : chosen.min;
+  const endValue =
+    chosen.key === 'angle' && chosen.unit === 'deg'
+      ? snapToStep(
+          chosen.min + (chosen.max - chosen.min) * 0.64,
+          chosen.min,
+          chosen.max,
+          chosen.step,
+        )
+      : chosen.max;
+  const contextParams = testContextParamsFor(descriptor.id, chosen.key);
+
   return {
     skip: false,
     policy: auditEntry?.keyframesPolicy ?? 'yes',
     paramKey: chosen.key,
     paramLabel: chosen.label,
-    startValue: chosen.min,
-    endValue: chosen.max,
-    expectedMidValue: (chosen.min + chosen.max) / 2,
+    startValue,
+    endValue,
+    expectedMidValue: (startValue + endValue) / 2,
+    ...(contextParams === undefined ? {} : { contextParams }),
   };
 }
