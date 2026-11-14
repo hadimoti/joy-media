@@ -140,8 +140,15 @@ export function parseMediaQcPayload(payload: unknown): ParsedMediaQcPayload {
       if (!Object.hasOwn(THRESHOLD_RANGES, key))
         throw new Error(`media.qc thresholds has an unknown setting ${key}`);
       const range = THRESHOLD_RANGES[key as keyof QcThresholds];
-      if (typeof value !== 'number' || !Number.isFinite(value) || value < range[0] || value > range[1])
-        throw new Error(`media.qc threshold ${key} must be a number from ${range[0]} to ${range[1]}`);
+      if (
+        typeof value !== 'number' ||
+        !Number.isFinite(value) ||
+        value < range[0] ||
+        value > range[1]
+      )
+        throw new Error(
+          `media.qc threshold ${key} must be a number from ${range[0]} to ${range[1]}`,
+        );
       merged[key] = value;
     }
     thresholds = merged as unknown as QcThresholds;
@@ -232,7 +239,10 @@ export function parseFreezedetect(
   durationUs: number,
   openEndUs: number | undefined,
 ): QcInterval[] {
-  const pattern = new RegExp(`lavfi\\.freezedetect\\.freeze_(start|duration|end):\\s*(${NUM})`, 'g');
+  const pattern = new RegExp(
+    `lavfi\\.freezedetect\\.freeze_(start|duration|end):\\s*(${NUM})`,
+    'g',
+  );
   const out: QcInterval[] = [];
   let open: { startUs: number; durationUs?: number } | undefined;
   const closeOpen = (): void => {
@@ -264,12 +274,16 @@ export function parseFreezedetect(
 
 /** `[scdet @ ..] lavfi.scd.score: 45.211, lavfi.scd.time: 2` */
 export function parseScdet(text: string): QcSceneCut[] {
-  const pattern = new RegExp(`lavfi\\.scd\\.score:\\s*(${NUM}),\\s*lavfi\\.scd\\.time:\\s*(${NUM})`, 'g');
+  const pattern = new RegExp(
+    `lavfi\\.scd\\.score:\\s*(${NUM}),\\s*lavfi\\.scd\\.time:\\s*(${NUM})`,
+    'g',
+  );
   const out: QcSceneCut[] = [];
   for (const match of text.matchAll(pattern)) {
     const timeUs = secondsToUs(match[2]);
     const score = Number(match[1]);
-    if (timeUs !== undefined && Number.isFinite(score)) out.push({ timeUs: Math.max(0, timeUs), score });
+    if (timeUs !== undefined && Number.isFinite(score))
+      out.push({ timeUs: Math.max(0, timeUs), score });
   }
   return out;
 }
@@ -294,7 +308,8 @@ export function parseSilencedetect(
     const endUs = secondsToUs(match[2]);
     if (endUs === undefined) continue;
     const durationOfRun = secondsToUs(match[3]);
-    const startUs = openStartUs ?? (durationOfRun === undefined ? undefined : endUs - durationOfRun);
+    const startUs =
+      openStartUs ?? (durationOfRun === undefined ? undefined : endUs - durationOfRun);
     openStartUs = undefined;
     if (startUs === undefined) continue;
     const interval = clampInterval(startUs, endUs, durationUs);
@@ -412,7 +427,15 @@ export function analysePicture(
   );
   const runs: QcExposureRun[] = [];
   const minRunUs = thresholds.exposureMinRunSec * 1_000_000;
-  let run: { kind: 'dark' | 'bright'; first: QcSignalFrame; last: QcSignalFrame; sum: number; count: number } | undefined;
+  let run:
+    | {
+        kind: 'dark' | 'bright';
+        first: QcSignalFrame;
+        last: QcSignalFrame;
+        sum: number;
+        count: number;
+      }
+    | undefined;
   const closeRun = (): void => {
     if (run === undefined) return;
     const startUs = run.first.timeUs;
@@ -690,7 +713,8 @@ export function buildQcReport(input: BuildQcReportInput): QcReport {
                 sampledFrames: measurements.picture.sampledFrames,
                 sampleIntervalUs: measurements.sampleIntervalUs,
                 meanLuma: Math.round(measurements.picture.meanLuma * 10) / 10,
-                medianChromaDistance: Math.round(measurements.picture.medianChromaDistance * 10) / 10,
+                medianChromaDistance:
+                  Math.round(measurements.picture.medianChromaDistance * 10) / 10,
               },
         thresholds,
         truncated: reasons,
@@ -704,7 +728,9 @@ export function buildQcReport(input: BuildQcReportInput): QcReport {
   if (Buffer.byteLength(JSON.stringify(report)) <= maxBytes) return report;
 
   // Too big: drop scene cuts first (the cheapest fact to lose), then the last findings, until it fits.
-  const sizes = drafts.map((draft) => Buffer.byteLength(JSON.stringify({ id: 'qc-finding-0000', ...draft })) + 1);
+  const sizes = drafts.map(
+    (draft) => Buffer.byteLength(JSON.stringify({ id: 'qc-finding-0000', ...draft })) + 1,
+  );
   let total = Buffer.byteLength(JSON.stringify(compose([], [...truncated, 'x'.repeat(80)])));
   for (const size of sizes) total += size;
   const kept = [...drafts];
@@ -724,7 +750,10 @@ export function buildQcReport(input: BuildQcReportInput): QcReport {
     keptSizes.splice(index, 1);
     dropped += 1;
   }
-  report = compose(kept, [...truncated, `${dropped} findings were not listed to keep the report under ${Math.round(maxBytes / 1024)} KB`]);
+  report = compose(kept, [
+    ...truncated,
+    `${dropped} findings were not listed to keep the report under ${Math.round(maxBytes / 1024)} KB`,
+  ]);
   return report;
 }
 
@@ -794,7 +823,10 @@ export function runProcess(
     const stderr = new BoundedText(limits.stderrHeadBytes, limits.stderrTailBytes);
     let intent: 'cancelled' | 'timed-out' | undefined;
     let settled = false;
+    // Assigned after spawn: finish() can run earlier (spawn failure), so these cannot be const.
+    // eslint-disable-next-line prefer-const
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // eslint-disable-next-line prefer-const
     let poll: ReturnType<typeof setInterval> | undefined;
     const finish = (state: ProcessOutcome['state'], exitCode: number | null): void => {
       if (settled) return;
@@ -811,7 +843,11 @@ export function runProcess(
     };
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, [...args], { shell: false, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      child = spawn(command, [...args], {
+        shell: false,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
     } catch {
       finish('failed', null);
       return;
@@ -830,9 +866,7 @@ export function runProcess(
     child.stdout?.on('data', (chunk: string) => stdout.push(chunk));
     child.stderr?.on('data', (chunk: string) => stderr.push(chunk));
     child.once('error', () => finish('failed', null));
-    child.once('close', (code) =>
-      finish(intent ?? (code === 0 ? 'completed' : 'failed'), code),
-    );
+    child.once('close', (code) => finish(intent ?? (code === 0 ? 'completed' : 'failed'), code));
   });
 }
 
@@ -936,15 +970,20 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
   };
 
   await options.progress(5);
-  const probed = await run('FFprobe', ffprobe, [
-    '-v',
-    'error',
-    '-show_entries',
-    'format=duration:stream=codec_type,duration:stream_disposition=attached_pic',
-    '-of',
-    'json',
-    options.sourcePath,
-  ], PROBE_TIMEOUT_MS);
+  const probed = await run(
+    'FFprobe',
+    ffprobe,
+    [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration:stream=codec_type,duration:stream_disposition=attached_pic',
+      '-of',
+      'json',
+      options.sourcePath,
+    ],
+    PROBE_TIMEOUT_MS,
+  );
   if (probed === undefined || probed.state === 'timed-out')
     throw new Error('FFprobe could not read the file in time');
   const probe = parseProbe(probed.stdout);
@@ -964,7 +1003,9 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
     checksRun.push('black');
   }
   if (probe.hasVideo && checks.has('frozen')) {
-    videoChain.push(`freezedetect=n=${thresholds.freezeNoiseDb}dB:d=${thresholds.freezeMinDurationSec}`);
+    videoChain.push(
+      `freezedetect=n=${thresholds.freezeNoiseDb}dB:d=${thresholds.freezeMinDurationSec}`,
+    );
     checksRun.push('frozen');
   }
   if (probe.hasVideo && checks.has('scene-cut')) {
@@ -1007,7 +1048,9 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
     checksRun.push('loudness');
   }
   if (probe.hasAudio && checks.has('silence')) {
-    audioChain.push(`silencedetect=n=${thresholds.silenceDb}dB:d=${thresholds.silenceMinDurationSec}`);
+    audioChain.push(
+      `silencedetect=n=${thresholds.silenceDb}dB:d=${thresholds.silenceMinDurationSec}`,
+    );
     checksRun.push('silence');
   }
   if (probe.hasAudio && checks.has('clipping')) {
@@ -1053,7 +1096,10 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
     if (checks.has('colour-cast')) checksRun.push('colour-cast');
     await options.progress(70);
     const seconds = durationUs / 1_000_000;
-    const fps = Math.max(0.01, seconds > 0 ? Math.min(MAX_SAMPLE_FPS, MAX_SAMPLED_FRAMES / seconds) : 1);
+    const fps = Math.max(
+      0.01,
+      seconds > 0 ? Math.min(MAX_SAMPLE_FPS, MAX_SAMPLED_FRAMES / seconds) : 1,
+    );
     sampleIntervalUs = Math.round(1_000_000 / Number(fps.toFixed(4)));
     const outcome = await run('the picture check', ffmpeg, [
       ...COMMON_FFMPEG_ARGS,
