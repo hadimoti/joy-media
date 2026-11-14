@@ -844,6 +844,14 @@ async function testItem(input: TestItemInput) {
   }
   const meanMsPerFrame = timingsMs.reduce((a, b) => a + b, 0) / timingsMs.length;
 
+  // A neutral default (hue 0, saturation 0, vibrance 0) legitimately renders like the Before frame.
+  // It passes when it is not blank and some adjusted value of a parameter does change the picture.
+  const neutralDefault = !isBlankFrame && previewVsBefore.meanAbsDiff <= 0.1;
+  const adjustedVisible = paramChecks.some(
+    (p) => p.passed && Math.max(p.lowVsDefaultMeanDiff, p.highVsDefaultMeanDiff) > 0.1,
+  );
+  const previewAccepted = previewPassed || (neutralDefault && adjustedVisible);
+
   return {
     id: input.id,
     label: descriptor.label,
@@ -851,7 +859,8 @@ async function testItem(input: TestItemInput) {
     ffmpegBackendNative: descriptor.backend.ffmpeg,
     ffmpegFilterGraphPresent: ffmpegFilterGraph !== undefined,
     preview: {
-      passed: previewPassed,
+      passed: previewAccepted,
+      neutralDefault,
       isBlankFrame,
       vsBeforeMeanDiff: previewVsBefore.meanAbsDiff,
       vsBeforeChangedPixels: previewVsBefore.changedPixels,
