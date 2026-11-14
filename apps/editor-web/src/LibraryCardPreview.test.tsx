@@ -288,26 +288,17 @@ describe('transition strip preview', () => {
 });
 
 describe('effect preview media', () => {
-  it('moves the before/after split with the slider and says so in words', () => {
+  it('shows the result picture alone, with no slider, divider or labels', () => {
     const view = render(<EffectPreviewMedia effectId="pixelate" label="Pixelate" />);
-    const slider = view.querySelector<HTMLInputElement>('input.library-compare-slider')!;
-    expect(slider.getAttribute('aria-valuetext')).toBe('Before 50%, after 50%');
-
-    setRange(slider, 20);
-
-    expect(view.querySelector<HTMLElement>('.library-compare-after')!.style.clipPath).toBe(
-      'inset(0 0 0 20%)',
-    );
-    expect(view.querySelector<HTMLElement>('.library-compare-divider')!.style.left).toBe('20%');
-    expect(slider.getAttribute('aria-valuetext')).toBe('Before 20%, after 80%');
+    expect(view.querySelector('input')).toBeNull();
+    expect(view.querySelector('.library-compare-divider')).toBeNull();
+    expect(view.textContent).not.toMatch(/Before|After/);
+    expect(view.querySelectorAll('img')).toHaveLength(1);
   });
 
-  it.each([
-    ['before', 'img.library-compare-before'],
-    ['after', 'img.effect-preview-media-fallback'],
-  ])('falls back when the %s picture is missing', (_name, selector) => {
+  it('falls back when the picture is missing', () => {
     const view = render(<EffectPreviewMedia effectId="pixelate" />);
-    const image = view.querySelector<HTMLImageElement>(selector)!;
+    const image = view.querySelector<HTMLImageElement>('img.effect-preview-media-fallback')!;
 
     act(() => {
       image.dispatchEvent(new Event('error'));

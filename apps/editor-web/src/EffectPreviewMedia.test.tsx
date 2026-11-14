@@ -19,7 +19,7 @@ describe('EffectPreviewMedia', () => {
     container = undefined;
   });
 
-  it('renders a draggable before-and-after WebP comparison without a motion video loop', () => {
+  it('renders the result WebP only: no before picture, labels, divider or slider, no video', () => {
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
@@ -28,12 +28,11 @@ describe('EffectPreviewMedia', () => {
     });
 
     expect(container.querySelector('video')).toBeNull();
-    expect(container.querySelector('input.library-compare-slider')?.getAttribute('type')).toBe(
-      'range',
-    );
-    expect(container.querySelector('img.library-compare-before')?.getAttribute('src')).toMatch(
-      /^\/effects\/preview\/before\.webp\?v=/,
-    );
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.querySelector('img.library-compare-before')).toBeNull();
+    expect(container.querySelector('.library-compare-divider')).toBeNull();
+    expect(container.textContent).not.toMatch(/Before|After/);
+    expect(container.querySelectorAll('img')).toHaveLength(1);
     const img = container.querySelector<HTMLImageElement>('img.effect-preview-media-fallback');
     expect(img).not.toBeNull();
     expect(img?.getAttribute('src')).toMatch(/^\/effects\/preview\/pixelate\.webp\?v=/);
