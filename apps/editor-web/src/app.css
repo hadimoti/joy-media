@@ -10811,8 +10811,10 @@ label {
 
 /* Dockview moves tabs that no longer fit into this menu. Keep regular tabs
    icon-only, then reveal their names in the menu so every panel stays reachable. */
+/* Owner: the chevron beside the panel's "..." menu duplicated the tab strip (it listed Flow while
+   Flow was already visible). Panel groups hold two or three tabs, so the menu is hidden. */
 #root .workspace .dv-tabs-overflow-dropdown-default {
-  display: grid;
+  display: none;
   place-items: center;
   width: 2rem;
   min-width: 2rem;

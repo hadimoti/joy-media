@@ -36,6 +36,13 @@ describe('library card layout', () => {
     expect(appCss).toMatch(/\.timeline-clip-label \{\s*display: none;/);
   });
 
+  it('hides the duplicate tab-list chevron beside the panel menu', () => {
+    const appCss = readFileSync(join(dir, 'app.css'), 'utf8');
+    expect(appCss).toMatch(
+      /#root \.workspace \.dv-tabs-overflow-dropdown-default \{\s*display: none;/,
+    );
+  });
+
   it('keeps the plus a small fixed square', () => {
     expect(css).toMatch(/\.library-card-add \{[^}]*width: 1\.5rem;[^}]*height: 1\.5rem;/);
   });
