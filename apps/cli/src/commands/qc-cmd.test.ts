@@ -4,13 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../cli.js';
-import {
-  describeFinding,
-  exitCodeForReport,
-  formatQcTime,
-  isFault,
-  QC_USAGE,
-} from './qc-cmd.js';
+import { describeFinding, exitCodeForReport, formatQcTime, isFault, QC_USAGE } from './qc-cmd.js';
 
 type Finding = Parameters<typeof describeFinding>[0];
 
@@ -102,13 +96,19 @@ describe('joy-media qc: usage and input errors', () => {
 
   it('prints one JSON document on stdout for a failure under --json', async () => {
     expect(await runCli(['qc', join(homeDir, 'missing.mp4'), '--json'])).toBe(1);
-    const logged = vi.mocked(console.log).mock.calls.map((args) => String(args[0])).join('\n');
+    const logged = vi
+      .mocked(console.log)
+      .mock.calls.map((args) => String(args[0]))
+      .join('\n');
     expect(JSON.parse(logged)).toMatchObject({ ok: false });
   });
 
   it('prints the usage line in its own help', async () => {
     expect(await runCli(['help', 'qc'])).toBe(0);
-    const logged = vi.mocked(console.log).mock.calls.map((args) => String(args[0])).join('\n');
+    const logged = vi
+      .mocked(console.log)
+      .mock.calls.map((args) => String(args[0]))
+      .join('\n');
     expect(logged).toContain(QC_USAGE);
   });
 });
@@ -171,10 +171,7 @@ describe.skipIf(!hasFfmpeg)('joy-media qc on a planted-fault file', () => {
   it('lists the black and the frozen part and exits 1', async () => {
     const code = await runCli(['qc', faultFile]);
     expect(code).toBe(1);
-    const printed = [
-      ...vi.mocked(console.log).mock.calls,
-      ...vi.mocked(console.error).mock.calls,
-    ]
+    const printed = [...vi.mocked(console.log).mock.calls, ...vi.mocked(console.error).mock.calls]
       .map((args) => String(args[0]))
       .join('\n');
     expect(printed).toMatch(/black/);
@@ -184,7 +181,10 @@ describe.skipIf(!hasFfmpeg)('joy-media qc on a planted-fault file', () => {
   it('prints a QC report under --json with the black and frozen findings in place', async () => {
     const code = await runCli(['qc', faultFile, '--json']);
     expect(code).toBe(1);
-    const stdout = vi.mocked(console.log).mock.calls.map((args) => String(args[0])).join('\n');
+    const stdout = vi
+      .mocked(console.log)
+      .mock.calls.map((args) => String(args[0]))
+      .join('\n');
     const report = JSON.parse(stdout) as {
       version: number;
       modelComprehensionGuaranteed: boolean;
@@ -198,10 +198,13 @@ describe.skipIf(!hasFfmpeg)('joy-media qc on a planted-fault file', () => {
     expect(report.technical?.checksRun).toEqual(expect.arrayContaining(['black', 'frozen']));
 
     const black = report.findings.find((f) => f.type === 'black');
-    const frozen = report.findings.find((f) => f.type === 'frozen');
+    // The black part is also a still picture, so it is reported as frozen too:
+    // look for the frozen finding at the planted grey part.
+    const frozen = report.findings.find(
+      (f) => f.type === 'frozen' && Math.abs(f.startUs - FREEZE_START_US) <= TOLERANCE_US,
+    );
     expect(black).toBeDefined();
     expect(frozen).toBeDefined();
     expect(Math.abs(black!.startUs - BLACK_START_US)).toBeLessThanOrEqual(TOLERANCE_US);
-    expect(Math.abs(frozen!.startUs - FREEZE_START_US)).toBeLessThanOrEqual(TOLERANCE_US);
   }, 120_000);
 });
