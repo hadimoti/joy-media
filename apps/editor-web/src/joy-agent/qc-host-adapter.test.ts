@@ -124,6 +124,7 @@ interface FixtureOptions {
   /** `'absent'`: no consent card is connected. A boolean is the user's answer to the card. */
   readonly consent?: 'absent' | boolean;
   readonly identity?: QcHostAdapterDeps['identity'];
+  readonly onReport?: QcHostAdapterDeps['onReport'];
 }
 
 function createFixture(options: FixtureOptions = {}): Fixture {
@@ -157,6 +158,7 @@ function createFixture(options: FixtureOptions = {}): Fixture {
     digest: async () => 'c'.repeat(64),
     now: () => Date.UTC(2026, 10, 14),
     evenFrameCount: 4,
+    ...(options.onReport === undefined ? {} : { onReport: options.onReport }),
   };
   return { adapter: createQcHostAdapter(deps), store, transport, requestConsent, image, privacy };
 }
@@ -445,6 +447,73 @@ describe('QC host adapter: gates in front of every frame', () => {
       ok: false,
       framesSent: 2,
     });
+  });
+
+  it('hands the report to the panel when it is stored, then again with the model and frames sent', async () => {
+    const reports: Record<string, unknown>[] = [];
+    const { adapter, reportId, frames } = await checked({
+      onReport: (report) => reports.push(report as Record<string, unknown>),
+    });
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      reportId,
+      run: { layer1: true, layer2: false, modelId: null, framesSent: 0 },
+    });
+
+    const request = frameRequest(reportId, frames.slice(0, 3));
+    await adapter.hasApprovedConsent(request, context());
+    await adapter.reviewFrames(request, context());
+    expect(reports).toHaveLength(2);
+    expect(reports[1]).toMatchObject({
+      reportId,
+      run: { layer2: true, modelId: 'vision-model', framesSent: 3 },
+    });
+
+    // A second review adds to the count, and a later read tells the same story.
+    const more = frameRequest(reportId, frames.slice(3, 5));
+    await adapter.hasApprovedConsent(more, context());
+    await adapter.reviewFrames(more, context());
+    expect(reports[2]).toMatchObject({ run: { framesSent: 5 } });
+    expect((await readLatest(adapter))['run']).toMatchObject({ layer2: true, framesSent: 5 });
+  });
+
+  it('counts the frames of a failed provider call once on the report', async () => {
+    const reports: Record<string, unknown>[] = [];
+    const throwing: QcFrameTransport = {
+      analyze: vi.fn(async () => {
+        throw new Error('network');
+      }),
+    };
+    const { adapter, reportId, frames } = await checked({
+      transport: throwing,
+      onReport: (report) => reports.push(report as Record<string, unknown>),
+    });
+    const request = frameRequest(reportId, frames.slice(0, 2));
+    await adapter.hasApprovedConsent(request, context());
+    await adapter.reviewFrames(request, context());
+    expect(reports).toHaveLength(2);
+    expect(reports[1]).toMatchObject({ run: { layer2: true, framesSent: 2 } });
+  });
+
+  it('does not charge a report for a refusal that sent nothing', async () => {
+    const reports: Record<string, unknown>[] = [];
+    const { adapter, reportId, frames } = await checked({
+      consent: false,
+      onReport: (report) => reports.push(report as Record<string, unknown>),
+    });
+    const request = frameRequest(reportId, [frames[0]!]);
+    await adapter.hasApprovedConsent(request, context());
+    await adapter.reviewFrames(request, context());
+    expect(reports).toHaveLength(1);
+  });
+
+  it('keeps checking when the panel callback throws', async () => {
+    const { reportId } = await checked({
+      onReport: () => {
+        throw new Error('display failed');
+      },
+    });
+    expect(reportId).toMatch(/^qc-report-/);
   });
 
   it('serves nothing after it is disposed', async () => {
