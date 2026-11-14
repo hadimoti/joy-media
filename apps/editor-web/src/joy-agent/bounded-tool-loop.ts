@@ -7,7 +7,13 @@ import { JOY_CAPTION_TEMPLATES } from '@joy-media/captions-core';
 import { TEXT_TEMPLATES } from '../text-template-catalog.js';
 import { HostRpcError, type HostRpcJson } from './host-rpc.js';
 import { MAX_JOY_AGENT_RUN_BUDGET_V1 } from './run-budget.js';
-import { isJoyAgentHostToolName, type JoyAgentHostToolName } from './host-tool-contract.js';
+import {
+  GENERATION_ASPECTS,
+  GENERATION_MAX_SECONDS,
+  GENERATION_PROMPT_MAX_CHARS,
+  isJoyAgentHostToolName,
+  type JoyAgentHostToolName,
+} from './host-tool-contract.js';
 
 export { JOY_AGENT_HOST_TOOL_NAMES } from './host-tool-contract.js';
 export type { JoyAgentHostToolName } from './host-tool-contract.js';
@@ -76,6 +82,11 @@ const MAX_OBSERVATION_CURSOR = 2_097_152;
 const MAX_QC_FRAMES_PER_TOOL_CALL = 16;
 const DEFAULT_MAX_QC_FRAMES_PER_RUN = 16;
 const MAX_QC_FRAMES_PER_RUN = 48;
+/** Generated media (T-C04): the per-run defaults are 4 pictures and 1 video; the ceilings bound any caller. */
+const DEFAULT_MAX_GENERATED_PICTURES_PER_RUN = 4;
+const DEFAULT_MAX_GENERATED_VIDEOS_PER_RUN = 1;
+const MAX_GENERATED_PICTURES_PER_RUN = 8;
+const MAX_GENERATED_VIDEOS_PER_RUN = 2;
 const SAFE_OBSERVATION_IDENTIFIER_PATTERN =
   '^[A-Za-z0-9][A-Za-z0-9._:@=-]*(?:/[A-Za-z0-9][A-Za-z0-9._:@=-]*)*$';
 
@@ -589,6 +600,62 @@ const LOOK_TOOLS: Readonly<
   look_detach: LOOK_DETACH_TOOL,
 };
 
+/**
+ * Generated media (T-C04). `generate_media` always raises a cost card in the
+ * host and waits for the user; no provider request is made before "Allow".
+ * `attach_generated_media` may only place a job that this run completed.
+ * Both are non-strict because `seconds`, `atSeconds` and `track` are optional.
+ */
+const GENERATE_MEDIA_TOOL: BrowserAgentToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'generate_media',
+    description:
+      'Ask the user to approve one generated picture or video made with the user’s own provider account. JOY shows a cost card first and sends nothing unless the user allows it. A run may start at most 4 pictures and 1 video. Returns the job id and, when the job ends, its status.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['kind', 'prompt', 'aspect'],
+      properties: {
+        kind: { type: 'string', enum: ['image', 'video'] },
+        prompt: { type: 'string', minLength: 1, maxLength: GENERATION_PROMPT_MAX_CHARS },
+        aspect: { type: 'string', enum: [...GENERATION_ASPECTS] },
+        seconds: { type: 'integer', minimum: 1, maximum: GENERATION_MAX_SECONDS },
+      },
+    },
+  },
+};
+
+const ATTACH_GENERATED_MEDIA_TOOL: BrowserAgentToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'attach_generated_media',
+    description:
+      'Place a picture or video that a completed generate_media job in this run produced: into the library, or onto the timeline at a time as one undo step. Jobs from earlier runs or unfinished jobs are refused.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['jobId', 'target'],
+      properties: {
+        jobId: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          pattern: SAFE_OBSERVATION_IDENTIFIER_PATTERN,
+        },
+        target: { type: 'string', enum: ['library', 'timeline'] },
+        atSeconds: { type: 'number', minimum: 0, maximum: MAX_OBSERVATION_RANGE_US / 1_000_000 },
+        track: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          pattern: SAFE_OBSERVATION_IDENTIFIER_PATTERN,
+        },
+      },
+    },
+  },
+};
+
 const LOOK_TOOL_NAME_SET: ReadonlySet<JoyAgentHostToolName> = new Set(
   Object.keys(LOOK_TOOLS) as (keyof typeof LOOK_TOOLS)[],
 );
@@ -609,6 +676,8 @@ function toolDefinitionFor(
     return createValidateProposalTool(proposalParameters);
   }
   if (LOOK_TOOL_NAME_SET.has(name)) return LOOK_TOOLS[name as keyof typeof LOOK_TOOLS];
+  if (name === 'generate_media') return GENERATE_MEDIA_TOOL;
+  if (name === 'attach_generated_media') return ATTACH_GENERATED_MEDIA_TOOL;
   return OBSERVATION_TOOLS[name as ObservationToolName];
 }
 
@@ -674,6 +743,37 @@ function requestedQcFrameCount(args: HostRpcJson): number | undefined {
 }
 
 function qcFrameRefusal(code: string, message: string): HostRpcJson {
+  return { ok: false, code, message };
+}
+
+/**
+ * Validates the model's `generate_media` shape before any card is raised. A
+ * picture takes no `seconds`. Returns the kind, or undefined for a bad request.
+ */
+function requestedGenerationKind(args: HostRpcJson): 'image' | 'video' | undefined {
+  if (!isRecord(args)) return undefined;
+  const { kind, prompt, aspect, seconds } = args;
+  if (kind !== 'image' && kind !== 'video') return undefined;
+  if (
+    typeof prompt !== 'string' ||
+    prompt.trim().length === 0 ||
+    prompt.length > GENERATION_PROMPT_MAX_CHARS
+  )
+    return undefined;
+  if (!(GENERATION_ASPECTS as readonly unknown[]).includes(aspect)) return undefined;
+  if (seconds === undefined) return kind;
+  if (
+    kind === 'image' ||
+    typeof seconds !== 'number' ||
+    !Number.isSafeInteger(seconds) ||
+    seconds < 1 ||
+    seconds > GENERATION_MAX_SECONDS
+  )
+    return undefined;
+  return kind;
+}
+
+function generationRefusal(code: string, message: string): HostRpcJson {
   return { ok: false, code, message };
 }
 
@@ -796,6 +896,10 @@ export async function runBoundedToolExchange(
     readonly maxToolCalls?: number;
     /** Per-run QC frame budget; it never exceeds the ADR's hard ceiling. */
     readonly maxObservationFrames?: number;
+    /** Per-run generated picture cap (default 4, ceiling 8). Charged when a cost card is raised. */
+    readonly maxGeneratedPictures?: number;
+    /** Per-run generated video cap (default 1, ceiling 2). Charged when a cost card is raised. */
+    readonly maxGeneratedVideos?: number;
     /**
      * Exact host-approved subset for this exchange. Pass the same list to
      * `createBrowserAgentToolCatalog` when preparing the provider request.
@@ -823,12 +927,25 @@ export async function runBoundedToolExchange(
     options.allowedToolNames,
     DEFAULT_BROWSER_AGENT_ALLOWED_TOOL_NAMES,
   );
+  const maxGeneratedPictures =
+    options.maxGeneratedPictures ?? DEFAULT_MAX_GENERATED_PICTURES_PER_RUN;
+  const maxGeneratedVideos = options.maxGeneratedVideos ?? DEFAULT_MAX_GENERATED_VIDEOS_PER_RUN;
+  if (
+    !Number.isSafeInteger(maxGeneratedPictures) ||
+    maxGeneratedPictures < 0 ||
+    maxGeneratedPictures > MAX_GENERATED_PICTURES_PER_RUN ||
+    !Number.isSafeInteger(maxGeneratedVideos) ||
+    maxGeneratedVideos < 0 ||
+    maxGeneratedVideos > MAX_GENERATED_VIDEOS_PER_RUN
+  )
+    throw new Error('JOY_AGENT_INVALID_GENERATION_BUDGET');
   const allowedToolNameSet = new Set(allowedToolNames);
   const messages = [...initialMessages];
   let toolCount = 0;
   let contextRead = false;
   let contextReadStep = -1;
   let qcFramesUsed = 0;
+  const generationCardsRaised = { image: 0, video: 0 };
   const callIds = new Set<string>();
   for (let step = 0; step < MAX_PARSER_MODEL_EXCHANGES; step += 1) {
     options.signal?.throwIfAborted();
@@ -900,6 +1017,31 @@ export async function runBoundedToolExchange(
           messages.push({ role: 'tool', tool_call_id: call.id, content: boundedJson(result) });
           continue;
         }
+        if (name === 'generate_media') {
+          // Refusals here never reach the host, so no cost card is raised and
+          // no provider request can start. A raised card charges the run budget,
+          // whether the user then allows or declines it: a model cannot keep
+          // re-asking the user past the cap.
+          const kind = requestedGenerationKind(args);
+          if (kind === undefined) {
+            result = generationRefusal(
+              'JOY_AGENT_INVALID_GENERATION_REQUEST',
+              'JOY could not use those generation settings. Choose picture or video, one aspect, and a prompt of up to 2,000 characters.',
+            );
+            messages.push({ role: 'tool', tool_call_id: call.id, content: boundedJson(result) });
+            continue;
+          }
+          const cap = kind === 'image' ? maxGeneratedPictures : maxGeneratedVideos;
+          if (generationCardsRaised[kind] >= cap) {
+            result = generationRefusal(
+              'JOY_AGENT_GENERATION_BUDGET_EXCEEDED',
+              `JOY did not ask for that ${kind} because this run already used its ${cap} ${kind} ${cap === 1 ? 'allowance' : 'allowances'}. No cost card was shown and nothing was sent.`,
+            );
+            messages.push({ role: 'tool', tool_call_id: call.id, content: boundedJson(result) });
+            continue;
+          }
+          generationCardsRaised[kind] += 1;
+        }
         const hostResult = await callHost(name, args);
         options.signal?.throwIfAborted();
         if (name === 'read_project_context') {
@@ -928,6 +1070,10 @@ export async function runBoundedToolExchange(
                   : 0;
             qcFramesUsed += Math.min(requestedFrames, framesSent);
           } else if (name === 'qc_report_read') {
+            result = hostResult;
+          } else if (name === 'generate_media' || name === 'attach_generated_media') {
+            // The host already returns `ok` plus a readable refusal code; wrapping
+            // it as a success would hide a declined card or a refused attach.
             result = hostResult;
           } else {
             result = { ok: true, evidence: hostResult, applied: false };
