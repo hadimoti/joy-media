@@ -3829,23 +3829,32 @@ label {
 }
 .timeline-clip-filmstrip {
   position: absolute;
-  inset: 0;
+  /* Small pictures after the kind icon; only whole tiles that fit are rendered. */
+  inset: 4px 4px 4px 30px;
   display: flex;
+  gap: 2px;
   pointer-events: none;
   z-index: 0;
   border-radius: inherit;
   overflow: hidden;
 }
 .timeline-clip-cell {
-  flex: 1 1 0;
-  min-width: 0;
-  border-inline-end: 1px solid rgb(0 0 0 / 35%);
+  flex: none;
+  width: 26px;
+  border-radius: 2px;
   background:
     linear-gradient(145deg, rgb(255 255 255 / 13%), transparent 52%), var(--joy-bg-elevated);
 }
 .timeline-clip-cell.has-frame {
-  background-size: cover;
+  /* The whole picture fits inside its tile: never stretched or cropped. */
+  background-size: contain;
   background-repeat: no-repeat;
+}
+/* A later shorthand on the tinted tiles resets the size: this one keeps every picture fitted. */
+.timeline-clip .timeline-clip-cell.has-frame:nth-child(n) {
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
 }
 .timeline-clip--video .timeline-clip-cell:nth-child(3n + 2) {
   background: linear-gradient(35deg, rgb(255 255 255 / 10%), transparent 55%), var(--clip-tint);
@@ -10339,6 +10348,19 @@ label {
   overflow: hidden;
   box-sizing: border-box;
   background-color: var(--joy-bg-panel);
+}
+/* A 1px gray stroke around every big box (panel). It sits on the tile edge, inside the gap. */
+#root .workspace .dv-groupview {
+  position: relative;
+}
+#root .workspace .dv-groupview::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid #4a4b54;
+  border-radius: max(0px, calc(var(--joy-radius-panel) - var(--joy-shell-gap)));
+  pointer-events: none;
+  z-index: 30;
 }
 #root .workspace .dv-groupview .dv-tabs-and-actions-container {
   border-radius: var(--joy-radius-panel) var(--joy-radius-panel) 0 0;

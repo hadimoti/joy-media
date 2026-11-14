@@ -1,6 +1,18 @@
 const MIN_FILMSTRIP_FRAMES = 2;
 const MAX_FILMSTRIP_FRAMES = 24;
 const FILMSTRIP_FRAME_SPACING_PX = 28;
+/** A filmstrip tile is a small picture: 26 px wide and 2 px apart (the 28 px frame spacing), after the kind icon. */
+export const FILMSTRIP_TILE_PX = 26;
+export const FILMSTRIP_GAP_PX = 2;
+export const FILMSTRIP_LEAD_PX = 30;
+export const FILMSTRIP_TRAIL_PX = 4;
+
+/** Whole tiles that fit in a clip of this width; a part that does not fit is hidden, never cut. */
+export function visibleFilmstripTiles(widthPx: number): number {
+  if (!Number.isFinite(widthPx)) return 0;
+  const room = widthPx - FILMSTRIP_LEAD_PX - FILMSTRIP_TRAIL_PX + FILMSTRIP_GAP_PX;
+  return Math.max(0, Math.floor(room / (FILMSTRIP_TILE_PX + FILMSTRIP_GAP_PX)));
+}
 
 export interface FilmstripScheduleOptions {
   readonly sourceInUs: number;

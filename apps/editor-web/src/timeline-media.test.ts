@@ -4,7 +4,7 @@ import {
   getCachedFilmstripFrames,
   getCachedWaveformPeaks,
 } from './timeline-media-cache.js';
-import { scheduleFilmstripFrameTimes } from './timeline-media.js';
+import { scheduleFilmstripFrameTimes, visibleFilmstripTiles } from './timeline-media.js';
 
 describe('timeline media scheduling', () => {
   it('starts at the source in-point and spaces frames across the clip at the current zoom', () => {
@@ -79,5 +79,15 @@ describe('timeline media scheduling', () => {
     expect(await getCachedWaveformPeaks('asset-a', decode)).toBe(peaks);
     expect(await getCachedWaveformPeaks('asset-a', decode)).toBe(peaks);
     expect(decode).toHaveBeenCalledOnce();
+  });
+});
+
+describe('filmstrip tiles', () => {
+  it('shows only whole tiles and hides them all when the clip is too short', () => {
+    expect(visibleFilmstripTiles(20)).toBe(0);
+    expect(visibleFilmstripTiles(60)).toBe(1);
+    expect(visibleFilmstripTiles(30 + 4 + 26 * 3 + 2 * 2)).toBe(3);
+    expect(visibleFilmstripTiles(30 + 4 + 26 * 3 + 2 * 2 - 1)).toBe(2);
+    expect(visibleFilmstripTiles(Number.NaN)).toBe(0);
   });
 });

@@ -775,14 +775,14 @@ export function LooksSection({
             >
               <span className={`look-thumb look-thumb--${id}`} />
               <span className="look-card-label">{label}</span>
-              <span className="look-card-note">{LOOK_NOTES[id]}</span>
+              <span className="look-card-note sr-only">{LOOK_NOTES[id]}</span>
             </button>
           ))}
           {customId !== undefined && (
             <div className="look-card look-option is-active">
               <span className="look-thumb look-thumb--custom" />
               <span className="look-card-label">{customLutName ?? 'Custom LUT'}</span>
-              <span className="look-card-note">A LUT file from the project library.</span>
+              <span className="look-card-note sr-only">A LUT file from the project library.</span>
             </div>
           )}
         </div>

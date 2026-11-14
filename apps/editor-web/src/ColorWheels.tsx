@@ -408,7 +408,7 @@ export function ColorWheels({
           );
         })}
       </div>
-      <p className="cw-note">
+      <p className="cw-note sr-only">
         Drag the puck to push colour: the angle is the hue, the distance is the amount. Hold Shift
         for fine control, double-click a wheel to clear its colour, and use the arrow keys to move
         the puck.

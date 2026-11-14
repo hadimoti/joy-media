@@ -20,7 +20,11 @@ import {
   getCachedWaveformPeaks,
   loadTimelineAssetBlob,
 } from './timeline-media-cache.js';
-import { scheduleFilmstripFrameTimes, type TimelineElementMediaSource } from './timeline-media.js';
+import {
+  scheduleFilmstripFrameTimes,
+  visibleFilmstripTiles,
+  type TimelineElementMediaSource,
+} from './timeline-media.js';
 
 function filmstripCellCount(widthPx: number): number {
   return Math.max(2, Math.min(24, Math.floor(widthPx / 28)));
@@ -68,7 +72,10 @@ function Filmstrip({
   readonly frames: ReadonlyMap<number, string> | undefined;
   readonly hostRef: RefObject<HTMLSpanElement | null>;
 }) {
-  const count = frameTimesUs.length || filmstripCellCount(widthPx);
+  const count = Math.min(
+    frameTimesUs.length || filmstripCellCount(widthPx),
+    visibleFilmstripTiles(widthPx),
+  );
   return (
     <span className="timeline-clip-filmstrip" aria-hidden="true" ref={hostRef}>
       {Array.from({ length: count }, (_, index) => {

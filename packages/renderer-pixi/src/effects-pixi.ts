@@ -353,18 +353,20 @@ vec3 hslToRgb(vec3 hsl) {
   vec3 rgb=h<1.0?vec3(c,x,0.0):h<2.0?vec3(x,c,0.0):h<3.0?vec3(0.0,c,x):h<4.0?vec3(0.0,x,c):h<5.0?vec3(x,0.0,c):vec3(c,0.0,x);
   return rgb+m;
 }
+// WebGL1-compatible: Pixi compiles these sources as GLSL ES 1.00, which has no texelFetch.
+vec3 cubeTexel(float x, float y) { return texture(uCubeLutTexture, vec2((x+0.5)/(uCubeSize*uCubeSize), (y+0.5)/uCubeSize)).rgb; }
 vec3 sampleCube(vec3 rgb) {
   vec3 p=clamp((rgb-uCubeDomainMin)/(uCubeDomainMax-uCubeDomainMin),0.0,1.0)*(uCubeSize-1.0);
   vec3 lo=floor(p), hi=min(vec3(uCubeSize-1.0),lo+1.0), f=p-lo;
   float n=uCubeSize;
-  vec3 c000=texelFetch(uCubeLutTexture,ivec2(int(lo.x*n+lo.z),int(lo.y)),0).rgb;
-  vec3 c100=texelFetch(uCubeLutTexture,ivec2(int(hi.x*n+lo.z),int(lo.y)),0).rgb;
-  vec3 c010=texelFetch(uCubeLutTexture,ivec2(int(lo.x*n+lo.z),int(hi.y)),0).rgb;
-  vec3 c110=texelFetch(uCubeLutTexture,ivec2(int(hi.x*n+lo.z),int(hi.y)),0).rgb;
-  vec3 c001=texelFetch(uCubeLutTexture,ivec2(int(lo.x*n+hi.z),int(lo.y)),0).rgb;
-  vec3 c101=texelFetch(uCubeLutTexture,ivec2(int(hi.x*n+hi.z),int(lo.y)),0).rgb;
-  vec3 c011=texelFetch(uCubeLutTexture,ivec2(int(lo.x*n+hi.z),int(hi.y)),0).rgb;
-  vec3 c111=texelFetch(uCubeLutTexture,ivec2(int(hi.x*n+hi.z),int(hi.y)),0).rgb;
+  vec3 c000=cubeTexel(lo.x*n+lo.z,lo.y).rgb;
+  vec3 c100=cubeTexel(hi.x*n+lo.z,lo.y).rgb;
+  vec3 c010=cubeTexel(lo.x*n+lo.z,hi.y).rgb;
+  vec3 c110=cubeTexel(hi.x*n+lo.z,hi.y).rgb;
+  vec3 c001=cubeTexel(lo.x*n+hi.z,lo.y).rgb;
+  vec3 c101=cubeTexel(hi.x*n+hi.z,lo.y).rgb;
+  vec3 c011=cubeTexel(lo.x*n+hi.z,hi.y).rgb;
+  vec3 c111=cubeTexel(hi.x*n+hi.z,hi.y).rgb;
   return mix(mix(mix(c000,c100,f.x),mix(c010,c110,f.x),f.y),mix(mix(c001,c101,f.x),mix(c011,c111,f.x),f.y),f.z);
 }
 
@@ -556,8 +558,9 @@ function createColorGradeV2Filter(grade: ColorGradeIR, cubeLut?: ParsedCubeLut):
           uHslBands: { value: bandData, type: 'vec4<f32>', size: 8 },
           uHslAdjust: { value: adjustmentData, type: 'vec4<f32>', size: 8 },
         },
-        uCurveTexture: curveTexture,
-        uCubeLutTexture: cubeTexture,
+        // Pixi binds a filter's own textures by their source, not by the Texture object.
+        uCurveTexture: curveTexture.source,
+        uCubeLutTexture: cubeTexture.source,
       },
     });
     if (curveLease !== undefined || cubeLease !== undefined) {
@@ -586,7 +589,12 @@ function identityCurveTexture(): Texture {
   const pixels = new Uint8Array(256 * 4);
   for (let x = 0; x < 256; x += 1) pixels.fill(x, x * 4, x * 4 + 4);
   const texture = new Texture({
-    source: new BufferImageSource({ resource: pixels, width: 256, height: 1 }),
+    source: new BufferImageSource({
+      resource: pixels,
+      width: 256,
+      height: 1,
+      scaleMode: 'nearest',
+    }),
   });
   identityCurveTextureCache.set(identityCurveTexture, texture);
   return texture;
@@ -605,7 +613,12 @@ function getCurveTexture(curves: NonNullable<ColorGradeIR['curves']>): CurveText
     for (let channel = 0; channel < 4; channel += 1)
       pixels[x * 4 + channel] = tables[(['rgb', 'red', 'green', 'blue'] as const)[channel]!][x]!;
   const texture = new Texture({
-    source: new BufferImageSource({ resource: pixels, width: 256, height: 1 }),
+    source: new BufferImageSource({
+      resource: pixels,
+      width: 256,
+      height: 1,
+      scaleMode: 'nearest',
+    }),
   });
   const entry = { texture, references: 1 };
   curveTextureCache.set(key, entry);
@@ -640,6 +653,7 @@ function identityCubeTexture(): Texture {
       width: 4,
       height: 2,
       format: 'rgba32float',
+      scaleMode: 'nearest',
     }),
   });
   identityCubeTextureCache.set(identityCubeTexture, texture);
@@ -668,6 +682,7 @@ function getCubeTexture(lut: ParsedCubeLut): CubeTextureLease {
       width: lut.size * lut.size,
       height: lut.size,
       format: 'rgba32float',
+      scaleMode: 'nearest',
     }),
   });
   const entry = { texture, references: 1 };

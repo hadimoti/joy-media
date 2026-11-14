@@ -134,6 +134,15 @@ export async function decodeTimelineFilmstripFrames(
   sourceTimesUs: readonly number[],
 ): Promise<ReadonlyMap<number, string>> {
   if (sourceTimesUs.length === 0 || typeof document === 'undefined') return new Map();
+  if (!blob.type.startsWith('video/') && !blob.type.startsWith('audio/')) {
+    // A still picture (or a file with no type): try it as an image first, then as a video.
+    try {
+      const still = await decodeStillImageFrames(blob, sourceTimesUs);
+      if (still.size > 0) return still;
+    } catch {
+      // not an image: fall through to the video decoder
+    }
+  }
   const { ALL_FORMATS, BlobSource, Input, VideoSampleSink } = await import('mediabunny');
   const input = new Input({
     formats: ALL_FORMATS,
@@ -184,6 +193,39 @@ export async function decodeTimelineFilmstripFrames(
     return frames;
   } finally {
     input.dispose();
+  }
+}
+
+/** A still picture has one frame: every requested time shares one small fitted thumbnail. */
+async function decodeStillImageFrames(
+  blob: Blob,
+  sourceTimesUs: readonly number[],
+): Promise<ReadonlyMap<number, string>> {
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = VIDEO_THUMBNAIL_WIDTH;
+    canvas.height = VIDEO_THUMBNAIL_HEIGHT;
+    const context = canvas.getContext('2d');
+    if (context === null) return new Map();
+    const scale = Math.min(
+      VIDEO_THUMBNAIL_WIDTH / Math.max(1, bitmap.width),
+      VIDEO_THUMBNAIL_HEIGHT / Math.max(1, bitmap.height),
+    );
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    context.drawImage(
+      bitmap,
+      Math.round((VIDEO_THUMBNAIL_WIDTH - width) / 2),
+      Math.round((VIDEO_THUMBNAIL_HEIGHT - height) / 2),
+      width,
+      height,
+    );
+    const dataUrl = await encodeCanvasFrame(canvas);
+    if (dataUrl === undefined) return new Map();
+    return new Map([...new Set(sourceTimesUs)].map((timeUs) => [timeUs, dataUrl] as const));
+  } finally {
+    bitmap.close();
   }
 }
 
