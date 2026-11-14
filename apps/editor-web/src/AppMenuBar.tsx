@@ -46,6 +46,8 @@ export function AppMenuBar(props: AppMenuBarProps) {
   const { onAction } = props;
   const { openId, open, toggle, close, registerRoot } = usePopupManager();
   const menuRefs = useRef(new Map<string, HTMLUListElement>());
+  // The menu a hover just opened. The click that follows on the same title keeps it open instead of closing it.
+  const openedByHover = useRef<string | null>(null);
   const baseId = useId();
   // Which menu-bar group is open, if any. Outside click and Escape are handled by the manager.
   const openGroupId =
@@ -94,9 +96,21 @@ export function AppMenuBar(props: AppMenuBarProps) {
               aria-haspopup="menu"
               aria-expanded={isOpen}
               aria-controls={menuId}
-              onClick={(event) => toggle(popupId, event.currentTarget)}
+              onClick={(event) => {
+                if (openedByHover.current === popupId) {
+                  openedByHover.current = null;
+                  return;
+                }
+                toggle(popupId, event.currentTarget);
+              }}
               onMouseEnter={(event) => {
-                if (openGroupId !== null) open(popupId, event.currentTarget);
+                if (openGroupId !== null && openGroupId !== group.id) {
+                  openedByHover.current = popupId;
+                  open(popupId, event.currentTarget);
+                }
+              }}
+              onMouseLeave={() => {
+                if (openedByHover.current === popupId) openedByHover.current = null;
               }}
             >
               {group.label}

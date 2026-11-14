@@ -552,6 +552,26 @@ describe('app menu bar on the popup manager', () => {
     expect(container?.querySelectorAll('[role="menu"]').length).toBe(0);
     expect(document.activeElement).toBe(menubarTrigger('Edit'));
   });
+
+  it('a click on the title a hover just opened keeps that menu open; the next click closes it (LTP-055)', async () => {
+    await render(
+      <PopupProvider>
+        <AppMenuBar {...props} />
+      </PopupProvider>,
+    );
+
+    await click(menubarTrigger('File'));
+    await act(async () => {
+      menubarTrigger('Edit').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    await click(menubarTrigger('Edit'));
+    expect(menubarTrigger('Edit').getAttribute('aria-expanded')).toBe('true');
+    expect(menubarTrigger('File').getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelectorAll('[role="menu"]').length).toBe(1);
+
+    await click(menubarTrigger('Edit'));
+    expect(container?.querySelectorAll('[role="menu"]').length).toBe(0);
+  });
 });
 
 describe('command palette toggled from its toolbar button', () => {
