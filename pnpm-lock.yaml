@@ -110,6 +110,9 @@ importers:
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../../packages/provider-sdk
+      '@joy-media/worker':
+        specifier: workspace:*
+        version: link:../worker
       ai:
         specifier: 7.0.92
         version: 7.0.92(zod@4.6.6)
