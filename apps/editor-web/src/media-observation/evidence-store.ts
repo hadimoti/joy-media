@@ -95,6 +95,39 @@ export interface ReadEvidenceCoveragePageInput extends EvidenceManifestLookup {
   readonly pageIndex: number;
 }
 
+/** Coverage recorded beside one derived, local JPEG frame artifact. */
+export interface EvidenceFrameArtifactCoverage {
+  readonly sourceDurationUs: number;
+  readonly sampledFrameCount: number;
+  readonly sampledCutCount: number;
+  readonly totalCutCount: number;
+  /** A sampled timeline view is never exhaustive source-frame coverage. */
+  readonly completeSourceCoverage: false;
+}
+
+/** A bounded, timestamped JPEG derived from a composed timeline frame. */
+export interface EvidenceFrameArtifact {
+  readonly frameId: string;
+  readonly timestampUs: number;
+  readonly jpeg: Blob;
+  readonly width: number;
+  readonly height: number;
+  readonly coverage: EvidenceFrameArtifactCoverage;
+}
+
+export interface RecordEvidenceFrameArtifactInput extends EvidenceManifestLookup {
+  readonly frameId: string;
+  readonly timestampUs: number;
+  readonly jpeg: Blob;
+  readonly width: number;
+  readonly height: number;
+  readonly coverage: EvidenceFrameArtifactCoverage;
+}
+
+export interface ReadEvidenceFrameArtifactInput extends EvidenceManifestLookup {
+  readonly frameId: string;
+}
+
 /** Only a user-triggered, project-scoped command may clear derived analysis. */
 export interface UserEvidenceClearRequest {
   readonly projectId: string;
@@ -105,6 +138,8 @@ export interface EvidenceStoreOptions {
   readonly maxManifestCount?: number;
   readonly maxPagesPerManifest?: number;
   readonly maxFramesPerManifest?: number;
+  readonly maxFrameArtifactBytes?: number;
+  readonly maxTotalFrameArtifactBytes?: number;
 }
 
 export interface EvidenceStore {
@@ -113,6 +148,9 @@ export interface EvidenceStore {
   readCoveragePage(input: ReadEvidenceCoveragePageInput): EvidenceManifestCoveragePage | undefined;
   /** Returns false for a stale/missing scope without changing stored evidence. */
   recordFrames(input: RecordEvidenceFramesInput): boolean;
+  /** Keeps a bounded derived JPEG only for an intended, already-decoded frame. */
+  recordFrameArtifact(input: RecordEvidenceFrameArtifactInput): boolean;
+  readFrameArtifact(input: ReadEvidenceFrameArtifactInput): EvidenceFrameArtifact | undefined;
   /** Returns false for a stale/missing scope without changing stored evidence. */
   setStatus(input: SetEvidenceManifestStatusInput): boolean;
   /**
@@ -127,7 +165,12 @@ export class EvidenceStoreQuotaError extends Error {
   readonly code = 'JOY_EVIDENCE_QUOTA_EXCEEDED' as const;
 
   constructor(
-    readonly quota: 'manifest-count' | 'page-count' | 'frame-count',
+    readonly quota:
+      | 'manifest-count'
+      | 'page-count'
+      | 'frame-count'
+      | 'frame-artifact-bytes'
+      | 'total-frame-artifact-bytes',
     readonly limit: number,
     readonly current: number,
     readonly requested: number,
@@ -153,6 +196,9 @@ const DEFAULT_MAX_MANIFEST_COUNT = 64;
 const DEFAULT_MAX_PAGES_PER_MANIFEST = 4_096;
 const DEFAULT_MAX_FRAMES_PER_MANIFEST =
   DEFAULT_MAX_PAGES_PER_MANIFEST * MAX_EVIDENCE_MANIFEST_FRAME_IDS_PER_PAGE;
+const DEFAULT_MAX_FRAME_ARTIFACT_BYTES = 1 * 1024 * 1024;
+const DEFAULT_MAX_TOTAL_FRAME_ARTIFACT_BYTES = 32 * 1024 * 1024;
+const MAX_FRAME_ARTIFACT_PIXELS = 4_096 * 2_160;
 const MAX_DERIVED_METADATA_ENTRIES = 64;
 const MAX_DERIVED_METADATA_STRING_LENGTH = 512;
 const ASSET_DIGEST = /^[a-f0-9]{64}$/i;
@@ -203,6 +249,8 @@ interface MutableEvidenceManifest {
 export function createEvidenceStore(options: EvidenceStoreOptions = {}): EvidenceStore {
   const limits = normalizeLimits(options);
   const manifests = new Map<string, MutableEvidenceManifest>();
+  const artifactsByManifest = new Map<string, Map<string, EvidenceFrameArtifact>>();
+  let storedArtifactBytes = 0;
 
   return {
     createManifest(input) {
@@ -272,6 +320,55 @@ export function createEvidenceStore(options: EvidenceStoreOptions = {}): Evidenc
       }
       return true;
     },
+    recordFrameArtifact(input) {
+      const manifest = getScopedManifest(manifests, input);
+      if (manifest === undefined) return false;
+      if (
+        manifest.status !== 'running' ||
+        manifest.persistence !== 'ephemeral' ||
+        !isPlainRecord(input)
+      )
+        throw new RangeError('JPEG artifacts require an active ephemeral evidence manifest');
+      const artifact = normalizeFrameArtifactInput(input, manifest, limits);
+      const pageIndex = manifest.framePageById.get(artifact.frameId);
+      if (pageIndex === undefined)
+        throw new RangeError('frame artifact is not intended by this manifest');
+      const page = manifest.pages[pageIndex]!;
+      if (!page.decodedFrameIds.has(artifact.frameId))
+        throw new RangeError('frame artifact must be recorded after its decoded stage');
+
+      const artifacts = artifactsByManifest.get(manifest.id) ?? new Map();
+      if (artifacts.has(artifact.frameId))
+        throw new RangeError('frame artifact already exists for this manifest');
+      if (artifact.jpeg.size > limits.maxFrameArtifactBytes)
+        throw new EvidenceStoreQuotaError(
+          'frame-artifact-bytes',
+          limits.maxFrameArtifactBytes,
+          0,
+          artifact.jpeg.size,
+        );
+      if (artifact.jpeg.size > limits.maxTotalFrameArtifactBytes - storedArtifactBytes)
+        throw new EvidenceStoreQuotaError(
+          'total-frame-artifact-bytes',
+          limits.maxTotalFrameArtifactBytes,
+          storedArtifactBytes,
+          artifact.jpeg.size,
+        );
+
+      const stored = cloneFrameArtifact(artifact);
+      artifacts.set(stored.frameId, stored);
+      artifactsByManifest.set(manifest.id, artifacts);
+      storedArtifactBytes += stored.jpeg.size;
+      return true;
+    },
+    readFrameArtifact(input) {
+      const manifest = getScopedManifest(manifests, input);
+      if (manifest === undefined) return undefined;
+      if (!isPlainRecord(input)) throw new RangeError('frame artifact lookup must be an object');
+      assertFrameId(input.frameId, 'frameId');
+      const artifact = artifactsByManifest.get(manifest.id)?.get(input.frameId);
+      return artifact === undefined ? undefined : cloneFrameArtifact(artifact);
+    },
     setStatus(input) {
       const manifest = getScopedManifest(manifests, input);
       if (manifest === undefined) return false;
@@ -290,7 +387,14 @@ export function createEvidenceStore(options: EvidenceStoreOptions = {}): Evidenc
         (manifest) => manifest.scope.identity.projectId === input.projectId,
       );
       assertProjectHasNoActiveReview(manifests, input.projectId);
-      for (const manifest of scoped) manifests.delete(manifest.id);
+      for (const manifest of scoped) {
+        manifests.delete(manifest.id);
+        const artifacts = artifactsByManifest.get(manifest.id);
+        if (artifacts !== undefined) {
+          for (const artifact of artifacts.values()) storedArtifactBytes -= artifact.jpeg.size;
+          artifactsByManifest.delete(manifest.id);
+        }
+      }
       return Object.freeze({ clearedManifestCount: scoped.length });
     },
   };
@@ -351,7 +455,105 @@ function normalizeLimits(options: EvidenceStoreOptions): Required<EvidenceStoreO
       DEFAULT_MAX_FRAMES_PER_MANIFEST,
       'maxFramesPerManifest',
     ),
+    maxFrameArtifactBytes: normalizeLimit(
+      options.maxFrameArtifactBytes,
+      DEFAULT_MAX_FRAME_ARTIFACT_BYTES,
+      'maxFrameArtifactBytes',
+    ),
+    maxTotalFrameArtifactBytes: normalizeLimit(
+      options.maxTotalFrameArtifactBytes,
+      DEFAULT_MAX_TOTAL_FRAME_ARTIFACT_BYTES,
+      'maxTotalFrameArtifactBytes',
+    ),
   };
+}
+
+function normalizeFrameArtifactInput(
+  input: Record<string, unknown>,
+  manifest: MutableEvidenceManifest,
+  limits: Required<EvidenceStoreOptions>,
+): EvidenceFrameArtifact {
+  if (
+    !hasOnlyKeys(
+      input,
+      ['manifestId', 'scope', 'frameId', 'timestampUs', 'jpeg', 'width', 'height', 'coverage'],
+      ['manifestId', 'scope', 'frameId', 'timestampUs', 'jpeg', 'width', 'height', 'coverage'],
+    )
+  )
+    throw new RangeError('frame artifact must contain only bounded JPEG evidence fields');
+  assertFrameId(input.frameId, 'frameId');
+  if (!Number.isSafeInteger(input.timestampUs) || (input.timestampUs as number) < 0)
+    throw new RangeError('frame artifact timestamp must be a non-negative safe integer');
+  if (
+    !Number.isSafeInteger(input.width) ||
+    (input.width as number) < 1 ||
+    !Number.isSafeInteger(input.height) ||
+    (input.height as number) < 1 ||
+    (input.width as number) * (input.height as number) > MAX_FRAME_ARTIFACT_PIXELS
+  )
+    throw new RangeError('frame artifact dimensions exceed the bounded image size');
+  if (!(input.jpeg instanceof Blob) || input.jpeg.type !== 'image/jpeg' || input.jpeg.size < 1)
+    throw new RangeError('frame artifact must be a non-empty JPEG Blob');
+  if (input.jpeg.size > limits.maxFrameArtifactBytes)
+    throw new EvidenceStoreQuotaError(
+      'frame-artifact-bytes',
+      limits.maxFrameArtifactBytes,
+      0,
+      input.jpeg.size,
+    );
+  const coverage = normalizeFrameArtifactCoverage(input.coverage, manifest.framePageById.size);
+  return Object.freeze({
+    frameId: input.frameId as string,
+    timestampUs: input.timestampUs as number,
+    jpeg: input.jpeg.slice(0, input.jpeg.size, 'image/jpeg'),
+    width: input.width as number,
+    height: input.height as number,
+    coverage,
+  });
+}
+
+function normalizeFrameArtifactCoverage(
+  value: unknown,
+  intendedFrameCount: number,
+): EvidenceFrameArtifactCoverage {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactKeys(value, [
+      'sourceDurationUs',
+      'sampledFrameCount',
+      'sampledCutCount',
+      'totalCutCount',
+      'completeSourceCoverage',
+    ])
+  )
+    throw new RangeError('frame artifact coverage must contain only bounded counts');
+  const { sourceDurationUs, sampledFrameCount, sampledCutCount, totalCutCount } = value;
+  if (
+    !Number.isSafeInteger(sourceDurationUs) ||
+    (sourceDurationUs as number) < 1 ||
+    sampledFrameCount !== intendedFrameCount ||
+    !Number.isSafeInteger(sampledCutCount) ||
+    (sampledCutCount as number) < 0 ||
+    !Number.isSafeInteger(totalCutCount) ||
+    (totalCutCount as number) < (sampledCutCount as number) ||
+    value.completeSourceCoverage !== false
+  )
+    throw new RangeError('frame artifact coverage does not match its evidence manifest');
+  return Object.freeze({
+    sourceDurationUs: sourceDurationUs as number,
+    sampledFrameCount: sampledFrameCount as number,
+    sampledCutCount: sampledCutCount as number,
+    totalCutCount: totalCutCount as number,
+    completeSourceCoverage: false,
+  });
+}
+
+function cloneFrameArtifact(artifact: EvidenceFrameArtifact): EvidenceFrameArtifact {
+  return Object.freeze({
+    ...artifact,
+    jpeg: artifact.jpeg.slice(0, artifact.jpeg.size, 'image/jpeg'),
+    coverage: Object.freeze({ ...artifact.coverage }),
+  });
 }
 
 function normalizeLimit(value: unknown, fallback: number, label: string): number {

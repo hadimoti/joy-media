@@ -211,4 +211,64 @@ describe('evidence store', () => {
       store.readManifest({ manifestId: 'second', scope: scope({ runId: 'run-2' }) }),
     ).toBeUndefined();
   });
+
+  it('stores timestamped JPEG artifacts with bounded coverage and clears them with the project', () => {
+    const store = createEvidenceStore();
+    const manifestScope = scope();
+    const lookup = { manifestId: 'timeline-qc', scope: manifestScope };
+    store.createManifest({
+      id: lookup.manifestId,
+      scope: manifestScope,
+      mode: 'overview',
+      intendedFrameIdPages: [['timeline-frame-1000000']],
+    });
+
+    const artifactApi = store as unknown as {
+      recordFrameArtifact?: (input: unknown) => boolean;
+      readFrameArtifact?: (input: unknown) => unknown;
+    };
+    expect(artifactApi.recordFrameArtifact).toBeTypeOf('function');
+    expect(artifactApi.readFrameArtifact).toBeTypeOf('function');
+
+    store.recordFrames({
+      ...lookup,
+      stage: 'decoded',
+      frameIds: ['timeline-frame-1000000'],
+    });
+    const jpeg = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type: 'image/jpeg' });
+    const coverage = {
+      sourceDurationUs: 10_000_000,
+      sampledFrameCount: 1,
+      sampledCutCount: 0,
+      totalCutCount: 0,
+      completeSourceCoverage: false,
+    } as const;
+
+    expect(
+      artifactApi.recordFrameArtifact!({
+        ...lookup,
+        frameId: 'timeline-frame-1000000',
+        timestampUs: 1_000_000,
+        jpeg,
+        width: 320,
+        height: 180,
+        coverage,
+      }),
+    ).toBe(true);
+    expect(
+      artifactApi.readFrameArtifact!({
+        ...lookup,
+        frameId: 'timeline-frame-1000000',
+      }),
+    ).toMatchObject({ timestampUs: 1_000_000, jpeg, width: 320, height: 180, coverage });
+
+    store.setStatus({ ...lookup, status: 'cancelled' });
+    store.clearProject({ projectId: 'project-1', intent: 'user-request' });
+    expect(
+      artifactApi.readFrameArtifact!({
+        ...lookup,
+        frameId: 'timeline-frame-1000000',
+      }),
+    ).toBeUndefined();
+  });
 });
