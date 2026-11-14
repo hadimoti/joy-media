@@ -20185,3 +20185,43 @@ label {
   flex: none;
   margin: 0;
 }
+
+/* The two anchors of a text gradient: drag a dot to place that end of the gradient. */
+.monitor-gradient-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+}
+.monitor-gradient-line {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+.monitor-gradient-line line {
+  stroke: var(--joy-accent);
+  stroke-width: 1.5px;
+  stroke-dasharray: 5 4;
+}
+.monitor-gradient-anchor {
+  position: absolute;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1px var(--joy-accent),
+    0 1px 4px rgb(0 0 0 / 50%);
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+}
+.monitor-gradient-anchor:active {
+  cursor: grabbing;
+}
+.monitor-gradient-layer.passive .monitor-gradient-anchor {
+  pointer-events: none;
+}

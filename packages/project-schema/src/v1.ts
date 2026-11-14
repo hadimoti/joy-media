@@ -1361,6 +1361,20 @@ function validateTextDocument(
   }
 }
 
+/** Gradient anchors are optional; when set, both must be points inside a generous box around the text. */
+function isValidGradientAnchors(fill: Record<string, unknown>): boolean {
+  const point = (value: unknown): boolean =>
+    isRecord(value) &&
+    Number.isFinite(value.x) &&
+    Number.isFinite(value.y) &&
+    (value.x as number) >= -2 &&
+    (value.x as number) <= 3 &&
+    (value.y as number) >= -2 &&
+    (value.y as number) <= 3;
+  if (fill.start === undefined && fill.end === undefined) return true;
+  return point(fill.start) && point(fill.end);
+}
+
 function validateTextStyle(value: unknown, path: string, diagnostics: ProjectDiagnostic[]): void {
   if (
     !isRecord(value) ||
@@ -1378,6 +1392,7 @@ function validateTextStyle(value: unknown, path: string, diagnostics: ProjectDia
     !['start', 'center', 'end'].includes(String(value.align)) ||
     !isRecord(value.fill) ||
     !['solid', 'linear-gradient'].includes(String(value.fill.kind)) ||
+    !isValidGradientAnchors(value.fill) ||
     !['normal', 'multiply', 'screen', 'overlay', 'soft-light', 'hard-light', 'difference'].includes(
       String(value.blendMode),
     ) ||

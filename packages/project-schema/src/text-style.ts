@@ -15,13 +15,38 @@ export interface TextGradientStopV1 {
   readonly color: string;
 }
 
+/** A point of the text box: (0, 0) is its top-left corner and (1, 1) its bottom-right corner. */
+export interface TextGradientPointV1 {
+  readonly x: number;
+  readonly y: number;
+}
+
 export type TextFillV1 =
   | { readonly kind: 'solid'; readonly color: string }
   | {
       readonly kind: 'linear-gradient';
+      /** Used when start and nd are not set (every project saved before the anchors existed). */
       readonly angleDeg: number;
       readonly stops: readonly TextGradientStopV1[];
+      /** Where the first stop sits. With nd, they replace the angle. */
+      readonly start?: TextGradientPointV1;
+      /** Where the last stop sits. */
+      readonly end?: TextGradientPointV1;
     };
+
+/** The two anchors of a gradient: the saved ones, or the ones the angle draws through the box centre. */
+export function textGradientAnchors(fill: {
+  readonly angleDeg: number;
+  readonly start?: TextGradientPointV1;
+  readonly end?: TextGradientPointV1;
+}): { readonly start: TextGradientPointV1; readonly end: TextGradientPointV1 } {
+  if (fill.start !== undefined && fill.end !== undefined)
+    return { start: fill.start, end: fill.end };
+  const radians = (fill.angleDeg * Math.PI) / 180;
+  const dx = Math.cos(radians) * 0.5;
+  const dy = Math.sin(radians) * 0.5;
+  return { start: { x: 0.5 - dx, y: 0.5 - dy }, end: { x: 0.5 + dx, y: 0.5 + dy } };
+}
 
 export interface TextStrokeV1 {
   readonly color: string;

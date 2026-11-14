@@ -654,6 +654,9 @@ function textFillToIR(fill: TextFillV1): TextFillIR {
     kind: 'linear-gradient',
     angleDeg: fill.angleDeg,
     stops: fill.stops.map((stop) => ({ offset: stop.offset, color: parseTextColor(stop.color) })),
+    ...(fill.start !== undefined && fill.end !== undefined
+      ? { start: { ...fill.start }, end: { ...fill.end } }
+      : {}),
   };
 }
 

@@ -398,10 +398,12 @@ export async function createBrowserPixiRenderer(
             const radians = (node.fill.angleDeg * Math.PI) / 180;
             const dx = Math.cos(radians) * 0.5;
             const dy = Math.sin(radians) * 0.5;
+            // Saved anchors win; without them the angle draws through the centre (older projects).
+            const anchored = node.fill.start !== undefined && node.fill.end !== undefined;
             return new FillGradient({
               type: 'linear',
-              start: { x: 0.5 - dx, y: 0.5 - dy },
-              end: { x: 0.5 + dx, y: 0.5 + dy },
+              start: anchored ? { ...node.fill.start! } : { x: 0.5 - dx, y: 0.5 - dy },
+              end: anchored ? { ...node.fill.end! } : { x: 0.5 + dx, y: 0.5 + dy },
               textureSpace: 'local',
               colorStops: node.fill.stops.map((stop) => ({
                 offset: stop.offset,

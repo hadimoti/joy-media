@@ -101,6 +101,9 @@ export type TextFillIR =
       readonly kind: 'linear-gradient';
       readonly angleDeg: number;
       readonly stops: readonly { readonly offset: number; readonly color: Rgba }[];
+      /** Anchors in the text box (0 to 1 each way); with both set they replace the angle. */
+      readonly start?: { readonly x: number; readonly y: number };
+      readonly end?: { readonly x: number; readonly y: number };
     };
 
 export interface TextStrokeIR {

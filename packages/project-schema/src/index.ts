@@ -107,6 +107,7 @@ export type {
   TextAlignV1,
   TextBlendModeV1,
   TextGradientStopV1,
+  TextGradientPointV1,
   TextFillV1,
   TextStrokeV1,
   TextShadowV1,
@@ -119,6 +120,7 @@ export type {
 } from './text-style.js';
 export {
   DEFAULT_TEXT_STYLE_V1,
+  textGradientAnchors,
   textDocumentFromString,
   textDocumentToString,
 } from './text-style.js';

@@ -2,7 +2,12 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import { EditorPanelContext, type EditorPanelContextValue } from '../editor-panel-context.js';
 import { withVideoFrameNode } from '@joy-media/playback-engine';
 import type { EditorOverlayIR, RenderFrameIR } from '@joy-media/render-ir';
-import type { VisualObjectV1 } from '@joy-media/project-schema';
+import {
+  textGradientAnchors,
+  type TextGradientPointV1,
+  type VisualObjectV1,
+} from '@joy-media/project-schema';
+import { MonitorGradientAnchors } from './MonitorGradientAnchors.js';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import {
@@ -847,6 +852,61 @@ function MonitorPanelContent({
     () => buildMonitorGroupOverlay(transformTargets, monitorView.view.zoom),
     [monitorView.view.zoom, transformTargets],
   );
+  // A selected text with a gradient fill shows its two anchors on the picture: drag them to place the gradient.
+  const gradientTarget = useMemo(() => {
+    if (transformOverlays.length !== 1) return undefined;
+    const overlay = transformOverlays[0]!;
+    const object = visualProject.visualObjects[overlay.elementId];
+    const fill = object?.kind === 'text' ? object.textStyle?.fill : undefined;
+    if (object === undefined || fill === undefined || fill.kind !== 'linear-gradient')
+      return undefined;
+    const anchors = textGradientAnchors(fill);
+    return {
+      overlay,
+      objectId: object.id,
+      start: anchors.start,
+      end: anchors.end,
+      startColor: fill.stops[0]?.color ?? '#ffffff',
+      endColor: fill.stops[fill.stops.length - 1]?.color ?? '#ffffff',
+    };
+  }, [transformOverlays, visualProject]);
+  const gradientPending = useRef<{
+    objectId: string;
+    start: TextGradientPointV1;
+    end: TextGradientPointV1;
+  } | null>(null);
+  const gradientFrame = useRef<number | undefined>(undefined);
+  const moveGradientAnchors = (next: {
+    readonly start: TextGradientPointV1;
+    readonly end: TextGradientPointV1;
+  }) => {
+    if (gradientTarget === undefined) return;
+    gradientPending.current = { objectId: gradientTarget.objectId, ...next };
+    if (gradientFrame.current !== undefined) return;
+    // One project write per frame while the dot is dragged.
+    gradientFrame.current = requestAnimationFrame(() => {
+      gradientFrame.current = undefined;
+      const pending = gradientPending.current;
+      gradientPending.current = null;
+      if (pending === null) return;
+      const project = context.visualProject;
+      const object = project.visualObjects[pending.objectId];
+      if (object?.kind !== 'text' || object.textStyle?.fill.kind !== 'linear-gradient') return;
+      context.replaceVisualProject({
+        ...project,
+        visualObjects: {
+          ...project.visualObjects,
+          [pending.objectId]: {
+            ...object,
+            textStyle: {
+              ...object.textStyle,
+              fill: { ...object.textStyle.fill, start: pending.start, end: pending.end },
+            },
+          },
+        },
+      });
+    });
+  };
   const frameRect = monitorFrameRect(monitorView.view, frameSize);
 
   const toggleFullscreen = () => {
@@ -1006,6 +1066,19 @@ function MonitorPanelContent({
           interactive={monitorView.tool === 'select' && !spaceHeld}
           startGesture={transformController.startGesture}
         />
+        {gradientTarget !== undefined && (
+          <MonitorGradientAnchors
+            overlay={gradientTarget.overlay}
+            start={gradientTarget.start}
+            end={gradientTarget.end}
+            startColor={gradientTarget.startColor}
+            endColor={gradientTarget.endColor}
+            view={monitorView.view}
+            viewportSize={monitorView.viewportSize}
+            interactive={monitorView.tool === 'select' && !spaceHeld}
+            onChange={moveGradientAnchors}
+          />
+        )}
         <MonitorEyedropper
           view={monitorView.view}
           frame={frameSize}
