@@ -183,13 +183,24 @@ describe('AgentPanel: QC report card', () => {
     );
     expect(host.querySelectorAll('[aria-label="QC report"]')).toHaveLength(1);
     expect(host.querySelector('[data-qc-fact="sent"]')?.textContent).toBe('ModelSent to gpt-test');
-    expect(host.querySelector('[data-qc-fact="frames"]')?.textContent).toBe('Frames4 / 16');
+    expect(host.querySelector('[data-qc-fact="frames"]')?.textContent).toBe('Frames4');
 
-    // A second report is a later check: its card shows the state before and after.
-    act(() => built[0]!.onReport?.(report(1, { reportId: 'qc-report-run-1-2' })));
+    // A report from a different run is not a before/after pair.
+    act(() => built[0]!.onReport?.(report(1, { reportId: 'qc-report-run-2-1' })));
     const cards = host.querySelectorAll('[aria-label="QC report"]');
     expect(cards).toHaveLength(2);
     expect(cards[0]!.querySelector('[data-qc-fact="before"]')).toBeNull();
+    expect(cards[1]!.querySelector('[data-qc-fact="before"]')).toBeNull();
+    expect(cards[1]!.querySelector('[data-qc-fact="after"]')).toBeNull();
+    expect(cards[1]!.querySelector('[data-qc-fact="findings"]')?.textContent).toBe('Findings1');
+  });
+
+  it('shows before and after for a later report in the same run', async () => {
+    const host = await sendPrompt('Run a quality check on my film', () => undefined);
+    act(() => built[0]!.onReport?.(report(3)));
+    act(() => built[0]!.onReport?.(report(1, { reportId: 'qc-report-run-1-2' })));
+    const cards = host.querySelectorAll('[aria-label="QC report"]');
+    expect(cards).toHaveLength(2);
     expect(cards[1]!.querySelector('[data-qc-fact="before"]')?.textContent).toBe('Before3');
     expect(cards[1]!.querySelector('[data-qc-fact="after"]')?.textContent).toBe('After1');
   });

@@ -48,6 +48,7 @@ function report(overrides: Record<string, unknown> = {}): Record<string, unknown
         startUs: 500_000,
         endUs: 500_000,
         label: 'A black frame.',
+        measured: { blackDurationSec: 0.5 },
         fixable: false,
       },
     ],
@@ -121,8 +122,15 @@ describe('readQcReportView', () => {
 
   it('reads the model and the frames used against the budget', () => {
     const view = readQcReportView(
-      report({ run: { layer1: true, layer2: true, modelId: 'vision-1', framesSent: 4 } }),
-      12,
+      report({
+        run: {
+          layer1: true,
+          layer2: true,
+          modelId: 'vision-1',
+          framesSent: 4,
+          frameBudget: 12,
+        },
+      }),
     )!;
     expect(view).toMatchObject({
       layer2: true,
@@ -132,6 +140,53 @@ describe('readQcReportView', () => {
     });
     expect(qcSentLine(view)).toBe('Sent to vision-1');
     expect(qcSentLine(readQcReportView(report())!)).toBe('Kept on this device');
+  });
+
+  it('does not invent a frame budget or print a contradictory one', () => {
+    const noBudget = readQcReportView(
+      report({ run: { layer1: true, layer2: true, modelId: 'vision-1', framesSent: 20 } }),
+    )!;
+    const noBudgetMarkdown = qcReportMarkdown(noBudget);
+    expect(noBudget.frameBudget).toBeUndefined();
+    expect(noBudgetMarkdown).toContain('- Frames: 20');
+    expect(noBudgetMarkdown).not.toContain('of 16');
+
+    const contradictory = readQcReportView(
+      report({
+        frameBudget: 16,
+        run: {
+          layer1: true,
+          layer2: true,
+          modelId: 'vision-1',
+          framesSent: 20,
+          frameBudget: 16,
+        },
+      }),
+    )!;
+    expect(contradictory.frameBudget).toBeUndefined();
+    expect(qcReportMarkdown(contradictory)).not.toContain('20 of 16');
+  });
+
+  it('reads bounded notes and measured values without throwing', () => {
+    const longNote = 'n'.repeat(300);
+    const view = readQcReportView(
+      report({
+        notes: [
+          { id: 'note-1', frameId: 'frame-1', timeUs: 2_000_000, text: 'Check the title edge.' },
+          { id: 'note-2', frameId: 'frame-2', timeUs: 3_000_000, text: longNote },
+          null,
+          { id: 'bad-time', frameId: 'frame-3', timeUs: -1, text: 'No time.' },
+        ],
+      }),
+    )!;
+    expect(view.notes).toEqual([
+      { timeUs: 2_000_000, text: 'Check the title edge.' },
+      { timeUs: 3_000_000, text: `${'n'.repeat(239)}…` },
+      { text: 'No time.' },
+    ]);
+    expect(view.groups[0]!.findings[0]!.measured).toEqual({ blackDurationSec: 0.5 });
+    expect(qcReportMarkdown(view)).toContain('Black duration: 0.5 s');
+    expect(qcReportMarkdown(view)).toContain('Check the title edge.');
   });
 
   it('keeps a frame id with a path or a link out of the filmstrip', () => {
@@ -181,17 +236,73 @@ describe('formatting and files', () => {
     expect(markdown).toContain('3 findings (1 blocker, 1 major, 1 minor) in 3 types');
     expect(markdown).toContain('- Before: 5 findings, after: 3 findings');
     expect(markdown).toContain('- Kept on this device');
-    expect(markdown).toContain('- Frames: 0 of 16');
+    expect(markdown).toContain('- Frames: 0');
     expect(markdown).toContain('## Safe area (1)');
     expect(markdown).toContain('| 0:01.000–0:03.000 | minor | measured |');
     expect(markdown).toContain('not guaranteed to have understood');
     expect(qcReportMarkdown(readQcReportView(report({ findings: [] }))!)).toContain('No findings.');
   });
 
-  it('writes the report as received as JSON', () => {
-    const source = report();
-    const json = JSON.parse(qcReportJson(readQcReportView(source)!)) as Record<string, unknown>;
-    expect(json).toEqual(source);
+  it('uses the range length, not its end time', () => {
+    const view = readQcReportView(
+      report({
+        target: {
+          kind: 'timeline',
+          range: { domain: 'composition', startUs: 2_000_000, endUs: 6_000_000 },
+        },
+      }),
+    )!;
+    expect(view.durationUs).toBe(4_000_000);
+    expect(qcReportMarkdown(view)).toContain('- Length: 0:04.000');
+  });
+
+  it('writes JSON from the verified view, including notes and measurements', () => {
+    const source = report({
+      unverifiedField: 'must not be saved',
+      findings: [
+        ...((report()['findings'] as unknown[]) ?? []),
+        { id: 'bad', type: 'black', startUs: -1, endUs: 1, label: 'Invalid finding' },
+      ],
+      notes: [{ id: 'n1', frameId: 'timeline-frame-0', timeUs: 0, text: 'Review the opening.' }],
+    });
+    const view = readQcReportView(source)!;
+    const json = JSON.parse(qcReportJson(view, { findingCount: 5 })) as Record<string, unknown>;
+    expect(json).toMatchObject({
+      reportId: 'qc-report-run-1-1',
+      findingCount: 3,
+      before: { findingCount: 5 },
+      notes: [{ timeUs: 0, text: 'Review the opening.' }],
+    });
+    expect(json).not.toHaveProperty('unverifiedField');
+    const groups = json['groups'] as { findings: { measured: Record<string, unknown> }[] }[];
+    expect(groups.flatMap((group) => group.findings).some((finding) => finding.measured['blackDurationSec'] === 0.5)).toBe(true);
+    expect(JSON.stringify(json)).not.toContain('Invalid finding');
     expect(json['modelComprehensionGuaranteed']).toBe(false);
+  });
+
+  it('shows ellipses when labels or capped lists are shortened', () => {
+    const longLabel = 'x'.repeat(300);
+    const findings = Array.from({ length: 401 }, (_, index) => ({
+      id: `finding-${index}`,
+      type: 'black',
+      state: 'measured',
+      severity: 'minor',
+      startUs: index,
+      endUs: index,
+      label: index === 0 ? longLabel : 'A finding.',
+      measured: {},
+    }));
+    const frames = Array.from({ length: 97 }, (_, index) => ({
+      frameId: `frame-${index}`,
+      timeUs: index,
+    }));
+    const view = readQcReportView(report({ findings, frames }))!;
+    const firstFinding = view.groups[0]!.findings[0]!;
+    expect(firstFinding.label).toHaveLength(240);
+    expect(firstFinding.label.endsWith('…')).toBe(true);
+    expect(view.findingCount).toBe(400);
+    expect(view.frames).toHaveLength(96);
+    expect(view.truncated).toContain('Findings truncated…');
+    expect(view.truncated).toContain('Frames truncated…');
   });
 });

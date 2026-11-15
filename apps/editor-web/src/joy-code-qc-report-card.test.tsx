@@ -18,6 +18,7 @@ const FINDINGS = [
     startUs: 1_000_000,
     endUs: 3_000_000,
     label: 'A title sits outside the 90 percent safe area.',
+    measured: { insideSafeArea: false },
     fixable: true,
   },
   {
@@ -28,6 +29,7 @@ const FINDINGS = [
     startUs: 4_500_000,
     endUs: 5_000_000,
     label: 'A black run.',
+    measured: { blackDurationSec: 2.5 },
     fixable: false,
   },
 ];
@@ -38,10 +40,17 @@ function view(overrides: Record<string, unknown> = {}): QcReportView {
     reportId: 'qc-report-run-1-1',
     createdAt: '2026-11-15T10:00:00.000Z',
     target: { kind: 'timeline', range: { domain: 'composition', startUs: 0, endUs: 6_000_000 } },
-    run: { layer1: true, layer2: true, modelId: 'vision-1', framesSent: 4, framesSkipped: 0 },
+    run: {
+      layer1: true,
+      layer2: true,
+      modelId: 'vision-1',
+      framesSent: 4,
+      framesSkipped: 0,
+      frameBudget: 16,
+    },
     coverage: { completeSourceCoverage: false, sampledRanges: [], unsampledRanges: [] },
     findings: FINDINGS,
-    notes: [],
+    notes: [{ id: 'note-1', frameId: 'timeline-frame-0', timeUs: 1_500_000, text: 'Check the title edge.' }],
     frames: [
       { frameId: 'timeline-frame-0', timeUs: 0 },
       { frameId: 'timeline-frame-2000000', timeUs: 2_000_000 },
@@ -86,6 +95,8 @@ describe('JoyCodeQcReportCard', () => {
     expect(groups[1]!.textContent).toContain('0:01.000–0:03.000');
     expect(host.querySelector('[data-qc-fact="sent"]')?.textContent).toBe('ModelSent to vision-1');
     expect(host.querySelector('[data-qc-fact="frames"]')?.textContent).toBe('Frames4 / 16');
+    expect(host.querySelector('[data-qc-measured]')?.textContent).toBe('Black duration: 2.5 s');
+    expect(host.querySelector('[data-qc-notes]')?.textContent).toContain('Check the title edge.');
     expect(host.querySelector('[data-qc-fact="findings"]')?.textContent).toBe('Findings2');
     expect(host.querySelector('[data-agent-evidence-filmstrip]')).not.toBeNull();
     expect(host.querySelectorAll('.agent-evidence-filmstrip__marker')).toHaveLength(2);
@@ -182,7 +193,14 @@ describe('JoyCodeQcReportCard', () => {
     const [jsonName, json] = saveFile.mock.calls[1] as [string, string];
     expect(markdownName).toBe('qc-report-run-1-1.md');
     expect(markdown).toContain('- Before: 6 findings, after: 2 findings');
+    expect(markdown).toContain('Black duration: 2.5 s');
+    expect(markdown).toContain('Check the title edge.');
     expect(jsonName).toBe('qc-report-run-1-1.json');
-    expect(JSON.parse(json)).toMatchObject({ version: 1, reportId: 'qc-report-run-1-1' });
+    expect(JSON.parse(json)).toMatchObject({
+      version: 1,
+      reportId: 'qc-report-run-1-1',
+      before: { findingCount: 6 },
+      notes: [{ timeUs: 1_500_000, text: 'Check the title edge.' }],
+    });
   });
 });
