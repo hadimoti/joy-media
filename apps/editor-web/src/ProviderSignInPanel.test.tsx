@@ -9,7 +9,7 @@ import { ProviderSignInPanel } from './ProviderSignInPanel.js';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const RISK_NOTICE =
-  'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
+  'Sign-in uses a public app ID from another tool, and the provider may stop it at any time. An API key is the dependable way to connect.';
 
 describe('ProviderSignInPanel', () => {
   const global = globalThis as { window?: unknown };
@@ -131,20 +131,20 @@ describe('ProviderSignInPanel', () => {
     }
   });
 
-  it('shows OAuth sign-in as the primary route for every provider, with the API key second as secondary', async () => {
+  it('shows the API key as the main route for every provider, with the sign-in second (T-F09)', async () => {
     installDesktopBridge();
     await mount();
 
     for (const provider of ['ChatGPT', 'Kimi', 'xAI']) {
       await openAccordion(provider);
       const signInRoute = route(provider, 'OAuth');
-      expect(signInRoute.querySelector('h4')?.textContent).toBe('Sign-in route (Primary)');
+      expect(signInRoute.querySelector('h4')?.textContent).toBe('Sign-in');
       expect(signInRoute.querySelector('button')?.textContent?.trim()).toBe(
         'Sign in with ' + provider,
       );
-      expect(route(provider, 'API-key').querySelector('h4')?.textContent).toBe(
-        'API key route (Secondary)',
-      );
+      // The sign-in is the quiet second route: a secondary button, not the gold action.
+      expect(signInRoute.querySelector('button')?.className).toContain('button-secondary');
+      expect(route(provider, 'API-key').querySelector('h4')?.textContent).toBe('API key');
 
       const card = container
         .querySelector('button[aria-label="Toggle ' + provider + ' connection routes"]')
@@ -153,7 +153,7 @@ describe('ProviderSignInPanel', () => {
         [...(card?.querySelectorAll('section[aria-label$="route"]') ?? [])].map((section) =>
           section.getAttribute('aria-label'),
         ),
-      ).toEqual([provider + ' OAuth route', provider + ' API-key route']);
+      ).toEqual([provider + ' API-key route', provider + ' OAuth route']);
       expect(
         container.querySelector('button[aria-label="Toggle ' + provider + ' sign-in route"]'),
       ).toBeNull();
@@ -187,6 +187,58 @@ describe('ProviderSignInPanel', () => {
     expect(route('ChatGPT', 'API-key').textContent).toContain(
       'An OpenAI API key is billed separately from ChatGPT.',
     );
+  });
+
+  it('gives every key route a "Get a key" and an "API docs" link that open the right pages (T-F09)', async () => {
+    installDesktopBridge();
+    await mount();
+
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) await openAccordion(provider);
+
+    const expected = {
+      ChatGPT: ['https://platform.openai.com/api-keys', 'https://developers.openai.com'],
+      Kimi: [
+        'https://platform.kimi.ai/console/api-keys',
+        'https://platform.kimi.ai/docs/guide/start-using-kimi-api',
+      ],
+      xAI: ['https://console.x.ai', 'https://docs.x.ai/docs/api-reference'],
+    } as const;
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI'] as const) {
+      const links = [...route(provider, 'API-key').querySelectorAll<HTMLAnchorElement>('a')];
+      expect(links.map((link) => link.textContent)).toEqual(['Get a key', 'API docs']);
+      expect(links.map((link) => link.getAttribute('href'))).toEqual(expected[provider]);
+      for (const link of links) {
+        expect(link.target).toBe('_blank');
+        expect(link.rel).toBe('noreferrer');
+      }
+    }
+  });
+
+  it('follows the Kimi region choice in its key and docs links (T-F09)', async () => {
+    installDesktopBridge();
+    await mount();
+    await openAccordion('Kimi');
+
+    const select = route('Kimi', 'API-key').querySelector<HTMLSelectElement>('select');
+    if (select === null) throw new Error('Expected the Kimi region select');
+    select.value = 'china';
+    await act(async () => select.dispatchEvent(new Event('change', { bubbles: true })));
+
+    expect(
+      [...route('Kimi', 'API-key').querySelectorAll<HTMLAnchorElement>('a')].map((link) =>
+        link.getAttribute('href'),
+      ),
+    ).toEqual([
+      'https://platform.kimi.com/console/api-keys',
+      'https://platform.kimi.com/docs/get-api-key',
+    ]);
+  });
+
+  it('keeps no MiniMax sign-in route in the panel (D23)', async () => {
+    installDesktopBridge();
+    await mount();
+    expect(container.textContent).not.toContain('MiniMax');
+    expect(container.querySelector('[aria-label^="MiniMax"]')).toBeNull();
   });
 
   it('says on the ChatGPT card that the sign-in cannot make pictures, and on no other card', async () => {
