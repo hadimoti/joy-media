@@ -87,6 +87,51 @@ export function updateUniversalTimelineForTransaction(
   let changed = false;
   for (const command of transaction.commands) {
     switch (command.type) {
+      case 'timeline.trimClipStart': {
+        items = items.map((item) => {
+          if (
+            (item.id !== command.payload.clipId &&
+              !item.id.startsWith(`${command.payload.clipId}:object:`)) ||
+            item.compositionId !== command.payload.compositionId ||
+            item.trackId !== command.payload.trackId
+          )
+            return item;
+          const deltaUs = command.payload.newStartUs - item.startUs;
+          return {
+            ...item,
+            startUs: command.payload.newStartUs,
+            durationUs: item.durationUs - deltaUs,
+            ...(item.sourceInUs === undefined
+              ? {}
+              : {
+                  sourceInUs: sourceInAfterStartTrim(
+                    project,
+                    timeline,
+                    command.payload.clipId,
+                    item,
+                    deltaUs,
+                  ),
+                }),
+          };
+        });
+        changed = true;
+        break;
+      }
+      case 'timeline.trimClipEnd': {
+        items = items.map((item) =>
+          (item.id === command.payload.clipId ||
+            item.id.startsWith(`${command.payload.clipId}:object:`)) &&
+          item.compositionId === command.payload.compositionId &&
+          item.trackId === command.payload.trackId
+            ? {
+                ...item,
+                durationUs: command.payload.newEndUs - item.startUs,
+              }
+            : item,
+        );
+        changed = true;
+        break;
+      }
       case 'timeline.moveElement': {
         const movingIds = items
           .filter(
@@ -487,6 +532,26 @@ export function updateUniversalTimelineForTransaction(
     universalTimeline: { schemaVersion: UNIVERSAL_TIMELINE_SCHEMA_VERSION, items },
     updatedAt: new Date().toISOString(),
   };
+}
+
+function sourceInAfterStartTrim(
+  project: JoyProjectV1,
+  timeline: SpikeProject | undefined,
+  clipId: string,
+  item: UniversalTimelineItem,
+  deltaUs: number,
+): number {
+  // The timeline is the authority for rate and direction; the visual project is only the fallback.
+  const clip =
+    findTimelineClip(timeline, item, clipId) ??
+    project.compositions[item.compositionId]?.tracks
+      .find((track) => track.id === item.trackId)
+      ?.clips.find((candidate) => candidate.id === clipId);
+  if (clip?.kind === 'video') {
+    const direction = clip.reversed === true ? -1 : 1;
+    return item.sourceInUs! + Math.round(deltaUs * (clip.playbackRate ?? 1)) * direction;
+  }
+  return item.sourceInUs! + deltaUs;
 }
 
 function findTimelineClip(

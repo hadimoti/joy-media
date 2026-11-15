@@ -52,6 +52,87 @@ describe('universal placement binding', () => {
     );
   });
 
+  it('projects start and end trims into the universal item and source window', () => {
+    const boundWithClip = upsertUniversalTimelineBinding(INITIAL_EDITOR_PROJECT, {
+      id: 'trimmed-video',
+      compositionId: 'root',
+      trackId: 'caption-track',
+      elementKind: 'video',
+      startUs: 1_000_000,
+      durationUs: 5_000_000,
+      source: { kind: 'asset', id: 'product-still' },
+      sourceInUs: 3_000_000,
+    });
+    const bound = upsertUniversalTimelineBinding(boundWithClip, {
+      id: 'trimmed-video:object:trimmed-title',
+      compositionId: 'root',
+      trackId: 'caption-track',
+      elementKind: 'text',
+      startUs: 1_000_000,
+      durationUs: 5_000_000,
+      source: { kind: 'object', id: 'trimmed-title' },
+    });
+    const startTrimmed = updateUniversalTimelineForTransaction(bound, {
+      label: 'Trim start',
+      commands: [
+        {
+          type: 'timeline.trimClipStart',
+          payload: {
+            compositionId: 'root',
+            trackId: 'caption-track',
+            clipId: 'trimmed-video',
+            newStartUs: 2_000_000,
+          },
+        },
+      ],
+    });
+    expect(startTrimmed.universalTimeline?.items).toContainEqual(
+      expect.objectContaining({
+        id: 'trimmed-video',
+        startUs: 2_000_000,
+        durationUs: 4_000_000,
+        sourceInUs: 4_000_000,
+      }),
+    );
+    expect(startTrimmed.universalTimeline?.items).toContainEqual(
+      expect.objectContaining({
+        id: 'trimmed-video:object:trimmed-title',
+        startUs: 2_000_000,
+        durationUs: 4_000_000,
+      }),
+    );
+
+    const endTrimmed = updateUniversalTimelineForTransaction(startTrimmed, {
+      label: 'Trim end',
+      commands: [
+        {
+          type: 'timeline.trimClipEnd',
+          payload: {
+            compositionId: 'root',
+            trackId: 'caption-track',
+            clipId: 'trimmed-video',
+            newEndUs: 5_000_000,
+          },
+        },
+      ],
+    });
+    expect(endTrimmed.universalTimeline?.items).toContainEqual(
+      expect.objectContaining({
+        id: 'trimmed-video',
+        startUs: 2_000_000,
+        durationUs: 3_000_000,
+        sourceInUs: 4_000_000,
+      }),
+    );
+    expect(endTrimmed.universalTimeline?.items).toContainEqual(
+      expect.objectContaining({
+        id: 'trimmed-video:object:trimmed-title',
+        startUs: 2_000_000,
+        durationUs: 3_000_000,
+      }),
+    );
+  });
+
   it('projects clips from an added track and removes them with the track', () => {
     const added = updateUniversalTimelineForTransaction(INITIAL_EDITOR_PROJECT, {
       label: 'Add universal track',
@@ -208,6 +289,59 @@ describe('universal placement binding', () => {
       expect.arrayContaining([
         expect.objectContaining({ id: 'movable', trackId: 'caption-track', withinTrackOrder: 1 }),
       ]),
+    );
+  });
+  it('start-trim source offset follows the timeline clip rate and direction, not the visual project', () => {
+    const base = buildReferenceSpikeProject();
+    const root = base.compositions['root']!;
+    const withRate = (rate: number, reversed: boolean) => ({
+      ...base,
+      compositions: {
+        ...base.compositions,
+        root: {
+          ...root,
+          tracks: root.tracks.map((track) => ({
+            ...track,
+            clips: track.clips.map((clip) =>
+              clip.id === 'intro' && clip.kind === 'video'
+                ? { ...clip, playbackRate: rate, reversed }
+                : clip,
+            ),
+          })),
+        },
+      },
+    });
+    const bound = upsertUniversalTimelineBinding(INITIAL_EDITOR_PROJECT, {
+      id: 'intro',
+      compositionId: 'root',
+      trackId: 'track-0',
+      elementKind: 'video',
+      startUs: 1_000_000,
+      durationUs: 5_000_000,
+      source: { kind: 'asset', id: 'product-still' },
+      sourceInUs: 3_000_000,
+    });
+    const transaction: CommandTransaction = {
+      label: 'Trim start',
+      commands: [
+        {
+          type: 'timeline.trimClipStart',
+          payload: {
+            compositionId: 'root',
+            trackId: 'track-0',
+            clipId: 'intro',
+            newStartUs: 2_000_000,
+          },
+        },
+      ],
+    };
+    const twice = updateUniversalTimelineForTransaction(bound, transaction, withRate(2, false));
+    expect(twice.universalTimeline?.items).toContainEqual(
+      expect.objectContaining({ id: 'intro', sourceInUs: 5_000_000 }),
+    );
+    const backwards = updateUniversalTimelineForTransaction(bound, transaction, withRate(2, true));
+    expect(backwards.universalTimeline?.items).toContainEqual(
+      expect.objectContaining({ id: 'intro', sourceInUs: 1_000_000 }),
     );
   });
 });
