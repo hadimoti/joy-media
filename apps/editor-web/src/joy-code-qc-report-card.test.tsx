@@ -50,7 +50,14 @@ function view(overrides: Record<string, unknown> = {}): QcReportView {
     },
     coverage: { completeSourceCoverage: false, sampledRanges: [], unsampledRanges: [] },
     findings: FINDINGS,
-    notes: [{ id: 'note-1', frameId: 'timeline-frame-0', timeUs: 1_500_000, text: 'Check the title edge.' }],
+    notes: [
+      {
+        id: 'note-1',
+        frameId: 'timeline-frame-0',
+        timeUs: 1_500_000,
+        text: 'Check the title edge.',
+      },
+    ],
     frames: [
       { frameId: 'timeline-frame-0', timeUs: 0 },
       { frameId: 'timeline-frame-2000000', timeUs: 2_000_000 },
@@ -97,6 +104,9 @@ describe('JoyCodeQcReportCard', () => {
     expect(host.querySelector('[data-qc-fact="frames"]')?.textContent).toBe('Frames4 / 16');
     expect(host.querySelector('[data-qc-measured]')?.textContent).toBe('Black duration: 2.5 s');
     expect(host.querySelector('[data-qc-notes]')?.textContent).toContain('Check the title edge.');
+    expect(host.innerHTML.indexOf('data-qc-notes')).toBeGreaterThan(
+      host.innerHTML.indexOf('data-qc-group="safe-area"'),
+    );
     expect(host.querySelector('[data-qc-fact="findings"]')?.textContent).toBe('Findings2');
     expect(host.querySelector('[data-agent-evidence-filmstrip]')).not.toBeNull();
     expect(host.querySelectorAll('.agent-evidence-filmstrip__marker')).toHaveLength(2);

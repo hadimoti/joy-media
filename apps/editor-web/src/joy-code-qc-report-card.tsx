@@ -11,7 +11,9 @@ import { useState } from 'react';
 import { AgentEvidenceFilmstrip } from './AgentEvidenceFilmstrip.js';
 import { downloadBrowserTextFile } from './browser-text-download.js';
 import {
+  formatQcMeasurements,
   formatQcRange,
+  formatQcTimecode,
   qcReportFileNames,
   qcReportJson,
   qcReportMarkdown,
@@ -65,7 +67,7 @@ export function JoyCodeQcReportCard({
   const onSave = (): void => {
     const names = qcReportFileNames(view.reportId);
     saveFile(names.markdown, qcReportMarkdown(view, before));
-    saveFile(names.json, qcReportJson(view));
+    saveFile(names.json, qcReportJson(view, before));
   };
 
   return (
@@ -106,7 +108,9 @@ export function JoyCodeQcReportCard({
         <div data-qc-fact="frames">
           <dt>Frames</dt>
           <dd>
-            {view.framesSent} / {view.frameBudget}
+            {view.frameBudget === undefined
+              ? view.framesSent
+              : `${view.framesSent} / ${view.frameBudget}`}
           </dd>
         </div>
       </dl>
@@ -133,6 +137,7 @@ export function JoyCodeQcReportCard({
           <ul className="joy-code-qc-card__findings">
             {group.findings.map((finding) => {
               const time = formatQcRange(finding);
+              const measured = formatQcMeasurements(finding);
               return (
                 <li key={finding.id}>
                   <button
@@ -148,6 +153,11 @@ export function JoyCodeQcReportCard({
                       {time}
                     </time>
                     <span className="joy-code-qc-card__label">{finding.label}</span>
+                    {measured.length > 0 && (
+                      <span className="joy-code-qc-card__measured" data-qc-measured="true">
+                        {measured}
+                      </span>
+                    )}
                   </button>
                 </li>
               );
@@ -155,6 +165,24 @@ export function JoyCodeQcReportCard({
           </ul>
         </section>
       ))}
+
+      {view.notes.length > 0 && (
+        <section className="joy-code-qc-card__group" data-qc-notes="true">
+          <h4 className="joy-code-qc-card__group-name">Notes</h4>
+          <ul className="joy-code-qc-card__findings">
+            {view.notes.map((note, index) => (
+              <li key={`${note.timeUs ?? 'no-time'}-${index}`}>
+                {note.timeUs === undefined ? null : (
+                  <time className="joy-code-qc-card__time" dir="ltr">
+                    {formatQcTimecode(note.timeUs)}
+                  </time>
+                )}{' '}
+                {note.text}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {view.frames.length > 0 && (
         <AgentEvidenceFilmstrip

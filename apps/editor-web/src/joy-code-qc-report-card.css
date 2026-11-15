@@ -143,6 +143,12 @@
   overflow-wrap: anywhere;
 }
 
+.joy-code-qc-card__measured {
+  min-inline-size: 0;
+  color: var(--joy-text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .joy-code-qc-card__save {
   display: inline-flex;
   align-items: center;

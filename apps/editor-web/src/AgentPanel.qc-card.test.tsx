@@ -172,7 +172,7 @@ describe('AgentPanel: QC report card', () => {
     expect(onSeek).toHaveBeenCalledWith(2_000_000);
   });
 
-  it('updates the same card when frames were sent for the report, and adds a card for a re-check', async () => {
+  it('updates the same card when frames were sent and keeps unrelated runs separate', async () => {
     const host = await sendPrompt('Run a quality check on my film', () => undefined);
 
     act(() => built[0]!.onReport?.(report(3)));

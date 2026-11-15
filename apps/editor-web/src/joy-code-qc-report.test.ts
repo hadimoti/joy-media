@@ -48,7 +48,7 @@ function report(overrides: Record<string, unknown> = {}): Record<string, unknown
         startUs: 500_000,
         endUs: 500_000,
         label: 'A black frame.',
-        measured: { blackDurationSec: 0.5 },
+        measured: { blackDurationSec: 0.5, freezeLengthMs: 1_250, integratedLufs: -16 },
         fixable: false,
       },
     ],
@@ -151,6 +151,14 @@ describe('readQcReportView', () => {
     expect(noBudgetMarkdown).toContain('- Frames: 20');
     expect(noBudgetMarkdown).not.toContain('of 16');
 
+    const reportBudget = readQcReportView(
+      report({
+        frameBudget: 24,
+        run: { layer1: true, layer2: true, modelId: 'vision-1', framesSent: 20 },
+      }),
+    )!;
+    expect(reportBudget.frameBudget).toBe(24);
+
     const contradictory = readQcReportView(
       report({
         frameBudget: 16,
@@ -169,6 +177,11 @@ describe('readQcReportView', () => {
 
   it('reads bounded notes and measured values without throwing', () => {
     const longNote = 'n'.repeat(300);
+    const brokenNote = Object.defineProperty({}, 'text', {
+      get() {
+        throw new Error('unreadable note');
+      },
+    });
     const view = readQcReportView(
       report({
         notes: [
@@ -176,6 +189,7 @@ describe('readQcReportView', () => {
           { id: 'note-2', frameId: 'frame-2', timeUs: 3_000_000, text: longNote },
           null,
           { id: 'bad-time', frameId: 'frame-3', timeUs: -1, text: 'No time.' },
+          brokenNote,
         ],
       }),
     )!;
@@ -184,8 +198,14 @@ describe('readQcReportView', () => {
       { timeUs: 3_000_000, text: `${'n'.repeat(239)}…` },
       { text: 'No time.' },
     ]);
-    expect(view.groups[0]!.findings[0]!.measured).toEqual({ blackDurationSec: 0.5 });
+    expect(view.groups[0]!.findings[0]!.measured).toEqual({
+      blackDurationSec: 0.5,
+      freezeLengthMs: 1_250,
+      integratedLufs: -16,
+    });
     expect(qcReportMarkdown(view)).toContain('Black duration: 0.5 s');
+    expect(qcReportMarkdown(view)).toContain('Freeze length: 1.25 s');
+    expect(qcReportMarkdown(view)).toContain('Loudness: -16 LUFS');
     expect(qcReportMarkdown(view)).toContain('Check the title edge.');
   });
 
@@ -275,7 +295,11 @@ describe('formatting and files', () => {
     });
     expect(json).not.toHaveProperty('unverifiedField');
     const groups = json['groups'] as { findings: { measured: Record<string, unknown> }[] }[];
-    expect(groups.flatMap((group) => group.findings).some((finding) => finding.measured['blackDurationSec'] === 0.5)).toBe(true);
+    expect(
+      groups
+        .flatMap((group) => group.findings)
+        .some((finding) => finding.measured['blackDurationSec'] === 0.5),
+    ).toBe(true);
     expect(JSON.stringify(json)).not.toContain('Invalid finding');
     expect(json['modelComprehensionGuaranteed']).toBe(false);
   });

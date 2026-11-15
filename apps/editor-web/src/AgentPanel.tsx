@@ -3830,7 +3830,13 @@ export function AgentPanel({
               const qcIndex = qcCards.findIndex((card) => card.messageId === message.id);
               const qcCard = qcIndex === -1 ? undefined : qcCards[qcIndex];
               if (message.failureKey === undefined && qcCard !== undefined) {
-                const earlier = qcIndex > 0 ? qcCards[qcIndex - 1] : undefined;
+                const earlier =
+                  qcIndex > 0 && qcCard.view.reportLineageId !== undefined
+                    ? qcCards
+                        .slice(0, qcIndex)
+                        .reverse()
+                        .find((card) => card.view.reportLineageId === qcCard.view.reportLineageId)
+                    : undefined;
                 return (
                   <JoyCodeQcReportCard
                     key={message.id}
