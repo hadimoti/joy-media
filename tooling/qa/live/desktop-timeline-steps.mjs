@@ -73,11 +73,12 @@ async function dragBy(page, locator, dx, dy = 0) {
 }
 
 async function contextItem(page, label) {
-  await page
-    .getByRole('menuitem', { name: label })
-    .or(page.getByText(label, { exact: typeof label === 'string' }))
-    .first()
-    .click();
+  // Only an entry of the open menu: a bare text match can hit a button or a tooltip elsewhere on the page,
+  // and the click then does nothing (found live: split at playhead left its menu open).
+  const menu = page.getByRole('menu').last();
+  await menu.waitFor({ state: 'visible', timeout: 5_000 });
+  // The accessible name of an entry includes its shortcut ("Split at playheadS"), so a string matches a part.
+  await menu.getByRole('menuitem', { name: label }).first().click({ timeout: 8_000 });
 }
 
 async function rightClickClip(page, clipId, label) {

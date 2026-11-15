@@ -10618,6 +10618,16 @@ label {
 #root .workspace .dv-grid-view {
   background-color: var(--joy-bg-app) !important;
 }
+/* Dockview's inner boxes are overflow: hidden, but their content is about 4 px larger than the box (the sash
+   handles stick out), so a click or a focus could scroll them by 4.4 px, sideways or down: the whole dock moved
+   left and right and up and down about once a second while a test ran (measured live, defect 102). Clipped
+   boxes cannot be scrolled; what shows stays the same. */
+#root .workspace .dv-grid-view,
+#root .workspace .dv-split-view-container,
+#root .workspace .dv-branch-node,
+#root .workspace .dv-view {
+  overflow: clip;
+}
 #root .workspace .dv-resize-container:has(> .dv-groupview) {
   border-radius: var(--joy-radius-panel);
 }
