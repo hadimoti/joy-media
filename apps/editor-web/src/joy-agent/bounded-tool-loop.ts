@@ -6,6 +6,7 @@ import {
 import { JOY_CAPTION_TEMPLATES } from '@joy-media/captions-core';
 import { TEXT_TEMPLATES } from '../text-template-catalog.js';
 import { HostRpcError, type HostRpcJson } from './host-rpc.js';
+import { QC_DEFAULT_RUN_FRAME_BUDGET } from './qc-request-intent.js';
 import { MAX_JOY_AGENT_RUN_BUDGET_V1 } from './run-budget.js';
 import {
   GENERATION_ASPECTS,
@@ -80,7 +81,7 @@ const MAX_OBSERVATION_METADATA_BYTES = 32 * 1024;
 const MAX_OBSERVATION_PAGE_SIZE = 128;
 const MAX_OBSERVATION_CURSOR = 2_097_152;
 const MAX_QC_FRAMES_PER_TOOL_CALL = 16;
-const DEFAULT_MAX_QC_FRAMES_PER_RUN = 16;
+const DEFAULT_MAX_QC_FRAMES_PER_RUN = QC_DEFAULT_RUN_FRAME_BUDGET;
 const MAX_QC_FRAMES_PER_RUN = 48;
 /** Generated media (T-C04): the per-run defaults are 4 pictures and 1 video; the ceilings bound any caller. */
 const DEFAULT_MAX_GENERATED_PICTURES_PER_RUN = 4;

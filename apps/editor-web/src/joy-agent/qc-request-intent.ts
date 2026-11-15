@@ -13,6 +13,12 @@ export const QC_HOST_TOOL_NAMES = Object.freeze([
   'media_contact_sheet',
 ] as const satisfies readonly JoyAgentHostToolName[]);
 
+/**
+ * Frames one quality-check run may send to a model when nothing sets a smaller or larger budget. The tool
+ * loop enforces it; the report card shows the frames used against it.
+ */
+export const QC_DEFAULT_RUN_FRAME_BUDGET = 16;
+
 const QC_HOST_TOOL_NAME_SET: ReadonlySet<string> = new Set(QC_HOST_TOOL_NAMES);
 
 export function isQcHostToolName(name: string): boolean {

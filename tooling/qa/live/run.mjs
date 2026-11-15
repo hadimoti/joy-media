@@ -2,6 +2,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { createLiveDriver } from './driver.mjs';
 import {
   addToTimelineThroughLeftPanel,
@@ -16,15 +17,27 @@ import {
   MONITOR_SUITE_IDS,
   zoomShots,
 } from './monitor-suite-steps.mjs';
+import { LIVE_ROWS } from './matrix.mjs';
+import { runRows } from './rows.mjs';
 
-const KNOWN_TESTS = new Set(['D-000', 'D-001', 'D-002', ...MONITOR_SUITE_IDS]);
+import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
+import { executeRow } from './matrix-core.mjs';
+
+const KNOWN_TESTS = new Set([
+  'D-000',
+  'D-001',
+  'D-002',
+  ...MONITOR_SUITE_IDS,
+  ...LIVE_ROWS.map((row) => row.id),
+  ...MATRIX_IDS,
+]);
 
 // `D-M*` expands to every known id with that prefix (T-M13 suite).
 function expandPrefix(prefix) {
   return [...KNOWN_TESTS].filter((id) => id.startsWith(prefix));
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const options = { needsSignIn: false, simulateWrongJoyHash: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -77,36 +90,44 @@ function parseArgs(argv) {
   return options;
 }
 
-async function run() {
+export async function run(argv = process.argv.slice(2)) {
   let options;
   try {
-    options = parseArgs(process.argv.slice(2));
+    options = parseArgs(argv);
   } catch (error) {
     process.stderr.write(`usage error: ${error.message}\n`);
     process.exitCode = 1;
     return;
   }
   const runId = randomUUID();
-  const outDir = resolve(options.out ?? join('C:\\jgp\\v111\\evidence\\T-A02', runId));
+  const testMode = options.testIds.some((id) => LIVE_ROWS.some((row) => row.id === id));
+  const evidenceTask = testMode ? 'T-A07-A08' : 'T-A02';
+  const outDir = resolve(options.out ?? join('C:\\jgp\\v111\\evidence', evidenceTask, runId));
   const scratchRoot = 'C:\\jgp\\v111\\codex';
   const profileDir = join(scratchRoot, 'profiles', runId);
   const libraryDir = join(scratchRoot, 'libraries', runId);
-  const driver = createLiveDriver(
-    {
-      appDir: resolve(options.app),
-      outDir,
-      profileDir,
-      libraryDir,
-      runId,
-      needsSignIn: options.needsSignIn,
-      localAppData: options.needsSignIn ? process.env.LOCALAPPDATA : undefined,
-      reason: `T-A02 live QA: ${options.testIds.join(',')}`,
-    },
-    options.simulateWrongJoyHash ? { preflightDeps: { joyHash: 'simulated-wrong-hash' } } : {},
-  );
+  const projectTitle = `T-A07/A08 ${runId.slice(0, 8)}`;
+  const driverConfig = {
+    appDir: resolve(options.app),
+    outDir,
+    profileDir,
+    libraryDir,
+    downloadDir: join(profileDir, 'downloads'),
+    testMode,
+    runId,
+    needsSignIn: options.needsSignIn,
+    localAppData: options.needsSignIn ? process.env.LOCALAPPDATA : undefined,
+    reason: `${evidenceTask} live QA: ${options.testIds.join(',')}`,
+  };
+  const driverOptions = options.simulateWrongJoyHash
+    ? { preflightDeps: { joyHash: 'simulated-wrong-hash' } }
+    : {};
+  const makeDriver = (reuseExisting = false) =>
+    createLiveDriver({ ...driverConfig, reuseExisting }, driverOptions);
+  let driver = makeDriver();
   const results = [];
   try {
-    const session = await driver.launch();
+    let session = await driver.launch();
     let setupProblem;
     try {
       await setScratchLibrary(session.page, libraryDir);
@@ -115,17 +136,69 @@ async function run() {
         .split('\n')[0]
         .slice(0, 400);
     }
-    if (!setupProblem && options.testIds.some((id) => id in MONITOR_SUITE_CASES)) {
+    if (!setupProblem && (options.testIds.some((id) => id in MONITOR_SUITE_CASES) || testMode)) {
       try {
-        await newProject(session.page, `T-M13 ${runId.slice(0, 8)}`);
+        await newProject(session.page, testMode ? projectTitle : `T-M13 ${runId.slice(0, 8)}`);
       } catch (error) {
         setupProblem = String(error?.message ?? error)
           .split('\n')[0]
           .slice(0, 400);
       }
     }
+    if (!setupProblem && testMode && options.media) {
+      try {
+        await importThroughLeftPanel(session.page, options.media);
+        await addToTimelineThroughLeftPanel(session.page, options.media);
+      } catch (error) {
+        setupProblem = String(error?.message ?? error)
+          .split('\n')[0]
+          .slice(0, 400);
+      }
+    }
+    const taskRows = LIVE_ROWS.filter((row) => options.testIds.includes(row.id));
+    const taskContext = {
+      page: session.page,
+      outDir,
+      downloadDir: session.downloadDir,
+      media: options.media,
+      libraryDir,
+      projectTitle,
+      shot: async (path) => screenshot(taskContext.page, path),
+      restartApp: async () => {
+        await driver.close();
+        driver = makeDriver(true);
+        session = await driver.launch();
+        taskContext.page = session.page;
+        taskContext.downloadDir = session.downloadDir;
+      },
+    };
+    if (taskRows.length > 0) {
+      const runnableRows = setupProblem
+        ? taskRows.map((row) => ({
+            ...row,
+            run: async () => {
+              throw new Error(setupProblem);
+            },
+          }))
+        : taskRows;
+      results.push(...(await runRows(runnableRows, taskContext)).map(({ result }) => result));
+    }
     let mediaImported = false;
+    // T-A05 and T-A06 rows (desktop-matrix-rows.mjs) build their own result, evidence and defect text.
+    const matrixContext = options.testIds.some((id) => id in MATRIX_ROWS)
+      ? createMatrixContext({ page: session.page, outDir, libraryDir, runId })
+      : undefined;
+    if (matrixContext && !setupProblem) await matrixContext.bridge.installTap().catch(() => false);
     for (const id of options.testIds) {
+      if (LIVE_ROWS.some((row) => row.id === id)) continue;
+      if (id in MATRIX_ROWS) {
+        results.push(
+          setupProblem
+            ? { id, status: 'failed', message: setupProblem, screenshot: null, ms: 0, evidence: [] }
+            : await executeRow(MATRIX_ROWS[id], session.page, matrixContext),
+        );
+        continue;
+      }
       const startedAt = Date.now();
       let message = setupProblem ?? '';
       let status = setupProblem ? 'failed' : 'passed';
@@ -197,10 +270,16 @@ async function run() {
       writeFileSync(join(resultDir, 'result.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
       process.stdout.write(`${result.id}: ${result.status} ${result.message}\n`);
     }
-    if (results.some((result) => result.status !== 'passed') && process.exitCode !== 2) {
+    // A "not-reachable" row is a finding for CC to judge, not a failed run.
+    const failedRun = results.some(
+      (result) => result.status !== 'passed' && result.status !== 'not-reachable',
+    );
+    if (failedRun && process.exitCode !== 2) {
       process.exitCode = 1;
     }
   }
 }
 
-await run();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await run();
+}

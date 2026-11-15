@@ -48,7 +48,13 @@ function fail(message) {
  * the sign-in page opens in the normal Chrome profile. Everything else stays scratch in both modes.
  * Pure: it touches no disk. The caller creates `scratchDirs` and prints `modeLine`.
  */
-export function buildLaunchEnvironment({ baseEnv, envRoot, needsSignIn, electronDir }) {
+export function buildLaunchEnvironment({
+  baseEnv,
+  envRoot,
+  needsSignIn,
+  electronDir,
+  testDownloadDirectory,
+}) {
   const scratch = {
     USERPROFILE: join(envRoot, 'User'),
     HOME: join(envRoot, 'User'),
@@ -57,6 +63,9 @@ export function buildLaunchEnvironment({ baseEnv, envRoot, needsSignIn, electron
     TMP: join(envRoot, 'Temp'),
   };
   const env = { ...baseEnv, ...scratch, ELECTRON_OVERRIDE_DIST_PATH: electronDir };
+  if (testDownloadDirectory !== undefined) {
+    env.JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY = testDownloadDirectory;
+  }
   const scratchDirs = [scratch.USERPROFILE, scratch.APPDATA, scratch.TEMP];
   if (needsSignIn) {
     const realLocalAppData = baseEnv.LOCALAPPDATA;
@@ -80,6 +89,14 @@ export function buildLaunchEnvironment({ baseEnv, envRoot, needsSignIn, electron
     mode: 'scratch',
     modeLine: 'mode: scratch (every folder is scratch; no sign-in)',
   };
+}
+
+export function buildLaunchArguments({ profileDir, port, testMode = false }) {
+  return [
+    `--user-data-dir=${profileDir}`,
+    `--remote-debugging-port=${port}`,
+    ...(testMode ? ['--joy-media-test-mode'] : []),
+  ];
 }
 
 export async function checkLaunchRules(config, deps = {}) {
@@ -132,7 +149,7 @@ export async function checkLaunchRules(config, deps = {}) {
     if (isInside(abs, process.cwd())) throw fail(`${name} path must be outside the worktree`);
     if (linkOnPath(abs)) throw fail(`${name} path contains a link or junction`);
   }
-  if (existsSync(config.outDir) && readdirSync(config.outDir).length > 0) {
+  if (!config.reuseExisting && existsSync(config.outDir) && readdirSync(config.outDir).length > 0) {
     throw fail('output folder must be empty so prior evidence is not overwritten');
   }
   const protectedRoots = [
@@ -161,8 +178,16 @@ export async function checkLaunchRules(config, deps = {}) {
   if (pathsOverlap) {
     throw fail('output, profile, and scratch library paths must be separate');
   }
-  if (existsSync(config.profileDir)) throw fail('profile path must be new for each run');
-  if (existsSync(config.libraryDir)) throw fail('scratch library path must be new for each run');
+  if (!config.reuseExisting && existsSync(config.profileDir))
+    throw fail('profile path must be new for each run');
+  if (!config.reuseExisting && existsSync(config.libraryDir))
+    throw fail('scratch library path must be new for each run');
+  const downloadDir = config.downloadDir ?? join(config.profileDir, 'downloads');
+  if (config.testMode === true) {
+    if (!isInside(resolve(downloadDir), resolve(config.profileDir)) || linkOnPath(downloadDir)) {
+      throw fail('test-mode downloads must be a regular folder inside the scratch profile');
+    }
+  }
   if (
     config.needsSignIn &&
     config.localAppData !== undefined &&
@@ -183,7 +208,7 @@ export async function checkLaunchRules(config, deps = {}) {
   if (running !== 0) throw fail('a JOY Media or Electron process is already running');
   const portAvailable = deps.portAvailable ?? (await isPortAvailable());
   if (!portAvailable) throw fail('could not reserve a CDP port');
-  return { appDir, appExe, electronDir, ownerLibraryFiles: before, joyHash };
+  return { appDir, appExe, electronDir, ownerLibraryFiles: before, joyHash, downloadDir };
 }
 
 export function verifyAfterRun(before, after) {
@@ -279,19 +304,26 @@ export function createLiveDriver(config, options = {}) {
     }
     mkdirSync(dirname(profileDir), { recursive: true });
     mkdirSync(dirname(libraryDir), { recursive: true });
-    mkdirSync(profileDir, { recursive: false });
-    mkdirSync(libraryDir, { recursive: false });
+    if (config.reuseExisting !== true) {
+      mkdirSync(profileDir, { recursive: false });
+      mkdirSync(libraryDir, { recursive: false });
+    }
     mkdirSync(config.outDir, { recursive: true });
-    const emptyCatalog = {
-      version: 1,
-      counts: { total: 0, audio: 0, image: 0 },
-      assets: [],
-    };
-    writeFileSync(
-      join(libraryDir, 'catalog.json'),
-      `${JSON.stringify(emptyCatalog, null, 2)}\n`,
-      'utf8',
-    );
+    if (config.reuseExisting !== true) {
+      const emptyCatalog = {
+        version: 1,
+        counts: { total: 0, audio: 0, image: 0 },
+        assets: [],
+      };
+      writeFileSync(
+        join(libraryDir, 'catalog.json'),
+        `${JSON.stringify(emptyCatalog, null, 2)}\n`,
+        'utf8',
+      );
+    }
+
+    const downloadDir = baseline.downloadDir;
+    if (config.testMode === true) mkdirSync(downloadDir, { recursive: true });
 
     const port = await findFreePort();
     const envRoot = join(profileDir, 'environment');
@@ -300,6 +332,7 @@ export function createLiveDriver(config, options = {}) {
       envRoot,
       needsSignIn: config.needsSignIn === true,
       electronDir: baseline.electronDir,
+      testDownloadDirectory: config.testMode === true ? downloadDir : undefined,
     });
     const env = launchEnv.env;
     for (const path of launchEnv.scratchDirs) mkdirSync(path, { recursive: true });
@@ -308,7 +341,7 @@ export function createLiveDriver(config, options = {}) {
     const { chromium: appChromium } = requireFromApp('playwright-core');
     child = spawnProcess(
       baseline.appExe,
-      [`--user-data-dir=${profileDir}`, `--remote-debugging-port=${port}`],
+      buildLaunchArguments({ profileDir, port, testMode: config.testMode === true }),
       {
         cwd: baseline.appDir,
         env,
@@ -332,7 +365,12 @@ export function createLiveDriver(config, options = {}) {
       .find((candidate) => !candidate.url().startsWith('devtools://'));
     if (!page) throw fail('CDP connected but no app window was found');
     await page.waitForLoadState('domcontentloaded', { timeout: 30_000 });
-    return { page, profileDir, libraryDir };
+    return {
+      page,
+      profileDir,
+      libraryDir,
+      downloadDir: config.testMode === true ? downloadDir : undefined,
+    };
   }
 
   async function close() {

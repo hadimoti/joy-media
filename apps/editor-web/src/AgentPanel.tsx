@@ -145,6 +145,9 @@ import {
   type JoyCodeMessageKey,
 } from './joy-code-messages.js';
 import { JoyCodeFailureCard } from './joy-code-failure-card.js';
+import { JoyCodeMediaParts, type JoyCodeMediaPartsProps } from './joy-code-media-parts.js';
+import { readQcReportView, type QcReportView } from './joy-code-qc-report.js';
+import { JoyCodeQcReportCard } from './joy-code-qc-report-card.js';
 import {
   createJoyCodeRetryTargets,
   joyCodeMessageWithoutRetry,
@@ -569,6 +572,8 @@ export function AgentPanel({
   resolveAudioAssetUrl,
   storage,
   onOpenSettings,
+  generatedMedia,
+  onSeek,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -606,6 +611,14 @@ export function AgentPanel({
   /** Writer-fenced browser persistence owned by the writable editor root. */
   readonly storage: ProjectWriterStorage;
   readonly onOpenSettings?: () => void;
+  /**
+   * Picture and video messages: the bytes reader (by job id, never by path) and
+   * the handlers for Cancel, Add to library, Place on timeline, Save as and
+   * Discard. Absent handlers do nothing (T-C06 wires the real ones).
+   */
+  readonly generatedMedia?: Omit<JoyCodeMediaPartsProps, 'parts'>;
+  /** Moves the editor playhead (microseconds). A QC report card's timecodes call it. */
+  readonly onSeek?: (timeUs: number) => void;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -721,6 +734,12 @@ export function AgentPanel({
   // The QC host adapter of the current quality-check run, if any. A new run or an
   // unmount disposes the previous one so its report and frame store do not outlive it.
   const qcAdapterRef = useRef<QcHostAdapter | undefined>(undefined);
+  // One report card per QC report, kept beside the conversation by message id. The message itself is an
+  // ordinary assistant line (the summary), so a reload shows that line and ordinary chat is unchanged.
+  const [qcCards, setQcCards] = useState<
+    readonly { readonly messageId: string; readonly view: QcReportView }[]
+  >([]);
+  const qcCardMessageIdsRef = useRef(new Map<string, string>());
   /** The cached image probe of the connected model. It never starts a probe itself. */
   const qcImageSupported = useCallback((): boolean => {
     const media = joyAgentEngineClient?.getMediaCapabilities();
@@ -1761,6 +1780,34 @@ export function AgentPanel({
   }
 
   /**
+   * A QC report arrived (or changed because frames were sent for it): show it as one card in the
+   * conversation. The first time a report id is seen it adds the summary message the card replaces;
+   * later calls with the same id update that card in place.
+   */
+  function onQcReport(report: Readonly<Record<string, unknown>>): void {
+    const view = readQcReportView(report);
+    if (view === undefined) return;
+    const known = qcCardMessageIdsRef.current.get(view.reportId);
+    if (known !== undefined) {
+      setQcCards((current) =>
+        current.map((card) => (card.messageId === known ? { messageId: known, view } : card)),
+      );
+      return;
+    }
+    const messageId = makeJoyCodeId('message');
+    qcCardMessageIdsRef.current.set(view.reportId, messageId);
+    setQcCards((current) => [...current, { messageId, view }]);
+    setConversation((current) =>
+      addJoyCodeConversationMessage(current, {
+        id: messageId,
+        role: 'assistant',
+        body: view.summary,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  }
+
+  /**
    * One failure is one calm card (joy-code-failure-card.tsx) built from its
    * table entry. The code is logged here, and only the code: never the text.
    * `retry` is the exact request that failed; a failure with none gets no
@@ -2205,6 +2252,7 @@ export function AgentPanel({
               getTimeline: () => latestSessionRef.current.timelineProject,
               isCachedImageSupported: qcImageSupported,
               isPrivacyModeAllowed: qcPrivacyAllowed,
+              onReport: onQcReport,
             });
             qcAdapterRef.current = qcAdapter;
           }
@@ -3786,8 +3834,31 @@ export function AgentPanel({
               </div>
             )}
 
-            {activeThread?.messages.map((message) =>
-              message.failureKey !== undefined ? (
+            {activeThread?.messages.map((message) => {
+              const qcIndex = qcCards.findIndex((card) => card.messageId === message.id);
+              const qcCard = qcIndex === -1 ? undefined : qcCards[qcIndex];
+              if (message.failureKey === undefined && qcCard !== undefined) {
+                const earlier =
+                  qcIndex > 0 && qcCard.view.reportLineageId !== undefined
+                    ? qcCards
+                        .slice(0, qcIndex)
+                        .reverse()
+                        .find((card) => card.view.reportLineageId === qcCard.view.reportLineageId)
+                    : undefined;
+                return (
+                  <JoyCodeQcReportCard
+                    key={message.id}
+                    view={qcCard.view}
+                    before={
+                      earlier === undefined
+                        ? undefined
+                        : { findingCount: earlier.view.findingCount }
+                    }
+                    onSeek={onSeek}
+                  />
+                );
+              }
+              return message.failureKey !== undefined ? (
                 <JoyCodeFailureCard
                   key={message.id}
                   {...failureCardProps(message.id, message.failureKey)}
@@ -3806,19 +3877,38 @@ export function AgentPanel({
                   )}
                   <div>
                     <strong>{message.role === 'user' ? 'You' : 'Joy Code'}</strong>
-                    <p
-                      lang={
-                        message.role === 'assistant' && /[\u0600-\u06ff]/u.test(message.body)
-                          ? 'fa'
-                          : undefined
-                      }
-                    >
-                      {message.body}
-                    </p>
+                    {message.parts !== undefined && message.parts.length > 0 ? (
+                      <>
+                        {/* A body that no text part repeats is still shown, so no words are lost. */}
+                        {message.body.length > 0 &&
+                          !message.parts.some((part) => part.kind === 'text') && (
+                            <p
+                              lang={
+                                message.role === 'assistant' && /[؀-ۿ]/u.test(message.body)
+                                  ? 'fa'
+                                  : undefined
+                              }
+                            >
+                              {message.body}
+                            </p>
+                          )}
+                        <JoyCodeMediaParts {...generatedMedia} parts={message.parts} />
+                      </>
+                    ) : (
+                      <p
+                        lang={
+                          message.role === 'assistant' && /[\u0600-\u06ff]/u.test(message.body)
+                            ? 'fa'
+                            : undefined
+                        }
+                      >
+                        {message.body}
+                      </p>
+                    )}
                   </div>
                 </article>
-              ),
-            )}
+              );
+            })}
 
             {isThinking && (
               <article

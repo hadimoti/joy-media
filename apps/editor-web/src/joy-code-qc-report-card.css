@@ -1,0 +1,175 @@
+/* Joy Code's QC report card (T-B07). Names only; the accent is the theme yellow; nothing under 12 px. */
+.joy-code-qc-card {
+  display: grid;
+  gap: 0.55rem;
+  align-self: stretch;
+  min-inline-size: 0;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-control);
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
+
+.joy-code-qc-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-inline-size: 0;
+}
+
+.joy-code-qc-card__title {
+  font-size: var(--joy-type-sm);
+  font-weight: 650;
+}
+
+.joy-code-qc-card__summary {
+  margin: 0;
+  color: var(--joy-text);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.joy-code-qc-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 0.9rem;
+  margin: 0;
+  padding: 0.35rem 0;
+  border-block: 1px solid var(--joy-border);
+}
+
+.joy-code-qc-card__facts > div {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-inline-size: 0;
+}
+
+.joy-code-qc-card__facts dt {
+  color: var(--joy-text-secondary);
+}
+
+.joy-code-qc-card__facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.joy-code-qc-card__notes {
+  margin: 0;
+  padding-inline-start: 1rem;
+  color: var(--joy-text-secondary);
+}
+
+.joy-code-qc-card__group {
+  display: grid;
+  gap: 0.25rem;
+  min-inline-size: 0;
+}
+
+.joy-code-qc-card__group-name {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: var(--joy-type-xs);
+  font-weight: 700;
+}
+
+.joy-code-qc-card__count {
+  color: var(--joy-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.joy-code-qc-card__findings {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.joy-code-qc-card__finding {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  inline-size: 100%;
+  min-block-size: 1.75rem;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--joy-border);
+  border-inline-start-width: 3px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--joy-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.joy-code-qc-card__finding:disabled {
+  cursor: default;
+}
+
+.joy-code-qc-card__finding.is-blocker {
+  border-inline-start-color: var(--joy-danger);
+}
+
+.joy-code-qc-card__finding.is-major {
+  border-inline-start-color: var(--joy-warning);
+}
+
+.joy-code-qc-card__finding.is-minor {
+  border-inline-start-color: var(--joy-accent);
+}
+
+.joy-code-qc-card__finding:hover:not(:disabled),
+.joy-code-qc-card__finding:focus-visible {
+  border-color: var(--joy-accent);
+  outline: none;
+}
+
+.joy-code-qc-card__time {
+  flex: 0 0 auto;
+  color: var(--joy-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.joy-code-qc-card__label {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.joy-code-qc-card__measured {
+  min-inline-size: 0;
+  color: var(--joy-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.joy-code-qc-card__save {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--joy-text);
+  font: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.joy-code-qc-card__save:hover,
+.joy-code-qc-card__save:focus-visible {
+  border-color: var(--joy-accent);
+  outline: none;
+}
+
+.joy-code-qc-card__icon {
+  color: var(--joy-accent);
+}
