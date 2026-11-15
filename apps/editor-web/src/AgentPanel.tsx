@@ -2254,24 +2254,45 @@ export function AgentPanel({
           qcAdapterRef.current = undefined;
           let qcAdapter: QcHostAdapter | undefined;
           if (structured && isQcCheckRequest(body)) {
-            qcAdapter = createEditorQcAdapter({
+            const qcAdapterInput = {
               runId,
               projectId: contextInput.projectId,
               revision: baseRevision,
-              getRevision: () => latestSessionRef.current.projectRevisionId,
               modelId: capturedModelId ?? '',
               promptPolicyDigest: capturedPolicyDigest,
-              isCurrent: () =>
-                activeModelRunIdRef.current === runId &&
-                latestSessionRef.current.visualProject.id === contextInput.projectId,
               getTimeline: () => latestSessionRef.current.timelineProject,
               isCachedImageSupported: qcImageSupported,
               isPrivacyModeAllowed: qcPrivacyAllowed,
               onReport: onQcReport,
+            };
+            // The QC tools keep their original guard: an edit during the run refuses the check.
+            qcAdapter = createEditorQcAdapter({
+              ...qcAdapterInput,
+              isCurrent: () =>
+                activeModelRunIdRef.current === runId &&
+                latestSessionRef.current.visualProject.id === contextInput.projectId &&
+                latestSessionRef.current.projectRevisionId === baseRevision,
             });
+            // The repair loop commits its own approved plans, so its re-checks follow the live revision.
+            // It has its own adapter: the QC tools above never see this relaxed identity.
+            const repairQcAdapter = createEditorQcAdapter({
+              ...qcAdapterInput,
+              getRevision: () => latestSessionRef.current.projectRevisionId,
+              isCurrent: () =>
+                activeModelRunIdRef.current === runId &&
+                latestSessionRef.current.visualProject.id === contextInput.projectId,
+            });
+            const toolAdapter = qcAdapter;
+            qcAdapter = {
+              ...toolAdapter,
+              dispose() {
+                toolAdapter.dispose();
+                repairQcAdapter.dispose();
+              },
+            };
             const repairHost = createQcRepairHost({
               session,
-              checks: [timelineQcCheckPort(qcAdapter)],
+              checks: [timelineQcCheckPort(repairQcAdapter)],
               getAudio: () => audioStateFromProject(latestSessionRef.current.visualProject),
               onAudioApplied: (audio) => onQcAudioApplied?.(audio),
               textBoxes: () => [],

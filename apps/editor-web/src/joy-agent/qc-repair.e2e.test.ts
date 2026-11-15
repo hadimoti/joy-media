@@ -19,6 +19,7 @@ import {
   type QcHostAdapter,
   type QcTimelineSource,
 } from './qc-host-adapter.js';
+import { applyQcRepairPlan } from './qc-repair-apply.js';
 import { createQcRepairHost, timelineQcCheckPort, type QcCheckPort } from './qc-repair-host.js';
 import type { QcRepairFinding, QcRepairPlan } from './qc-repair-plan.js';
 import { createJoyAgentHostRpcMethodsForSnapshot } from './tool-bridge.js';
@@ -449,6 +450,8 @@ describe('QC fix loop end to end (T-B06)', () => {
   it('stops without a change when the owner declines the plan', async () => {
     const session = new EditorSession(memoryStorage(), fixtureTimeline(), fixtureDocument());
     const original = JSON.stringify(session.timelineProject);
+    const originalDocument = JSON.stringify(session.visualProject);
+    const historyBefore = session.historyCursorSequence;
     const adapter = editorAdapter(session);
     const host = createQcRepairHost({
       session,
@@ -461,6 +464,89 @@ describe('QC fix loop end to end (T-B06)', () => {
     const result = await host.run(new AbortController().signal);
     expect(result.stop).toBe('declined');
     expect(result.remainingFindings).toHaveLength(3);
+    // Nothing was written anywhere, not even applied and rolled back: both documents and the history.
     expect(JSON.stringify(session.timelineProject)).toBe(original);
+    expect(JSON.stringify(session.visualProject)).toBe(originalDocument);
+    expect(session.historyCursorSequence).toBe(historyBefore);
+  });
+
+  it('is honest in the wiring the panel ships today: no composition capture, no file check, no title boxes', async () => {
+    const session = new EditorSession(memoryStorage(), fixtureTimeline(), fixtureDocument());
+    const original = JSON.stringify(session.timelineProject);
+    const originalDocument = JSON.stringify(session.visualProject);
+    const historyBefore = session.historyCursorSequence;
+    // The same shape as AgentPanel: a timeline port over a source with no composition and no text boxes.
+    const shippedAdapter = createQcHostAdapter({
+      evidenceStore: createEvidenceStore(),
+      identity: () => ({
+        runId: 'run-qc-shipped',
+        projectId: session.timelineProject.id,
+        revision: session.projectRevisionId,
+        modelId: 'stub-model',
+        promptPolicyDigest: 'policy-1',
+      }),
+      timeline: () => qcTimelineSourceFromTimeline(session.timelineProject, undefined, []),
+      sampler: createTimelineQcSampler({ canvasFactory }),
+      isCachedImageSupported: () => false,
+      isPrivacyModeAllowed: () => false,
+      digest: async () => 'c'.repeat(64),
+      now: () => Date.UTC(2026, 10, 15),
+      evenFrameCount: 4,
+    });
+    const approve = vi.fn(async () => true);
+    const host = createQcRepairHost({
+      session,
+      checks: [timelineQcCheckPort(shippedAdapter)],
+      getAudio: () => audioOf(session.visualProject),
+      textBoxes: () => [],
+      approve,
+      maxRounds: 3,
+    });
+    const result = await host.run(new AbortController().signal);
+    // Until composed-frame capture and the Worker file check are connected, the loop says so and edits nothing.
+    expect(result.stop).toBe('check-failed');
+    expect(approve).not.toHaveBeenCalled();
+    expect(JSON.stringify(session.timelineProject)).toBe(original);
+    expect(JSON.stringify(session.visualProject)).toBe(originalDocument);
+    expect(session.historyCursorSequence).toBe(historyBefore);
+  });
+});
+
+describe('QC repair commit guards', () => {
+  it('refuses a plan built against an older revision and writes nothing', () => {
+    const session = new EditorSession(memoryStorage(), fixtureTimeline(), fixtureDocument());
+    const dispatchCompound = vi.fn();
+    const plan = { edits: [{ kind: 'cut' }] } as unknown as QcRepairPlan;
+    const result = applyQcRepairPlan(
+      {
+        projectRevisionId: 'revision-now',
+        timelineProject: session.timelineProject,
+        visualProject: session.visualProject,
+        dispatchCompound,
+      },
+      plan,
+      EMPTY_AUDIO_STATE,
+      'revision-before',
+    );
+    expect(result).toMatchObject({ ok: false, code: 'stale-revision' });
+    expect(dispatchCompound).not.toHaveBeenCalled();
+  });
+
+  it('refuses an empty plan', () => {
+    const session = new EditorSession(memoryStorage(), fixtureTimeline(), fixtureDocument());
+    const dispatchCompound = vi.fn();
+    const result = applyQcRepairPlan(
+      {
+        projectRevisionId: 'r',
+        timelineProject: session.timelineProject,
+        visualProject: session.visualProject,
+        dispatchCompound,
+      },
+      { edits: [] } as unknown as QcRepairPlan,
+      EMPTY_AUDIO_STATE,
+      'r',
+    );
+    expect(result).toMatchObject({ ok: false, code: 'empty-plan' });
+    expect(dispatchCompound).not.toHaveBeenCalled();
   });
 });

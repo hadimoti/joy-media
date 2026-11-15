@@ -11,7 +11,10 @@
 import { applyAudioCommand, applyTransaction, CommandError } from '@joy-media/commands';
 import type { AudioState, CommandTransaction } from '@joy-media/commands';
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
-import { applyVisualObjectProjectTransaction } from '@joy-media/property-system';
+import {
+  applyVisualObjectProjectTransaction,
+  removeClipPropertyAnimations,
+} from '@joy-media/property-system';
 import { withProjectAudio } from '../audio-session.js';
 import { updateUniversalTimelineForTransaction } from '../universal-placement.js';
 import type { QcRepairPlan } from './qc-repair-plan.js';
@@ -57,6 +60,12 @@ export function compileQcRepair(
   if (plan.timelineCommands.length > 0) {
     timeline = { label, commands: [...plan.timelineCommands] };
     applyTransaction(target.timelineProject, timeline);
+    // The normal editor path drops the animations a removed clip owned; a repair that removes a clip must too.
+    for (const command of plan.timelineCommands) {
+      if (command.type === 'timeline.removeClip') {
+        document = removeClipPropertyAnimations(document, command.payload.clipId);
+      }
+    }
     document = updateUniversalTimelineForTransaction(document, timeline, target.timelineProject);
   }
   if (plan.visualCommands.length > 0)
