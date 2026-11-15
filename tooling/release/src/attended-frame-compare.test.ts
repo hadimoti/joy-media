@@ -17,7 +17,11 @@ import {
 const W = 160;
 const H = 90;
 
-function frameOf(pixel: (x: number, y: number) => readonly number[], width = W, height = H): RgbFrame {
+function frameOf(
+  pixel: (x: number, y: number) => readonly number[],
+  width = W,
+  height = H,
+): RgbFrame {
   const data = new Uint8Array(width * height * 3);
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -37,7 +41,12 @@ function chart(boxX = 40): RgbFrame {
     const inBox = x >= boxX && x < boxX + 30 && y >= 20 && y < 60;
     if (inBox) return [240, 240, 240];
     const bar = Math.floor(x / 20) % 4;
-    return [[200, 40, 40], [40, 200, 40], [40, 40, 200], [200, 200, 40]][bar]!;
+    return [
+      [200, 40, 40],
+      [40, 200, 40],
+      [40, 40, 200],
+      [200, 200, 40],
+    ][bar]!;
   });
 }
 
@@ -82,11 +91,19 @@ describe('measures', () => {
 
   it('reads mean luma with BT.601 weights', () => {
     expect(meanLuma(solid([255, 255, 255]))).toBeCloseTo(255, 6);
-    expect(meanLuma(solid([0x2a, 0x6f, 0xdb]))).toBeCloseTo(0.299 * 42 + 0.587 * 111 + 0.114 * 219, 6);
+    expect(meanLuma(solid([0x2a, 0x6f, 0xdb]))).toBeCloseTo(
+      0.299 * 42 + 0.587 * 111 + 0.114 * 219,
+      6,
+    );
   });
 
   it('refuses frames of two sizes or a frame whose bytes do not fit its size', () => {
-    expect(() => lumaSsim(chart(), frameOf(() => [0, 0, 0], 80, 45))).toThrow('scaled to one size');
+    expect(() =>
+      lumaSsim(
+        chart(),
+        frameOf(() => [0, 0, 0], 80, 45),
+      ),
+    ).toThrow('scaled to one size');
     expect(() =>
       meanAbsoluteDifference(chart(), { width: W, height: H, data: new Uint8Array(10) }),
     ).toThrow('is not 160x90 RGB');

@@ -201,7 +201,9 @@ describe('each check fails on its own fault', () => {
   it('picture-matches-reference: a black Monitor at one frame fails it', async () => {
     const { report } = await dryRun({ previewBlackFirst: true });
     expect(statusOf(report)['picture-matches-reference']).toBe('failed');
-    expect(detailOf(report, 'picture-matches-reference')).toContain('frame 19: the reference frame is black');
+    expect(detailOf(report, 'picture-matches-reference')).toContain(
+      'frame 19: the reference frame is black',
+    );
   });
 
   it('picture-matches-reference: a Monitor 1.5 s late fails it', async () => {
@@ -217,7 +219,9 @@ describe('each check fails on its own fault', () => {
       'picture-matches-reference': 'failed',
       'dissolve-checked': 'failed',
     });
-    expect(detailOf(report, 'picture-matches-reference')).toContain('the Monitor capture of frame 19 failed');
+    expect(detailOf(report, 'picture-matches-reference')).toContain(
+      'the Monitor capture of frame 19 failed',
+    );
   });
 
   it('dissolve-checked: a hard cut in the export fails it', async () => {
@@ -298,7 +302,11 @@ const TIMELINE = {
             { id: 'c2', assetId: 'a2', startUs: 3_000_400, durationUs: 2_000_000 },
           ],
         },
-        { id: 'a1row', family: 'audio', clips: [{ id: 'c3', assetId: 'a1', startUs: 0, durationUs: 3_000_000 }] },
+        {
+          id: 'a1row',
+          family: 'audio',
+          clips: [{ id: 'c3', assetId: 'a1', startUs: 0, durationUs: 3_000_000 }],
+        },
       ],
     },
   },
@@ -309,7 +317,9 @@ const VISUAL = {
     a1: { id: 'a1', displayName: names.videoName },
     a2: { id: 'a2', displayName: names.stillName },
   },
-  transitions: [{ id: 't1', type: 'gl:fade', leftClipId: 'c1', rightClipId: 'c2', durationUs: 500_000 }],
+  transitions: [
+    { id: 't1', type: 'gl:fade', leftClipId: 'c1', rightClipId: 'c2', durationUs: 500_000 },
+  ],
 };
 
 describe('timelineFactsFrom', () => {
@@ -323,7 +333,9 @@ describe('timelineFactsFrom', () => {
       preset: 'youtube-1080',
     });
     expect(facts.frameRate).toBeCloseTo(29.97, 2);
-    expect(facts.clips.map((clip) => [clip.id, clip.trackFamily, clip.displayName, clip.sourceInUs])).toEqual([
+    expect(
+      facts.clips.map((clip) => [clip.id, clip.trackFamily, clip.displayName, clip.sourceInUs]),
+    ).toEqual([
       ['c1', 'video', names.videoName, 500_000],
       ['c2', 'video', names.stillName, 0],
       ['c3', 'audio', names.videoName, 0],
@@ -353,7 +365,9 @@ describe('timelineFactsFrom', () => {
       'no root composition',
     );
     expect(() =>
-      timelineFactsFrom(stores({ rootCompositionId: 'r', compositions: { r: { width: 0, height: 5 } } })),
+      timelineFactsFrom(
+        stores({ rootCompositionId: 'r', compositions: { r: { width: 0, height: 5 } } }),
+      ),
     ).toThrow('no size');
     expect(() =>
       timelineFactsFrom({ ...stores(TIMELINE), [TIMELINE_LOG_KEY]: '{not json' }),
@@ -373,7 +387,9 @@ describe('placement, dissolve and samples', () => {
     expect(placementOf(facts, names).still.id).toBe('c2');
     const gap: TimelineFacts = {
       ...facts,
-      clips: facts.clips.map((clip): FactClip => (clip.id === 'c2' ? { ...clip, startUs: 3_100_000 } : clip)),
+      clips: facts.clips.map((clip): FactClip =>
+        clip.id === 'c2' ? { ...clip, startUs: 3_100_000 } : clip,
+      ),
     };
     expect(() => placementOf(gap, names)).toThrow('not where the clip ends');
   });
@@ -389,7 +405,10 @@ describe('placement, dissolve and samples', () => {
       ),
     ).toThrow('does not fit the clip');
     expect(
-      dissolveOf({ ...facts, transitions: [{ ...facts.transitions[0]!, type: 'dissolve' }] }, placement).type,
+      dissolveOf(
+        { ...facts, transitions: [{ ...facts.transitions[0]!, type: 'dissolve' }] },
+        placement,
+      ).type,
     ).toBe('dissolve');
   });
 
@@ -441,14 +460,26 @@ const GOOD_PROBE: SemanticsProbe = {
   video: [{ codec: 'h264', width: 1920, height: 1080, durationSeconds: 6.0 }],
   audio: [{ codec: 'aac', channels: 2, sampleRate: 48_000 }],
 };
-const EXPECTATION = { width: 1920, height: 1080, frameRate: 30, durationUs: 6_000_000, frameCount: 180 };
+const EXPECTATION = {
+  width: 1920,
+  height: 1080,
+  frameRate: 30,
+  durationUs: 6_000_000,
+  frameCount: 180,
+};
 
 describe('the measured checks as functions', () => {
   it('reads an ffprobe report', () => {
     const probe = semanticsProbeFrom({
       format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '6.016000' },
       streams: [
-        { codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, duration: '6.000000' },
+        {
+          codec_type: 'video',
+          codec_name: 'h264',
+          width: 1920,
+          height: 1080,
+          duration: '6.000000',
+        },
         { codec_type: 'audio', codec_name: 'aac', channels: 2, sample_rate: '48000' },
       ],
     });
@@ -479,16 +510,33 @@ describe('the measured checks as functions', () => {
     ]);
   });
 
+  it('stream layout: rejects audio encoded at a different sample rate than the preset', () => {
+    expect(
+      streamLayoutBlockers(
+        {
+          ...GOOD_PROBE,
+          audio: [{ ...GOOD_PROBE.audio[0]!, sampleRate: 44_100 }],
+        },
+        EXPECTATION,
+      ),
+    ).toContain('the audio sample rate is 44100 Hz, not 48000 Hz');
+  });
+
   it('duration: one frame either way passes, more fails, and the stream duration counts too', () => {
     expect(durationBlockers({ ...GOOD_PROBE, durationSeconds: 6.033 }, EXPECTATION)).toEqual([]);
     expect(durationBlockers({ ...GOOD_PROBE, durationSeconds: 6.07 }, EXPECTATION)).toHaveLength(1);
     expect(
       durationBlockers(
-        { ...GOOD_PROBE, video: [{ codec: 'h264', width: 1920, height: 1080, durationSeconds: 5.5 }] },
+        {
+          ...GOOD_PROBE,
+          video: [{ codec: 'h264', width: 1920, height: 1080, durationSeconds: 5.5 }],
+        },
         EXPECTATION,
       ),
     ).toEqual(["the video stream lasts 5.5 s, not the timeline's 6.000 s within one frame"]);
-    expect(durationBlockers({ ...GOOD_PROBE, durationSeconds: Number.NaN }, EXPECTATION)).toHaveLength(1);
+    expect(
+      durationBlockers({ ...GOOD_PROBE, durationSeconds: Number.NaN }, EXPECTATION),
+    ).toHaveLength(1);
   });
 
   it('frame count: exact only', () => {
@@ -496,14 +544,18 @@ describe('the measured checks as functions', () => {
     expect(frameCountBlockers(181, EXPECTATION)).toEqual([
       "ffmpeg decoded 181 frames, not the timeline's 180",
     ]);
-    expect(frameCountBlockers(Number.NaN, EXPECTATION)).toEqual(['the decoded frame count was not read']);
+    expect(frameCountBlockers(Number.NaN, EXPECTATION)).toEqual([
+      'the decoded frame count was not read',
+    ]);
   });
 
   it('audio: two channels above the silence level', () => {
     expect(audioBlockers(GOOD_PROBE, [-21, -21.4])).toEqual([]);
     expect(audioBlockers(GOOD_PROBE, [-21, Number.NEGATIVE_INFINITY])).toHaveLength(1);
     expect(audioBlockers(GOOD_PROBE, [-21])).toEqual(['1 audio channels were decoded, not 2']);
-    expect(audioBlockers({ ...GOOD_PROBE, audio: [] }, [])).toEqual(['the file has no audio stream']);
+    expect(audioBlockers({ ...GOOD_PROBE, audio: [] }, [])).toEqual([
+      'the file has no audio stream',
+    ]);
   });
 
   it("parses each channel's RMS from ffmpeg's astats report and skips Overall", () => {

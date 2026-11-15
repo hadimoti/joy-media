@@ -955,7 +955,12 @@ function semanticsEditorPageOf(base) {
             const zoom = Number(wrap.getAttribute('data-monitor-zoom'));
             const panX = Number(wrap.getAttribute('data-monitor-pan-x'));
             const panY = Number(wrap.getAttribute('data-monitor-pan-y'));
-            return { x: box.left + panX, y: box.top + panY, width: width * zoom, height: height * zoom };
+            return {
+              x: box.left + panX,
+              y: box.top + panY,
+              width: width * zoom,
+              height: height * zoom,
+            };
           },
           [composition.width, composition.height],
         ),
@@ -1064,7 +1069,18 @@ export function createExportSemanticsDriver(config) {
     async audioRmsDb(name) {
       const result = tool(
         config.ffmpeg,
-        ['-hide_banner', '-nostats', '-i', runPath(name), '-vn', '-af', 'astats=metadata=0:reset=0', '-f', 'null', '-'],
+        [
+          '-hide_banner',
+          '-nostats',
+          '-i',
+          runPath(name),
+          '-vn',
+          '-af',
+          'astats=metadata=0:reset=0',
+          '-f',
+          'null',
+          '-',
+        ],
         `the audio levels of ${name}`,
         300_000,
       );
@@ -1073,11 +1089,15 @@ export function createExportSemanticsDriver(config) {
 
     async frameOf(source, size) {
       const path =
-        source.kind === 'fixture-video' ? join(config.fixturesDir, source.name) : runPath(source.name);
+        source.kind === 'fixture-video'
+          ? join(config.fixturesDir, source.name)
+          : runPath(source.name);
       const scale = `scale=${size.width}:${size.height}:flags=area`;
       // A video frame is the first one whose time is at or after `seconds`, picked by the select filter.
       const filter =
-        source.kind === 'run-picture' ? scale : `select=gte(t\\,${source.seconds.toFixed(6)}),${scale}`;
+        source.kind === 'run-picture'
+          ? scale
+          : `select=gte(t\\,${source.seconds.toFixed(6)}),${scale}`;
       const result = tool(
         config.ffmpeg,
         [

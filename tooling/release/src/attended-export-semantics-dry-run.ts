@@ -8,8 +8,8 @@
  * (a moving gradient for the clip, solid blue for the still), so the frame compare and the dissolve check
  * do real arithmetic on them. Faults make each check fail on purpose; the unit tests use them.
  *
- * A dry-run receipt is evidence that the code path works, never that the app works: its candidate is
- * all zeros, its app hash is the hash of a fixed text, and the runner writes it as dry-run-receipt.json.
+ * The in-memory dry-run receipt is evidence that the code path works, never that the app works: its
+ * candidate is all zeros and its app hash is the hash of a fixed text. The CLI omits it from dry-run.json.
  */
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
@@ -97,7 +97,10 @@ function fill(
   return { width: size.width, height: size.height, data };
 }
 
-function clipFrame(size: { readonly width: number; readonly height: number }, frame: number): RgbFrame {
+function clipFrame(
+  size: { readonly width: number; readonly height: number },
+  frame: number,
+): RgbFrame {
   return fill(size, (x, y) => clipRgb(x, y, size.width, size.height, frame));
 }
 
@@ -247,7 +250,10 @@ export class DryRunWorld implements ExportSemanticsDriver {
     const transition = options.ignoreDissolve === true ? undefined : this.transitions[0];
     if (still !== undefined && timeUs >= still.startUs) return stillFrame(size);
     if (video === undefined) return blackFrame(size);
-    const windowStart = still === undefined || transition === undefined ? Infinity : still.startUs - transition.durationUs;
+    const windowStart =
+      still === undefined || transition === undefined
+        ? Infinity
+        : still.startUs - transition.durationUs;
     if (timeUs >= windowStart && transition !== undefined) {
       const progress = (timeUs - windowStart) / transition.durationUs;
       return blendFrames(clipFrame(size, frame), stillFrame(size), progress);
@@ -367,7 +373,10 @@ class DryRunPage implements SemanticsEditorPage {
       id: PROJECT_ID,
       exportPreset: 'social-h264-aac',
       assets: Object.fromEntries(
-        this.world.clips.map((clip) => [clip.assetId, { id: clip.assetId, displayName: clip.displayName }]),
+        this.world.clips.map((clip) => [
+          clip.assetId,
+          { id: clip.assetId, displayName: clip.displayName },
+        ]),
       ),
       transitions: this.world.transitions,
     };
@@ -382,7 +391,8 @@ class DryRunPage implements SemanticsEditorPage {
   }
 
   async capturePreview(frame: number): Promise<Uint8Array> {
-    if (this.world.faults.previewFails === true) throw new Error('the Monitor did not reach the frame');
+    if (this.world.faults.previewFails === true)
+      throw new Error('the Monitor did not reach the frame');
     this.captures += 1;
     const shown = this.world.faults.previewLate === true ? frame + 45 : frame;
     const black = this.world.faults.previewBlackFirst === true && this.captures === 1;
@@ -390,7 +400,8 @@ class DryRunPage implements SemanticsEditorPage {
   }
 
   async exportMp4(): Promise<Uint8Array> {
-    if (this.world.faults.exportFails === true) throw new Error('the render did not verify: Failed — encoder');
+    if (this.world.faults.exportFails === true)
+      throw new Error('the render did not verify: Failed — encoder');
     if (this.world.faults.emptyExport === true) return new Uint8Array();
     return new Uint8Array(Buffer.from(`dry-run export of ${this.world.durationUs()} µs`));
   }
@@ -417,7 +428,11 @@ export function dryRunInput(
 
 /** Runs the scenario once against the fake world. */
 export async function runExportSemanticsDryRun(
-  options: { readonly runId?: string; readonly candidateSha?: string; readonly faults?: DryRunFaults } = {},
+  options: {
+    readonly runId?: string;
+    readonly candidateSha?: string;
+    readonly faults?: DryRunFaults;
+  } = {},
 ): Promise<{ readonly report: ExportSemanticsReport; readonly world: DryRunWorld }> {
   const world = new DryRunWorld(options.faults);
   const report = await runExportMediaSemantics(world, dryRunInput(options));

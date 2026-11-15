@@ -298,10 +298,7 @@ export function parseRunArgs(argv, scenarios) {
   }
   if (!scenarios.includes(options.scenario))
     throw new Error(`unknown scenario: ${options.scenario}`);
-  if (
-    (!dryRun || options.candidate !== undefined) &&
-    !/^[0-9a-f]{40}$/u.test(options.candidate)
-  ) {
+  if ((!dryRun || options.candidate !== undefined) && !/^[0-9a-f]{40}$/u.test(options.candidate)) {
     throw new Error('--candidate must be the full 40-character lowercase commit');
   }
   if (!dryRun && !/^[0-9a-f]{64}$/u.test(options['expected-exe-sha256'])) {

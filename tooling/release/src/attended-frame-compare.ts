@@ -119,7 +119,9 @@ function lumaOf(frame: RgbFrame): Float64Array {
   for (let pixel = 0; pixel < luma.length; pixel += 1) {
     const offset = pixel * 3;
     luma[pixel] =
-      0.299 * frame.data[offset]! + 0.587 * frame.data[offset + 1]! + 0.114 * frame.data[offset + 2]!;
+      0.299 * frame.data[offset]! +
+      0.587 * frame.data[offset + 1]! +
+      0.114 * frame.data[offset + 2]!;
   }
   return luma;
 }

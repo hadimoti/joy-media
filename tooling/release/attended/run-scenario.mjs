@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// The first scripted attended scenario (restart, save and export) for one candidate build.
+// Scripted attended scenarios for one candidate build.
 //
-// Without --launch it runs the preflight and the refusals, then prints the plan. It copies the source
-// database and its write-ahead files into plan-source only to read them, and starts nothing. With --launch
-// it copies the source profile into the run folder, checks that the copy's asset library is the scratch
-// library, and only then starts the candidate copy on that copy.
-// Each run needs the owner at the PC and a yes that names the run.
+// Without --launch, a live scenario stops before app startup. The restart/save/export scenario copies the
+// source database into plan-source only to read it, then copies the source profile into the run folder
+// only for a live launch. The other scenarios create new profiles for their live runs. Every live run
+// starts the unpacked candidate copy, never the installed app.
+// Every live launch needs the owner at the PC and a yes that names the run. Dry runs start no app.
 //
 // Usage (Windows, from the repository root):
 //   node --experimental-strip-types tooling/release/attended/run-scenario.mjs \
@@ -22,6 +22,16 @@
 //     --candidate <40-hex commit> --expected-exe-sha256 <64-hex build hash> \
 //     --library <scratch library with catalog.json> --out <new run folder> [--media <mp4>]
 //     [--owner-library-files <n>] [--launch]
+//
+// The export-media-semantics scenario uses the candidate exe, a scratch library and fixture folder:
+//   node --experimental-strip-types tooling/release/attended/run-scenario.mjs \
+//     --scenario desktop.export-media-semantics --exe <unpacked copy>\joy-media.exe \
+//     --candidate <40-hex commit> --expected-exe-sha256 <64-hex build hash> \
+//     --library <scratch library with catalog.json> --out <new run folder> \
+//     [--fixtures <fixture folder>] [--owner-library-files <n>] [--launch]
+// Its fake-driver dry run needs only a candidate and a new output folder:
+//   node --experimental-strip-types tooling/release/attended/run-scenario.mjs \
+//     --scenario desktop.export-media-semantics --dry-run --candidate <40-hex commit> --out <new folder>
 // --owner-library-files approves the owner library's file count for the run; a different count is refused.
 // An option the runner does not know, or one given twice, is refused, so a typo cannot drop an approval.
 // Exit codes: 0 passed (or a dry run with no refusals), 2 refused, failed or not ready, 1 usage error.
@@ -39,6 +49,13 @@ import {
   runFreshProcessPersistence,
 } from '../src/attended-fresh-process.ts';
 import {
+  EXPORT_SEMANTICS_SCENARIO,
+  runExportMediaSemantics,
+  STILL_FIXTURE,
+  VIDEO_FIXTURE,
+} from '../src/attended-export-semantics.ts';
+import { runExportSemanticsDryRun } from '../src/attended-export-semantics-dry-run.ts';
+import {
   RESTART_SAVE_EXPORT,
   exportExpectation,
   runRestartSaveExport,
@@ -48,6 +65,7 @@ import {
   createFreshProcessDriver,
   boundedWait,
   createScenarioDriver,
+  createExportSemanticsDriver,
   databaseModuleProblem,
 } from './scenario-driver.mjs';
 import {
@@ -66,7 +84,7 @@ import {
 } from './scenario-rules.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SCENARIOS = [RESTART_SAVE_EXPORT, FRESH_PROCESS_SCENARIO];
+const SCENARIOS = [RESTART_SAVE_EXPORT, FRESH_PROCESS_SCENARIO, EXPORT_SEMANTICS_SCENARIO];
 
 /** The longest a scenario may take. A run that has not ended by then is recorded as an error; nothing is killed. */
 const RUN_LIMIT_MS = 60 * 60_000;
@@ -92,6 +110,7 @@ const DEFAULT_CLIP = join(
   'media',
   'video.mp4',
 );
+const DEFAULT_FIXTURES = 'C:\\jgp\\v111\\fixtures';
 const DB_NAME = 'joy-media.sqlite3';
 const LIBRARY_SETTING = 'asset_library_directory';
 const DEFAULT_LIBRARY = ownerDefaultLibrary(homedir());
@@ -426,6 +445,221 @@ async function runFreshProcess(options) {
   process.exit(report.verdict === 'passed' ? 0 : 2);
 }
 
+/** Runs the export-semantics scenario entirely against injected fakes; no preflight or app is involved. */
+async function runExportSemanticsDryRunCli(options) {
+  const out = resolve(options.out);
+  const unexpected = unexpectedRunArtifacts(out);
+  if (unexpected.length > 0) {
+    process.stderr.write(
+      `refused: ${out} already holds ${unexpected.join(', ')}; a dry run needs an empty folder\n`,
+    );
+    process.exit(2);
+  }
+  if (isInside(out, process.cwd())) {
+    process.stderr.write(`refused: the dry-run folder is inside the working folder: ${out}\n`);
+    process.exit(2);
+  }
+  if (linkOnPath(out)) {
+    process.stderr.write(`refused: ${out} goes through a link or a junction\n`);
+    process.exit(2);
+  }
+
+  const { report } = await runExportSemanticsDryRun({
+    runId: randomUUID(),
+    candidateSha: options.candidate,
+  });
+  const reportPath = join(out, 'dry-run.json');
+  mkdirSync(out, { recursive: true });
+  refuseLinkedRunFolder(out);
+  // The in-memory fake report includes a structurally valid synthetic receipt for the validator test.
+  // Do not persist it as receipt.json: this command is never live evidence.
+  const dryRunReport = { mode: 'dry-run', report: { ...report, receipt: undefined } };
+  writeFileSync(reportPath, `${JSON.stringify(dryRunReport, null, 2)}\n`, 'utf8');
+  process.stdout.write(`dry run: ${report.verdict} (${reportPath}); no app was launched\n`);
+  for (const check of report.checks) {
+    process.stdout.write(`${check.status.padEnd(8)} ${check.name}: ${check.detail}\n`);
+  }
+  for (const blocker of report.blockers) process.stdout.write(`blocker: ${blocker}\n`);
+  process.exit(report.verdict === 'passed' ? 0 : 2);
+}
+
+/**
+ * Plans or runs the export-semantics scenario. A launch seeds one new scratch profile, imports the media through
+ * the editor, captures the Monitor, exports, closes the app, and then measures the files with ffmpeg/ffprobe.
+ */
+async function runExportSemantics(options) {
+  const out = resolve(options.out);
+  const library = resolve(options.library);
+  const exe = resolve(options.exe);
+  const fixturesDir = resolve(options.fixtures ?? DEFAULT_FIXTURES);
+  const profile = join(out, 'profile');
+  const port = Number(options.port ?? 9339);
+  const refusals = [];
+
+  if (isInside(exe, INSTALLED_FOLDER)) {
+    process.stderr.write(
+      'refused: the exe is inside the installed JOY Media folder; the run uses the candidate copy only. Nothing was checked, created or started.\n',
+    );
+    process.exit(2);
+  }
+  const unexpected = unexpectedRunArtifacts(out);
+  if (unexpected.length > 0) {
+    process.stderr.write(
+      `refused: ${out} already holds ${unexpected.join(', ')}; a run needs an empty folder, so use a new run folder\n`,
+    );
+    process.exit(2);
+  }
+  refuseOwnerLibrary(options);
+
+  if (linkOnPath(fixturesDir) || linkInside(fixturesDir) !== undefined) {
+    process.stderr.write(
+      `refused: ${fixturesDir} goes through or contains a link, junction, shared file or unreadable folder\n`,
+    );
+    process.exit(2);
+  }
+  for (const fixture of [VIDEO_FIXTURE, STILL_FIXTURE]) {
+    if (!existsSync(join(fixturesDir, fixture)))
+      refusals.push(`fixture ${join(fixturesDir, fixture)} is missing`);
+  }
+  if (refusals.length > 0) {
+    for (const refusal of refusals) process.stderr.write(`refused: ${refusal}\n`);
+    process.stderr.write('nothing was written or started\n');
+    process.exit(2);
+  }
+
+  const preflight = spawnSync(
+    process.execPath,
+    [
+      '--experimental-strip-types',
+      join(here, 'attended-preflight.mjs'),
+      '--exe',
+      exe,
+      '--candidate',
+      options.candidate,
+      '--profile',
+      profile,
+      '--library',
+      library,
+      '--out',
+      out,
+    ],
+    { encoding: 'utf8', timeout: 300_000 },
+  );
+  process.stdout.write(preflight.stdout ?? '');
+  process.stderr.write(preflight.stderr ?? '');
+  if (preflight.status !== 0) {
+    process.stderr.write('not ready: the preflight blocked the run, so nothing was started\n');
+    process.exit(2);
+  }
+  const preflightReport = JSON.parse(readFileSync(join(out, 'preflight.json'), 'utf8'));
+  if (preflightReport.exe.sha256 !== options['expected-exe-sha256']) {
+    refusals.push(
+      `the exe hash ${preflightReport.exe.sha256} is not the expected build hash ${options['expected-exe-sha256']}`,
+    );
+  }
+  if (existsSync(profile))
+    refusals.push(`${profile} already exists; a run needs a new profile folder`);
+  if (!(await portIsFree(port)))
+    refusals.push(`port ${port} is in use; the app's debug port must be free`);
+  if (refusals.length > 0) {
+    for (const refusal of refusals) process.stderr.write(`refused: ${refusal}\n`);
+    process.stderr.write('nothing was started\n');
+    process.exit(2);
+  }
+
+  if (!options.launch) {
+    process.stdout.write(
+      [
+        `scenario: ${EXPORT_SEMANTICS_SCENARIO}`,
+        `profile: ${profile} (new, on scratch library ${library})`,
+        `fixtures: ${join(fixturesDir, VIDEO_FIXTURE)} and ${join(fixturesDir, STILL_FIXTURE)}`,
+        'steps: import and place the stereo clip and still through the editor; add a Dissolve; capture three Monitor frames; export MP4; close; measure with ffprobe and ffmpeg',
+        'plan only: no app was launched. Repeat with --launch after the owner says yes.',
+      ].join('\n') + '\n',
+    );
+    process.exit(0);
+  }
+
+  const moduleProblem = await databaseModuleProblem(preflightReport.unpackedDir);
+  if (moduleProblem !== null) {
+    process.stderr.write(`refused: ${moduleProblem}\nnothing was started\n`);
+    process.exit(2);
+  }
+
+  const runId = randomUUID();
+  let report;
+  try {
+    process.stdout.write('launching the candidate copy; the owner must be at the PC\n');
+    refuseLinkedPaths([out, library], [out, library, DEFAULT_LIBRARY, fixturesDir]);
+    const driver = createExportSemanticsDriver({
+      exe,
+      unpackedDir: preflightReport.unpackedDir,
+      runDir: out,
+      port,
+      defaultLibrary: DEFAULT_LIBRARY,
+      installedFolder: INSTALLED_FOLDER,
+      downloadsFolder: join(homedir(), 'Downloads'),
+      fixturesDir,
+      ffmpeg: preflightReport.tools.ffmpeg,
+      ffprobe: preflightReport.tools.ffprobe,
+    });
+    const libraryBefore = await driver.ownerLibrarySignature();
+    const downloadsBefore = await driver.downloadsSignature();
+    report = await withinRunLimit(
+      runExportMediaSemantics(driver, {
+        runId,
+        candidateSha: preflightReport.candidateSha,
+        exeSha256: preflightReport.exe.sha256,
+        unpackedDir: preflightReport.unpackedDir,
+        library,
+        profile,
+        approvedOwnerFiles: approvedOwnerFilesOf(options),
+      }),
+    );
+    report = afterRunComparison(EXPORT_SEMANTICS_SCENARIO, report, {
+      libraryBefore,
+      libraryAfter: await driver.ownerLibrarySignature(),
+      downloadsBefore,
+      downloadsAfter: await driver.downloadsSignature(),
+    });
+  } catch (error) {
+    const errorPath = join(out, 'error.json');
+    if (runFolderProblem(out) === undefined) {
+      writeFileSync(
+        errorPath,
+        `${JSON.stringify({ runId, error: String(error?.stack ?? error) }, null, 2)}\n`,
+        'utf8',
+      );
+      process.stderr.write(`error: the run stopped (${errorPath}): ${error?.message ?? error}\n`);
+    } else {
+      process.stderr.write(
+        `error: the run stopped: ${error?.message ?? error}; no file was written to the run folder, which has a link\n`,
+      );
+    }
+    process.exit(2);
+  }
+
+  refuseLinkedRunFolder(out);
+  writeFileSync(
+    join(out, 'run.json'),
+    `${JSON.stringify({ ...report, approvedOwnerFiles: approvedOwnerFilesOf(options) }, null, 2)}\n`,
+    'utf8',
+  );
+  if (report.receipt !== undefined) {
+    writeFileSync(
+      join(out, 'receipt.json'),
+      `${JSON.stringify(report.receipt, null, 2)}\n`,
+      'utf8',
+    );
+  }
+  process.stdout.write(`verdict: ${report.verdict} (${join(out, 'run.json')})\n`);
+  for (const check of report.checks) {
+    process.stdout.write(`${check.status.padEnd(8)} ${check.name}: ${check.detail}\n`);
+  }
+  for (const blocker of report.blockers) process.stdout.write(`blocker: ${blocker}\n`);
+  process.exit(report.verdict === 'passed' ? 0 : 2);
+}
+
 async function main() {
   let options;
   try {
@@ -435,8 +669,17 @@ async function main() {
     process.exit(1);
   }
 
+  if (options['dry-run']) {
+    await runExportSemanticsDryRunCli(options);
+    return;
+  }
+
   if (options.scenario === FRESH_PROCESS_SCENARIO) {
     await runFreshProcess(options);
+    return;
+  }
+  if (options.scenario === EXPORT_SEMANTICS_SCENARIO) {
+    await runExportSemantics(options);
     return;
   }
 

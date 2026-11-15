@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { EXPORT_SEMANTICS_SCENARIO } from './attended-export-semantics.ts';
 import { FRESH_PROCESS_SCENARIO } from './attended-fresh-process.ts';
 import { RESTART_SAVE_EXPORT } from './attended-scenario.ts';
 
@@ -80,6 +81,25 @@ function runRunner(args: string[]): { status: number | null; stderr: string } {
     { encoding: 'utf8', timeout: 110_000, env: childEnv() },
   );
   return { status: result.status, stderr: result.stderr ?? '' };
+}
+
+function runSemanticsDryRun(): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--experimental-strip-types',
+      RUN_SCENARIO,
+      '--scenario',
+      EXPORT_SEMANTICS_SCENARIO,
+      '--dry-run',
+      '--candidate',
+      CANDIDATE,
+      '--out',
+      out,
+    ],
+    { encoding: 'utf8', timeout: 110_000, env: childEnv() },
+  );
+  return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
 
 /** Runs the standalone preflight as a child process, and returns its exit status and both output streams. */
@@ -163,6 +183,43 @@ function failedPreflightChecks(): string[] {
 }
 
 describe('the runner command line without --launch', () => {
+  it('runs export semantics against fakes and writes a marked dry-run report, not a live receipt', () => {
+    const result = runSemanticsDryRun();
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('dry run: passed');
+    expect(existsSync(join(out, 'dry-run.json'))).toBe(true);
+    expect(existsSync(join(out, 'preflight.json'))).toBe(false);
+    expect(existsSync(join(out, 'receipt.json'))).toBe(false);
+
+    const dryRun = JSON.parse(readFileSync(join(out, 'dry-run.json'), 'utf8')) as {
+      mode: string;
+      report: {
+        scenario: string;
+        verdict: string;
+        candidateSha: string;
+        checks: { name: string; status: string }[];
+        receipt?: unknown;
+      };
+    };
+    expect(dryRun.mode).toBe('dry-run');
+    expect(dryRun.report).toMatchObject({
+      scenario: EXPORT_SEMANTICS_SCENARIO,
+      verdict: 'passed',
+      candidateSha: CANDIDATE,
+    });
+    expect(dryRun.report.checks.map((check) => [check.name, check.status])).toEqual([
+      ['export-completed', 'passed'],
+      ['stream-layout-matches-preset', 'passed'],
+      ['duration-matches-timeline', 'passed'],
+      ['frame-count-matches-timeline', 'passed'],
+      ['audio-present', 'passed'],
+      ['picture-matches-reference', 'passed'],
+      ['dissolve-checked', 'passed'],
+    ]);
+    expect(dryRun.report).not.toHaveProperty('receipt');
+  }, 130_000);
+
   it('refuses an exe inside the installed folder before reading anything', () => {
     const result = runCli(installedExe());
 

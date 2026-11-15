@@ -10,8 +10,8 @@
  *
  * - export-completed: the export finished, was downloaded through the page and is not empty.
  * - stream-layout-matches-preset: an MP4 with one H.264 video stream at the composition size and one AAC
- *   audio stream with two channels (the layout every export preset writes; export-core keeps the
- *   composition size for each preset).
+ *   audio stream with two channels at 48 kHz (the layout every export preset writes; export-core keeps
+ *   the composition size for each preset).
  * - duration-matches-timeline: the file lasts as long as the timeline, within one frame.
  * - frame-count-matches-timeline: ffmpeg decodes exactly the timeline's frame count.
  * - audio-present: both audio channels carry sound (decoded RMS above MIN_AUDIO_RMS_DB).
@@ -77,6 +77,8 @@ export const JUNCTION_TOLERANCE_US = 1_000;
 /** A channel whose decoded RMS is at or below this is silent. The fixture's tone is about -21 dB. */
 export const MIN_AUDIO_RMS_DB = -50;
 export const EXPECTED_AUDIO_CHANNELS = 2;
+/** Every export preset uses this AAC sample rate. */
+export const EXPECTED_AUDIO_SAMPLE_RATE = 48_000;
 
 /** The Monitor capture and export frames are read at these places; a clip shorter than this cannot be sampled. */
 const MIN_SAMPLED_SPAN_FRAMES = 4;
@@ -314,7 +316,11 @@ function assetNames(documents: readonly Record<string, unknown>[]): Map<string, 
   for (const document of documents) {
     if (!isRecord(document.assets)) continue;
     for (const asset of Object.values(document.assets)) {
-      if (isRecord(asset) && typeof asset.id === 'string' && typeof asset.displayName === 'string') {
+      if (
+        isRecord(asset) &&
+        typeof asset.id === 'string' &&
+        typeof asset.displayName === 'string'
+      ) {
         names.set(asset.id, asset.displayName);
       }
     }
@@ -362,7 +368,8 @@ export function timelineFactsFrom(stores: Stores): TimelineFacts {
     throw new Error('the browser storage names no open project');
   }
   const timeline = latestDocument(stores[TIMELINE_LOG_KEY], 'timeline log', projectId);
-  if (timeline === undefined) throw new Error(`the stored timeline has no snapshot of ${projectId}`);
+  if (timeline === undefined)
+    throw new Error(`the stored timeline has no snapshot of ${projectId}`);
   const visual = latestDocument(stores[VISUAL_LOG_KEY], 'visual log', projectId);
   const documents = visual === undefined ? [timeline] : [timeline, visual];
 
@@ -421,7 +428,10 @@ export function timelineFactsFrom(stores: Stores): TimelineFacts {
       });
     }
   }
-  const preset = visual !== undefined && typeof visual.exportPreset === 'string' ? visual.exportPreset : undefined;
+  const preset =
+    visual !== undefined && typeof visual.exportPreset === 'string'
+      ? visual.exportPreset
+      : undefined;
   return {
     projectId,
     width,
@@ -465,7 +475,9 @@ export function placementOf(facts: TimelineFacts, names: SemanticsNames): Placem
   const video = clipNamed(facts, names.videoName);
   const still = clipNamed(facts, names.stillName);
   if (video.trackId !== still.trackId) {
-    throw new Error(`the still is on track ${still.trackId}, not on the clip's track ${video.trackId}`);
+    throw new Error(
+      `the still is on track ${still.trackId}, not on the clip's track ${video.trackId}`,
+    );
   }
   const videoEndUs = video.startUs + video.durationUs;
   if (Math.abs(still.startUs - videoEndUs) > JUNCTION_TOLERANCE_US) {
@@ -480,8 +492,7 @@ export function placementOf(facts: TimelineFacts, names: SemanticsNames): Placem
 export function dissolveOf(facts: TimelineFacts, placement: Placement): FactTransition {
   const between = facts.transitions.filter(
     (transition) =>
-      transition.leftClipId === placement.video.id &&
-      transition.rightClipId === placement.still.id,
+      transition.leftClipId === placement.video.id && transition.rightClipId === placement.still.id,
   );
   if (between.length !== 1) {
     throw new Error(`the timeline holds ${between.length} transitions between the clips, not 1`);
@@ -645,8 +656,10 @@ export function streamLayoutBlockers(
   if (!probe.formatName.split(',').includes('mp4')) {
     blockers.push(`the container is ${probe.formatName || 'unknown'}, not mp4`);
   }
-  if (probe.video.length !== 1) blockers.push(`there are ${probe.video.length} video streams, not 1`);
-  if (probe.audio.length !== 1) blockers.push(`there are ${probe.audio.length} audio streams, not 1`);
+  if (probe.video.length !== 1)
+    blockers.push(`there are ${probe.video.length} video streams, not 1`);
+  if (probe.audio.length !== 1)
+    blockers.push(`there are ${probe.audio.length} audio streams, not 1`);
   const video = probe.video[0];
   if (video !== undefined) {
     if (video.codec !== 'h264') blockers.push(`the video codec is ${video.codec}, not h264`);
@@ -663,6 +676,11 @@ export function streamLayoutBlockers(
       blockers.push(`the audio has ${audio.channels} channels, not ${EXPECTED_AUDIO_CHANNELS}`);
     }
     if (!(audio.sampleRate > 0)) blockers.push('the audio has no sample rate');
+    else if (audio.sampleRate !== EXPECTED_AUDIO_SAMPLE_RATE) {
+      blockers.push(
+        `the audio sample rate is ${audio.sampleRate} Hz, not ${EXPECTED_AUDIO_SAMPLE_RATE} Hz`,
+      );
+    }
   }
   return blockers;
 }
@@ -690,7 +708,8 @@ export function durationBlockers(
 }
 
 export function frameCountBlockers(decoded: number, expectation: SemanticsExpectation): string[] {
-  if (!Number.isSafeInteger(decoded) || decoded < 0) return ['the decoded frame count was not read'];
+  if (!Number.isSafeInteger(decoded) || decoded < 0)
+    return ['the decoded frame count was not read'];
   return decoded === expectation.frameCount
     ? []
     : [`ffmpeg decoded ${decoded} frames, not the timeline's ${expectation.frameCount}`];
@@ -774,7 +793,8 @@ function orderedChecks(
   required: readonly string[],
 ): AttendedCheck[] {
   return required.map(
-    (name): AttendedCheck => results.get(name) ?? { name, status: 'not-run', detail: 'not reached' },
+    (name): AttendedCheck =>
+      results.get(name) ?? { name, status: 'not-run', detail: 'not reached' },
   );
 }
 
@@ -837,8 +857,16 @@ export async function runExportMediaSemantics(
   }
   const refusals = [
     ...beforeReading.readErrors,
-    ...guardBlockers(before, 'before launch', undefined, beforeReading.unread, input.approvedOwnerFiles),
-    ...(downloadsError === undefined ? [] : [`could not read the Downloads folder: ${downloadsError}`]),
+    ...guardBlockers(
+      before,
+      'before launch',
+      undefined,
+      beforeReading.unread,
+      input.approvedOwnerFiles,
+    ),
+    ...(downloadsError === undefined
+      ? []
+      : [`could not read the Downloads folder: ${downloadsError}`]),
   ];
   const finish = (parts: {
     readonly verdict: ScenarioVerdict;
@@ -864,7 +892,13 @@ export async function runExportMediaSemantics(
   });
   if (refusals.length > 0) {
     note('refused', refusals.join('; '));
-    return finish({ verdict: 'refused', launches: 0, after: undefined, blockers: refusals, receipt: undefined });
+    return finish({
+      verdict: 'refused',
+      launches: 0,
+      after: undefined,
+      blockers: refusals,
+      receipt: undefined,
+    });
   }
 
   const sessions: Session[] = [];
@@ -885,7 +919,9 @@ export async function runExportMediaSemantics(
     }
   };
   const captureFailure = async (check: string): Promise<void> => {
-    const open = [...sessions].reverse().find((session) => !session.closed && session.page !== undefined);
+    const open = [...sessions]
+      .reverse()
+      .find((session) => !session.closed && session.page !== undefined);
     if (open?.page === undefined) return;
     try {
       const snapshot = await withTimeout(open.page.snapshot(), 45_000);
@@ -919,17 +955,26 @@ export async function runExportMediaSemantics(
     await stage('export-completed', () => page.waitForLibrary());
     const library = await stage('export-completed', () => page.libraryDirectory());
     if (normalizeDirectory(library) !== normalizeDirectory(input.library)) {
-      throw new StepFailure('export-completed', `the profile's library is ${library}, not ${input.library}`);
+      throw new StepFailure(
+        'export-completed',
+        `the profile's library is ${library}, not ${input.library}`,
+      );
     }
     await stage('export-completed', () => page.createProject(names.projectTitle));
     note('project-created', `${names.projectTitle} on the scratch library ${library}`);
 
     // Place the stereo clip, then the still where the clip ends, filling the frame.
     const readFacts = (): Promise<TimelineFacts> =>
-      stage('export-completed', async () => timelineFactsFrom(await page.readStorage(TIMELINE_FACT_KEYS)));
-    await stage('export-completed', () => page.importAndPlace(names.videoName, 'video/mp4', videoBytes));
+      stage('export-completed', async () =>
+        timelineFactsFrom(await page.readStorage(TIMELINE_FACT_KEYS)),
+      );
+    await stage('export-completed', () =>
+      page.importAndPlace(names.videoName, 'video/mp4', videoBytes),
+    );
     const afterVideo = await readFacts();
-    const placedVideo = await stage('export-completed', async () => clipNamed(afterVideo, names.videoName));
+    const placedVideo = await stage('export-completed', async () =>
+      clipNamed(afterVideo, names.videoName),
+    );
     const videoEndFrame = Math.round(
       ((placedVideo.startUs + placedVideo.durationUs) * afterVideo.frameRate) / 1_000_000,
     );
@@ -954,9 +999,15 @@ export async function runExportMediaSemantics(
       const notice = await page.addDissolve(names.stillLabel);
       facts = await readFacts();
       transition = dissolveOf(facts, placement);
-      note('dissolve-added', `${transition.type}, ${transition.durationUs} µs; the app said "${notice}"`);
+      note(
+        'dissolve-added',
+        `${transition.type}, ${transition.durationUs} µs; the app said "${notice}"`,
+      );
     } catch (error) {
-      fail('dissolve-checked', `the Dissolve was not added between the clips: ${describeError(error)}`);
+      fail(
+        'dissolve-checked',
+        `the Dissolve was not added between the clips: ${describeError(error)}`,
+      );
       await captureFailure('dissolve-checked');
     }
 
@@ -1054,14 +1105,20 @@ export async function runExportMediaSemantics(
     const size = compareSizeFor(expectation.width, expectation.height);
     const exportFrame = (frame: number): Promise<RgbFrame> =>
       driver.frameOf(
-        { kind: 'run-video', name: SEMANTICS_EXPORT_FILE, seconds: seekSecondsOf(frame, expectation.frameRate) },
+        {
+          kind: 'run-video',
+          name: SEMANTICS_EXPORT_FILE,
+          seconds: seekSecondsOf(frame, expectation.frameRate),
+        },
         size,
       );
     const previewFrame = (frame: number): Promise<RgbFrame> => {
       const name = previews.get(frame);
       if (name === undefined) {
         return Promise.reject(
-          new Error(`the Monitor capture of frame ${frame} failed: ${previewErrors.get(frame) ?? 'not taken'}`),
+          new Error(
+            `the Monitor capture of frame ${frame} failed: ${previewErrors.get(frame) ?? 'not taken'}`,
+          ),
         );
       }
       return driver.frameOf({ kind: 'run-picture', name }, size);
@@ -1114,7 +1171,9 @@ export async function runExportMediaSemantics(
       };
       const problems = [
         ...(judgement.passed ? [] : [judgement.reason]),
-        ...(monitor.passed ? [] : [`the Monitor at frame ${sample.frame} differs: ${monitor.reason}`]),
+        ...(monitor.passed
+          ? []
+          : [`the Monitor at frame ${sample.frame} differs: ${monitor.reason}`]),
       ];
       if (problems.length > 0) throw new Error(problems.join('; '));
       return (
@@ -1155,7 +1214,12 @@ export async function runExportMediaSemantics(
   if (allPassed && blockers.length === 0 && artifacts.length === EXPECTED_ARTIFACTS) {
     const candidate: AttendedReceipt = {
       schema: ATTENDED_RECEIPT_SCHEMA,
-      scenario: { id: EXPORT_SEMANTICS_SCENARIO, status: 'passed', firstAttemptPassed: true, retries: 0 },
+      scenario: {
+        id: EXPORT_SEMANTICS_SCENARIO,
+        status: 'passed',
+        firstAttemptPassed: true,
+        retries: 0,
+      },
       candidateSha: input.candidateSha,
       app: { exeSha256: input.exeSha256, unpackedDir: input.unpackedDir },
       run: {
