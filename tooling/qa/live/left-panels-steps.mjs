@@ -94,11 +94,18 @@ export async function textTemplates(page, ctx) {
         (state) => state.clips.length > before.clips.length,
         `${labels[0]} did not add a timeline element`,
       );
-      return `${labels[0]} added element ${addedClipId(before, after)}`;
+      const clipId = addedClipId(before, after);
+      const tag = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/gu, '-')
+        .replace(/^-|-$/gu, '');
+      const exported = await finishWithPreviewAndExport(page, ctx, rowId, `text-${tag}`, {
+        tag: `text-${tag}`,
+      });
+      return `${labels[0]} added element ${clipId}; ${exported}`;
     },
   );
-  const exported = await finishWithPreviewAndExport(page, ctx, rowId, 'text-templates');
-  return { message: `${outcome.message}; ${exported}`, parts: outcome.parts };
+  return { message: outcome.message, parts: outcome.parts };
 }
 
 export async function editText(page, ctx) {
@@ -128,7 +135,9 @@ export async function editText(page, ctx) {
   await editor.waitFor({ state: 'visible' });
   const stored = await page.locator(LEFT_SEL.textContent).first().inputValue();
   if (stored !== TEXT_SAMPLE) {
-    throw new Error(`the typed text was not kept: the field reads "${stored}", expected "${TEXT_SAMPLE}"`);
+    throw new Error(
+      `the typed text was not kept: the field reads "${stored}", expected "${TEXT_SAMPLE}"`,
+    );
   }
   const exported = await finishWithPreviewAndExport(page, ctx, rowId, 'edit-text');
   return `typed "${TEXT_SAMPLE}" into element ${textClipId} and read it back; ${exported}`;
@@ -166,9 +175,7 @@ export async function audioPresets(page, ctx) {
   const rowId = 'D-068';
   await ensureTimelineClip(page, ctx, rowId);
   await openCreateTool(page, 'audio');
-  const names = await page
-    .locator(`${LEFT_SEL.audioChoices} strong`)
-    .evaluateAll(readNodeTexts);
+  const names = await page.locator(`${LEFT_SEL.audioChoices} strong`).evaluateAll(readNodeTexts);
   if (names.length === 0) throw new Error('the Audio panel lists no enhancement preset');
   const outcome = await runParts(
     rowId,
@@ -198,13 +205,18 @@ export async function audioPresets(page, ctx) {
         const text = (await page.locator(LEFT_SEL.audioError).first().textContent()) ?? '';
         throw new Error(`applying ${name} showed an error: ${text.trim().slice(0, 160)}`);
       }
-      return `${name} applied without an error`;
+      const tag = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/gu, '-')
+        .replace(/^-|-$/gu, '');
+      const exported = await finishWithPreviewAndExport(page, ctx, rowId, `audio-${tag}`, {
+        tag: `audio-${tag}`,
+        audio: mediaHasAudio(ctx.media) ? true : 'any',
+      });
+      return `${name} applied without an error; ${exported}`;
     },
   );
-  const exported = await finishWithPreviewAndExport(page, ctx, rowId, 'audio-presets', {
-    audio: mediaHasAudio(ctx.media) ? true : 'any',
-  });
-  return { message: `${outcome.message}; ${exported}`, parts: outcome.parts };
+  return { message: outcome.message, parts: outcome.parts };
 }
 
 export async function templatesApply(page, ctx) {
@@ -231,7 +243,7 @@ export async function templatesApply(page, ctx) {
   );
   if (!asked) {
     // Applied at once: record the screenshot and export evidence, then fail as a defect candidate.
-    await finishWithPreviewAndExport(page, ctx, rowId, 'template-no-confirm').catch(() => undefined);
+    await finishWithPreviewAndExport(page, ctx, rowId, 'template-no-confirm');
     throw new Error(
       `applying a template added ${after.clips.length - before.clips.length} element(s) with no confirm box; the matrix (D-069) and card T-A07 expect a confirm box`,
     );

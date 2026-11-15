@@ -93,6 +93,7 @@ export async function effectsAddChangeRemove(page, ctx, deps = {}) {
   const md5 = deps.md5 ?? firstFrameMd5;
   const base = await ensureTimelineClip(page, ctx, rowId);
   await selectClipById(page, base.clips[0].id);
+  await previewShot(page, ctx, rowId, 'effect-baseline');
   const baseline = await exportAndProbe(page, ctx, rowId, { tag: 'without-effect' }, deps.export);
   const baselineHash = md5(baseline.path);
   await selectClipById(page, base.clips[0].id);
@@ -116,7 +117,14 @@ export async function effectsAddChangeRemove(page, ctx, deps = {}) {
         await items.first().waitFor({ state: 'attached' });
         state.effectId = await items.first().getAttribute('data-effect-id');
         await previewShot(page, ctx, rowId, 'effect-added');
-        return `${label} added; the Inspector lists effect ${state.effectId}`;
+        const addedExport = await exportAndProbe(
+          page,
+          ctx,
+          rowId,
+          { tag: 'effect-added' },
+          deps.export,
+        );
+        return `${label} added; the Inspector lists effect ${state.effectId}; ${addedExport.message}`;
       }
       if (state.effectId === undefined) {
         throw notReachable(rowId, 'the add step did not finish, so there is no effect to work on');
@@ -137,7 +145,13 @@ export async function effectsAddChangeRemove(page, ctx, deps = {}) {
           throw new Error(`the parameter reads ${read} after setting ${state.target}`);
         }
         await previewShot(page, ctx, rowId, 'effect-changed');
-        const withEffect = await exportAndProbe(page, ctx, rowId, { tag: 'with-effect' }, deps.export);
+        const withEffect = await exportAndProbe(
+          page,
+          ctx,
+          rowId,
+          { tag: 'with-effect' },
+          deps.export,
+        );
         const hash = md5(withEffect.path);
         if (hash === baselineHash) {
           throw new Error(
@@ -149,7 +163,14 @@ export async function effectsAddChangeRemove(page, ctx, deps = {}) {
       await item.locator(FX_SEL.effectRemove).first().click();
       await page.locator(FX_SEL.effectItem).first().waitFor({ state: 'detached' });
       await previewShot(page, ctx, rowId, 'effect-removed');
-      return `effect ${state.effectId} removed; the Inspector lists none`;
+      const removedExport = await exportAndProbe(
+        page,
+        ctx,
+        rowId,
+        { tag: 'effect-removed' },
+        deps.export,
+      );
+      return `effect ${state.effectId} removed; the Inspector lists none; ${removedExport.message}`;
     },
   );
   return { message: `${outcome.message}; baseline ${baseline.message}`, parts: outcome.parts };
@@ -158,11 +179,15 @@ export async function effectsAddChangeRemove(page, ctx, deps = {}) {
 export async function clipAudioControls(page, ctx, deps = {}) {
   const rowId = 'D-058';
   if (!mediaHasAudio(ctx.media)) {
-    throw blockedRow(rowId, 'needs --media <video fixture with audio> (a name with "audio", not "silent")');
+    throw blockedRow(
+      rowId,
+      'needs --media <video fixture with audio> (a name with "audio", not "silent")',
+    );
   }
   const base = await ensureTimelineClip(page, ctx, rowId);
   const measure = deps.measure ?? measureMeanVolumeDb;
   await selectClipById(page, base.clips[0].id);
+  await previewShot(page, ctx, rowId, 'gain-1');
   const full = await exportAndProbe(page, ctx, rowId, { tag: 'gain-1', audio: true }, deps.export);
   const fullDb = measure(full.path);
   await selectClipById(page, base.clips[0].id);
@@ -172,15 +197,26 @@ export async function clipAudioControls(page, ctx, deps = {}) {
   await gain.press('Enter');
   await blurFocus(page);
   if (Number(await gain.inputValue()) !== 0.5) throw new Error('Volume did not keep 0.5');
-  const half = await exportAndProbe(page, ctx, rowId, { tag: 'gain-0.5', audio: true }, deps.export);
+  await previewShot(page, ctx, rowId, 'gain-0.5');
+  const half = await exportAndProbe(
+    page,
+    ctx,
+    rowId,
+    { tag: 'gain-0.5', audio: true },
+    deps.export,
+  );
   const halfDb = measure(half.path);
   const drop = fullDb - halfDb;
   if (Math.abs(drop - 6.02) > 2) {
-    throw new Error(`Volume 0.5 changed the export level by ${drop.toFixed(1)} dB, expected about 6 dB (${fullDb} -> ${halfDb})`);
+    throw new Error(
+      `Volume 0.5 changed the export level by ${drop.toFixed(1)} dB, expected about 6 dB (${fullDb} -> ${halfDb})`,
+    );
   }
   const mute = page.getByRole('button', { name: /^(On|Muted)$/u }).first();
   await mute.click();
-  if ((await mute.getAttribute('aria-pressed')) !== 'true') throw new Error('Mute did not switch on');
+  if ((await mute.getAttribute('aria-pressed')) !== 'true')
+    throw new Error('Mute did not switch on');
+  await previewShot(page, ctx, rowId, 'muted');
   const muted = await exportAndProbe(page, ctx, rowId, { tag: 'muted' }, deps.export);
   const hasAudio = (muted.probe.streams ?? []).some((stream) => stream.codec_type === 'audio');
   let mutedNote = 'the muted export has no audio stream';
@@ -201,7 +237,11 @@ export async function clipAudioControls(page, ctx, deps = {}) {
 
 async function openLooks(page) {
   await clickMenuItem(page, 'View', 'Joy Code');
-  await page.locator(FX_SEL.looksButton).filter({ hasText: /^Looks$/u }).first().click();
+  await page
+    .locator(FX_SEL.looksButton)
+    .filter({ hasText: /^Looks$/u })
+    .first()
+    .click();
   await page.locator(FX_SEL.looksRegion).first().waitFor({ state: 'visible' });
 }
 
@@ -212,7 +252,8 @@ async function approveLook(page) {
     if (await approve.isEnabled()) break;
     await page.waitForTimeout(500);
   }
-  if (!(await approve.isEnabled())) throw new Error('the Look preview never became ready to approve');
+  if (!(await approve.isEnabled()))
+    throw new Error('the Look preview never became ready to approve');
   await approve.click();
 }
 
@@ -254,23 +295,36 @@ export async function joyCodeLooks(page, ctx, deps = {}) {
         }
         await page.getByRole('button', { name: `Run ${flow.title}`, exact: true }).click();
         await approveLook(page);
-        if ((await appliedCount(page)) < 1) throw new Error(`${flow.title} is not listed under Applied`);
+        if ((await appliedCount(page)) < 1)
+          throw new Error(`${flow.title} is not listed under Applied`);
         flow.applied = true;
         await previewShot(page, ctx, rowId, 'look-applied');
-        const exported = await exportAndProbe(page, ctx, rowId, { tag: 'look-applied' }, deps.export);
+        const exported = await exportAndProbe(
+          page,
+          ctx,
+          rowId,
+          { tag: 'look-applied' },
+          deps.export,
+        );
         await openLooks(page);
         return `${flow.title} applied and listed; ${exported.message}`;
       }
-      if (!flow.applied) throw notReachable(rowId, 'the apply step did not finish, so there is no Look to work on');
+      if (!flow.applied)
+        throw notReachable(rowId, 'the apply step did not finish, so there is no Look to work on');
       await page.locator('#living-looks-tab-applied').click();
       if (name === 'update') {
-        const control = page.locator(FX_SEL.appliedControl).first().locator('input, select').first();
+        const control = page
+          .locator(FX_SEL.appliedControl)
+          .first()
+          .locator('input, select')
+          .first();
         const kind = await control.evaluate(readControlKind);
         if (kind === 'select') {
           const values = await control.evaluate(readOptionValues);
           const current = await control.inputValue();
           const other = values.find((value) => value !== current);
-          if (other === undefined) throw notReachable(rowId, 'the first Look control has one choice only');
+          if (other === undefined)
+            throw notReachable(rowId, 'the first Look control has one choice only');
           await control.selectOption(other);
         } else if (kind === 'checkbox') {
           await control.click();
@@ -280,7 +334,14 @@ export async function joyCodeLooks(page, ctx, deps = {}) {
         }
         await approveLook(page);
         await previewShot(page, ctx, rowId, 'look-updated');
-        return `a control of ${flow.title} changed and the update was approved`;
+        const exported = await exportAndProbe(
+          page,
+          ctx,
+          rowId,
+          { tag: 'look-updated' },
+          deps.export,
+        );
+        return `a control of ${flow.title} changed and the update was approved; ${exported.message}`;
       }
       if (name === 'reset') {
         const reset = page.locator(FX_SEL.appliedReset).first();
@@ -293,20 +354,29 @@ export async function joyCodeLooks(page, ctx, deps = {}) {
         await reset.click();
         await approveLook(page);
         await previewShot(page, ctx, rowId, 'look-reset');
-        return `${flow.title} reset to its Look control`;
+        const exported = await exportAndProbe(page, ctx, rowId, { tag: 'look-reset' }, deps.export);
+        return `${flow.title} reset to its Look control; ${exported.message}`;
       }
       const before = await appliedCount(page);
       await page.locator(FX_SEL.appliedDetach).first().click();
       await page.waitForTimeout(300);
       const detached = await page.locator(FX_SEL.appliedLook).count();
-      if (detached !== before - 1) throw new Error(`Detach left ${detached} Look(s), expected ${before - 1}`);
+      if (detached !== before - 1)
+        throw new Error(`Detach left ${detached} Look(s), expected ${before - 1}`);
       await previewShot(page, ctx, rowId, 'look-detached');
       await blurFocus(page);
       await page.keyboard.press('Control+KeyZ');
       const restored = await page.locator(FX_SEL.appliedLook).count();
-      if (restored !== before) throw new Error(`Undo after Detach left ${restored} Look(s), expected ${before}`);
+      if (restored !== before)
+        throw new Error(`Undo after Detach left ${restored} Look(s), expected ${before}`);
       await page.locator(FX_SEL.appliedDetach).first().click();
-      const exported = await exportAndProbe(page, ctx, rowId, { tag: 'look-detached' }, deps.export);
+      const exported = await exportAndProbe(
+        page,
+        ctx,
+        rowId,
+        { tag: 'look-detached' },
+        deps.export,
+      );
       return `Detach removed the Look and one Undo restored it; detached again; ${exported.message}`;
     },
   );

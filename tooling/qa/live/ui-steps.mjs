@@ -32,6 +32,7 @@ export function exactRegex(text) {
 /** Page-side: the open header menu (group name, items with label, shortcut and disabled). */
 export function readOpenMenu() {
   const visible = (element) => {
+    if (element === null) return false;
     const box = element.getBoundingClientRect();
     return box.width > 0 && box.height > 0;
   };
@@ -72,6 +73,7 @@ export function readPalette() {
 /** Page-side: the things the shortcut and menu rows compare before and after a key or a click. */
 export function readEditorSnapshot() {
   const visible = (element) => {
+    if (element === null) return false;
     const box = element.getBoundingClientRect();
     return box.width > 0 && box.height > 0;
   };
@@ -88,7 +90,7 @@ export function readEditorSnapshot() {
           .trim();
   const sign = (selector) => {
     const element = document.querySelector(selector);
-    const html = element === null ? '' : element.innerHTML;
+    const html = element === null ? '' : element.outerHTML;
     let hash = 0;
     for (let index = 0; index < html.length; index += 1) {
       hash = (hash * 31 + html.charCodeAt(index)) | 0;
@@ -103,7 +105,8 @@ export function readEditorSnapshot() {
       selected: element.getAttribute('aria-pressed') === 'true',
       trackId: element.closest('[data-track-id]')?.getAttribute('data-track-id') ?? null,
     })),
-    clipSignature: sign('.timeline-clip[data-clip-id]') + (firstClip === null ? '' : firstClip.className),
+    clipSignature:
+      sign('.timeline-clip[data-clip-id]') + (firstClip === null ? '' : firstClip.className),
     zoom: zoomSlider === null ? null : zoomSlider.value,
     playing: [...document.querySelectorAll('.monitor-transport button')].some(
       (button) => button.getAttribute('aria-label') === 'Pause',
@@ -120,9 +123,12 @@ export function readEditorSnapshot() {
     splitTool: pressed('button[aria-label="Split tool"]'),
     loop: pressed('button[aria-label^="Loop on or off"]'),
     rangeSignature: `${sign('.timeline-ruler')}|${sign('.monitor-transport')}`,
+    monitorSignature: sign('.monitor-selection-overlay') + sign('.monitor-transform-box'),
+    monitorFocus: Boolean(document.activeElement?.closest?.('.monitor-canvas-wrap')),
+    focusedElement: `${document.activeElement?.tagName ?? ''}:${document.activeElement?.getAttribute?.('aria-label') ?? ''}:${document.activeElement?.className?.toString?.() ?? ''}`,
     fullscreen: document.fullscreenElement !== null,
-    paletteOpen: document.querySelector('section.palette[role="dialog"]') !== null,
-    shortcutsOpen: document.querySelector('.shortcuts-overlay[role="dialog"]') !== null,
+    paletteOpen: visible(document.querySelector('section.palette[role="dialog"]')),
+    shortcutsOpen: visible(document.querySelector('.shortcuts-overlay[role="dialog"]')),
     dialogs: [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')]
       .filter(visible)
       .map((element) =>
@@ -196,7 +202,11 @@ export async function waitForSnapshot(page, predicate, why, { attempts = 20, ste
 }
 
 export async function openMenuGroup(page, label) {
-  await page.locator(SEL.menuTrigger).filter({ hasText: exactRegex(label) }).first().click();
+  await page
+    .locator(SEL.menuTrigger)
+    .filter({ hasText: exactRegex(label) })
+    .first()
+    .click();
   await page.locator(SEL.dropdown).first().waitFor({ state: 'visible' });
   const menu = await readMenu(page);
   if (!menu.open || menu.group !== label) {
@@ -221,7 +231,11 @@ export async function menuItem(page, group, label) {
 export async function clickMenuItem(page, group, label) {
   const { item } = await menuItem(page, group, label);
   if (item.disabled) throw new Error(`${group} > ${label} is greyed out, so it cannot be clicked`);
-  await page.locator(SEL.menuItemLabel).filter({ hasText: exactRegex(label) }).first().click();
+  await page
+    .locator(SEL.menuItemLabel)
+    .filter({ hasText: exactRegex(label) })
+    .first()
+    .click();
   return item;
 }
 
@@ -329,7 +343,9 @@ export async function ensureTimelineClip(page, ctx, rowId, { minClips = 1 } = {}
       );
     }
     if (added >= minClips + 1) {
-      throw new Error(`adding ${basename(ctx.media)} did not put ${minClips} clip(s) on the timeline`);
+      throw new Error(
+        `adding ${basename(ctx.media)} did not put ${minClips} clip(s) on the timeline`,
+      );
     }
     const name = basename(resolve(ctx.media));
     await openCreateTool(page, 'media');
