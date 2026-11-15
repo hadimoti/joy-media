@@ -1,0 +1,139 @@
+# JOY Media v1.1.1
+
+JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video editor for Windows, with no account and no server. This version adds Monitor tools, a full colour panel, real thumbnails and waveforms on the timeline, and many fixes found by using the app by hand.
+
+## Monitor and colour
+
+### Monitor
+
+- Zoom the Monitor with the mouse wheel, from 10 percent to 800 percent. The zoom goes toward the pointer.
+- Ctrl+0 fits the picture. Ctrl+1 shows it at 100 percent. Ctrl++ and Ctrl+- zoom in and out.
+- Hold Space and drag to move the picture. It does not start playback.
+- Click a clip in the Monitor to select it. A box appears with handles to scale and rotate it.
+- With a clip selected in the Monitor, the arrow keys move it by one pixel. Shift+arrow moves it by ten.
+- Fit and Fill buttons put a clip into the frame.
+- When you change the canvas (for example 16:9 to 9:16), JOY Media asks how to reframe the clips: Fit, Fill or Keep positions. Undo returns the old canvas.
+
+### Colour
+
+- The Colour panel has wheels, curves, HSL bands with an eyedropper, six looks, and a LUT amount.
+- A grade can be set for the whole output or for one clip, and the Monitor shows it.
+- Every colour control can be reset, undone, keyframed and saved with the project (checked in tests).
+
+### Filters, effects and transitions
+
+- Each filter and effect is tested one by one against a real picture: 15 of 15 filters and 18 of 18 effects pass.
+- Filters and effects each have one home. The 20 items that appeared in both lists now appear once.
+- There are 38 transitions in 8 groups: Basic fades, Wipes, Slides and pushes, Zooms and spins, Shapes and masks, Glitch and digital, Light and glow, Creative. 35 pass every check. The three that do not are listed under known limits.
+
+## Timeline
+
+- Clips have a colour by type: video, audio, text, effect.
+- Video clips show small thumbnails. Audio clips show a waveform. Thumbnails are whole tiles only, and they hide on clips that are too narrow.
+- The sound of each video clip shows as a strip on the first audio row. This is display only. You cannot move or edit the strip. Strips of clips that play together are drawn in separate bands.
+- The column with track names can be resized by dragging. Double-click the edge to reset it. The width is remembered.
+- Audio rows are at least 56 pixels high. The track headers stay in view while you scroll.
+- When you drag clips, a dashed ghost shows where they will land. A red ghost means the drop is refused, and a message says why. A clip dropped on a taken spot lands at the nearest free spot of that row. A group keeps its shape.
+- Ctrl+C, Ctrl+X and Ctrl+V work. Paste lands at the earliest free spot after the playhead, and the clips keep their distances.
+- Ctrl+D duplicates every selected clip. Shift+click extends the selection.
+- Timeline keys: V select tool, B split tool, M marker, T add visual track, A add audio track, N snapping, = and - zoom, Shift+Z fit, Shift+F freeze frame, Shift+R reverse, Shift+Delete ripple delete, Ctrl+I import media. The Keyboard Shortcuts dialog lists them.
+- The track colour menu is a small row of dots.
+- The eye button on a track now hides text and stickers too, in the picture and in the export.
+
+## Text and captions
+
+- Text and stickers draw over the video, and only while their clip plays.
+- A gradient on text has a start dot and an end dot in the Monitor. Drag either dot, also outside the text.
+- Clicking a colour swatch opens a colour picker: a square, a hue bar and a hex field. It replaces the old colour input in Text, Captions and the Inspector.
+- Captions are drawn in the Monitor and in the export as soon as you add the first caption track. The panel switch can turn this off. Caption styles Clean, Karaoke Pop and RTL Classic and the size slider work.
+- Auto captions use the selected clip, or the clip under the playhead if none is selected. The words are placed where the clip plays, with its trim and speed. Auto captions need a speech-to-text provider that you connect in Joy Code Settings.
+- Caption sliders keep the value inside their range.
+- The Inspector names a text clip by its words, not by an id.
+
+## Joy Code
+
+- Every failure has a plain message that says what happened. If the provider gave a reason, the message keeps it.
+- Joy Code does not start a run when no model is chosen.
+- A sign-in that stopped can be started again.
+- Joy Code Settings use one layout. The temperature and token fields are replaced by an effort level: Auto, Low, Medium or High. Older saved numbers show as Custom.
+- The model list loads as soon as you choose a provider. The model field stays off until then.
+- A custom endpoint needs one tick to confirm that you trust it.
+- Joy Code opens as wide as the Inspector column.
+
+## Files and projects
+
+- The Projects page scrolls, has window buttons, and can be used to drag the window. The format picker no longer pushes Create and Cancel off the screen.
+- Drag files from Windows onto a timeline lane, onto the area under the tracks (this makes a new track), onto the Monitor, or onto the Media panel. A locked track refuses the drop. A dashed outline shows the target.
+- Dropping on the Media panel only imports. It does not place clips.
+- The import message counts only new files: "N files added to the media library, M already there."
+- A project reopens with the playhead where you left it.
+- A saved project reopens with the same clips, tracks, titles, captions, curves and markers.
+- Export MP4 was checked on a 71-second project: H.264 1920x1080, AAC stereo, it decodes without error, and six frames match the Monitor.
+
+## Fixes
+
+### Pictures and effects
+
+- The Monitor was black whenever the project had a colour grade. Fixed.
+- A grade with a value such as Exposure +0.45 turned the picture into blue and magenta bands. Fixed.
+- Clip colour grades did nothing in the app. Fixed.
+- Curves came out too dark and tinted. Fixed.
+- The Monitor kept the last video frame over a gap. It now shows the background.
+- Eleven effects drew nothing in the preview, and now draw: Pixelate, Mosaic, Radial Blur, Tilt Shift, Bayer Dither, Halftone, Contour Map, Glyph Matrix, Scatter Mosaic, Tone Geometry, Pixel Sort.
+- Nine effects had no picture at all and now work: Color Overlay, Curves, Bulge, Twist, Ripple, CRT, Edge Detect, Emboss, Unsharp Mask.
+- Bloom now adds a glow around bright areas, and its Threshold slider works. Before, it blurred the whole picture.
+
+**Saved projects can look different.** These change the picture of an existing project: Bloom, Sepia, Vibrance, Brightness / Contrast (when not at 0), Hue / Saturation (when saturation is not 0), and the nine effects listed above. In every case the old picture was wrong, blank or missing.
+
+### Editing
+
+- S, Ctrl+D, N and Ctrl+Z did nothing after you clicked a clip. Fixed.
+- The snapping button and the N key did nothing. Fixed.
+- Shift+Delete deleted without closing the gap. Fixed.
+- Setting a clip to 2x and back to 1x made it one microsecond longer, and the change was refused when the next clip touched. Fixed.
+- Plain Left and Right now move a selected clip by one pixel, and step the playhead when nothing is selected.
+- Dragging an effect or filter card onto a clip no longer starts the browser's picture drag.
+- The Monitor zoom keys Ctrl+0, Ctrl+1, Ctrl++ and Ctrl+- did not work. Fixed.
+
+### Menus and panels
+
+- Header menus open one at a time. Escape closes a menu and returns focus to its title.
+- The command palette opens empty each time.
+- The Clip menu has Split at Playhead, Duplicate Clip, Delete and Speed. The Edit menu has Cut, Copy, Paste and Delete.
+- Every dock tab has its own close button. A closed panel reopens from the View menu in its old place.
+- Monitor footer controls are no longer cut at the bottom.
+- Settings left tabs can no longer scroll out of sight.
+- Connection sections in Settings show the right arrow when closed and down when open.
+- Library panels have no description lines. Cards have a plus button only.
+- Asset view icons: large previews are four squares, the compact grid is nine small squares.
+
+## Known limits
+
+- **Persian and Arabic text is not finished.** Right-to-left shaping and line direction are not correct in titles or captions in the video. This is planned for a later version.
+- **Transitions.** TV Static uses random noise, so the preview and the export cannot match. Kaleidoscope and Ripple: the Speed option showed no change in the test (open). Slide and push transitions are tested with a looser limit for the last frame. Full table: `docs/qa/v1.1.1/TRANSITIONS.md`.
+- **Video clips have no fade.** There are no opacity fade handles on video. Audio fades are set in the Audio panel.
+- **No Detach audio.** The Clip menu cannot split the sound of a video clip into its own audio clip. The audio strips on the first audio row are display only.
+- **Dual Lens Time View has no audio strips.**
+- **Dragging a clip out of JOY Media to Explorer is not offered.**
+- **Text from templates is placed by its top edge**, while the Inspector counts from the centre. Position Y 540 draws the text about half a height low.
+- **Text gradients use anchors.** There is no angle field and no "reset anchors" button.
+- **Smart guides, snapping while you move on the Monitor, text editing in place, crop handles and the right-click menu on the Monitor** are planned for v1.1.2.
+- **Joy Code cannot yet check a finished video frame by frame, and cannot yet make pictures or videos.** These tools are not connected.
+- **Glow** still blurs the whole picture. **Vibrance** is slightly different in the preview and in the command-line render. The Tone Geometry Angle slider does nothing until a shape other than Circle is chosen.
+- The HSL band names do not match their centre angles (Yellow shows 90 degrees, Green 135).
+- The Track Lock button keeps the same name when locked. Its state is shown only to screen readers.
+- Guides on the Monitor work with the mouse only.
+- The web build of the drop progress Cancel button cannot stop the file that is being imported. The desktop app is not affected.
+
+## Not yet checked on screen
+
+These are built and tested in code. They were not yet seen working in the running app when these notes were written.
+
+- Crop numbers cutting the picture in the Monitor and the export.
+- Monitor overlays, guides, background and bars; the preview quality control; frame stepping and the time readout.
+- Colour on old projects compared with v1.1.0, and the graphics card path of the colour engine.
+- The single Format control, the format question for a new project, and the export size following the canvas.
+- Sample projects without missing media, missing-clip marks on the timeline, the Monitor and the Inspector, and the export warning about missing media.
+- The Asset Library Storage dialog and its Open folder button.
+- Scopes in one place, the library card design, transition cards that play the real transition, and the centred Format button with grouped export presets.
+- Animate panel changes, and the panel header menu.

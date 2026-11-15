@@ -1,4 +1,5 @@
 import {
+  isJoyCodeMessageParts,
   loadJoyCodeThreads,
   type JoyCodeHistoryStorage,
   type JoyCodeMessage,
@@ -162,6 +163,7 @@ function isJoyCodeMessage(value: unknown): value is JoyCodeMessage {
     typeof candidate.createdAt === 'string' &&
     candidate.id.length <= MAX_ID_CHARS &&
     candidate.createdAt.length <= MAX_TIMESTAMP_CHARS &&
-    candidate.body.length <= 8_000
+    candidate.body.length <= 8_000 &&
+    isJoyCodeMessageParts(candidate.parts)
   );
 }

@@ -20,12 +20,16 @@ import {
 import { LIVE_ROWS } from './matrix.mjs';
 import { runRows } from './rows.mjs';
 
+import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
+import { executeRow } from './matrix-core.mjs';
+
 const KNOWN_TESTS = new Set([
   'D-000',
   'D-001',
   'D-002',
   ...MONITOR_SUITE_IDS,
   ...LIVE_ROWS.map((row) => row.id),
+  ...MATRIX_IDS,
 ]);
 
 // `D-M*` expands to every known id with that prefix (T-M13 suite).
@@ -180,8 +184,21 @@ export async function run(argv = process.argv.slice(2)) {
       results.push(...(await runRows(runnableRows, taskContext)).map(({ result }) => result));
     }
     let mediaImported = false;
+    // T-A05 and T-A06 rows (desktop-matrix-rows.mjs) build their own result, evidence and defect text.
+    const matrixContext = options.testIds.some((id) => id in MATRIX_ROWS)
+      ? createMatrixContext({ page: session.page, outDir, libraryDir, runId })
+      : undefined;
+    if (matrixContext && !setupProblem) await matrixContext.bridge.installTap().catch(() => false);
     for (const id of options.testIds) {
       if (LIVE_ROWS.some((row) => row.id === id)) continue;
+      if (id in MATRIX_ROWS) {
+        results.push(
+          setupProblem
+            ? { id, status: 'failed', message: setupProblem, screenshot: null, ms: 0, evidence: [] }
+            : await executeRow(MATRIX_ROWS[id], session.page, matrixContext),
+        );
+        continue;
+      }
       const startedAt = Date.now();
       let message = setupProblem ?? '';
       let status = setupProblem ? 'failed' : 'passed';
@@ -253,7 +270,11 @@ export async function run(argv = process.argv.slice(2)) {
       writeFileSync(join(resultDir, 'result.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
       process.stdout.write(`${result.id}: ${result.status} ${result.message}\n`);
     }
-    if (results.some((result) => result.status !== 'passed') && process.exitCode !== 2) {
+    // A "not-reachable" row is a finding for CC to judge, not a failed run.
+    const failedRun = results.some(
+      (result) => result.status !== 'passed' && result.status !== 'not-reachable',
+    );
+    if (failedRun && process.exitCode !== 2) {
       process.exitCode = 1;
     }
   }
