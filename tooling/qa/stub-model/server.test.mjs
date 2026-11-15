@@ -6,6 +6,7 @@ import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { buildSettingsFlowScript } from './settings-flow-script.mjs';
 
 const serverPath = fileURLToPath(new URL('./server.mjs', import.meta.url));
 
@@ -378,4 +379,191 @@ test('returns queued chat responses and a safe error after the script is exhaust
   const exhausted = await request();
   assert.equal(exhausted.status, 503);
   assert.equal((await exhausted.json()).error.code, 'script_exhausted');
+});
+
+test('logs that an Authorization header was sent and its length, never the key itself', async (t) => {
+  const server = await startServer(t, toolResponse());
+  const key = `Bearer joy-stub-key-${randomUUID()}`;
+  const headers = { authorization: key, 'content-type': 'application/json' };
+
+  await globalThis.fetch(`${server.baseUrl}/models`, { headers });
+  await globalThis.fetch(`${server.baseUrl}/models`);
+  await globalThis.fetch(`${server.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: 'joy-stub-model',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What is in this picture?' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,AAECAwQ=' } },
+          ],
+        },
+      ],
+    }),
+  });
+
+  const logText = await readFile(server.logPath, 'utf8');
+  const events = logText
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(events.length, 3);
+  assert.deepEqual(
+    events.map((event) => [event.method, event.authorization_present]),
+    [
+      ['GET', true],
+      ['GET', false],
+      ['POST', true],
+    ],
+  );
+  assert.equal(events[0].authorization_length, key.length);
+  assert.equal(events[1].authorization_length, undefined);
+  assert.equal(events[2].authorization_length, key.length);
+  assert.equal(events[2].image_url_count, 1);
+  assert.equal(logText.includes(key), false);
+  assert.equal(logText.includes(key.slice('Bearer '.length)), false);
+  assert.equal(logText.includes('joy-stub-key-'), false);
+});
+
+test('picks a scripted response by request shape and falls back to the queue in order', async (t) => {
+  const server = await startServer(t, {
+    responses: [
+      { content: 'first queued' },
+      {
+        content: 'probe ack',
+        reusable: true,
+        match: { user_includes: 'capability test', media_part: 'image_url' },
+      },
+      {
+        content: null,
+        match: { user_includes: 'use the tool', tool: 'joy_probe', last_role: 'user' },
+        tool_calls: [
+          { id: 'call_probe', type: 'function', function: { name: 'joy_probe', arguments: '{}' } },
+        ],
+      },
+      { content: 'second queued' },
+    ],
+  });
+  const probeTools = [
+    { type: 'function', function: { name: 'joy_probe', parameters: { type: 'object' } } },
+  ];
+  const ask = async (messages, tools) => {
+    const response = await globalThis.fetch(`${server.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'joy-stub-model', messages, ...(tools ? { tools } : {}) }),
+    });
+    return (await response.json()).choices[0].message;
+  };
+  const imageProbe = [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'This is a capability test.' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,AAECAwQ=' } },
+      ],
+    },
+  ];
+  const toolRequest = [{ role: 'user', content: 'Please use the tool once.' }];
+
+  assert.equal((await ask([{ role: 'user', content: 'hello' }])).content, 'first queued');
+  // A reusable match answers every request of that shape, and never takes a queue place.
+  assert.equal((await ask(imageProbe)).content, 'probe ack');
+  assert.equal((await ask(imageProbe)).content, 'probe ack');
+  const toolTurn = await ask(toolRequest, probeTools);
+  assert.equal(toolTurn.tool_calls[0].function.name, 'joy_probe');
+  // A match that is not reusable is spent, so the same request now meets the queue.
+  assert.equal((await ask(toolRequest, probeTools)).content, 'second queued');
+});
+
+test('a reusable unmatched response can be used again as a fallback', async (t) => {
+  const server = await startServer(t, {
+    responses: [{ content: 'repeatable fallback', reusable: true }],
+  });
+  const ask = () =>
+    globalThis.fetch(`${server.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'joy-stub-model',
+        messages: [{ role: 'user', content: 'no match in this script' }],
+      }),
+    });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await ask();
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).choices[0].message.content, 'repeatable fallback');
+  }
+});
+
+test('the default audio capability response is an unsupported-media error', async (t) => {
+  const server = await startServer(t, buildSettingsFlowScript());
+  const response = await globalThis.fetch(`${server.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'joy-stub-model',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: "This is JOY's synthetic audio capability test." },
+            { type: 'input_audio', input_audio: { data: 'AA==', format: 'wav' } },
+          ],
+        },
+      ],
+    }),
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: { message: 'Audio input is not supported by this model.', code: 'unsupported_media' },
+  });
+});
+
+test('holds a non-streamed reply for delay_ms so a run can be cancelled in time', async (t) => {
+  const server = await startServer(t, {
+    responses: [{ content: 'slow reply', delay_ms: 400 }],
+  });
+  const startedAt = Date.now();
+  const response = await globalThis.fetch(`${server.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'joy-stub-model', messages: [{ role: 'user', content: 'x' }] }),
+  });
+  assert.equal((await response.json()).choices[0].message.content, 'slow reply');
+  assert.ok(Date.now() - startedAt >= 350, 'the reply came back before delay_ms');
+});
+
+async function runToExit(args) {
+  const child = spawn(process.execPath, [serverPath, ...args], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  const outcome = await new Promise((resolveExit) => {
+    child.once('exit', (code) => resolveExit({ code }));
+  });
+  return { ...outcome, stderr };
+}
+
+test('refuses the reserved port range and a missing script or log', async () => {
+  const reserved = await runToExit(['--port', '5200', '--script', 'x.json', '--log', 'y.log']);
+  assert.equal(reserved.code, 1);
+  assert.match(reserved.stderr, /5173-5273/);
+
+  const noScript = await runToExit(['--port', '0', '--log', 'y.log']);
+  assert.equal(noScript.code, 1);
+  assert.match(noScript.stderr, /--script is required/);
+
+  const noLog = await runToExit(['--port', '0', '--script', 'x.json']);
+  assert.equal(noLog.code, 1);
+  assert.match(noLog.stderr, /--log is required/);
 });

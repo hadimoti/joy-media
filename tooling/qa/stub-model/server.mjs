@@ -1,3 +1,10 @@
+/**
+ * Response script format: a JSON object with an optional `model` and a non-empty `responses` array.
+ * Each response may set `match` (`user_includes`, `last_role`, `last_tool`, `media_part`, or `tool`),
+ * `content`, `tool_calls`, `delay_ms`, and `reusable`. Omit `match` for an ordered fallback. An `error` object
+ * with `message` and `code` plus optional `status_code` returns an OpenAI-style HTTP error instead
+ * of a completion. Reusable responses repeat both when matched and as an unmatched fallback.
+ */
 import { appendFile, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 
@@ -31,6 +38,10 @@ function parseArguments(argv) {
   if (!Number.isInteger(parsed.port) || parsed.port < 0 || parsed.port > 65535) {
     throw new Error('--port must be an integer from 0 to 65535');
   }
+  // Windows reserves 5174-5273 and the dev server owns 5173, so no stub may listen in that range.
+  if (parsed.port >= 5173 && parsed.port <= 5273) {
+    throw new Error('--port must not be in 5173-5273 (reserved); use 0 or 47xxx');
+  }
   if (typeof parsed.scriptPath !== 'string' || parsed.scriptPath.length === 0) {
     throw new Error('--script is required');
   }
@@ -42,6 +53,84 @@ function parseArguments(argv) {
 
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const MATCH_KEYS = new Set(['user_includes', 'last_role', 'last_tool', 'media_part', 'tool']);
+
+/**
+ * An optional `match` on a scripted response picks it by the shape of the request instead of by
+ * position, so the order of the app's own probe calls cannot shift the script. Keys:
+ * `user_includes` (text of the last user message contains it), `last_role` (role of the last
+ * message), `last_tool` (the final tool reply's originating tool), `media_part` (a content part
+ * of that type is present), or `tool` (that tool is offered).
+ * A response without `match` is taken in order, as before.
+ */
+function parseMatch(value, index) {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) throw new Error(`response ${index + 1} match must be an object`);
+  for (const [key, entry] of Object.entries(value)) {
+    if (!MATCH_KEYS.has(key) || typeof entry !== 'string' || entry.length === 0) {
+      throw new Error(`response ${index + 1} match has an invalid ${key}`);
+    }
+  }
+  return value;
+}
+
+function lastUserText(messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!isRecord(message) || message.role !== 'user') continue;
+    if (typeof message.content === 'string') return message.content;
+    if (Array.isArray(message.content)) {
+      return message.content
+        .map((part) => (isRecord(part) && typeof part.text === 'string' ? part.text : ''))
+        .join('\n');
+    }
+    return '';
+  }
+  return '';
+}
+
+function requestMatches(match, body) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  if (match.user_includes !== undefined && !lastUserText(messages).includes(match.user_includes)) {
+    return false;
+  }
+  if (match.last_role !== undefined) {
+    const last = messages.at(-1);
+    if (!isRecord(last) || last.role !== match.last_role) return false;
+  }
+  if (match.last_tool !== undefined) {
+    const last = messages.at(-1);
+    if (!isRecord(last) || last.role !== 'tool' || typeof last.tool_call_id !== 'string')
+      return false;
+    const toolName = messages
+      .slice(0, -1)
+      .reverse()
+      .find(
+        (message) =>
+          isRecord(message) && message.role === 'assistant' && Array.isArray(message.tool_calls),
+      )
+      ?.tool_calls.find((call) => isRecord(call) && call.id === last.tool_call_id)?.function?.name;
+    if (toolName !== match.last_tool) return false;
+  }
+  if (match.media_part !== undefined) {
+    const found = messages.some(
+      (message) =>
+        isRecord(message) &&
+        Array.isArray(message.content) &&
+        message.content.some((part) => isRecord(part) && part.type === match.media_part),
+    );
+    if (!found) return false;
+  }
+  if (match.tool !== undefined) {
+    const tools = Array.isArray(body.tools) ? body.tools : [];
+    const offered = tools.some(
+      (entry) => isRecord(entry) && isRecord(entry.function) && entry.function.name === match.tool,
+    );
+    if (!offered) return false;
+  }
+  return true;
 }
 
 function parseResponseScript(value) {
@@ -74,7 +163,31 @@ function parseResponseScript(value) {
     if (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > 5000) {
       throw new Error(`response ${index + 1} delay_ms must be from 0 to 5000`);
     }
-    return { content, tool_calls: toolCalls, delay_ms: delayMs };
+    const error = entry.error ?? null;
+    if (
+      error !== null &&
+      (!isRecord(error) || typeof error.message !== 'string' || typeof error.code !== 'string')
+    ) {
+      throw new Error(`response ${index + 1} error must contain message and code strings`);
+    }
+    if (error !== null && (content !== null || toolCalls.length > 0)) {
+      throw new Error(`response ${index + 1} cannot combine an error with content or tool calls`);
+    }
+    const statusCode = entry.status_code ?? 400;
+    if (error !== null && (!Number.isInteger(statusCode) || statusCode < 400 || statusCode > 599)) {
+      throw new Error(`response ${index + 1} status_code must be from 400 to 599`);
+    }
+    const match = parseMatch(entry.match, index);
+    return {
+      content,
+      tool_calls: toolCalls,
+      error,
+      status_code: statusCode,
+      delay_ms: delayMs,
+      match,
+      reusable: entry.reusable === true,
+      used: false,
+    };
   });
 
   const model =
@@ -115,6 +228,31 @@ async function readRequestJson(request) {
   } catch {
     throw new Error('invalid_json');
   }
+}
+
+/** The log never holds the key: only that an Authorization header was sent, and how long it was. */
+function authorizationSummary(request) {
+  const header = request.headers.authorization;
+  return typeof header === 'string'
+    ? { authorization_present: true, authorization_length: header.length }
+    : { authorization_present: false };
+}
+
+/** The matching response for a request, or undefined when the script has none left. */
+function pickResponse(script, body) {
+  for (const [index, entry] of script.responses.entries()) {
+    if (entry.match === null || (entry.used && !entry.reusable)) continue;
+    if (requestMatches(entry.match, body)) {
+      entry.used = true;
+      return { index, entry };
+    }
+  }
+  for (const [index, entry] of script.responses.entries()) {
+    if (entry.match !== null || (entry.used && !entry.reusable)) continue;
+    entry.used = true;
+    return { index, entry };
+  }
+  return undefined;
 }
 
 function requestSummary(body, model) {
@@ -266,7 +404,6 @@ async function main() {
       }
     }
   };
-  let nextResponse = 0;
   const openStreams = new Set();
   let stopping = false;
 
@@ -291,11 +428,7 @@ async function main() {
     }
 
     if (request.method === 'GET' && path === '/v1/models') {
-      await logEvent({
-        method: 'GET',
-        path,
-        authorization_present: typeof request.headers.authorization === 'string',
-      });
+      await logEvent({ method: 'GET', path, ...authorizationSummary(request) });
       sendJson(response, 200, {
         object: 'list',
         data: [{ id: model, object: 'model', created: 0, owned_by: 'joy-media-stub' }],
@@ -317,7 +450,7 @@ async function main() {
       await logEvent({
         method: 'POST',
         path,
-        authorization_present: typeof request.headers.authorization === 'string',
+        ...authorizationSummary(request),
         ...requestSummary(body, model),
       });
       if (body.model !== model) {
@@ -326,20 +459,31 @@ async function main() {
         });
         return;
       }
-      if (nextResponse >= script.responses.length) {
+      const picked = pickResponse(script, body);
+      if (picked === undefined) {
         sendJson(response, 503, {
           error: { message: 'Response script is exhausted.', code: 'script_exhausted' },
         });
         return;
       }
 
-      const index = nextResponse;
-      const scripted = script.responses[nextResponse];
-      nextResponse += 1;
+      const { index, entry: scripted } = picked;
+      if (scripted.error !== null) {
+        sendJson(response, scripted.status_code, { error: scripted.error });
+        return;
+      }
       if (body.stream === true) {
         await sendStreamingResponse(response, model, scripted, index, openStreams);
       } else {
-        sendJson(response, 200, completionResponse(model, scripted, index));
+        if (scripted.delay_ms > 0) {
+          await new Promise((resolveDelay) => {
+            const timer = setTimeout(resolveDelay, scripted.delay_ms);
+            timer.unref();
+          });
+        }
+        if (!response.destroyed) {
+          sendJson(response, 200, completionResponse(model, scripted, index));
+        }
       }
       return;
     }
