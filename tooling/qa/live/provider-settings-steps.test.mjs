@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -10,6 +10,11 @@ import {
   DEFAULT_PLAN_OPERATIONS,
 } from '../stub-model/settings-flow-script.mjs';
 import { createFakePage } from './provider-settings-fake-page.mjs';
+import * as providerSettingsSteps from './provider-settings-steps.mjs';
+import {
+  assertRendererProposalArguments,
+  loadRendererProposalContract,
+} from '../stub-model/renderer-proposal-contract.mjs';
 import {
   assertNoSecret,
   CONSENT_TEXT,
@@ -18,6 +23,7 @@ import {
   EXECUTION_MODES,
   PROVIDER_SETTINGS_CASES,
   PROVIDER_SETTINGS_ORDER,
+  runInModes,
 } from './provider-settings-steps.mjs';
 
 const CTX = {
@@ -91,6 +97,30 @@ test('a preview that writes before approval fails D-090', async () => {
   await assert.rejects(async () => {
     await runAll(page);
   }, /preview wrote to the timeline/);
+});
+
+test('a D-090 run fails when the model replies without staging a proposal', async () => {
+  const page = createFakePage({ noProposalMode: 'auto-apply-low-risk' });
+  await assert.rejects(
+    () => PROVIDER_SETTINGS_CASES['D-090'](page, CTX),
+    /Apply safe changes: no proposal card/u,
+  );
+  assert.equal(page.app.state.mode, 'auto-apply-low-risk');
+  assert.equal(
+    page.app.state.clips,
+    1,
+    'the earlier preview was undone before the missing proposal',
+  );
+});
+
+test('D-090 will not approve when an approval button appears without a proposal card', async () => {
+  const page = createFakePage({ orphanApprovalMode: 'preview-and-approve' });
+  await assert.rejects(() => runInModes(page, CTX), /no proposal card appeared before approval/u);
+  const clicks = page.app.calls.filter(([kind]) => kind === 'click').map(([, desc]) => desc);
+  assert.equal(
+    clicks.some((desc) => desc.includes('Approve & apply')),
+    false,
+  );
 });
 
 test('Suggest only that applies an edit fails D-090', async () => {
@@ -181,6 +211,32 @@ test('assertNoSecret fails when the key is in a reply and passes when it is not'
   })();
 });
 
+test('evidence scan covers every text artifact and ignores binary screenshots', async () => {
+  const scanEvidenceForSecret = providerSettingsSteps.scanEvidenceForSecret;
+  assert.equal(typeof scanEvidenceForSecret, 'function');
+  const directory = await mkdtemp(join(tmpdir(), 'joy-stub-evidence-'));
+  const artifacts = [
+    join(directory, 'summary.json'),
+    join(directory, 'D-087', 'result.json'),
+    join(directory, 'stub-requests.ndjson'),
+    join(directory, 'ipc-replies.ndjson'),
+  ];
+  await mkdir(join(directory, 'D-087'), { recursive: true });
+  await Promise.all(artifacts.map((path) => writeFile(path, 'clean')));
+  await writeFile(join(directory, 'D-087', 'screenshot.png'), Buffer.from(CTX.apiKey));
+  try {
+    const clean = await scanEvidenceForSecret(CTX.apiKey, directory);
+    assert.equal(clean.filesScanned, artifacts.length);
+    for (const path of artifacts) {
+      await writeFile(path, `contains ${CTX.apiKey}`);
+      await assert.rejects(() => scanEvidenceForSecret(CTX.apiKey, directory), /stub key appears/u);
+      await writeFile(path, 'clean');
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('the real stub server accepts the script and answers the app probe shapes from it', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'joy-stub-flow-'));
   const scriptPath = join(directory, 'script.json');
@@ -216,8 +272,10 @@ test('the real stub server accepts the script and answers the app probe shapes f
     return (await response.json()).choices[0].message;
   };
   const probeTools = [{ type: 'function', function: { name: 'joy_probe', parameters: {} } }];
+  const rendererContract = await loadRendererProposalContract();
   const planTools = [
-    { type: 'function', function: { name: 'propose_timeline_operations', parameters: {} } },
+    rendererContract.readProjectContextTool,
+    rendererContract.validateProposalTool,
   ];
   const probe = await ask(
     [
@@ -248,11 +306,25 @@ test('the real stub server accepts the script and answers the app probe shapes f
     },
   ]);
   assert.equal(media.content, 'JOY_MEDIA_CAPABILITY_PROBE_OK_V1');
-  const plan = await ask([{ role: 'user', content: 'STUB-PLAN preview-and-approve' }], planTools);
-  assert.equal(plan.tool_calls[0].function.name, 'propose_timeline_operations');
+  const planRequest = [{ role: 'user', content: 'STUB-PLAN preview-and-approve' }];
+  const context = await ask(planRequest, planTools);
+  assert.equal(context.tool_calls[0].function.name, 'read_project_context');
+  const plan = await ask(
+    [
+      ...planRequest,
+      { role: 'assistant', content: null, tool_calls: context.tool_calls },
+      { role: 'tool', tool_call_id: 'call-stub-context', content: '{"domain":"overview"}' },
+    ],
+    planTools,
+  );
+  assert.equal(plan.tool_calls[0].function.name, rendererContract.proposalToolName);
+  const proposalArgs = JSON.parse(plan.tool_calls[0].function.arguments);
+  assert.doesNotThrow(() => assertRendererProposalArguments(rendererContract, proposalArgs));
   const closing = await ask(
     [
-      { role: 'user', content: 'STUB-PLAN preview-and-approve' },
+      ...planRequest,
+      { role: 'assistant', content: null, tool_calls: context.tool_calls },
+      { role: 'tool', tool_call_id: 'call-stub-context', content: '{"domain":"overview"}' },
       { role: 'assistant', content: null, tool_calls: plan.tool_calls },
       { role: 'tool', tool_call_id: 'call-stub-plan', content: '{}' },
     ],
@@ -261,23 +333,44 @@ test('the real stub server accepts the script and answers the app probe shapes f
   assert.equal(closing.content, 'Staged the edit.');
 });
 
-test('the stub script answers each request shape the app sends, and is valid for the server', () => {
+test('the stub script uses the renderer proposal tool and validates its real arguments', async () => {
+  const rendererContract = await loadRendererProposalContract();
   const script = buildSettingsFlowScript({ model: 'joy-stub-model' });
   assert.equal(script.model, 'joy-stub-model');
   const matched = script.responses.filter((entry) => entry.match !== undefined);
   assert.ok(matched.every((entry) => entry.reusable === true));
-  const planned = script.responses.find((entry) => entry.match?.user_includes === 'STUB-PLAN');
+  assert.ok(rendererContract.hostToolNames.includes(rendererContract.proposalToolName));
+  const planned = script.responses.find((entry) =>
+    entry.tool_calls?.some((call) => call.function.name === rendererContract.proposalToolName),
+  );
+  assert.ok(planned, 'the stub script includes a renderer proposal response');
   const args = JSON.parse(planned.tool_calls[0].function.arguments);
+  assert.equal(planned.tool_calls[0].function.name, rendererContract.proposalToolName);
   assert.deepEqual(args.operations, [...DEFAULT_PLAN_OPERATIONS]);
-  assert.equal(planned.tool_calls[0].function.name, 'propose_timeline_operations');
+  assert.equal(args.operations[0].assetId, rendererContract.rendererFixtureAssetId);
+  assert.doesNotThrow(() => assertRendererProposalArguments(rendererContract, args));
   const slow = script.responses.find((entry) => entry.match?.user_includes === 'STUB-SLOW');
   assert.ok(slow.delay_ms >= 3000 && slow.delay_ms <= 5000);
-  const own = buildSettingsFlowScript({ planOperations: [{ kind: 'remove', id: 'x' }] });
+  const ownOperations = [{ ...DEFAULT_PLAN_OPERATIONS[0], startUs: 2_000_000 }];
+  const own = buildSettingsFlowScript({ planOperations: ownOperations });
   assert.deepEqual(
     JSON.parse(
-      own.responses.find((entry) => entry.match?.user_includes === 'STUB-PLAN').tool_calls[0]
+      own.responses.find((entry) => entry.match?.tool === 'validate_proposal').tool_calls[0]
         .function.arguments,
     ).operations,
-    [{ kind: 'remove', id: 'x' }],
+    ownOperations,
   );
+  const imageProbe = script.responses.find(
+    (entry) => entry.match?.user_includes === 'synthetic image capability test',
+  );
+  const audioProbe = script.responses.find(
+    (entry) => entry.match?.user_includes === 'synthetic audio capability test',
+  );
+  const videoProbe = script.responses.find(
+    (entry) => entry.match?.user_includes === 'synthetic video capability test',
+  );
+  assert.equal(imageProbe.content, 'JOY_MEDIA_CAPABILITY_PROBE_OK_V1');
+  assert.ok(audioProbe, 'the stub script has an audio-specific response');
+  assert.equal(audioProbe.error.code, 'unsupported_media');
+  assert.equal(videoProbe.content, 'JOY_MEDIA_CAPABILITY_PROBE_OK_V1');
 });

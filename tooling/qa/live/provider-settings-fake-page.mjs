@@ -8,6 +8,8 @@
  *   previewWrites       the preview writes a clip before approval
  *   suggestOnlyApplies  Suggest only applies the edit
  *   autoModesApply      the two automatic modes apply without asking
+ *   noProposalMode      that execution mode replies without staging an edit
+ *   orphanApprovalMode  that execution mode exposes approval without its proposal card
  *   keepConsentOnEdit   editing the public URL keeps the consent ticked
  *   leakKeyInReply      an IPC reply echoes the typed key
  */
@@ -49,6 +51,7 @@ export function createFakeApp(options = {}) {
     draft: '',
     clips: 1,
     stage: 'none',
+    orphanApproval: false,
     messages: 0,
     hello: false,
     slow: false,
@@ -77,7 +80,13 @@ export function createFakeApp(options = {}) {
       state.cancelled = false;
     } else if (text.startsWith('STUB-PLAN')) {
       state.stage = 'none';
-      if (state.mode === 'suggest-only') {
+      state.orphanApproval = false;
+      if (options.orphanApprovalMode === state.mode) {
+        state.orphanApproval = true;
+        state.messages += 1;
+      } else if (options.noProposalMode === state.mode) {
+        state.messages += 1;
+      } else if (state.mode === 'suggest-only') {
         if (options.suggestOnlyApplies) applyEdit();
         else state.messages += 1;
       } else if (state.mode === 'preview-and-approve') {
@@ -130,7 +139,8 @@ export function createFakeApp(options = {}) {
     if (tail.includes('.timeline-clip')) return state.clips;
     if (tail.includes('JOY Agent live proposal')) return state.stage === 'proposal' ? 1 : 0;
     if (tail.includes('Proposed timeline plan')) return 0;
-    if (tail.includes('Approve & apply')) return state.stage === 'proposal' ? 1 : 0;
+    if (tail.includes('Approve & apply'))
+      return state.stage === 'proposal' || state.orphanApproval ? 1 : 0;
     if (tail.includes('Apply edit')) return 0;
     if (tail.includes('Undo run')) return state.stage === 'applied' ? 1 : 0;
     if (tail.includes('Last Joy Code run'))
@@ -325,7 +335,7 @@ class FakeLocator {
     const tail = this.app.last(this.desc);
     if (tail.includes('agent-slot-title')) return LABELS[this.app.slotIndex(this.desc)] ?? 'Slot';
     if (tail.includes('joy-settings-probe-grid'))
-      return 'Image\nSupported\nAudio\nSupported\nVideo\nSupported';
+      return 'Image\nSupported\nAudio\nUnavailable\nVideo\nSupported';
     return '';
   }
 

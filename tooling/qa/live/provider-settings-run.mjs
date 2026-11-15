@@ -10,18 +10,18 @@
  */
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLiveDriver } from './driver.mjs';
 import { newProject, screenshot, setScratchLibrary } from './steps.mjs';
 import { createFakePage } from './provider-settings-fake-page.mjs';
 import {
-  assertNoSecret,
   collectIpc,
   installIpcCapture,
   PROVIDER_SETTINGS_CASES,
   PROVIDER_SETTINGS_ORDER,
+  scanEvidenceForSecret,
 } from './provider-settings-steps.mjs';
 import { buildSettingsFlowScript } from '../stub-model/settings-flow-script.mjs';
 
@@ -103,8 +103,7 @@ async function run() {
   mkdirSync(outDir, { recursive: true });
   const scriptPath = join(outDir, 'stub-script.json');
   const logPath = join(outDir, 'stub-requests.ndjson');
-  // The key is typed into the app and must appear nowhere afterwards. It lives outside the
-  // evidence and profile folders so that grepping those folders for it proves something.
+  // The key is typed into the app and must appear nowhere in the evidence or IPC replies.
   const apiKey = `joy-stub-key-${randomUUID()}`;
   const keyDir = join(SCRATCH_ROOT, 'keys');
   mkdirSync(keyDir, { recursive: true });
@@ -194,19 +193,27 @@ async function run() {
         process.exitCode = 2;
       }
     }
-    let secretCheck;
+    let secretCheck = 'pending evidence scan';
+    const summaryPath = join(outDir, 'summary.json');
+    const writeSummary = () =>
+      writeFileSync(
+        summaryPath,
+        `${JSON.stringify({ runId, ipcMode, secretCheck, keyFile, results }, null, 2)}\n`,
+      );
     try {
-      // The stub writes its log on the first request; no request means no file and nothing to leak.
-      const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
-      secretCheck = `checked ${assertNoSecret(apiKey, [log, ...ipc])} captured text(s): no key`;
+      writeSummary();
+      const scan = await scanEvidenceForSecret(apiKey, outDir);
+      secretCheck = `checked ${scan.filesScanned} text evidence files (screenshots excluded): no key`;
+      writeSummary();
+      const finalScan = await scanEvidenceForSecret(apiKey, outDir);
+      secretCheck = `checked ${finalScan.filesScanned} text evidence files (screenshots excluded): no key`;
+      writeSummary();
     } catch (error) {
       secretCheck = `FAILED: ${error.message}`;
       process.exitCode = 1;
+      writeSummary();
+      await scanEvidenceForSecret(apiKey, outDir).catch(() => undefined);
     }
-    writeFileSync(
-      join(outDir, 'summary.json'),
-      `${JSON.stringify({ runId, ipcMode, secretCheck, keyFile, results }, null, 2)}\n`,
-    );
     for (const result of results) {
       process.stdout.write(`${result.id}: ${result.status} ${result.detail ?? ''}\n`);
     }

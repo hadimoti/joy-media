@@ -6,6 +6,7 @@ import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { buildSettingsFlowScript } from './settings-flow-script.mjs';
 
 const serverPath = fileURLToPath(new URL('./server.mjs', import.meta.url));
 
@@ -476,6 +477,52 @@ test('picks a scripted response by request shape and falls back to the queue in 
   assert.equal(toolTurn.tool_calls[0].function.name, 'joy_probe');
   // A match that is not reusable is spent, so the same request now meets the queue.
   assert.equal((await ask(toolRequest, probeTools)).content, 'second queued');
+});
+
+test('a reusable unmatched response can be used again as a fallback', async (t) => {
+  const server = await startServer(t, {
+    responses: [{ content: 'repeatable fallback', reusable: true }],
+  });
+  const ask = () =>
+    globalThis.fetch(`${server.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'joy-stub-model',
+        messages: [{ role: 'user', content: 'no match in this script' }],
+      }),
+    });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await ask();
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).choices[0].message.content, 'repeatable fallback');
+  }
+});
+
+test('the default audio capability response is an unsupported-media error', async (t) => {
+  const server = await startServer(t, buildSettingsFlowScript());
+  const response = await globalThis.fetch(`${server.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'joy-stub-model',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: "This is JOY's synthetic audio capability test." },
+            { type: 'input_audio', input_audio: { data: 'AA==', format: 'wav' } },
+          ],
+        },
+      ],
+    }),
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: { message: 'Audio input is not supported by this model.', code: 'unsupported_media' },
+  });
 });
 
 test('holds a non-streamed reply for delay_ms so a run can be cancelled in time', async (t) => {

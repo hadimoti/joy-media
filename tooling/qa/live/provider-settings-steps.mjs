@@ -21,6 +21,8 @@
  *   D-087r  Remove the stub profile.
  */
 
+import { readdir, readFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 import { openMenu } from './steps.mjs';
 
 export const CONSENT_TEXT =
@@ -198,8 +200,14 @@ export async function fetchModelsAndCheckMedia(page, ctx) {
     45_000,
   );
   const grid = await ui.mediaGrid(dialog).innerText();
-  if (!/Image[\s\S]*Supported/u.test(grid) || !/Video[\s\S]*Supported/u.test(grid)) {
-    throw new Error(`the stub should show image and video as supported; the grid says: ${grid}`);
+  if (
+    !/Image[\s\S]*Supported/u.test(grid) ||
+    !/Audio[\s\S]*Unavailable/u.test(grid) ||
+    !/Video[\s\S]*Supported/u.test(grid)
+  ) {
+    throw new Error(
+      `the stub should support image and video but not audio; the grid says: ${grid}`,
+    );
   }
   return `model list filled; media check: ${grid.replace(/\s+/gu, ' ').trim()}`;
 }
@@ -315,6 +323,9 @@ export function checkModeOutcome(modeId, outcome, snapshot, before) {
     if (snapshot.clips !== before) return 'the preview wrote to the timeline before approval';
     if (outcome !== 'proposal') return `expected a proposal to approve, saw: ${outcome}`;
   }
+  if (modeId !== 'suggest-only' && outcome === 'reply') {
+    return 'no proposal card was staged';
+  }
   if (outcome === 'applied' && snapshot.clips !== before && !snapshot.undo) {
     return 'an applied edit shows no Undo run';
   }
@@ -344,6 +355,9 @@ export async function runInModes(page, ctx) {
     const entry = { mode: mode.id, baselineClips: baseline.clips, staged: { outcome, ...staged } };
 
     if (outcome === 'proposal') {
+      if (!staged.liveProposal && !staged.plan) {
+        throw new Error(`${mode.name}: no proposal card appeared before approval`);
+      }
       if (staged.approve) await ui.approve(page).click();
       else await ui.applyEdit(page).click();
       await expectVisible(ui.lastRun(page).first(), `${mode.name}: the run card after approval`);
@@ -476,6 +490,35 @@ export function assertNoSecret(secret, texts) {
   const leaks = texts.filter((text) => String(text).includes(secret));
   if (leaks.length > 0) throw new Error(`the stub key appears in ${leaks.length} captured text(s)`);
   return texts.length;
+}
+
+/** Scans every text evidence artifact that may contain captured requests or replies. */
+export async function scanEvidenceForSecret(secret, evidenceDirectory) {
+  assertNoSecret(secret, []);
+  const names = new Set([
+    'summary.json',
+    'result.json',
+    'stub-requests.ndjson',
+    'ipc-replies.ndjson',
+  ]);
+  const files = [];
+  async function walk(directory) {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else if (entry.isFile() && names.has(entry.name)) files.push(path);
+    }
+  }
+  await walk(evidenceDirectory);
+  files.sort();
+  const texts = await Promise.all(files.map((path) => readFile(path, 'utf8')));
+  const leakedFiles = files.filter((_, index) => texts[index].includes(secret));
+  if (leakedFiles.length > 0) {
+    const locations = leakedFiles.map((path) => relative(evidenceDirectory, path)).join(', ');
+    throw new Error(`the stub key appears in ${leakedFiles.length} evidence file(s): ${locations}`);
+  }
+  return { filesScanned: files.length };
 }
 
 /** The cases by id, and the order a full run takes. */
