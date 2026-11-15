@@ -360,6 +360,9 @@ export async function runCommandCycle(row, page, ctx) {
 export async function executeRow(row, page, ctx) {
   const startedAt = Date.now();
   ctx.bridge?.log.setLabel(row.id);
+  // A menu or popup left open by the row before would block every click of this one: close it first.
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.keyboard.press('Escape').catch(() => {});
   let status = 'passed';
   let message = '';
   let evidence = [];
