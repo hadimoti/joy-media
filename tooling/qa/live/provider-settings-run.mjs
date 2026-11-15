@@ -5,17 +5,20 @@
  * results, the stub request log and the captured IPC replies for the key grep.
  *
  *   node tooling/qa/live/provider-settings-run.mjs --app <unpacked-dir> [--tests D-087,D-088]
- *     [--out <dir>] [--plan-operations <json file>] [--needs-sign-in]
+ *     [--out <dir>] [--media <video or picture fixture>] [--plan-operations <json file>] [--needs-sign-in]
+ *   D-090 needs --media (the fixture is imported and put on the timeline so the stub's edit names real
+ *   project ids) or --plan-operations (a JSON file with the ids).
  *   node tooling/qa/live/provider-settings-run.mjs --dry-run
  */
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLiveDriver } from './driver.mjs';
 import { newProject, screenshot, setScratchLibrary } from './steps.mjs';
 import { createFakePage } from './provider-settings-fake-page.mjs';
+import { seedPlanOperations } from './provider-settings-seed.mjs';
 import {
   collectIpc,
   installIpcCapture,
@@ -34,7 +37,7 @@ function parseArgs(argv) {
     const arg = argv[index];
     if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--needs-sign-in') options.needsSignIn = true;
-    else if (['--app', '--tests', '--out', '--plan-operations'].includes(arg)) {
+    else if (['--app', '--tests', '--out', '--plan-operations', '--media'].includes(arg)) {
       const value = argv[index + 1];
       if (!value || value.startsWith('--')) throw new Error(`${arg} needs a value`);
       options[arg.slice(2).replace(/-([a-z])/gu, (_, letter) => letter.toUpperCase())] = value;
@@ -56,6 +59,16 @@ function parseArgs(argv) {
   if (unknown.length > 0) {
     throw new Error(
       `unknown test id ${unknown.join(',')}; known: ${PROVIDER_SETTINGS_ORDER.join(',')}`,
+    );
+  }
+  if (
+    !options.dryRun &&
+    options.testIds.includes('D-090') &&
+    !options.planOperations &&
+    !options.media
+  ) {
+    throw new Error(
+      'D-090 on the live app needs --media <fixture> or --plan-operations <json>: the proposal must name real project ids',
     );
   }
   return options;
@@ -110,24 +123,30 @@ async function run() {
   const keyFile = join(keyDir, `${runId}.txt`);
   writeFileSync(keyFile, `${apiKey}\n`, 'utf8');
 
-  const planOperations = options.planOperations
-    ? JSON.parse(readFileSync(resolve(options.planOperations), 'utf8'))
-    : undefined;
-  writeFileSync(
-    scriptPath,
-    `${JSON.stringify(buildSettingsFlowScript(planOperations ? { planOperations } : {}), null, 2)}\n`,
-    'utf8',
-  );
-  const stub = await startStub({ scriptPath, logPath });
-  const ctx = { baseUrl: stub.baseUrl, model: stub.model, apiKey };
+  // The stub starts after the project is seeded (live runs), so its edit can name the real ids.
+  const startStubWithOperations = async (planOperations) => {
+    writeFileSync(
+      scriptPath,
+      `${JSON.stringify(buildSettingsFlowScript(planOperations ? { planOperations } : {}), null, 2)}\n`,
+      'utf8',
+    );
+    const started = await startStub({ scriptPath, logPath });
+    return { started, ctx: { baseUrl: started.baseUrl, model: started.model, apiKey } };
+  };
+  let stub;
+  let ctx;
   const results = [];
   let driver;
   let page;
   let ipcMode = 'not-installed';
   const profileDir = join(SCRATCH_ROOT, 'profiles', runId);
   try {
+    const fileOperations = options.planOperations
+      ? JSON.parse(readFileSync(resolve(options.planOperations), 'utf8'))
+      : undefined;
     if (options.dryRun) {
       page = createFakePage();
+      ({ started: stub, ctx } = await startStubWithOperations(fileOperations));
       ctx.timeoutMs = 300;
     } else {
       driver = createLiveDriver({
@@ -145,6 +164,10 @@ async function run() {
       await setScratchLibrary(page, join(SCRATCH_ROOT, 'libraries', runId));
       await newProject(page, `T-A11 ${runId.slice(0, 8)}`);
       ipcMode = await installIpcCapture(page).catch(() => 'failed');
+      const planOperations =
+        fileOperations ??
+        (options.media ? await seedPlanOperations(page, resolve(options.media)) : undefined);
+      ({ started: stub, ctx } = await startStubWithOperations(planOperations));
     }
     for (const id of options.testIds) {
       const startedAt = Date.now();
@@ -184,7 +207,7 @@ async function run() {
   } finally {
     const ipc = page && !options.dryRun ? await collectIpc(page).catch(() => []) : [];
     writeFileSync(join(outDir, 'ipc-replies.ndjson'), ipc.join('\n') + (ipc.length ? '\n' : ''));
-    await stub.stop();
+    await stub?.stop();
     if (driver) {
       try {
         await driver.close();
@@ -193,26 +216,27 @@ async function run() {
         process.exitCode = 2;
       }
     }
+    // The throwaway key file is removed once the run is over; the summary says so.
+    rmSync(keyFile, { force: true });
     let secretCheck = 'pending evidence scan';
     const summaryPath = join(outDir, 'summary.json');
     const writeSummary = () =>
       writeFileSync(
         summaryPath,
-        `${JSON.stringify({ runId, ipcMode, secretCheck, keyFile, results }, null, 2)}\n`,
+        `${JSON.stringify({ runId, ipcMode, secretCheck, keyFile: 'removed after the run', results }, null, 2)}\n`,
       );
     try {
       writeSummary();
       const scan = await scanEvidenceForSecret(apiKey, outDir);
       secretCheck = `checked ${scan.filesScanned} text evidence files (screenshots excluded): no key`;
+      // The final summary is written once with the result, then everything is scanned again, so the
+      // file that stays on disk is a scanned one.
       writeSummary();
-      const finalScan = await scanEvidenceForSecret(apiKey, outDir);
-      secretCheck = `checked ${finalScan.filesScanned} text evidence files (screenshots excluded): no key`;
-      writeSummary();
+      await scanEvidenceForSecret(apiKey, outDir);
     } catch (error) {
       secretCheck = `FAILED: ${error.message}`;
       process.exitCode = 1;
       writeSummary();
-      await scanEvidenceForSecret(apiKey, outDir).catch(() => undefined);
     }
     for (const result of results) {
       process.stdout.write(`${result.id}: ${result.status} ${result.detail ?? ''}\n`);

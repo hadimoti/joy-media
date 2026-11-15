@@ -148,7 +148,8 @@ export function createFakeApp(options = {}) {
     if (tail.includes('Reverted.')) return state.stage === 'reverted' ? 1 : 0;
     if (tail.includes('is thinking')) return 0;
     if (tail.includes('.joy-code-message')) return state.messages;
-    if (tail.includes('role=button[Stop]')) return state.slow && !state.cancelled ? 1 : 0;
+    if (tail.includes('role=button[Stop current plan]'))
+      return state.slow && !state.cancelled ? 1 : 0;
     if (tail.includes('agent-slot-card')) return 2;
     return visible(desc) ? 1 : 0;
   }
@@ -204,7 +205,7 @@ export function createFakeApp(options = {}) {
     } else if (tail.includes('Undo run')) {
       state.stage = 'reverted';
       state.clips -= 1;
-    } else if (tail.startsWith('role=button[Stop]')) {
+    } else if (tail.startsWith('role=button[Stop current plan]')) {
       state.cancelled = true;
       state.slow = false;
     } else if (/role=button\[\/\^Remove/u.test(tail)) {

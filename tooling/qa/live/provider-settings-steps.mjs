@@ -69,7 +69,8 @@ export const ui = {
   applyEdit: (page) => page.getByRole('button', { name: /Apply edit/u }),
   reject: (page) => page.getByRole('button', { name: /^Reject$/u }),
   undoRun: (page) => page.getByRole('button', { name: /Undo run/u }),
-  stop: (page) => page.getByRole('button', { name: 'Stop', exact: true }),
+  // The send button turns into this while a run is busy (AgentPanel.tsx aria-label).
+  stop: (page) => page.getByRole('button', { name: 'Stop current plan', exact: true }),
   liveProposal: (page) => page.locator('[aria-label="JOY Agent live proposal"]'),
   plan: (page) => page.locator('[aria-label="Proposed timeline plan"]'),
   lastRun: (page) => page.locator('[aria-label="Last Joy Code run"]'),
@@ -307,7 +308,8 @@ export function classifyOutcome(snapshot, messagesBefore) {
   if (snapshot.thinking) return 'waiting';
   if (snapshot.approve || snapshot.applyEdit) return 'proposal';
   if (snapshot.lastRun && !snapshot.reverted) return 'applied';
-  if (snapshot.liveProposal || snapshot.plan) return 'waiting';
+  // A visible proposal or plan card is a result: checkModeOutcome judges whether it may offer approval.
+  if (snapshot.liveProposal || snapshot.plan) return 'proposal';
   if (snapshot.messages >= messagesBefore + 2) return 'reply';
   return 'waiting';
 }
