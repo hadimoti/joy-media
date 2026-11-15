@@ -24,8 +24,13 @@ import {
   systemTool,
 } from '../../release/attended/scenario-rules.mjs';
 
-export const EXPECTED_JOY_HASH = 'AF05BE55222C86FECE27E738B7E8A931CB4261C9797261C67DDE3C71A4E5CAC0';
-export const LOCK_PATH = 'C:\\jgp\\LOCK-app-run.txt';
+import { labRoots, PC_JOY_HASH } from './lab-roots.mjs';
+
+const LAB = labRoots();
+// PC defaults; a second machine sets JOY_QA_ROOT, JOY_QA_LOCK and JOY_QA_EXPECTED_JOY_HASH (see lab-roots.mjs).
+export const EXPECTED_JOY_HASH = LAB.expectedJoyHash;
+export { PC_JOY_HASH };
+export const LOCK_PATH = LAB.lockPath;
 export const OS_FILE_DROP_SELECTORS = Object.freeze({
   timeline: '.timeline-lane, .timeline-empty-state, .timeline-file-new-track-drop',
   monitor: '.monitor-canvas-wrap',
@@ -34,7 +39,13 @@ export const OS_FILE_DROP_SELECTORS = Object.freeze({
 const APP_NAME = 'joy-media.exe';
 const CDP_HOST = '127.0.0.1';
 const OWNER_HOME = 'C:\\Users\\HadiMoti';
-const DROP_FIXTURE_ROOT = 'C:\\jgp\\v111\\dnd';
+const DROP_FIXTURE_ROOT = LAB.drops;
+
+/** Files in the owner's default library; a machine with no such folder has none to protect. */
+function ownerLibraryCount(home) {
+  const folder = ownerDefaultLibrary(home);
+  return existsSync(folder) ? countFiles(folder) : 0;
+}
 
 function fail(message) {
   const error = new Error(message);
@@ -43,9 +54,10 @@ function fail(message) {
 }
 
 /**
- * The environment of a test launch. Every folder is scratch (user data, USERPROFILE, HOME, APPDATA, TEMP,
- * LOCALAPPDATA), except in sign-in mode (`--needs-sign-in`): there LOCALAPPDATA stays the owner's real one, so
- * the sign-in page opens in the normal Chrome profile. Everything else stays scratch in both modes.
+ * The environment of one launch. Every folder is scratch (user data, USERPROFILE, HOME, APPDATA, TEMP,
+ * LOCALAPPDATA), except in a sign-in launch (`needsSignIn`, asked for by `--needs-sign-in` and only for the sign-in
+ * step): there LOCALAPPDATA is the owner's real one, so the sign-in page opens in the normal Chrome profile. The live
+ * rows never run in that launch. Everything else stays scratch in both modes.
  * Pure: it touches no disk. The caller creates `scratchDirs` and prints `modeLine`.
  */
 export function buildLaunchEnvironment({
@@ -58,6 +70,8 @@ export function buildLaunchEnvironment({
   const scratch = {
     USERPROFILE: join(envRoot, 'User'),
     HOME: join(envRoot, 'User'),
+    // The worker keeps its state under JOY_MEDIA_HOME when it is set: never the machine's own value.
+    JOY_MEDIA_HOME: join(envRoot, 'JoyMediaHome'),
     APPDATA: join(envRoot, 'Roaming'),
     TEMP: join(envRoot, 'Temp'),
     TMP: join(envRoot, 'Temp'),
@@ -66,7 +80,7 @@ export function buildLaunchEnvironment({
   if (testDownloadDirectory !== undefined) {
     env.JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY = testDownloadDirectory;
   }
-  const scratchDirs = [scratch.USERPROFILE, scratch.APPDATA, scratch.TEMP];
+  const scratchDirs = [scratch.USERPROFILE, scratch.APPDATA, scratch.TEMP, scratch.JOY_MEDIA_HOME];
   if (needsSignIn) {
     const realLocalAppData = baseEnv.LOCALAPPDATA;
     if (!realLocalAppData) {
@@ -89,6 +103,11 @@ export function buildLaunchEnvironment({
     mode: 'scratch',
     modeLine: 'mode: scratch (every folder is scratch; no sign-in)',
   };
+}
+
+/** True for the editor window (served from the app scheme); false for devtools and the loading window. */
+export function isAppEditorUrl(url) {
+  return typeof url === 'string' && url.startsWith('joy-media-app://');
 }
 
 export function buildLaunchArguments({ profileDir, port, testMode = false }) {
@@ -157,6 +176,8 @@ export async function checkLaunchRules(config, deps = {}) {
     join(ownerHome, 'Desktop'),
     join(ownerHome, 'Downloads'),
     join(ownerHome, 'joy-media'),
+    join(ownerHome, '.joy-media'),
+    join(ownerHome, 'Documents', 'JOY Projects'),
     installedDir,
     join(ownerHome, 'AppData', 'Roaming', '@joy-media'),
     join(ownerHome, 'AppData', 'Roaming', 'JOY Media'),
@@ -203,7 +224,7 @@ export async function checkLaunchRules(config, deps = {}) {
   if (joyHash !== EXPECTED_JOY_HASH) {
     throw fail('joy:// registry hash does not match the approved value');
   }
-  const before = deps.ownerLibraryFiles ?? countFiles(ownerDefaultLibrary(ownerHome));
+  const before = deps.ownerLibraryFiles ?? ownerLibraryCount(ownerHome);
   const running = deps.runningProcesses ?? countJoyAndElectronProcesses(appDir);
   if (running !== 0) throw fail('a JOY Media or Electron process is already running');
   const portAvailable = deps.portAvailable ?? (await isPortAvailable());
@@ -268,7 +289,7 @@ export async function dispatchOSFileDrop(
 
 export function createLiveDriver(config, options = {}) {
   const runId = config.runId ?? randomUUID();
-  const agentRoot = 'C:\\jgp\\v111\\codex';
+  const agentRoot = LAB.scratch;
   const profileDir = config.profileDir ?? join(agentRoot, 'profiles', runId);
   const libraryDir = config.libraryDir ?? join(agentRoot, 'libraries', runId);
   const lockPath = config.lockPath ?? LOCK_PATH;
@@ -285,7 +306,14 @@ export function createLiveDriver(config, options = {}) {
   let started = false;
   let closed = false;
 
-  async function launch() {
+  /**
+   * Starts the app. `signIn: true` is the sign-in launch of a `--needs-sign-in` run: the only launch that gets the
+   * real LOCALAPPDATA. A plain launch is always scratch, so the live rows never see the owner's real folder.
+   */
+  async function launch({ signIn = false } = {}) {
+    if (signIn === true && config.needsSignIn !== true) {
+      throw fail('the sign-in launch needs --needs-sign-in');
+    }
     const lockState = inspectLockFile(lockPath);
     if (lockState.status === 'busy') throw fail('app lock is younger than 30 minutes');
     if (lockState.status === 'error') throw fail('could not inspect the app lock');
@@ -294,10 +322,13 @@ export function createLiveDriver(config, options = {}) {
     lockFd = lock.fd;
     lockContents = lock.contents;
     try {
-      baseline = await checkLaunchRules(launchConfig, {
-        ...options.preflightDeps,
-        lock: { status: 'available' },
-      });
+      baseline = await checkLaunchRules(
+        { ...launchConfig, needsSignIn: signIn === true },
+        {
+          ...options.preflightDeps,
+          lock: { status: 'available' },
+        },
+      );
     } catch (error) {
       if (error?.code === 'LIVE_PREFLIGHT_REFUSED') throw error;
       throw fail(`launch preflight failed: ${String(error?.message ?? error).split('\n')[0]}`);
@@ -330,7 +361,7 @@ export function createLiveDriver(config, options = {}) {
     const launchEnv = buildLaunchEnvironment({
       baseEnv: process.env,
       envRoot,
-      needsSignIn: config.needsSignIn === true,
+      needsSignIn: signIn === true,
       electronDir: baseline.electronDir,
       testDownloadDirectory: config.testMode === true ? downloadDir : undefined,
     });
@@ -339,13 +370,16 @@ export function createLiveDriver(config, options = {}) {
     process.stdout.write(`${launchEnv.modeLine}\n`);
     const requireFromApp = createRequire(join(baseline.appDir, 'resources', 'app', 'package.json'));
     const { chromium: appChromium } = requireFromApp('playwright-core');
+    // JOY_QA_APP_LOG: a file that receives the app's own output (stdout and stderr) for a diagnosis.
+    const appLogPath = process.env.JOY_QA_APP_LOG;
+    const appLogFd = appLogPath ? openSync(appLogPath, 'a') : undefined;
     child = spawnProcess(
       baseline.appExe,
       buildLaunchArguments({ profileDir, port, testMode: config.testMode === true }),
       {
         cwd: baseline.appDir,
         env,
-        stdio: 'ignore',
+        stdio: appLogFd === undefined ? 'ignore' : ['ignore', appLogFd, appLogFd],
         windowsHide: false,
       },
     );
@@ -359,10 +393,16 @@ export function createLiveDriver(config, options = {}) {
       if (!browser) await delay(500);
     }
     if (!browser) throw fail('unpacked app did not expose CDP before timeout');
-    page = browser
-      .contexts()
-      .flatMap((context) => context.pages())
-      .find((candidate) => !candidate.url().startsWith('devtools://'));
+    // The packaged app first shows a small loading window (a data: page) that closes after about two seconds;
+    // the editor is the page served from the app's own scheme. Take that one, never the loading window.
+    const pageDeadline = Date.now() + 30_000;
+    while (Date.now() < pageDeadline && !page) {
+      page = browser
+        .contexts()
+        .flatMap((context) => context.pages())
+        .find((candidate) => isAppEditorUrl(candidate.url()));
+      if (!page) await delay(250);
+    }
     if (!page) throw fail('CDP connected but no app window was found');
     await page.waitForLoadState('domcontentloaded', { timeout: 30_000 });
     return {
@@ -391,7 +431,7 @@ export function createLiveDriver(config, options = {}) {
         await delay(1_000);
         afterProcesses = countJoyAndElectronProcesses(baseline.appDir);
       }
-      const afterCount = countFiles(ownerDefaultLibrary(OWNER_HOME));
+      const afterCount = ownerLibraryCount(OWNER_HOME);
       verifyAfterRun(baseline, {
         joyHash: afterHash,
         ownerLibraryFiles: afterCount,
@@ -419,7 +459,7 @@ export function createLiveDriver(config, options = {}) {
       return page;
     },
     async screenshot(path) {
-      await page.screenshot({ path, fullPage: true });
+      await page.screenshot({ path, fullPage: false });
     },
     async visibleText() {
       return page.locator('body').innerText();
@@ -432,6 +472,56 @@ export function createLiveDriver(config, options = {}) {
       return dispatchOSFileDrop(page, surface, filePaths, dropOptions);
     },
   };
+}
+
+/** The sign-in launch's record: the page title and a screenshot, in `<outDir>/sign-in`. */
+async function recordSignInPage(page, outDir) {
+  const dir = join(outDir, 'sign-in');
+  mkdirSync(dir, { recursive: true });
+  const title = await page.title().catch(() => '');
+  writeFileSync(
+    join(dir, 'result.json'),
+    `${JSON.stringify({ title, localAppData: 'the real one, for this launch only' }, null, 2)}\n`,
+    'utf8',
+  );
+  await page.screenshot({ path: join(dir, 'screenshot.png'), fullPage: false }).catch(() => null);
+}
+
+/** Launches the driver. A launch that throws still closes it, so the app lock is released and no app is left running. */
+async function launchOrClose(driver, options) {
+  try {
+    return await driver.launch(options);
+  } catch (error) {
+    await driver.close().catch(() => {});
+    throw error;
+  }
+}
+
+/**
+ * The launches of one run. With `needsSignIn` (`--needs-sign-in`) the real LOCALAPPDATA is used for the sign-in
+ * launch only: the sign-in page is recorded and that app is closed, then the live rows run on a scratch launch of
+ * the same profile. Without it, the one launch is scratch. `makeDriver(reuseExisting)` builds a driver for one
+ * launch. Returns the driver to close at the end and the session to run the rows on.
+ */
+export async function launchForRun({
+  makeDriver,
+  needsSignIn,
+  outDir,
+  recordSignIn = recordSignInPage,
+}) {
+  if (needsSignIn !== true) {
+    const driver = makeDriver();
+    return { driver, session: await launchOrClose(driver) };
+  }
+  const signInDriver = makeDriver();
+  const signInSession = await launchOrClose(signInDriver, { signIn: true });
+  try {
+    await recordSignIn(signInSession.page, outDir);
+  } finally {
+    await signInDriver.close();
+  }
+  const driver = makeDriver(true);
+  return { driver, session: await launchOrClose(driver) };
 }
 
 function inspectLock(path) {
@@ -481,9 +571,10 @@ function exportJoyHash(outDir) {
 }
 
 function countJoyAndElectronProcesses(appDir) {
-  const directory = appDir.replace(/'/gu, "''");
+  // A trailing separator: a sibling folder that only starts with the same letters is not this app.
+  const directory = `${appDir.replace(/[\\/]+$/u, '')}\\`.replace(/'/gu, "''");
   const script = [
-    `$d = '${directory}'`,
+    `$d = '${directory}';`,
     '@(Get-CimInstance Win32_Process | Where-Object {',
     "$_.Name -eq 'joy-media.exe' -or",
     '($_.ExecutablePath -and',

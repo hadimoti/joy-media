@@ -67,9 +67,10 @@ export function mediaHasAudio(media) {
   return name.includes('audio') && !name.includes('silent');
 }
 
+/** The export step of a row. `ctx.export` holds injected export deps in a unit test; a live run has none. */
 async function finishWithPreviewAndExport(page, ctx, rowId, slug, exportOptions = {}) {
   await previewShot(page, ctx, rowId, slug);
-  const exported = await exportAndProbe(page, ctx, rowId, exportOptions);
+  const exported = await exportAndProbe(page, ctx, rowId, exportOptions, ctx.export);
   return exported.message;
 }
 

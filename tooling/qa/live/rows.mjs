@@ -157,15 +157,66 @@ export async function runParts(id, label, items, fn) {
   };
 }
 
-/** Runs rows in order. A row that needs the app to be unchanged by an earlier one is listed after it. */
+/**
+ * A row that did not run because the page was lost earlier (`ctx.pageLost` is the reason). It is failed with that
+ * reason, its body never runs on the closed window, and it has no screenshot.
+ */
+export function abandonedRow(id, reason, area = id) {
+  const message = `not run: ${reason}`;
+  const result = {
+    id,
+    status: 'failed',
+    message,
+    detail: message,
+    screenshot: null,
+    ms: 0,
+    durationMs: 0,
+  };
+  return {
+    result,
+    defect: formatDefect({ id, area, what: message, expected: area, severity: 'major' }),
+  };
+}
+
+/**
+ * Runs rows in order. A row that needs the app to be unchanged by an earlier one is listed after it. Once
+ * `ctx.pageLost` is set (the app's window could not be closed or started again), no later row runs on it: each
+ * remaining row is failed with that reason instead.
+ */
 export async function runRows(rows, ctx) {
   const outcomes = [];
   for (const row of rows) {
-    const outcome = await runRow(row, ctx);
+    const outcome = ctx.pageLost
+      ? abandonedRow(row.id, ctx.pageLost, row.area ?? row.id)
+      : await runRow(row, ctx);
     writeRowEvidence(ctx.outDir, outcome);
     outcomes.push(outcome);
   }
   return outcomes;
+}
+
+/**
+ * Restarts the app for a row that needs a restart (D-079). The old window is closed first; when that fails, or the
+ * new app does not start, `ctx.pageLost` records why, so the rows after this one are not run on a closed page.
+ * The error is passed on, so the row that asked for the restart still fails.
+ */
+export async function restartAppOnto(ctx, { close, relaunch }) {
+  try {
+    await close();
+  } catch (error) {
+    ctx.pageLost = `the app window did not close cleanly, so later rows were not run on it (${firstLine(error)})`;
+    throw error;
+  }
+  let session;
+  try {
+    session = await relaunch();
+  } catch (error) {
+    ctx.pageLost = `the app did not start again after a restart, so later rows were not run (${firstLine(error)})`;
+    throw error;
+  }
+  ctx.page = session.page;
+  ctx.downloadDir = session.downloadDir;
+  return session;
 }
 
 /** `D-0*` style prefixes expand to every row id that starts with the prefix. */

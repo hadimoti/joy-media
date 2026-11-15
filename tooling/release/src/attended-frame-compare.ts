@@ -194,32 +194,52 @@ export function lumaSsim(a: RgbFrame, b: RgbFrame): number {
   return total / windows;
 }
 
+/** The measures of one pair of frames, as pictureProblems reads them. */
+export interface PictureMeasures {
+  readonly ssim: number;
+  readonly meanDifference: number;
+  readonly referenceMeanLuma: number;
+  readonly candidateMeanLuma: number;
+}
+
 /**
- * Compares a reference frame (the Monitor capture) with a candidate (the export frame at the same time).
- * Both must already be the same size. The pair passes when SSIM and the mean difference are within the
- * limits and neither frame is black.
+ * The reasons a pair of measured frames is not the same picture: a black frame, SSIM below PICTURE_MIN_SSIM, or
+ * a mean difference above PICTURE_MAX_MEAN_DIFFERENCE. Both limits are inclusive (exactly the limit passes). A
+ * NaN measure fails. Empty when the pair passes.
  */
-export function compareFrames(reference: RgbFrame, candidate: RgbFrame): FrameComparison {
-  const ssim = lumaSsim(reference, candidate);
-  const meanDifference = meanAbsoluteDifference(reference, candidate);
-  const referenceMeanLuma = meanLuma(reference);
-  const candidateMeanLuma = meanLuma(candidate);
+export function pictureProblems(measures: PictureMeasures): string[] {
   const problems: string[] = [];
-  if (referenceMeanLuma <= BLACK_FRAME_MAX_MEAN_LUMA) problems.push('the reference frame is black');
-  if (candidateMeanLuma <= BLACK_FRAME_MAX_MEAN_LUMA) problems.push('the export frame is black');
-  if (!(ssim >= PICTURE_MIN_SSIM)) {
-    problems.push(`SSIM ${ssim.toFixed(3)} is below ${PICTURE_MIN_SSIM}`);
+  if (measures.referenceMeanLuma <= BLACK_FRAME_MAX_MEAN_LUMA) {
+    problems.push('the reference frame is black');
   }
-  if (!(meanDifference <= PICTURE_MAX_MEAN_DIFFERENCE)) {
+  if (measures.candidateMeanLuma <= BLACK_FRAME_MAX_MEAN_LUMA) {
+    problems.push('the export frame is black');
+  }
+  if (!(measures.ssim >= PICTURE_MIN_SSIM)) {
+    problems.push(`SSIM ${measures.ssim.toFixed(6)} is below ${PICTURE_MIN_SSIM}`);
+  }
+  if (!(measures.meanDifference <= PICTURE_MAX_MEAN_DIFFERENCE)) {
     problems.push(
-      `the mean difference ${meanDifference.toFixed(2)} is above ${PICTURE_MAX_MEAN_DIFFERENCE} levels`,
+      `the mean difference ${measures.meanDifference.toFixed(2)} is above ${PICTURE_MAX_MEAN_DIFFERENCE} levels`,
     );
   }
+  return problems;
+}
+
+/**
+ * Compares a reference frame (the Monitor capture) with a candidate (the export frame at the same time).
+ * Both must already be the same size. The pair passes when pictureProblems finds nothing.
+ */
+export function compareFrames(reference: RgbFrame, candidate: RgbFrame): FrameComparison {
+  const measures: PictureMeasures = {
+    ssim: lumaSsim(reference, candidate),
+    meanDifference: meanAbsoluteDifference(reference, candidate),
+    referenceMeanLuma: meanLuma(reference),
+    candidateMeanLuma: meanLuma(candidate),
+  };
+  const problems = pictureProblems(measures);
   return {
-    ssim,
-    meanDifference,
-    referenceMeanLuma,
-    candidateMeanLuma,
+    ...measures,
     passed: problems.length === 0,
     reason: problems.join('; '),
   };

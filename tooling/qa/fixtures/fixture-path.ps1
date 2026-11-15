@@ -12,7 +12,8 @@
 # (C:\jgp\v111\fixtures-evil), a path that escapes with .. after resolving,
 # and any path that passes through a symbolic link or junction.
 
-$script:FixtureRoot = 'C:\jgp\v111\fixtures'
+# A second machine sets JOY_QA_ROOT (the same variable as the live driver); the PC default stays.
+$script:FixtureRoot = if ([string]::IsNullOrWhiteSpace($env:JOY_QA_ROOT)) { 'C:\jgp\v111\fixtures' } else { Join-Path $env:JOY_QA_ROOT 'fixtures' }
 
 function Test-PathInside {
   # True when $Candidate equals $Base or is inside it. Both must be full paths

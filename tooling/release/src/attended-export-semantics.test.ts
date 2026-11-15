@@ -5,6 +5,7 @@ import { TIMELINE_LOG_KEY, VISUAL_LOG_KEY } from './attended-fresh-process.ts';
 import {
   ACTIVE_PROJECT_KEY,
   EXPECTED_AUDIO_SAMPLE_RATE,
+  EXPORT_PRESET_FRAME_RATE,
   EXPORT_SEMANTICS_SCENARIO,
   SEMANTICS_EXPORT_FILE,
   audioBlockers,
@@ -16,6 +17,7 @@ import {
   parseAstatsRms,
   placementOf,
   previewFileName,
+  probeRateOf,
   runExportMediaSemantics,
   samplePlan,
   seekSecondsOf,
@@ -248,6 +250,48 @@ describe('each check fails on its own fault', () => {
   });
 });
 
+describe('the dry run compares two models, and each fault is measured', () => {
+  it('the export is a different model of the picture, so the picture check sees a small, non-zero difference', async () => {
+    const { report } = await dryRun();
+    const picture = report.measurements.picture as Record<
+      string,
+      { meanDifference: number; ssim: number }
+    >;
+    for (const [frame, comparison] of Object.entries(picture)) {
+      expect(comparison.meanDifference, frame).toBeGreaterThan(0);
+      expect(comparison.meanDifference, frame).toBeLessThan(12);
+      expect(comparison.ssim, frame).toBeLessThan(1);
+      expect(comparison.ssim, frame).toBeGreaterThanOrEqual(0.9);
+    }
+    expect(report.measurements.probe).toMatchObject({
+      video: [{ frameRate: 30 }],
+    });
+  });
+
+  it('picture-matches-reference: an export moved 40 levels from the Monitor fails it on the mean difference', async () => {
+    const { report } = await dryRun({ exportLevelShift: 40 });
+    expect(statusOf(report)['picture-matches-reference']).toBe('failed');
+    expect(detailOf(report, 'picture-matches-reference')).toContain('the mean difference');
+    expect(report.receipt).toBeUndefined();
+  });
+
+  it('stream-layout-matches-preset: an export at 25 fps fails it and the composition check names the preset', async () => {
+    const { report } = await dryRun({ exportFrameRate: 25 });
+    expect(statusOf(report)['stream-layout-matches-preset']).toBe('failed');
+    expect(detailOf(report, 'stream-layout-matches-preset')).toContain(
+      "the video runs at 25 fps, not the composition's 30 fps",
+    );
+    expect(statusOf(report)['duration-matches-timeline']).toBe('passed');
+  });
+
+  it('dissolve-checked: a Dissolve that moves the still fails it, because the placement is read again after it', async () => {
+    const { report } = await dryRun({ dissolveMovesStill: true });
+    expect(statusOf(report)['dissolve-checked']).toBe('failed');
+    expect(detailOf(report, 'dissolve-checked')).toContain('not where the clip ends');
+    expect(detailOf(report, 'export-completed')).toContain('Export MP4 finished');
+  });
+});
+
 describe('guards and blockers', () => {
   it('refuses before launch when the joy:// key is not the expected one', async () => {
     const { report, world } = await dryRun({ joyKey: 'f'.repeat(64) });
@@ -459,7 +503,7 @@ describe('placement, dissolve and samples', () => {
 const GOOD_PROBE: SemanticsProbe = {
   formatName: 'mov,mp4,m4a,3gp,3g2,mj2',
   durationSeconds: 6.0,
-  video: [{ codec: 'h264', width: 1920, height: 1080, durationSeconds: 6.0 }],
+  video: [{ codec: 'h264', width: 1920, height: 1080, durationSeconds: 6.0, frameRate: 30 }],
   audio: [{ codec: 'aac', channels: 2, sampleRate: 48_000 }],
 };
 const EXPECTATION = {
@@ -481,12 +525,29 @@ describe('the measured checks as functions', () => {
           width: 1920,
           height: 1080,
           duration: '6.000000',
+          avg_frame_rate: '30/1',
+          r_frame_rate: '30/1',
         },
         { codec_type: 'audio', codec_name: 'aac', channels: 2, sample_rate: '48000' },
       ],
     });
     expect(probe).toEqual({ ...GOOD_PROBE, durationSeconds: 6.016 });
     expect(() => semanticsProbeFrom(null)).toThrow('not a JSON object');
+  });
+
+  it('reads an ffprobe rate, and refuses a zero or unreadable one', () => {
+    expect(probeRateOf('30/1')).toBe(30);
+    expect(probeRateOf('30000/1001')).toBeCloseTo(29.97, 2);
+    expect(probeRateOf('0/0')).toBeUndefined();
+    expect(probeRateOf('0/1')).toBeUndefined();
+    expect(probeRateOf('thirty')).toBeUndefined();
+    expect(probeRateOf(undefined)).toBeUndefined();
+    const fallback = semanticsProbeFrom({
+      streams: [
+        { codec_type: 'video', codec_name: 'h264', avg_frame_rate: '0/0', r_frame_rate: '25/1' },
+      ],
+    });
+    expect(fallback.video[0]?.frameRate).toBe(25);
   });
 
   it('stream layout: passes the preset layout and names each difference', () => {
@@ -496,7 +557,7 @@ describe('the measured checks as functions', () => {
         {
           formatName: 'matroska,webm',
           durationSeconds: 6,
-          video: [{ codec: 'vp9', width: 1920, height: 1080 }],
+          video: [{ codec: 'vp9', width: 1920, height: 1080, frameRate: 30 }],
           audio: [
             { codec: 'opus', channels: 2, sampleRate: 48_000 },
             { codec: 'aac', channels: 2, sampleRate: 48_000 },
@@ -510,6 +571,44 @@ describe('the measured checks as functions', () => {
       'the video codec is vp9, not h264',
       'the audio codec is opus, not aac',
     ]);
+  });
+
+  it('stream layout: records and fails a video whose frame rate is not the composition one', () => {
+    expect(
+      streamLayoutBlockers(
+        { ...GOOD_PROBE, video: [{ ...GOOD_PROBE.video[0]!, frameRate: 25 }] },
+        EXPECTATION,
+      ),
+    ).toEqual(["the video runs at 25 fps, not the composition's 30 fps"]);
+    expect(
+      streamLayoutBlockers(
+        { ...GOOD_PROBE, video: [{ ...GOOD_PROBE.video[0]!, frameRate: undefined }] },
+        EXPECTATION,
+      ),
+    ).toEqual(['the video frame rate was not read']);
+  });
+
+  it('stream layout: a composition at another rate than the export presets fails, even when the file matches it', () => {
+    const at25 = { ...EXPECTATION, frameRate: 25 };
+    expect(
+      streamLayoutBlockers(
+        { ...GOOD_PROBE, video: [{ ...GOOD_PROBE.video[0]!, frameRate: 25 }] },
+        at25,
+      ),
+    ).toEqual(['the composition runs at 25 fps, but the export presets write 30 fps']);
+    // ffprobe's 29.97 is a real difference from the presets' 30, so it is named too.
+    expect(
+      streamLayoutBlockers(
+        { ...GOOD_PROBE, video: [{ ...GOOD_PROBE.video[0]!, frameRate: 29.97 }] },
+        { ...EXPECTATION, frameRate: 29.97 },
+      ).join(' | '),
+    ).toContain('the composition runs at 29.97 fps, but the export presets write 30 fps');
+  });
+
+  it('every export preset writes the frame rate the scenario expects', () => {
+    for (const preset of Object.values(EXPORT_PRESETS)) {
+      expect(preset.frameRate).toBe(EXPORT_PRESET_FRAME_RATE);
+    }
   });
 
   it('stream layout: rejects audio encoded at a different sample rate than the preset', () => {

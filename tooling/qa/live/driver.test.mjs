@@ -8,6 +8,7 @@ import {
   buildLaunchArguments,
   createLiveDriver,
   EXPECTED_JOY_HASH,
+  launchForRun,
   verifyAfterRun,
 } from './driver.mjs';
 import * as liveDriver from './driver.mjs';
@@ -25,6 +26,7 @@ function fakeRun() {
   const playwright = join(app, 'resources', 'app', 'node_modules', 'playwright-core');
   mkdirSync(playwright, { recursive: true });
   writeFileSync(join(playwright, 'package.json'), '{"name":"playwright-core"}');
+  writeFileSync(join(playwright, 'index.js'), 'module.exports = { chromium: {} };\n');
   writeFileSync(join(app, 'joy-media.exe'), 'fake app');
   writeFileSync(join(root, 'electron.exe'), 'fake Electron');
   writeFileSync(join(root, 'version'), '44.3.0');
@@ -207,6 +209,7 @@ test('sign-in mode creates only scratch folders, never the real LOCALAPPDATA', (
     join(SCRATCH_ROOT, 'User'),
     join(SCRATCH_ROOT, 'Roaming'),
     join(SCRATCH_ROOT, 'Temp'),
+    join(SCRATCH_ROOT, 'JoyMediaHome'),
   ]);
   assert.ok(!launch.scratchDirs.includes(REAL_LOCAL_APP_DATA));
 });
@@ -219,7 +222,7 @@ test('scratch mode creates the scratch LOCALAPPDATA folder with the others', () 
     electronDir: ELECTRON_DIR,
   });
 
-  assert.equal(launch.scratchDirs.length, 4);
+  assert.equal(launch.scratchDirs.length, 5);
   assert.ok(launch.scratchDirs.includes(join(SCRATCH_ROOT, 'Local')));
 });
 
@@ -308,4 +311,166 @@ test('dispatches trusted CDP file-drop events with real scratch file paths', asy
   );
   assert.deepEqual(calls.find((call) => call.params?.type === 'drop')?.params.data.files, [file]);
   assert.equal(calls.at(-1)?.method, 'detach');
+});
+
+test('the sign-in launch is refused when the run did not ask for --needs-sign-in', async (t) => {
+  const run = fakeRun();
+  t.after(() => rmSync(run.root, { recursive: true, force: true }));
+  const fake = driverFor(run);
+
+  await assert.rejects(fake.driver.launch({ signIn: true }), /needs --needs-sign-in/u);
+  assert.equal(fake.launches(), 0);
+  await fake.driver.close();
+});
+
+test('only the sign-in launch gets the real LOCALAPPDATA; a plain launch of the same run is scratch', async (t) => {
+  const run = fakeRun();
+  const realLocal = join('C:', 'Users', 'Tester', 'AppData', 'Local');
+  const savedLocal = process.env.LOCALAPPDATA;
+  process.env.LOCALAPPDATA = realLocal;
+  t.after(() => {
+    if (savedLocal === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = savedLocal;
+    rmSync(run.root, { recursive: true, force: true });
+  });
+  const seen = [];
+  for (const signIn of [true, false]) {
+    const folder = `profile-${signIn ? 'sign-in' : 'plain'}`;
+    const driver = createLiveDriver(
+      {
+        ...configFor(run),
+        profileDir: join(run.root, folder),
+        libraryDir: join(run.root, `library-${folder}`),
+        runId: folder,
+        needsSignIn: true,
+        localAppData: realLocal,
+        lockPath: join(run.root, 'app-lock.txt'),
+      },
+      {
+        preflightDeps: {
+          platform: 'win32',
+          ownerHome: run.root,
+          installedDir: join(run.root, 'installed'),
+          joyHash: EXPECTED_JOY_HASH,
+          ownerLibraryFiles: 3221,
+          electronVersion: '44.3.0',
+          portAvailable: true,
+          runningProcesses: 0,
+        },
+        inspectLock: () => ({ status: 'available' }),
+        spawn(_exe, _args, options) {
+          seen.push({ signIn, localAppData: options.env.LOCALAPPDATA, profile: folder });
+          throw new Error('stopped before the app window');
+        },
+      },
+    );
+    await assert.rejects(driver.launch({ signIn }), /stopped before the app window/u);
+    await driver.close();
+  }
+
+  assert.deepEqual(seen, [
+    { signIn: true, localAppData: realLocal, profile: 'profile-sign-in' },
+    {
+      signIn: false,
+      localAppData: join(run.root, 'profile-plain', 'environment', 'Local'),
+      profile: 'profile-plain',
+    },
+  ]);
+});
+
+/** A driver stand-in that records each launch and close, for the order of a run's launches. */
+function recordingDrivers(calls) {
+  return (reuseExisting = false) => ({
+    async launch(options) {
+      calls.push(['launch', reuseExisting, options ?? {}]);
+      return { page: { title: async () => 'Sign in' }, downloadDir: undefined };
+    },
+    async close() {
+      calls.push(['close', reuseExisting]);
+    },
+  });
+}
+
+test('a --needs-sign-in run records the sign-in launch, closes it, then runs on a scratch launch of the same profile', async () => {
+  const calls = [];
+  const { driver, session } = await launchForRun({
+    makeDriver: recordingDrivers(calls),
+    needsSignIn: true,
+    outDir: join('C:', 'unused'),
+    recordSignIn: async () => calls.push(['record']),
+  });
+
+  assert.deepEqual(calls, [
+    ['launch', false, { signIn: true }],
+    ['record'],
+    ['close', false],
+    ['launch', true, {}],
+  ]);
+  assert.equal(typeof driver.close, 'function');
+  assert.equal(typeof session.page.title, 'function');
+});
+
+test('a run without --needs-sign-in makes one scratch launch and no sign-in step', async () => {
+  const calls = [];
+  await launchForRun({
+    makeDriver: recordingDrivers(calls),
+    needsSignIn: false,
+    outDir: join('C:', 'unused'),
+    recordSignIn: async () => calls.push(['record']),
+  });
+  assert.deepEqual(calls, [['launch', false, {}]]);
+});
+
+test('a failed sign-in record still closes the sign-in app and stops before the live rows', async () => {
+  const calls = [];
+  await assert.rejects(
+    launchForRun({
+      makeDriver: recordingDrivers(calls),
+      needsSignIn: true,
+      outDir: join('C:', 'unused'),
+      recordSignIn: async () => {
+        throw new Error('no page');
+      },
+    }),
+    /no page/u,
+  );
+  assert.deepEqual(calls, [
+    ['launch', false, { signIn: true }],
+    ['close', false],
+  ]);
+});
+
+test('a launch that throws still closes its driver, so the lock is released', async () => {
+  const calls = [];
+  const makeDriver = (reuseExisting = false) => ({
+    async launch() {
+      calls.push(['launch', reuseExisting]);
+      throw new Error('joy:// registry hash does not match');
+    },
+    async close() {
+      calls.push(['close', reuseExisting]);
+    },
+  });
+  await assert.rejects(
+    launchForRun({ makeDriver, needsSignIn: false, outDir: join('C:', 'unused') }),
+    /registry hash/u,
+  );
+  assert.deepEqual(calls, [
+    ['launch', false],
+    ['close', false],
+  ]);
+});
+
+test('the worker home is scratch in both modes, never the machine value', () => {
+  for (const needsSignIn of [false, true]) {
+    const base = { ...baseEnvironment(), JOY_MEDIA_HOME: 'C:\\Users\\Owner\\.joy-media' };
+    const launch = buildLaunchEnvironment({
+      baseEnv: base,
+      envRoot: SCRATCH_ROOT,
+      needsSignIn,
+      electronDir: ELECTRON_DIR,
+    });
+    assert.equal(launch.env.JOY_MEDIA_HOME, join(SCRATCH_ROOT, 'JoyMediaHome'));
+    assert.ok(launch.scratchDirs.includes(join(SCRATCH_ROOT, 'JoyMediaHome')));
+  }
 });
