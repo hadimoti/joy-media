@@ -29,6 +29,14 @@ import {
   type SemanticsProbe,
 } from './attended-export-semantics.ts';
 
+/**
+ * The export is modelled as the same picture after an encode: every level moves by this much (the colour-matrix
+ * and round-trip difference the real export shows) and by a small ripple of at most ±2 levels. The Monitor
+ * capture is the exact picture. So the picture check compares two different models, and passes with a small,
+ * non-zero difference, instead of comparing a frame with itself.
+ */
+export const EXPORT_LEVEL_SHIFT = 3;
+
 export const DRY_RUN_CANDIDATE = '0'.repeat(40);
 export const DRY_RUN_EXE_SHA256 = createHash('sha256')
   .update('JOY Media export-semantics dry run: no app')
@@ -70,6 +78,12 @@ export interface DryRunFaults {
   readonly previewLate?: boolean;
   readonly previewFails?: boolean;
   readonly closeFails?: boolean;
+  /** The export's picture is moved by this many levels instead of EXPORT_LEVEL_SHIFT. */
+  readonly exportLevelShift?: number;
+  /** The export file's video runs at this frame rate instead of the composition's 30 fps. */
+  readonly exportFrameRate?: number;
+  /** Adding the Dissolve moves the still 0.2 s later, so the clips no longer meet where the clip ends. */
+  readonly dissolveMovesStill?: boolean;
 }
 
 function clipRgb(x: number, y: number, width: number, height: number, frame: number): number[] {
@@ -110,6 +124,16 @@ function stillFrame(size: { readonly width: number; readonly height: number }): 
 
 function blackFrame(size: { readonly width: number; readonly height: number }): RgbFrame {
   return fill(size, () => [0, 0, 0]);
+}
+
+/** The exported picture: the exact picture moved by `shift` levels, with a ripple of at most ±2 levels. */
+function encodedFrame(frame: RgbFrame, shift: number): RgbFrame {
+  const data = new Uint8Array(frame.data.length);
+  for (let index = 0; index < data.length; index += 1) {
+    const ripple = ((Math.floor(index / 3) * 7 + (index % 3) * 3) % 5) - 2;
+    data[index] = Math.min(255, Math.max(0, frame.data[index]! + shift + ripple));
+  }
+  return { width: frame.width, height: frame.height, data };
 }
 
 /** The first frame at or after a time, as the real driver's ffmpeg select gives it. */
@@ -218,7 +242,15 @@ export class DryRunWorld implements ExportSemanticsDriver {
     return {
       formatName: 'mov,mp4,m4a,3gp,3g2,mj2',
       durationSeconds: seconds,
-      video: [{ codec: 'h264', width: size.width, height: size.height, durationSeconds: seconds }],
+      video: [
+        {
+          codec: 'h264',
+          width: size.width,
+          height: size.height,
+          durationSeconds: seconds,
+          frameRate: this.faults.exportFrameRate ?? FPS,
+        },
+      ],
       audio:
         this.faults.noAudioStream === true
           ? []
@@ -272,9 +304,10 @@ export class DryRunWorld implements ExportSemanticsDriver {
     const bytes = this.files.get(source.name);
     if (bytes === undefined) throw new Error(`${source.name} is not in the run folder`);
     if (source.kind === 'run-video') {
-      return this.renderedFrame(size, frameAtOrAfter(source.seconds), {
+      const picture = this.renderedFrame(size, frameAtOrAfter(source.seconds), {
         ignoreDissolve: this.faults.hardCut === true,
       });
+      return encodedFrame(picture, this.faults.exportLevelShift ?? EXPORT_LEVEL_SHIFT);
     }
     // A Monitor capture: the page wrote which frame it shows, and how.
     const capture = JSON.parse(Buffer.from(bytes).toString('utf8')) as {
@@ -342,6 +375,7 @@ class DryRunPage implements SemanticsEditorPage {
       rightClipId: right.id,
       durationUs: DISSOLVE_US,
     });
+    if (this.world.faults.dissolveMovesStill === true) right.startUs += 200_000;
     return 'Added Dissolve';
   }
 

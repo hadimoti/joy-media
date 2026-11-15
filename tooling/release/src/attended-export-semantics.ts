@@ -79,6 +79,13 @@ export const MIN_AUDIO_RMS_DB = -50;
 export const EXPECTED_AUDIO_CHANNELS = 2;
 /** Every export preset uses this AAC sample rate. */
 export const EXPECTED_AUDIO_SAMPLE_RATE = 48_000;
+/**
+ * Every export preset writes at this frame rate (EXPORT_PRESETS in the editor; a unit test pins each preset to
+ * it). A composition at another rate exports at that rate, so the stream check records and fails it.
+ */
+export const EXPORT_PRESET_FRAME_RATE = 30;
+/** The probed and the composition's frame rates may differ by this much (ffprobe reports 29.97 as 30000/1001). */
+export const FRAME_RATE_TOLERANCE = 0.01;
 
 /** The Monitor capture and export frames are read at these places; a clip shorter than this cannot be sampled. */
 const MIN_SAMPLED_SPAN_FRAMES = 4;
@@ -153,6 +160,8 @@ export interface SemanticsVideoStream {
   readonly width: number;
   readonly height: number;
   readonly durationSeconds?: number;
+  /** The stream's average frame rate in frames per second, when ffprobe gives one. */
+  readonly frameRate?: number;
 }
 
 export interface SemanticsAudioStream {
@@ -618,6 +627,17 @@ function numberOr(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+/** An ffprobe rate such as "30/1" or "30000/1001", or undefined for "0/0" and for text that is not a rate. */
+export function probeRateOf(text: unknown): number | undefined {
+  if (typeof text !== 'string') return undefined;
+  const match = /^(\d+)\/(\d+)$/u.exec(text.trim());
+  if (match === null) return undefined;
+  const denominator = Number(match[2]);
+  if (denominator === 0) return undefined;
+  const rate = Number(match[1]) / denominator;
+  return rate > 0 ? rate : undefined;
+}
+
 /** The fields this scenario reads from `ffprobe -print_format json -show_format -show_streams`. */
 export function semanticsProbeFrom(value: unknown): SemanticsProbe {
   if (!isRecord(value)) throw new Error('the probe is not a JSON object');
@@ -630,11 +650,13 @@ export function semanticsProbeFrom(value: unknown): SemanticsProbe {
       .filter((stream) => stream.codec_type === 'video')
       .map((stream) => {
         const durationSeconds = numberOr(stream.duration, Number.NaN);
+        const frameRate = probeRateOf(stream.avg_frame_rate) ?? probeRateOf(stream.r_frame_rate);
         return {
           codec: String(stream.codec_name ?? ''),
           width: numberOr(stream.width, 0),
           height: numberOr(stream.height, 0),
           ...(Number.isFinite(durationSeconds) ? { durationSeconds } : {}),
+          ...(frameRate === undefined ? {} : { frameRate }),
         };
       }),
     audio: streams
@@ -668,6 +690,19 @@ export function streamLayoutBlockers(
         `the video is ${video.width}x${video.height}, not the composition's ${expectation.width}x${expectation.height}`,
       );
     }
+    if (video.frameRate === undefined) {
+      blockers.push('the video frame rate was not read');
+    } else if (!(Math.abs(video.frameRate - expectation.frameRate) <= FRAME_RATE_TOLERANCE)) {
+      blockers.push(
+        `the video runs at ${video.frameRate} fps, not the composition's ${expectation.frameRate} fps`,
+      );
+    }
+  }
+  // The preset's rate is fixed, so a composition at another rate is a mismatch between it and the preset.
+  if (!(Math.abs(expectation.frameRate - EXPORT_PRESET_FRAME_RATE) <= FRAME_RATE_TOLERANCE)) {
+    blockers.push(
+      `the composition runs at ${expectation.frameRate} fps, but the export presets write ${EXPORT_PRESET_FRAME_RATE} fps`,
+    );
   }
   const audio = probe.audio[0];
   if (audio !== undefined) {
@@ -986,7 +1021,7 @@ export async function runExportMediaSemantics(
     );
     await stage('export-completed', () => page.fillFrame(names.stillLabel));
     let facts = await readFacts();
-    const placement = await stage('export-completed', async () => placementOf(facts, names));
+    let placement = await stage('export-completed', async () => placementOf(facts, names));
     note(
       'media-placed',
       `${names.videoName} at ${placement.video.startUs}–${placement.video.startUs + placement.video.durationUs} µs, ` +
@@ -998,6 +1033,9 @@ export async function runExportMediaSemantics(
     try {
       const notice = await page.addDissolve(names.stillLabel);
       facts = await readFacts();
+      // The placement is read again from the facts as they are after the Dissolve, so the samples use the
+      // timeline the export will render, not the one from before the Dissolve was added.
+      placement = placementOf(facts, names);
       transition = dissolveOf(facts, placement);
       note(
         'dissolve-added',

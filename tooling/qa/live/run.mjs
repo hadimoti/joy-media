@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { createLiveDriver } from './driver.mjs';
+import { createLiveDriver, launchForRun } from './driver.mjs';
 import {
   addToTimelineThroughLeftPanel,
   importThroughLeftPanel,
@@ -18,10 +18,36 @@ import {
   zoomShots,
 } from './monitor-suite-steps.mjs';
 import { LIVE_ROWS } from './matrix.mjs';
-import { runRows } from './rows.mjs';
+import { abandonedRow, restartAppOnto, runRows } from './rows.mjs';
 
 import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
 import { executeRow } from './matrix-core.mjs';
+
+/** What the --media fixture already did in this run: imported into the library, placed on the timeline. */
+export function createMediaState() {
+  return { imported: false, onTimeline: false };
+}
+
+/** The D-002 row: its import marks the fixture as imported, so a later row does not import it a second time. */
+export async function importMediaRow(state, importMedia) {
+  await importMedia();
+  state.imported = true;
+}
+
+/**
+ * Makes sure the --media fixture is in the library and on the timeline. Each step runs only when the setup or an
+ * earlier row has not done it yet: a second import would make a second asset in the library.
+ */
+export async function ensureMediaInProject(state, { importMedia, placeOnTimeline }) {
+  if (!state.imported) {
+    await importMedia();
+    state.imported = true;
+  }
+  if (!state.onTimeline) {
+    await placeOnTimeline();
+    state.onTimeline = true;
+  }
+}
 
 const KNOWN_TESTS = new Set([
   'D-000',
@@ -124,10 +150,16 @@ export async function run(argv = process.argv.slice(2)) {
     : {};
   const makeDriver = (reuseExisting = false) =>
     createLiveDriver({ ...driverConfig, reuseExisting }, driverOptions);
-  let driver = makeDriver();
+  let driver;
+  let session;
   const results = [];
+  const mediaState = createMediaState();
   try {
-    let session = await driver.launch();
+    ({ driver, session } = await launchForRun({
+      makeDriver,
+      needsSignIn: options.needsSignIn,
+      outDir,
+    }));
     let setupProblem;
     try {
       await setScratchLibrary(session.page, libraryDir);
@@ -147,8 +179,10 @@ export async function run(argv = process.argv.slice(2)) {
     }
     if (!setupProblem && testMode && options.media) {
       try {
-        await importThroughLeftPanel(session.page, options.media);
-        await addToTimelineThroughLeftPanel(session.page, options.media);
+        await ensureMediaInProject(mediaState, {
+          importMedia: () => importThroughLeftPanel(session.page, options.media),
+          placeOnTimeline: () => addToTimelineThroughLeftPanel(session.page, options.media),
+        });
       } catch (error) {
         setupProblem = String(error?.message ?? error)
           .split('\n')[0]
@@ -165,11 +199,13 @@ export async function run(argv = process.argv.slice(2)) {
       projectTitle,
       shot: async (path) => screenshot(taskContext.page, path),
       restartApp: async () => {
-        await driver.close();
-        driver = makeDriver(true);
-        session = await driver.launch();
-        taskContext.page = session.page;
-        taskContext.downloadDir = session.downloadDir;
+        session = await restartAppOnto(taskContext, {
+          close: () => driver.close(),
+          relaunch: async () => {
+            driver = makeDriver(true);
+            return driver.launch();
+          },
+        });
       },
     };
     if (taskRows.length > 0) {
@@ -183,7 +219,6 @@ export async function run(argv = process.argv.slice(2)) {
         : taskRows;
       results.push(...(await runRows(runnableRows, taskContext)).map(({ result }) => result));
     }
-    let mediaImported = false;
     // T-A05 and T-A06 rows (desktop-matrix-rows.mjs) build their own result, evidence and defect text.
     const matrixContext = options.testIds.some((id) => id in MATRIX_ROWS)
       ? createMatrixContext({ page: session.page, outDir, libraryDir, runId })
@@ -191,6 +226,10 @@ export async function run(argv = process.argv.slice(2)) {
     if (matrixContext && !setupProblem) await matrixContext.bridge.installTap().catch(() => false);
     for (const id of options.testIds) {
       if (LIVE_ROWS.some((row) => row.id === id)) continue;
+      if (taskContext.pageLost) {
+        results.push(abandonedRow(id, taskContext.pageLost).result);
+        continue;
+      }
       if (id in MATRIX_ROWS) {
         results.push(
           setupProblem
@@ -214,7 +253,9 @@ export async function run(argv = process.argv.slice(2)) {
           await newProject(session.page, title);
           message = `created project: ${title}`;
         } else if (id === 'D-002') {
-          await importThroughLeftPanel(session.page, options.media);
+          await importMediaRow(mediaState, () =>
+            importThroughLeftPanel(session.page, options.media),
+          );
           message = `imported ${options.media.split(/[\\/]/u).at(-1)} through the Media panel`;
         } else if (id in MONITOR_SUITE_CASES) {
           if (MONITOR_MEDIA_IDS.has(id)) {
@@ -222,11 +263,10 @@ export async function run(argv = process.argv.slice(2)) {
               throw new Error(
                 `BLOCKED-on-fixture ${id}: needs --media <file in C:\\jgp\\v111\\fixtures>; run.mjs imports it and adds it to the timeline first, because Play is disabled on an empty timeline`,
               );
-            if (!mediaImported) {
-              await importThroughLeftPanel(session.page, options.media);
-              await addToTimelineThroughLeftPanel(session.page, options.media);
-              mediaImported = true;
-            }
+            await ensureMediaInProject(mediaState, {
+              importMedia: () => importThroughLeftPanel(session.page, options.media),
+              placeOnTimeline: () => addToTimelineThroughLeftPanel(session.page, options.media),
+            });
           }
           const caseDir = join(outDir, id);
           await zoomShots(session.page, caseDir, 'before');
@@ -250,7 +290,7 @@ export async function run(argv = process.argv.slice(2)) {
     process.exitCode = error?.code === 'LIVE_PREFLIGHT_REFUSED' ? 2 : 1;
   } finally {
     try {
-      await driver.close();
+      await driver?.close();
     } catch (error) {
       const message = `post-run safety check failed: ${
         String(error?.message ?? error).split('\n')[0]

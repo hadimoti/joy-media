@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createLiveDriver } from './driver.mjs';
+import { createLiveDriver, launchForRun } from './driver.mjs';
 import { newProject, screenshot, setScratchLibrary } from './steps.mjs';
 import { createFakePage } from './provider-settings-fake-page.mjs';
 import { seedPlanOperations } from './provider-settings-seed.mjs';
@@ -149,7 +149,8 @@ async function run() {
       ({ started: stub, ctx } = await startStubWithOperations(fileOperations));
       ctx.timeoutMs = 300;
     } else {
-      driver = createLiveDriver({
+      // With --needs-sign-in only the sign-in launch uses the real LOCALAPPDATA; the cases run on a scratch launch.
+      const baseConfig = {
         appDir: resolve(options.app),
         outDir,
         profileDir,
@@ -158,9 +159,14 @@ async function run() {
         needsSignIn: options.needsSignIn,
         localAppData: options.needsSignIn ? process.env.LOCALAPPDATA : undefined,
         reason: `T-A11 live QA: ${options.testIds.join(',')}`,
+      };
+      const launched = await launchForRun({
+        makeDriver: (reuseExisting = false) => createLiveDriver({ ...baseConfig, reuseExisting }),
+        needsSignIn: options.needsSignIn,
+        outDir,
       });
-      const session = await driver.launch();
-      page = session.page;
+      driver = launched.driver;
+      page = launched.session.page;
       await setScratchLibrary(page, join(SCRATCH_ROOT, 'libraries', runId));
       await newProject(page, `T-A11 ${runId.slice(0, 8)}`);
       ipcMode = await installIpcCapture(page).catch(() => 'failed');

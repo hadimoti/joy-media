@@ -11,6 +11,7 @@ import {
   lumaSsim,
   meanAbsoluteDifference,
   meanLuma,
+  pictureProblems,
   type RgbFrame,
 } from './attended-frame-compare.ts';
 
@@ -160,6 +161,44 @@ describe('compareFrames', () => {
     const result = compareFrames(chart(), solid([0, 0, 0]));
     expect(result.passed).toBe(false);
     expect(result.reason).toContain('the export frame is black');
+  });
+});
+
+describe('the picture verdict at its edges', () => {
+  const alike = { referenceMeanLuma: 120, candidateMeanLuma: 120 };
+
+  it('pins the SSIM limit: exactly 0.90 passes, just under it fails', () => {
+    expect(PICTURE_MIN_SSIM).toBe(0.9);
+    expect(pictureProblems({ ...alike, ssim: 0.9, meanDifference: 0 })).toEqual([]);
+    const justUnder = pictureProblems({ ...alike, ssim: 0.9 - 1e-9, meanDifference: 0 });
+    expect(justUnder).toHaveLength(1);
+    expect(justUnder[0]).toMatch(/^SSIM 0\.900000 is below 0\.9$/u);
+    expect(pictureProblems({ ...alike, ssim: 0.89, meanDifference: 0 })).toHaveLength(1);
+  });
+
+  it('pins the mean-difference limit: exactly 12 passes, 12.01 fails', () => {
+    expect(pictureProblems({ ...alike, ssim: 1, meanDifference: 12 })).toEqual([]);
+    expect(pictureProblems({ ...alike, ssim: 1, meanDifference: 12.01 })).toEqual([
+      'the mean difference 12.01 is above 12 levels',
+    ]);
+  });
+
+  it('fails a NaN measure rather than passing it', () => {
+    expect(pictureProblems({ ...alike, ssim: Number.NaN, meanDifference: 0 })).toEqual([
+      'SSIM NaN is below 0.9',
+    ]);
+    expect(pictureProblems({ ...alike, ssim: 1, meanDifference: Number.NaN })).toHaveLength(1);
+  });
+
+  it('reports a black frame even when the measures pass', () => {
+    expect(
+      pictureProblems({
+        ssim: 1,
+        meanDifference: 0,
+        referenceMeanLuma: BLACK_FRAME_MAX_MEAN_LUMA,
+        candidateMeanLuma: 120,
+      }),
+    ).toEqual(['the reference frame is black']);
   });
 });
 

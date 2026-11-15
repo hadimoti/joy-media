@@ -43,9 +43,10 @@ function fail(message) {
 }
 
 /**
- * The environment of a test launch. Every folder is scratch (user data, USERPROFILE, HOME, APPDATA, TEMP,
- * LOCALAPPDATA), except in sign-in mode (`--needs-sign-in`): there LOCALAPPDATA stays the owner's real one, so
- * the sign-in page opens in the normal Chrome profile. Everything else stays scratch in both modes.
+ * The environment of one launch. Every folder is scratch (user data, USERPROFILE, HOME, APPDATA, TEMP,
+ * LOCALAPPDATA), except in a sign-in launch (`needsSignIn`, asked for by `--needs-sign-in` and only for the sign-in
+ * step): there LOCALAPPDATA is the owner's real one, so the sign-in page opens in the normal Chrome profile. The live
+ * rows never run in that launch. Everything else stays scratch in both modes.
  * Pure: it touches no disk. The caller creates `scratchDirs` and prints `modeLine`.
  */
 export function buildLaunchEnvironment({
@@ -285,7 +286,14 @@ export function createLiveDriver(config, options = {}) {
   let started = false;
   let closed = false;
 
-  async function launch() {
+  /**
+   * Starts the app. `signIn: true` is the sign-in launch of a `--needs-sign-in` run: the only launch that gets the
+   * real LOCALAPPDATA. A plain launch is always scratch, so the live rows never see the owner's real folder.
+   */
+  async function launch({ signIn = false } = {}) {
+    if (signIn === true && config.needsSignIn !== true) {
+      throw fail('the sign-in launch needs --needs-sign-in');
+    }
     const lockState = inspectLockFile(lockPath);
     if (lockState.status === 'busy') throw fail('app lock is younger than 30 minutes');
     if (lockState.status === 'error') throw fail('could not inspect the app lock');
@@ -294,10 +302,13 @@ export function createLiveDriver(config, options = {}) {
     lockFd = lock.fd;
     lockContents = lock.contents;
     try {
-      baseline = await checkLaunchRules(launchConfig, {
-        ...options.preflightDeps,
-        lock: { status: 'available' },
-      });
+      baseline = await checkLaunchRules(
+        { ...launchConfig, needsSignIn: signIn === true },
+        {
+          ...options.preflightDeps,
+          lock: { status: 'available' },
+        },
+      );
     } catch (error) {
       if (error?.code === 'LIVE_PREFLIGHT_REFUSED') throw error;
       throw fail(`launch preflight failed: ${String(error?.message ?? error).split('\n')[0]}`);
@@ -330,7 +341,7 @@ export function createLiveDriver(config, options = {}) {
     const launchEnv = buildLaunchEnvironment({
       baseEnv: process.env,
       envRoot,
-      needsSignIn: config.needsSignIn === true,
+      needsSignIn: signIn === true,
       electronDir: baseline.electronDir,
       testDownloadDirectory: config.testMode === true ? downloadDir : undefined,
     });
@@ -432,6 +443,46 @@ export function createLiveDriver(config, options = {}) {
       return dispatchOSFileDrop(page, surface, filePaths, dropOptions);
     },
   };
+}
+
+/** The sign-in launch's record: the page title and a screenshot, in `<outDir>/sign-in`. */
+async function recordSignInPage(page, outDir) {
+  const dir = join(outDir, 'sign-in');
+  mkdirSync(dir, { recursive: true });
+  const title = await page.title().catch(() => '');
+  writeFileSync(
+    join(dir, 'result.json'),
+    `${JSON.stringify({ title, localAppData: 'the real one, for this launch only' }, null, 2)}\n`,
+    'utf8',
+  );
+  await page.screenshot({ path: join(dir, 'screenshot.png'), fullPage: true }).catch(() => null);
+}
+
+/**
+ * The launches of one run. With `needsSignIn` (`--needs-sign-in`) the real LOCALAPPDATA is used for the sign-in
+ * launch only: the sign-in page is recorded and that app is closed, then the live rows run on a scratch launch of
+ * the same profile. Without it, the one launch is scratch. `makeDriver(reuseExisting)` builds a driver for one
+ * launch. Returns the driver to close at the end and the session to run the rows on.
+ */
+export async function launchForRun({
+  makeDriver,
+  needsSignIn,
+  outDir,
+  recordSignIn = recordSignInPage,
+}) {
+  if (needsSignIn !== true) {
+    const driver = makeDriver();
+    return { driver, session: await driver.launch() };
+  }
+  const signInDriver = makeDriver();
+  const signInSession = await signInDriver.launch({ signIn: true });
+  try {
+    await recordSignIn(signInSession.page, outDir);
+  } finally {
+    await signInDriver.close();
+  }
+  const driver = makeDriver(true);
+  return { driver, session: await driver.launch() };
 }
 
 function inspectLock(path) {
