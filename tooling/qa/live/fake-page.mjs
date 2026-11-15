@@ -33,10 +33,23 @@ function show(value) {
   if (value === undefined) return 'undefined';
   if (value !== null && typeof value === 'object' && typeof value.path === 'string')
     return `locator:${value.path}`;
-  return JSON.stringify(value);
+  // A regex nested in an option object (`{ hasText: /^File$/u }`) keeps its text, not `{}`.
+  return JSON.stringify(value, (_key, inner) =>
+    inner instanceof RegExp ? inner.toString() : inner,
+  );
 }
 
 const args = (list) => list.map(show).join(',');
+
+/**
+ * A selector must be a string. A misspelled key of a selector table (`LEFT_SEL.textAddButon`) reads as undefined,
+ * and a real page would reject it, so the fake throws here and the row body fails in the unit test.
+ */
+export function assertSelector(selector, method) {
+  if (typeof selector !== 'string') {
+    throw new TypeError(`${method} needs a string (selector or role), got ${show(selector)}`);
+  }
+}
 
 export function createFakePage({
   answers = () => undefined,
@@ -100,10 +113,12 @@ export function createFakePage({
     locator.last = () => locatorAt(`${path}.last()`);
     locator.nth = (index) => locatorAt(`${path}.nth(${index})`);
     locator.filter = (options) => locatorAt(`${path}.filter(${args([options])})`);
-    locator.locator = (selector, options) =>
-      locatorAt(
+    locator.locator = (selector, options) => {
+      assertSelector(selector, `${path}.locator`);
+      return locatorAt(
         `${path}.locator(${args(options === undefined ? [selector] : [selector, options])})`,
       );
+    };
     locator.getByRole = (role, options) =>
       locatorAt(`${path}.getByRole(${args(options === undefined ? [role] : [role, options])})`);
     locator.getByText = (text, options) =>
@@ -124,10 +139,16 @@ export function createFakePage({
   const root = locatorAt('page');
   const page = {
     calls,
-    locator: (selector, options) =>
-      locatorAt(`locator(${args(options === undefined ? [selector] : [selector, options])})`),
-    getByRole: (role, options) =>
-      locatorAt(`getByRole(${args(options === undefined ? [role] : [role, options])})`),
+    locator: (selector, options) => {
+      assertSelector(selector, 'page.locator');
+      return locatorAt(
+        `locator(${args(options === undefined ? [selector] : [selector, options])})`,
+      );
+    },
+    getByRole: (role, options) => {
+      assertSelector(role, 'page.getByRole');
+      return locatorAt(`getByRole(${args(options === undefined ? [role] : [role, options])})`);
+    },
     getByText: (text, options) =>
       locatorAt(`getByText(${args(options === undefined ? [text] : [text, options])})`),
     getByLabel: (text, options) =>
