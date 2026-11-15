@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { EXPORT_PRESETS } from '../../../apps/editor-web/src/export-presets.ts';
 import { REQUIRED_ATTENDED_CHECKS, validateAttendedReceipt } from './attended-receipt.ts';
 import { TIMELINE_LOG_KEY, VISUAL_LOG_KEY } from './attended-fresh-process.ts';
 import {
   ACTIVE_PROJECT_KEY,
+  EXPECTED_AUDIO_SAMPLE_RATE,
   EXPORT_SEMANTICS_SCENARIO,
   SEMANTICS_EXPORT_FILE,
   audioBlockers,
@@ -571,5 +573,18 @@ describe('the measured checks as functions', () => {
     ].join('\r\n');
     expect(parseAstatsRms(text)).toEqual([-21.072025, Number.NEGATIVE_INFINITY]);
     expect(parseAstatsRms('no stats here')).toEqual([]);
+  });
+});
+
+describe('the audio rule follows the real export presets', () => {
+  it('expects the sample rate and the channel count that every preset writes', () => {
+    const audio = Object.values(EXPORT_PRESETS).map((preset) => preset.audio);
+    expect(audio.length).toBeGreaterThan(0);
+    // If a preset changes its audio, this fails here, not on the first live run.
+    for (const settings of audio) {
+      expect(settings.sampleRate).toBe(EXPECTED_AUDIO_SAMPLE_RATE);
+      expect(settings.channels).toBe(2);
+      expect(settings.codec).toBe('aac');
+    }
   });
 });

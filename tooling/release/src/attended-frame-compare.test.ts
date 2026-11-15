@@ -123,6 +123,17 @@ describe('compareFrames', () => {
     expect(compareFrames(chart(), offsetBy(chart(), 6)).passed).toBe(true);
   });
 
+  it('keeps the mean-difference edge inclusive: exactly the limit passes, one level more fails', () => {
+    const reference = solid([100, 100, 100]);
+    const atLimit = compareFrames(reference, solid([112, 112, 112]));
+    expect(atLimit.meanDifference).toBe(PICTURE_MAX_MEAN_DIFFERENCE);
+    expect(atLimit.passed).toBe(true);
+    const over = compareFrames(reference, solid([113, 113, 113]));
+    expect(over.meanDifference).toBe(PICTURE_MAX_MEAN_DIFFERENCE + 1);
+    expect(over.passed).toBe(false);
+    expect(over.reason).toContain('mean difference');
+  });
+
   it('fails the same chart with its box moved: SSIM falls', () => {
     const result = compareFrames(chart(40), chart(100));
     expect(result.passed).toBe(false);
@@ -176,6 +187,27 @@ describe('blendFrames and judgeDissolve', () => {
     const judgement = judgeDissolve({ middle: from, from, to, progress: 0.5 });
     expect(judgement.passed).toBe(false);
     expect(judgement.reason).toContain('not clearly a blend');
+  });
+
+  it('fails a middle frame that is near a blend but off it by more than the limit (the residual rule)', () => {
+    const black = solid([0, 0, 0]);
+    const white = solid([200, 200, 200]);
+    // The blend at 0.5 is 100; 120 is 20 levels off, yet still much nearer the blend than to either clip.
+    const judgement = judgeDissolve({
+      middle: solid([120, 120, 120]),
+      from: black,
+      to: white,
+      progress: 0.5,
+    });
+    expect(judgement.residual).toBe(20);
+    expect(judgement.passed).toBe(false);
+    expect(judgement.reason).toContain('from the expected blend');
+    expect(judgement.reason).not.toContain('not clearly a blend');
+    // On the blend itself the same clips pass.
+    expect(
+      judgeDissolve({ middle: solid([100, 100, 100]), from: black, to: white, progress: 0.5 })
+        .passed,
+    ).toBe(true);
   });
 
   it('fails a cut to the incoming clip', () => {
