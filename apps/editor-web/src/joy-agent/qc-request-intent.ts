@@ -6,9 +6,10 @@
 
 import type { JoyAgentHostToolName } from './host-tool-contract.js';
 
-/** The three model-visible QC tool names. They exist only on a QC run. */
+/** The model-visible QC tool names. They exist only on a QC run. */
 export const QC_HOST_TOOL_NAMES = Object.freeze([
   'qc_report_read',
+  'qc_repair_run',
   'media_frames_view',
   'media_contact_sheet',
 ] as const satisfies readonly JoyAgentHostToolName[]);

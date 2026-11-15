@@ -1,6 +1,7 @@
 /**
- * Host-side QC adapter (card T-B04b). It is the one object that backs the three
- * QC agent tools (`qc_report_read`, `media_frames_view`, `media_contact_sheet`)
+ * Host-side QC adapter (card T-B04b). It is the one object that backs the
+ * QC agent tools (`qc_report_read`, `qc_repair_run`, `media_frames_view`,
+ * `media_contact_sheet`)
  * on the trusted main thread, as ADR-0045 sections 3 to 5 describe.
  *
  * What it does:
@@ -579,6 +580,8 @@ export interface EditorQcAdapterInput {
   readonly runId: string;
   readonly projectId: string;
   readonly revision: string;
+  /** Current revision for a bounded repair loop after its own approved commits. */
+  readonly getRevision?: () => string;
   readonly modelId: string;
   readonly promptPolicyDigest: string;
   /** True only while this run still owns the project at this revision. */
@@ -603,7 +606,7 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
         ? {
             runId: input.runId,
             projectId: input.projectId,
-            revision: input.revision,
+            revision: input.getRevision?.() ?? input.revision,
             modelId: input.modelId,
             promptPolicyDigest: input.promptPolicyDigest,
           }

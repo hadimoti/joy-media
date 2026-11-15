@@ -61,6 +61,8 @@ export interface QcRepairLoopResult {
   readonly rounds: readonly QcRepairRound[];
   readonly initialFindings: readonly QcRepairFinding[];
   readonly remainingFindings: readonly QcRepairFinding[];
+  /** The terminal plan when nothing is repairable, so unsupported reasons are still reported. */
+  readonly proposedPlan?: QcRepairPlan;
   /** Plain reason when the loop stopped on a failure. */
   readonly message?: string;
 }
@@ -86,10 +88,13 @@ export async function runQcRepairLoop(
   }
   let open = initial;
 
+  if (open.length === 0) return done('clean', rounds, initial, open);
+
   for (let round = 1; round <= maxRounds; round += 1) {
     if (signal.aborted) return done('cancelled', rounds, initial, open);
     const plan = deps.propose(open);
-    if (plan.edits.length === 0) return done('nothing-repairable', rounds, initial, open);
+    if (plan.edits.length === 0)
+      return done('nothing-repairable', rounds, initial, open, undefined, plan);
     const approved = await deps.approve(plan, round, signal);
     if (signal.aborted) return done('cancelled', rounds, initial, open);
     if (!approved) {
@@ -154,12 +159,14 @@ function done(
   initialFindings: readonly QcRepairFinding[],
   remainingFindings: readonly QcRepairFinding[],
   message?: string,
+  proposedPlan?: QcRepairPlan,
 ): QcRepairLoopResult {
   return {
     stop,
     rounds,
     initialFindings,
     remainingFindings,
+    ...(proposedPlan === undefined ? {} : { proposedPlan }),
     ...(message === undefined ? {} : { message }),
   };
 }

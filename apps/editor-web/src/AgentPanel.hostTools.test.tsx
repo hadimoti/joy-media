@@ -23,7 +23,7 @@ Element.prototype.scrollIntoView = vi.fn();
 
 /**
  * The model must only be offered host tools that this panel can answer. The
- * generation and QC tools are catalog-only here, so they must never reach the
+ * generation and QC tools are prompt-scoped here, so they must never reach the
  * model through the real composer send path.
  */
 
@@ -37,6 +37,7 @@ const NOT_OFFERED_IN_THIS_PANEL = [
   'generate_media',
   'attach_generated_media',
   'qc_report_read',
+  'qc_repair_run',
   'media_frames_view',
   'media_contact_sheet',
 ] as const;

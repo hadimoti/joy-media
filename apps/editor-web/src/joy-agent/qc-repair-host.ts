@@ -43,6 +43,8 @@ export interface QcRepairHostDeps {
   readonly getAudio: () => AudioState;
   /** Told the mixer graph after each applied round, so the panel state follows the document. */
   readonly onAudioApplied?: (audio: AudioState) => void;
+  /** Refreshes editor projections after a committed compound transaction. */
+  readonly onApplied?: () => void;
   readonly textBoxes: () => readonly TimelineQcTextBox[];
   readonly approve: (plan: QcRepairPlan, round: number, signal: AbortSignal) => Promise<boolean>;
   /** The Joy Code setting `fixRounds`. */
@@ -120,6 +122,7 @@ export function createQcRepairHost(deps: QcRepairHostDeps): QcRepairHost {
             );
             if (!applied.ok) return { ok: false, message: applied.message };
             if (plan.audioCommands.length > 0) deps.onAudioApplied?.(applied.audio);
+            deps.onApplied?.();
             return { ok: true };
           },
           maxRounds: deps.maxRounds,

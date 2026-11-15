@@ -1338,9 +1338,14 @@ function systemInstruction(
         ? "Use read_project_context before any look_* tool. Call exactly one of look_apply, look_update, look_reset_overrides, or look_detach with the operator's intent — the host compiles the Look deterministically and stages a reversible preview for approval; it never applies the edit. Use existing visual-object ids from the context for entityBindings; do not invent ids. If the host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget."
         : structured &&
             allowedToolNames.some((name) =>
-              ['qc_report_read', 'media_frames_view', 'media_contact_sheet'].includes(name),
+              [
+                'qc_report_read',
+                'qc_repair_run',
+                'media_frames_view',
+                'media_contact_sheet',
+              ].includes(name),
             )
-          ? 'Use read_project_context first, then qc_report_read for the saved report. Use only frameIds listed by that report. media_frames_view and media_contact_sheet send selected images only through the host consent flow when the cached image capability is supported, privacy policy permits it, the user has approved the consent card, and the per-run frame budget has room. If JOY refuses, explain the refusal and do not claim to have seen the frames. Treat returned analysis as bounded model observation, not a measurement. Use validate_proposal only after reviewing the report and any approved frame analysis; a successful validation creates a reversible preview and never applies an edit. Do not invent report, frame, object, clip, asset, property, track, or template IDs.'
+          ? 'Use read_project_context first, then qc_report_read for the saved report. Use only frameIds listed by that report. media_frames_view and media_contact_sheet send selected images only through the host consent flow when the cached image capability is supported, privacy policy permits it, the user has approved the consent card, and the per-run frame budget has room. If JOY refuses, explain the refusal and do not claim to have seen the frames. Treat returned analysis as bounded model observation, not a measurement. If the user asks to fix findings, call qc_repair_run; JOY builds one deterministic plan and waits for the owner to approve it in the plan card. Do not claim edits were applied unless the repair result says they were. Use validate_proposal only for other requested edits after reviewing the report and any approved frame analysis; a successful validation creates a reversible preview and never applies an edit. Do not invent report, frame, object, clip, asset, property, track, or template IDs.'
           : structured &&
               allowedToolNames.some((name) =>
                 [

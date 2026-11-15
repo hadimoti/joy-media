@@ -261,8 +261,8 @@ function editorAdapter(session: EditorSession): QcHostAdapter {
   });
 }
 
-/** The scripted stub model: it asks for the latest report, then answers in text. */
-async function stubModelReadsReport(adapter: QcHostAdapter) {
+/** The scripted stub model reads the report, calls repair, then answers in text. */
+async function stubModelReadsAndRepairs(adapter: QcHostAdapter) {
   const methods = createJoyAgentHostRpcMethodsForSnapshot(
     { projectId: 'project-1', revision: 'revision-1' },
     undefined,
@@ -293,6 +293,7 @@ async function stubModelReadsReport(adapter: QcHostAdapter) {
       if (step === 1) return call('context', 'read_project_context', { domain: 'overview' });
       if (step === 2)
         return call('read', 'qc_report_read', { reportId: 'latest', includeFindings: true });
+      if (step === 3) return call('repair', 'qc_repair_run', {});
       return JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Fix it.' } }] });
     },
     async (method: JoyAgentHostToolName, args: HostRpcJson) => {
@@ -300,18 +301,25 @@ async function stubModelReadsReport(adapter: QcHostAdapter) {
       if (handler === undefined) throw new Error(`unexpected host call ${method}`);
       return handler.execute(handler.parseArgs(args), hostContext());
     },
-    { allowedToolNames: ['read_project_context', 'qc_report_read'] },
+    { allowedToolNames: ['read_project_context', 'qc_report_read', 'qc_repair_run'] },
   );
-  const toolMessage = (requests.at(-1) ?? []).find(
-    (item): item is { role: string; content: string; tool_call_id: string } =>
-      typeof item === 'object' &&
-      item !== null &&
-      (item as { role?: unknown }).role === 'tool' &&
-      (item as { tool_call_id?: unknown }).tool_call_id === 'read',
-  );
-  return toolMessage === undefined
-    ? undefined
-    : (JSON.parse(toolMessage.content) as { findings?: { type: string }[] });
+  const toolMessage = (toolCallId: string) =>
+    (requests.at(-1) ?? []).find(
+      (item): item is { role: string; content: string; tool_call_id: string } =>
+        typeof item === 'object' &&
+        item !== null &&
+        (item as { role?: unknown }).role === 'tool' &&
+        (item as { tool_call_id?: unknown }).tool_call_id === toolCallId,
+    );
+  const reportMessage = toolMessage('read');
+  const repairMessage = toolMessage('repair');
+  return {
+    report:
+      reportMessage === undefined
+        ? undefined
+        : (JSON.parse(reportMessage.content) as { findings?: { type: string }[] }),
+    repair: repairMessage === undefined ? undefined : JSON.parse(repairMessage.content),
+  };
 }
 
 describe('QC fix loop end to end (T-B06)', () => {
@@ -349,25 +357,49 @@ describe('QC fix loop end to end (T-B06)', () => {
       target: { kind: 'timeline' },
       findings: initial.findings as unknown as HostRpcJson[],
     });
+    const historyBefore = session.historyCursorSequence;
 
-    // The stub model reads the report through the real qc_report_read tool.
-    const seen = await stubModelReadsReport(adapter);
-    expect(seen?.findings?.map((finding) => finding.type).sort()).toEqual([
+    // The stub model reads the report and invokes the bounded repair RPC.
+    adapter.runRepair = async (context) => {
+      const result = await host.run(context.signal, initial.findings);
+      return {
+        ok: true,
+        stop: result.stop,
+        rounds: result.rounds.map((round) => ({
+          round: round.round,
+          approved: round.approved,
+          applied: round.applied,
+          repairCount: round.plan.edits.length,
+          notRepairable: round.plan.notRepairable.map(({ type, reason }) => ({ type, reason })),
+        })),
+        remainingFindings: result.remainingFindings.map(({ type, startUs, endUs }) => ({
+          type,
+          startUs,
+          endUs,
+        })),
+      };
+    };
+    const model = await stubModelReadsAndRepairs(adapter);
+    expect(model.report?.findings?.map((finding) => finding.type).sort()).toEqual([
       'black',
       'loudness',
       'safe-area',
     ]);
 
-    // One plan, one approval, one transaction, then the re-check of the changed ranges.
-    const historyBefore = session.historyCursorSequence;
-    const result = await host.run(new AbortController().signal, initial.findings);
-    expect(result.stop).toBe('clean');
+    // One plan, one approval, one transaction, then the re-check of changed ranges.
+    const result = model.repair as {
+      ok?: boolean;
+      stop?: string;
+      rounds?: { round: number; approved: boolean; applied: boolean }[];
+      remainingFindings?: unknown[];
+    };
+    expect(result).toMatchObject({ ok: true, stop: 'clean', remainingFindings: [] });
     expect(approve).toHaveBeenCalledTimes(1);
     expect(result.rounds).toHaveLength(1);
+    expect(result.rounds![0]).toMatchObject({ round: 1, approved: true, applied: true });
     expect(approvals[0]!.notRepairable).toEqual([]);
     expect(approvals[0]!.edits.map((edit) => edit.kind).sort()).toEqual(['cut', 'gain', 'move']);
     expect(approvals[0]!.agentPlan.status).toBe('pending-approval');
-    expect(result.remainingFindings).toEqual([]);
     expect(session.historyCursorSequence).toBe(historyBefore + 1);
 
     // A full check afterwards agrees: none of the three faults is left.

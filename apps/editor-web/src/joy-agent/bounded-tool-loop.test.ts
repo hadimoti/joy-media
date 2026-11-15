@@ -88,6 +88,7 @@ describe('mounted Worker bounded semantic tool exchange', () => {
       'evidence_read',
       'evidence_coverage',
       'qc_report_read',
+      'qc_repair_run',
       'media_frames_view',
       'media_contact_sheet',
       'generate_media',

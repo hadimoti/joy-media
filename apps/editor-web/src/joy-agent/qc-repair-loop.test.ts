@@ -27,7 +27,13 @@ function plan(
               commands: [],
             },
           ],
-    notRepairable: [],
+    notRepairable: findings
+      .filter((finding) => finding.type === 'exposure')
+      .map((finding) => ({
+        findingId: finding.id,
+        type: finding.type,
+        reason: 'The grade is a taste decision.',
+      })),
     timelineCommands: [],
     audioCommands: [],
     visualCommands: [],
@@ -100,7 +106,7 @@ describe('QC repair loop', () => {
     const check = vi.fn(async () => ({ ok: true as const, findings: [] }));
     const result = await runQcRepairLoop(deps({ check }), new AbortController().signal);
     expect(check).toHaveBeenCalledWith('all', expect.anything());
-    expect(result.stop).toBe('nothing-repairable');
+    expect(result.stop).toBe('clean');
   });
 
   it('stops without applying when the owner declines', async () => {
@@ -127,13 +133,20 @@ describe('QC repair loop', () => {
     expect(failedCheck).toMatchObject({ stop: 'check-failed', message: 'no frames' });
   });
 
-  it('stops when only advice-only findings are left', async () => {
+  it('stops when only advice-only findings are left and returns the not-repairable plan', async () => {
     const result = await runQcRepairLoop(
       deps({ initialFindings: [{ id: 'e', type: 'exposure', startUs: 0, endUs: S }] }),
       new AbortController().signal,
     );
     expect(result.stop).toBe('nothing-repairable');
     expect(result.rounds).toEqual([]);
+    expect(result.proposedPlan?.notRepairable).toEqual([
+      {
+        findingId: 'e',
+        type: 'exposure',
+        reason: 'The grade is a taste decision.',
+      },
+    ]);
   });
 
   it('stops when cancelled', async () => {

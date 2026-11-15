@@ -324,7 +324,7 @@ describe('QC repair plan: titles and the rest', () => {
     });
     expect(plan.agentPlan.steps).toHaveLength(3);
     expect(plan.agentPlan.steps.every((step) => step.requiresConfirmation)).toBe(true);
-    expect(plan.repairedTypes.sort()).toEqual(['black', 'loudness', 'safe-area']);
+    expect([...plan.repairedTypes].sort()).toEqual(['black', 'loudness', 'safe-area']);
   });
 
   it('is deterministic for the same input', () => {

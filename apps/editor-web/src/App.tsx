@@ -7392,6 +7392,7 @@ function EditorWorkspace({
           onUndo={context.undo}
           onProjectRevision={context.bumpProjectRevision}
           session={context.session}
+          onQcAudioApplied={(next) => setAudioStateRaw(next)}
           settings={context.agentPolicy}
           {...(context.agentPanelCommand === undefined
             ? {}
