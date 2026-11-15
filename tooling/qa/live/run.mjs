@@ -259,8 +259,9 @@ export async function run(argv = process.argv.slice(2)) {
         String(error?.message ?? error).split('\n')[0]
       }`;
       for (const result of results) {
+        // Keep what the row found: the safety failure is added, it does not erase the row's own result.
+        result.message = `${message}; row result before the check: ${result.status}, ${result.message}`;
         result.status = 'failed';
-        result.message = message;
       }
       process.exitCode = 2;
     }

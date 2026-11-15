@@ -11505,6 +11505,9 @@ label {
   border: 0;
   min-width: 0;
   max-width: 100%;
+  /* The form grid centres items at their start: without this the format grid shrinks to one column and
+     pushes the name field and the Create button out of view (seen live, 16 Nov 2026). */
+  justify-self: stretch;
 }
 .new-project-formats legend {
   padding: 0;

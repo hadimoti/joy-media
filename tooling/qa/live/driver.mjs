@@ -102,6 +102,11 @@ export function buildLaunchEnvironment({
   };
 }
 
+/** True for the editor window (served from the app scheme); false for devtools and the loading window. */
+export function isAppEditorUrl(url) {
+  return typeof url === 'string' && url.startsWith('joy-media-app://');
+}
+
 export function buildLaunchArguments({ profileDir, port, testMode = false }) {
   return [
     `--user-data-dir=${profileDir}`,
@@ -350,13 +355,16 @@ export function createLiveDriver(config, options = {}) {
     process.stdout.write(`${launchEnv.modeLine}\n`);
     const requireFromApp = createRequire(join(baseline.appDir, 'resources', 'app', 'package.json'));
     const { chromium: appChromium } = requireFromApp('playwright-core');
+    // JOY_QA_APP_LOG: a file that receives the app's own output (stdout and stderr) for a diagnosis.
+    const appLogPath = process.env.JOY_QA_APP_LOG;
+    const appLogFd = appLogPath ? openSync(appLogPath, 'a') : undefined;
     child = spawnProcess(
       baseline.appExe,
       buildLaunchArguments({ profileDir, port, testMode: config.testMode === true }),
       {
         cwd: baseline.appDir,
         env,
-        stdio: 'ignore',
+        stdio: appLogFd === undefined ? 'ignore' : ['ignore', appLogFd, appLogFd],
         windowsHide: false,
       },
     );
@@ -370,10 +378,16 @@ export function createLiveDriver(config, options = {}) {
       if (!browser) await delay(500);
     }
     if (!browser) throw fail('unpacked app did not expose CDP before timeout');
-    page = browser
-      .contexts()
-      .flatMap((context) => context.pages())
-      .find((candidate) => !candidate.url().startsWith('devtools://'));
+    // The packaged app first shows a small loading window (a data: page) that closes after about two seconds;
+    // the editor is the page served from the app's own scheme. Take that one, never the loading window.
+    const pageDeadline = Date.now() + 30_000;
+    while (Date.now() < pageDeadline && !page) {
+      page = browser
+        .contexts()
+        .flatMap((context) => context.pages())
+        .find((candidate) => isAppEditorUrl(candidate.url()));
+      if (!page) await delay(250);
+    }
     if (!page) throw fail('CDP connected but no app window was found');
     await page.waitForLoadState('domcontentloaded', { timeout: 30_000 });
     return {
@@ -494,7 +508,7 @@ function exportJoyHash(outDir) {
 function countJoyAndElectronProcesses(appDir) {
   const directory = appDir.replace(/'/gu, "''");
   const script = [
-    `$d = '${directory}'`,
+    `$d = '${directory}';`,
     '@(Get-CimInstance Win32_Process | Where-Object {',
     "$_.Name -eq 'joy-media.exe' -or",
     '($_.ExecutablePath -and',
