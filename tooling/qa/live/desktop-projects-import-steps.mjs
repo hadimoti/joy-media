@@ -299,13 +299,11 @@ rows.push({
       .getByRole('button', { name: `Delete ${file}`, exact: true })
       .first()
       .click();
-    const dialog = page.getByRole('dialog').last();
+    // The confirm is an alertdialog (class app-dialog), not a plain dialog.
+    const dialog = page.getByRole('alertdialog').last();
     await dialog.waitFor({ state: 'visible' });
     const shot = await ctx.shot('D-A05-22', 'confirm');
-    await dialog
-      .getByRole('button', { name: /Delete|Remove|Confirm/u })
-      .last()
-      .click();
+    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
     await card.waitFor({ state: 'detached' });
     const catalog = await assetCatalogNames(ctx);
     if (catalog.includes(file)) throw new Error(`the catalog still lists ${file} after the delete`);
@@ -335,10 +333,14 @@ rows.push({
       await dialog.waitFor({ state: 'visible' });
       return dialog;
     };
+    // The dialog stays open after Apply Path and blocks the menu: close it before the next open.
+    const closeDialog = (open) =>
+      open.getByRole('button', { name: 'Close dialog', exact: true }).click();
     const evidence = [];
     let dialog = await openDialog();
     await dialog.getByRole('textbox').first().fill(ctx.altLibraryDir);
     await dialog.getByRole('button', { name: 'Apply Path', exact: true }).click();
+    await closeDialog(dialog);
     if (
       !(await assetLibraryPath(ctx))
         .toLowerCase()
@@ -350,6 +352,7 @@ rows.push({
     dialog = await openDialog();
     await dialog.getByRole('textbox').first().fill(original);
     await dialog.getByRole('button', { name: 'Apply Path', exact: true }).click();
+    await closeDialog(dialog);
     dialog = await openDialog();
     await dialog.getByRole('textbox').first().fill(ctx.altLibraryDir);
     await dialog

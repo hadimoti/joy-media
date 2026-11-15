@@ -459,7 +459,7 @@ export function createLiveDriver(config, options = {}) {
       return page;
     },
     async screenshot(path) {
-      await page.screenshot({ path, fullPage: true });
+      await page.screenshot({ path, fullPage: false });
     },
     async visibleText() {
       return page.locator('body').innerText();
@@ -484,7 +484,7 @@ async function recordSignInPage(page, outDir) {
     `${JSON.stringify({ title, localAppData: 'the real one, for this launch only' }, null, 2)}\n`,
     'utf8',
   );
-  await page.screenshot({ path: join(dir, 'screenshot.png'), fullPage: true }).catch(() => null);
+  await page.screenshot({ path: join(dir, 'screenshot.png'), fullPage: false }).catch(() => null);
 }
 
 /** Launches the driver. A launch that throws still closes it, so the app lock is released and no app is left running. */

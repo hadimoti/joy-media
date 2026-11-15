@@ -107,7 +107,7 @@ export async function screenshot(page, path) {
   });
   if (textEntryFocused) return null;
   mkdirSync(dirname(path), { recursive: true });
-  await page.screenshot({ path, fullPage: true });
+  await page.screenshot({ path, fullPage: false });
   return path;
 }
 
