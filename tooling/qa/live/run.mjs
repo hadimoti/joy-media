@@ -32,8 +32,12 @@ export function createMediaState() {
 }
 
 /** The D-002 row: its import marks the fixture as imported, so a later row does not import it a second time. */
-export async function importMediaRow(state, importMedia) {
-  if (state.imported) return;
+export async function importMediaRow(state, importMedia, verifyPresent = async () => {}) {
+  if (state.imported) {
+    // Setup already imported the fixture: the row still has to prove the asset is in the library.
+    await verifyPresent();
+    return;
+  }
   await importMedia();
   state.imported = true;
 }
@@ -257,8 +261,14 @@ export async function run(argv = process.argv.slice(2)) {
           await newProject(session.page, title);
           message = `created project: ${title}`;
         } else if (id === 'D-002') {
-          await importMediaRow(mediaState, () =>
-            importThroughLeftPanel(session.page, options.media),
+          await importMediaRow(
+            mediaState,
+            () => importThroughLeftPanel(session.page, options.media),
+            () =>
+              session.page
+                .locator('.asset-card', { hasText: options.media.split(/[\\/]/u).at(-1) })
+                .first()
+                .waitFor({ state: 'visible', timeout: 10_000 }),
           );
           message = `imported ${options.media.split(/[\\/]/u).at(-1)} through the Media panel`;
         } else if (id in MONITOR_SUITE_CASES) {

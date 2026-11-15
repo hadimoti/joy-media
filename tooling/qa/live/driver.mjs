@@ -118,6 +118,33 @@ export function buildLaunchArguments({ profileDir, port, testMode = false }) {
   ];
 }
 
+/** The owner's folders a live run must never read or write. */
+export function protectedRootsOf(ownerHome, installedDir) {
+  return [
+    ownerDefaultLibrary(ownerHome),
+    join(ownerHome, 'Desktop'),
+    join(ownerHome, 'Downloads'),
+    join(ownerHome, 'joy-media'),
+    join(ownerHome, '.joy-media'),
+    join(ownerHome, 'Documents', 'JOY Projects'),
+    installedDir,
+    join(ownerHome, 'AppData', 'Roaming', '@joy-media'),
+    join(ownerHome, 'AppData', 'Roaming', 'JOY Media'),
+  ];
+}
+
+/**
+ * Refuses a file the run would write (the lock file, the app log) when it lies in or around a protected owner
+ * folder. Called before anything is created, so a wrong environment variable cannot write there.
+ */
+export function refuseProtectedFile(path, label, ownerHome = OWNER_HOME) {
+  const installedDir = join(ownerHome, 'AppData', 'Local', 'Programs', 'JOY Media');
+  const abs = resolve(path);
+  if (protectedRootsOf(ownerHome, installedDir).some((root) => isInside(abs, root))) {
+    throw fail(`${label} path is inside a protected owner folder`);
+  }
+}
+
 export async function checkLaunchRules(config, deps = {}) {
   const platform = deps.platform ?? process.platform;
   if (platform !== 'win32') throw fail('live app runs require Windows');
@@ -171,17 +198,7 @@ export async function checkLaunchRules(config, deps = {}) {
   if (!config.reuseExisting && existsSync(config.outDir) && readdirSync(config.outDir).length > 0) {
     throw fail('output folder must be empty so prior evidence is not overwritten');
   }
-  const protectedRoots = [
-    ownerDefaultLibrary(ownerHome),
-    join(ownerHome, 'Desktop'),
-    join(ownerHome, 'Downloads'),
-    join(ownerHome, 'joy-media'),
-    join(ownerHome, '.joy-media'),
-    join(ownerHome, 'Documents', 'JOY Projects'),
-    installedDir,
-    join(ownerHome, 'AppData', 'Roaming', '@joy-media'),
-    join(ownerHome, 'AppData', 'Roaming', 'JOY Media'),
-  ];
+  const protectedRoots = protectedRootsOf(ownerHome, installedDir);
   for (const [name, path] of Object.entries(runPaths)) {
     const abs = resolve(path);
     if (protectedRoots.some((root) => isInside(abs, root) || isInside(root, abs))) {
@@ -314,6 +331,9 @@ export function createLiveDriver(config, options = {}) {
     if (signIn === true && config.needsSignIn !== true) {
       throw fail('the sign-in launch needs --needs-sign-in');
     }
+    // Nothing is created or deleted before these two files are known to be outside the owner's folders.
+    refuseProtectedFile(lockPath, 'app lock');
+    if (process.env.JOY_QA_APP_LOG) refuseProtectedFile(process.env.JOY_QA_APP_LOG, 'app log');
     const lockState = inspectLockFile(lockPath);
     if (lockState.status === 'busy') throw fail('app lock is younger than 30 minutes');
     if (lockState.status === 'error') throw fail('could not inspect the app lock');
@@ -418,6 +438,7 @@ export function createLiveDriver(config, options = {}) {
     closed = true;
     if (lockFd === undefined) return;
     let lockOwnershipChanged = false;
+    let appStillRunning = false;
     try {
       if (!started) return;
       await page
@@ -431,6 +452,16 @@ export function createLiveDriver(config, options = {}) {
         await delay(1_000);
         afterProcesses = countJoyAndElectronProcesses(baseline.appDir);
       }
+      // The app we started did not quit by itself (a hung window, a lost page): stop that one process we
+      // spawned, never anything else, and count again.
+      if (afterProcesses > 0 && child !== undefined && child.exitCode === null) {
+        child.kill();
+        for (let attempt = 0; afterProcesses > 0 && attempt < 10; attempt += 1) {
+          await delay(1_000);
+          afterProcesses = countJoyAndElectronProcesses(baseline.appDir);
+        }
+      }
+      appStillRunning = afterProcesses > 0;
       const afterCount = ownerLibraryCount(OWNER_HOME);
       verifyAfterRun(baseline, {
         joyHash: afterHash,
@@ -439,7 +470,8 @@ export function createLiveDriver(config, options = {}) {
       });
     } finally {
       if (lockFd !== undefined) closeSync(lockFd);
-      if (existsSync(lockPath)) {
+      // A lock stays while an app is still running: the next run must be refused, not collide with it.
+      if (existsSync(lockPath) && !appStillRunning) {
         if (readFileSync(lockPath, 'utf8') !== lockContents) {
           lockOwnershipChanged = true;
         } else {

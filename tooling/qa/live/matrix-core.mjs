@@ -1,4 +1,4 @@
-/* global window, localStorage */
+/* global window, document, localStorage */
 /**
  * Shared core of the T-A05 and T-A06 desktop matrix rows.
  *
@@ -212,9 +212,49 @@ export async function readProjectIds(page) {
 }
 
 /** The stored document of the open project through `desktop.media.project.document.get`. */
+/**
+ * The editor's live timeline project (tracks and clips), read from the page's own session. Found live on the
+ * laptop (16 Nov 2026): `desktop.media.project.document.get` returns only the visual document (`document`,
+ * `lookInstances`); the timeline clips live in the editor session (the revision id counts them as `timeline=N`),
+ * so a row that counts clips must read them here. Returns null when no session is found.
+ */
+export async function readLiveTimeline(page) {
+  const json = await page.evaluate(() => {
+    const root = document.getElementById('root');
+    const key = root && Object.keys(root).find((name) => name.startsWith('__reactContainer'));
+    if (!key) return null;
+    const seen = new Set();
+    const stack = [root[key]];
+    while (stack.length > 0) {
+      const fiber = stack.pop();
+      if (!fiber || seen.has(fiber)) continue;
+      seen.add(fiber);
+      for (const props of [fiber.memoizedProps, fiber.memoizedState]) {
+        if (!props || typeof props !== 'object') continue;
+        const session = props.session ?? props.context?.session;
+        if (session?.timelineProject?.compositions) {
+          try {
+            return JSON.stringify(session.timelineProject);
+          } catch {
+            return null;
+          }
+        }
+      }
+      if (fiber.child) stack.push(fiber.child);
+      if (fiber.sibling) stack.push(fiber.sibling);
+    }
+    return null;
+  });
+  return json === null || json === undefined ? null : JSON.parse(json);
+}
+
 export async function readDocument(page, bridge) {
+  const live = await readLiveTimeline(page).catch(() => null);
   const ids = await readProjectIds(page);
   if (!ids?.controlPlaneProjectId) {
+    if (live !== null) {
+      return { projectId: ids?.active ?? 'live', revisionId: 'live', document: live };
+    }
     throw new Error(
       `BLOCKED: no bridge project id for the open project (active ${ids?.active ?? 'none'}, ${ids?.bindingCount ?? 0} bindings); the project may not have been saved yet`,
     );
@@ -227,7 +267,9 @@ export async function readDocument(page, bridge) {
   return {
     projectId: ids.controlPlaneProjectId,
     revisionId: view.revisionId,
-    document: view.document,
+    // The timeline (clips) is the live one; the stored visual document stays available beside it.
+    document: live ?? view.document,
+    storedDocument: view.document,
   };
 }
 
@@ -318,6 +360,9 @@ export async function runCommandCycle(row, page, ctx) {
 export async function executeRow(row, page, ctx) {
   const startedAt = Date.now();
   ctx.bridge?.log.setLabel(row.id);
+  // A menu or popup left open by the row before would block every click of this one: close it first.
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.keyboard.press('Escape').catch(() => {});
   let status = 'passed';
   let message = '';
   let evidence = [];
