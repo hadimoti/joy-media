@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   buildLaunchEnvironment,
+  buildLaunchArguments,
   createLiveDriver,
   EXPECTED_JOY_HASH,
   verifyAfterRun,
@@ -249,6 +250,27 @@ test('building the environment does not change the base environment', () => {
   });
 
   assert.deepEqual(base, before);
+});
+
+test('test mode routes downloads into the scratch user profile and adds the guarded app flag', () => {
+  const downloadDir = join(SCRATCH_ROOT, 'downloads');
+  const launch = buildLaunchEnvironment({
+    baseEnv: baseEnvironment(),
+    envRoot: SCRATCH_ROOT,
+    needsSignIn: false,
+    electronDir: ELECTRON_DIR,
+    testDownloadDirectory: downloadDir,
+  });
+  assert.equal(launch.env.JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY, downloadDir);
+  assert.deepEqual(buildLaunchArguments({ profileDir: SCRATCH_ROOT, port: 9333, testMode: true }), [
+    `--user-data-dir=${SCRATCH_ROOT}`,
+    '--remote-debugging-port=9333',
+    '--joy-media-test-mode',
+  ]);
+  assert.deepEqual(
+    buildLaunchArguments({ profileDir: SCRATCH_ROOT, port: 9333, testMode: false }),
+    [`--user-data-dir=${SCRATCH_ROOT}`, '--remote-debugging-port=9333'],
+  );
 });
 
 test('dispatches trusted CDP file-drop events with real scratch file paths', async (t) => {
