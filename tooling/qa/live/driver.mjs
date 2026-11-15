@@ -70,6 +70,8 @@ export function buildLaunchEnvironment({
   const scratch = {
     USERPROFILE: join(envRoot, 'User'),
     HOME: join(envRoot, 'User'),
+    // The worker keeps its state under JOY_MEDIA_HOME when it is set: never the machine's own value.
+    JOY_MEDIA_HOME: join(envRoot, 'JoyMediaHome'),
     APPDATA: join(envRoot, 'Roaming'),
     TEMP: join(envRoot, 'Temp'),
     TMP: join(envRoot, 'Temp'),
@@ -78,7 +80,7 @@ export function buildLaunchEnvironment({
   if (testDownloadDirectory !== undefined) {
     env.JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY = testDownloadDirectory;
   }
-  const scratchDirs = [scratch.USERPROFILE, scratch.APPDATA, scratch.TEMP];
+  const scratchDirs = [scratch.USERPROFILE, scratch.APPDATA, scratch.TEMP, scratch.JOY_MEDIA_HOME];
   if (needsSignIn) {
     const realLocalAppData = baseEnv.LOCALAPPDATA;
     if (!realLocalAppData) {
@@ -174,6 +176,8 @@ export async function checkLaunchRules(config, deps = {}) {
     join(ownerHome, 'Desktop'),
     join(ownerHome, 'Downloads'),
     join(ownerHome, 'joy-media'),
+    join(ownerHome, '.joy-media'),
+    join(ownerHome, 'Documents', 'JOY Projects'),
     installedDir,
     join(ownerHome, 'AppData', 'Roaming', '@joy-media'),
     join(ownerHome, 'AppData', 'Roaming', 'JOY Media'),
@@ -483,6 +487,16 @@ async function recordSignInPage(page, outDir) {
   await page.screenshot({ path: join(dir, 'screenshot.png'), fullPage: true }).catch(() => null);
 }
 
+/** Launches the driver. A launch that throws still closes it, so the app lock is released and no app is left running. */
+async function launchOrClose(driver, options) {
+  try {
+    return await driver.launch(options);
+  } catch (error) {
+    await driver.close().catch(() => {});
+    throw error;
+  }
+}
+
 /**
  * The launches of one run. With `needsSignIn` (`--needs-sign-in`) the real LOCALAPPDATA is used for the sign-in
  * launch only: the sign-in page is recorded and that app is closed, then the live rows run on a scratch launch of
@@ -497,17 +511,17 @@ export async function launchForRun({
 }) {
   if (needsSignIn !== true) {
     const driver = makeDriver();
-    return { driver, session: await driver.launch() };
+    return { driver, session: await launchOrClose(driver) };
   }
   const signInDriver = makeDriver();
-  const signInSession = await signInDriver.launch({ signIn: true });
+  const signInSession = await launchOrClose(signInDriver, { signIn: true });
   try {
     await recordSignIn(signInSession.page, outDir);
   } finally {
     await signInDriver.close();
   }
   const driver = makeDriver(true);
-  return { driver, session: await driver.launch() };
+  return { driver, session: await launchOrClose(driver) };
 }
 
 function inspectLock(path) {
@@ -557,7 +571,8 @@ function exportJoyHash(outDir) {
 }
 
 function countJoyAndElectronProcesses(appDir) {
-  const directory = appDir.replace(/'/gu, "''");
+  // A trailing separator: a sibling folder that only starts with the same letters is not this app.
+  const directory = `${appDir.replace(/[\\/]+$/u, '')}\\`.replace(/'/gu, "''");
   const script = [
     `$d = '${directory}';`,
     '@(Get-CimInstance Win32_Process | Where-Object {',

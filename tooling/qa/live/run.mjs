@@ -33,6 +33,7 @@ export function createMediaState() {
 
 /** The D-002 row: its import marks the fixture as imported, so a later row does not import it a second time. */
 export async function importMediaRow(state, importMedia) {
+  if (state.imported) return;
   await importMedia();
   state.imported = true;
 }

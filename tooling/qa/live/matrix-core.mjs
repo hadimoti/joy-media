@@ -12,8 +12,9 @@
  */
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { labRoots } from './lab-roots.mjs';
 
-export const FIXTURE_ROOT = 'C:\\jgp\\v111\\fixtures';
+export const FIXTURE_ROOT = labRoots().fixtures;
 
 const LOGGED_PREFIXES = ['desktop.media.', 'desktop.asset-library.'];
 const MAX_LOGGED_REPLY_CHARS = 4000;

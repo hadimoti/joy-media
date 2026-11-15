@@ -59,3 +59,14 @@ test('the D-07 prefix expands every T-A08 shortcut and workspace row', () => {
   assert.ok(options.testIds.includes('D-079'));
   assert.ok(!options.testIds.includes('D-080'));
 });
+
+test('the D-002 row does not import a fixture that setup already imported', async () => {
+  const state = createMediaState();
+  const calls = [];
+  await ensureMediaInProject(state, {
+    importMedia: async () => calls.push('import'),
+    placeOnTimeline: async () => calls.push('place'),
+  });
+  await importMediaRow(state, async () => calls.push('import again'));
+  assert.deepEqual(calls, ['import', 'place']);
+});

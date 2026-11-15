@@ -5,7 +5,12 @@ import { mkdirSync } from 'node:fs';
 export async function newProject(page, title) {
   // Inside an editor the Projects page is one menu click away (File > Projects Library).
   const newButton = page.getByRole('button', { name: 'New project', exact: true });
-  if (!(await newButton.isVisible().catch(() => false))) {
+  // Wait a moment for the Projects page: a fresh launch may not have drawn the button yet.
+  const onProjectsPage = await newButton.waitFor({ state: 'visible', timeout: 5_000 }).then(
+    () => true,
+    () => false,
+  );
+  if (!onProjectsPage) {
     await openMenu(page, 'File');
     await page.getByRole('menuitem', { name: /Projects Library/u }).click();
   }

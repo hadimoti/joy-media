@@ -209,6 +209,7 @@ test('sign-in mode creates only scratch folders, never the real LOCALAPPDATA', (
     join(SCRATCH_ROOT, 'User'),
     join(SCRATCH_ROOT, 'Roaming'),
     join(SCRATCH_ROOT, 'Temp'),
+    join(SCRATCH_ROOT, 'JoyMediaHome'),
   ]);
   assert.ok(!launch.scratchDirs.includes(REAL_LOCAL_APP_DATA));
 });
@@ -221,7 +222,7 @@ test('scratch mode creates the scratch LOCALAPPDATA folder with the others', () 
     electronDir: ELECTRON_DIR,
   });
 
-  assert.equal(launch.scratchDirs.length, 4);
+  assert.equal(launch.scratchDirs.length, 5);
   assert.ok(launch.scratchDirs.includes(join(SCRATCH_ROOT, 'Local')));
 });
 
@@ -437,4 +438,39 @@ test('a failed sign-in record still closes the sign-in app and stops before the 
     ['launch', false, { signIn: true }],
     ['close', false],
   ]);
+});
+
+test('a launch that throws still closes its driver, so the lock is released', async () => {
+  const calls = [];
+  const makeDriver = (reuseExisting = false) => ({
+    async launch() {
+      calls.push(['launch', reuseExisting]);
+      throw new Error('joy:// registry hash does not match');
+    },
+    async close() {
+      calls.push(['close', reuseExisting]);
+    },
+  });
+  await assert.rejects(
+    launchForRun({ makeDriver, needsSignIn: false, outDir: join('C:', 'unused') }),
+    /registry hash/u,
+  );
+  assert.deepEqual(calls, [
+    ['launch', false],
+    ['close', false],
+  ]);
+});
+
+test('the worker home is scratch in both modes, never the machine value', () => {
+  for (const needsSignIn of [false, true]) {
+    const base = { ...baseEnvironment(), JOY_MEDIA_HOME: 'C:\\Users\\Owner\\.joy-media' };
+    const launch = buildLaunchEnvironment({
+      baseEnv: base,
+      envRoot: SCRATCH_ROOT,
+      needsSignIn,
+      electronDir: ELECTRON_DIR,
+    });
+    assert.equal(launch.env.JOY_MEDIA_HOME, join(SCRATCH_ROOT, 'JoyMediaHome'));
+    assert.ok(launch.scratchDirs.includes(join(SCRATCH_ROOT, 'JoyMediaHome')));
+  }
 });
