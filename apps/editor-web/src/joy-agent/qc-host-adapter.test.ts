@@ -125,6 +125,7 @@ interface FixtureOptions {
   readonly consent?: 'absent' | boolean;
   readonly identity?: QcHostAdapterDeps['identity'];
   readonly onReport?: QcHostAdapterDeps['onReport'];
+  readonly createContactSheet?: QcHostAdapterDeps['createContactSheet'];
 }
 
 function createFixture(options: FixtureOptions = {}): Fixture {
@@ -154,7 +155,9 @@ function createFixture(options: FixtureOptions = {}): Fixture {
     isPrivacyModeAllowed: () => privacy.value,
     ...(options.consent === 'absent' ? {} : { requestConsent }),
     ...(activeTransport === undefined ? {} : { transport: activeTransport }),
-    createContactSheet: async () => new Blob([new Uint8Array(4)], { type: 'image/jpeg' }),
+    createContactSheet:
+      options.createContactSheet ??
+      (async () => new Blob([new Uint8Array(4)], { type: 'image/jpeg' })),
     digest: async () => 'c'.repeat(64),
     now: () => Date.UTC(2026, 10, 14),
     evenFrameCount: 4,
@@ -493,6 +496,58 @@ describe('QC host adapter: gates in front of every frame', () => {
     await adapter.reviewFrames(request, context());
     expect(reports).toHaveLength(2);
     expect(reports[1]).toMatchObject({ run: { layer2: true, framesSent: 2 } });
+  });
+
+  it('puts the frame budget on the report, so the card can show frames against it', async () => {
+    const reports: Record<string, unknown>[] = [];
+    const { adapter, reportId, frames } = await checked({
+      onReport: (report) => reports.push(report as Record<string, unknown>),
+    });
+    expect(reports[0]).toMatchObject({ run: { frameBudget: 16 } });
+    const request = frameRequest(reportId, frames.slice(0, 3));
+    await adapter.hasApprovedConsent(request, context());
+    await adapter.reviewFrames(request, context());
+    expect(reports[1]).toMatchObject({ run: { framesSent: 3, frameBudget: 16 } });
+  });
+
+  it('still returns the review when the report cannot be updated after the model answered', async () => {
+    let answered = false;
+    const transport: QcFrameTransport = {
+      analyze: vi.fn(async () => {
+        answered = true;
+        return { ok: true as const, analysis: 'Fine.' };
+      }),
+    };
+    const { adapter, reportId, frames } = await checked({
+      transport,
+      identity: () => {
+        if (answered) throw new Error('identity unavailable');
+        return IDENTITY;
+      },
+    });
+    const request = frameRequest(reportId, frames.slice(0, 2));
+    await adapter.hasApprovedConsent(request, context());
+    await expect(adapter.reviewFrames(request, context())).resolves.toMatchObject({
+      ok: true,
+      framesSent: 2,
+    });
+  });
+
+  it('refuses plainly, without throwing, when the check closes while the contact sheet is built', async () => {
+    let closeNow: () => void = () => undefined;
+    const { adapter, reportId, frames } = await checked({
+      createContactSheet: async () => {
+        closeNow();
+        return new Blob([new Uint8Array(4)], { type: 'image/jpeg' });
+      },
+    });
+    closeNow = () => adapter.dispose();
+    const request = frameRequest(reportId, frames.slice(0, 2), 'media_contact_sheet');
+    await adapter.hasApprovedConsent(request, context());
+    await expect(adapter.reviewFrames(request, context())).resolves.toMatchObject({
+      ok: false,
+      code: 'JOY_AGENT_QC_REVIEW_FAILED',
+    });
   });
 
   it('does not charge a report for a refusal that sent nothing', async () => {

@@ -36,6 +36,7 @@
  *     `storeFileReport` and lists no frames, so frame tools refuse for it.
  */
 
+import { QC_DEFAULT_RUN_FRAME_BUDGET } from './qc-request-intent.js';
 import {
   createTimelineContactSheet,
   MAX_TIMELINE_CONTACT_SHEET_FRAMES,
@@ -269,6 +270,10 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         layer2: true,
         modelId: modelId.length > 0 ? modelId : (prior['modelId'] ?? null),
         framesSent: sentBefore + count,
+        frameBudget:
+          typeof prior['frameBudget'] === 'number'
+            ? prior['frameBudget']
+            : QC_DEFAULT_RUN_FRAME_BUDGET,
       },
     }) as { readonly [key: string]: HostRpcJson };
     reports.set(reportId, { ...stored, report: updated });
@@ -515,7 +520,13 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         }
       }
       // From here a provider may have seen pixels, so every failure is charged.
-      const chargedReportId = resolveStored(input.reportId)!.id;
+      const resolved = resolveStored(input.reportId);
+      if (resolved === undefined)
+        return refusal(
+          'JOY_AGENT_QC_REVIEW_FAILED',
+          'The check is no longer open. No frames were sent.',
+        );
+      const chargedReportId = resolved.id;
       let charged = false;
       try {
         const sent = await deps.transport.analyze({
@@ -526,8 +537,12 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
           contactSheet,
           signal: context.signal,
         });
-        charged = true;
-        chargeFrames(chargedReportId, frames.length);
+        try {
+          chargeFrames(chargedReportId, frames.length);
+          charged = true;
+        } catch {
+          // The report could not be updated; the review result below is still returned honestly.
+        }
         deps.evidenceStore.recordFrames({
           ...lookup,
           stage: 'submitted',
@@ -551,7 +566,13 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
           framesSent: frames.length,
         };
       } catch {
-        if (!charged) chargeFrames(chargedReportId, frames.length);
+        if (!charged) {
+          try {
+            chargeFrames(chargedReportId, frames.length);
+          } catch {
+            // The report could not be updated.
+          }
+        }
         return refusal(
           'JOY_AGENT_QC_REVIEW_FAILED',
           'The image review did not complete.',
@@ -686,7 +707,14 @@ function buildTimelineReport(input: TimelineReportInput): { readonly [key: strin
       kind: 'timeline',
       range: { domain: 'composition', startUs: 0, endUs: input.durationUs },
     },
-    run: { layer1: true, layer2: false, modelId: null, framesSent: 0, framesSkipped: 0 },
+    run: {
+      layer1: true,
+      layer2: false,
+      modelId: null,
+      framesSent: 0,
+      framesSkipped: 0,
+      frameBudget: QC_DEFAULT_RUN_FRAME_BUDGET,
+    },
     coverage: {
       completeSourceCoverage: false,
       sampledRanges,

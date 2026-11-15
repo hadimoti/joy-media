@@ -266,7 +266,7 @@ function reportLineageId(
 function validFrameBudget(value: unknown, framesSent: number): number | undefined {
   return typeof value === 'number' &&
     Number.isSafeInteger(value) &&
-    value >= 12 &&
+    value >= 1 &&
     value <= 48 &&
     framesSent <= value
     ? value
