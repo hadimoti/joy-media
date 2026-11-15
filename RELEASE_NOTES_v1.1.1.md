@@ -22,7 +22,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 
 ### Filters, effects and transitions
 
-- Each filter and effect is tested one by one against a real picture: 15 of 15 filters and 18 of 18 effects pass.
+- Each filter and effect is tested one by one against a real picture.
 - Filters and effects each have one home. The 20 items that appeared in both lists now appear once.
 - There are 38 transitions in 8 groups: Basic fades, Wipes, Slides and pushes, Zooms and spins, Shapes and masks, Glitch and digital, Light and glow, Creative. 35 pass every check. The three that do not are listed under known limits.
 
@@ -100,15 +100,29 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Header menus open one at a time. Escape closes a menu and returns focus to its title.
 - The command palette opens empty each time.
 - The Clip menu has Split at Playhead, Duplicate Clip, Delete and Speed. The Edit menu has Cut, Copy, Paste and Delete.
-- Every dock tab has its own close button. A closed panel reopens from the View menu in its old place.
+- Every dock tab has its own close button. A closed panel that is listed in the View menu reopens in its old place.
 - Monitor footer controls are no longer cut at the bottom.
 - Settings left tabs can no longer scroll out of sight.
 - Connection sections in Settings show the right arrow when closed and down when open.
 - Library panels have no description lines. Cards have a plus button only.
 - Asset view icons: large previews are four squares, the compact grid is nine small squares.
+- On a 16-inch laptop screen the app window moved a few pixels up, down and sideways while you worked. It no longer does. Only the Inspector list scrolls.
+- The New project form fits a small screen. The Project name field and the Create button are visible, and the format cards lay out in a grid.
+- The timeline right-click menu shows only keys that work, and empty divider lines no longer leave blank rows.
 
 ## Known limits
 
+- **Unsigned.** The files are not code-signed, so Windows shows a warning when you download or run the setup.
+- **GPU.** An NVIDIA hardware-encoder crash was seen on one machine before v1.1.0. Its cause is not known. The graphics card path of the colour engine is not yet checked on screen.
+- **Icon cache after upgrading from v1.0.2.** The Desktop shortcut can keep its old icon. This is the Windows icon cache, not JOY Media.
+- **Providers.** Kimi and xAI model answers and the Get a key and API docs links on the provider cards may not work as expected.
+- **Export.** The command line has 3 export choices (MP4, WebM, ProRes). The app has 5 presets, so the same request can give different files. Some effects may not appear in exported videos.
+- **Effect previews.** Some effect cards play the wrong preview loop, so the card may not show the effect as it looks.
+- **Sample project export.** Exporting one sample project can fail with "cannot resolve visual asset".
+- **Some drags.** One clip dragged from the asset panel showed on the timeline but was missing from the saved project; this is not yet explained. Dropping an image from the Asset Library onto the filter layer can do nothing, with no message.
+- **Export size.** Export size may follow the selected preset instead of the canvas size.
+- **Small windows.** A right-click (context) menu opened near the bottom edge of a small window can be cut by the window.
+- **Projects page when maximised.** The bottom of the Projects page can sit behind the Windows taskbar.
 - **Persian and Arabic text is not finished.** Right-to-left shaping and line direction are not correct in titles or captions in the video. This is planned for a later version.
 - **Transitions.** TV Static uses random noise, so the preview and the export cannot match. Kaleidoscope and Ripple: the Speed option showed no change in the test (open). Slide and push transitions are tested with a looser limit for the last frame. Full table: `docs/qa/v1.1.1/TRANSITIONS.md`.
 - **Video clips have no fade.** There are no opacity fade handles on video. Audio fades are set in the Audio panel.
@@ -119,11 +133,14 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - **Text gradients use anchors.** There is no angle field and no "reset anchors" button.
 - **Smart guides, snapping while you move on the Monitor, text editing in place, crop handles and the right-click menu on the Monitor** are planned for v1.1.2.
 - **Joy Code cannot yet check a finished video frame by frame, and cannot yet make pictures or videos.** These tools are not connected.
+- **Joy Code cannot yet repair a failed quality check on its own.** The repair step is not connected in the app. The quality check card is not kept after a reload; only its summary line is.
 - **Glow** still blurs the whole picture. **Vibrance** is slightly different in the preview and in the command-line render. The Tone Geometry Angle slider does nothing until a shape other than Circle is chosen.
 - The HSL band names do not match their centre angles (Yellow shows 90 degrees, Green 135).
 - The Track Lock button keeps the same name when locked. Its state is shown only to screen readers.
 - Guides on the Monitor work with the mouse only.
 - The web build of the drop progress Cancel button cannot stop the file that is being imported. The desktop app is not affected.
+- **Position X** uses offsets from the centre for picture clips and pixels for text clips, so the same number can mean different things.
+- **Small items, not yet fixed:** the vertical ruler on the Monitor has no numbers; Alt+arrow scaling at the smallest size can change a box's shape; the Monitor's frame-step keys are not in the command palette; the command palette shows a different Undo shortcut from the menus; the View menu cannot reopen the Captions, Text, Audio, Transitions, Colour, Motion or Templates panels; the command line prints an older provider risk sentence; one title template still says "New tools for JOY Studio"; some icon buttons in Joy Code Settings keep fixed colours instead of the theme colours; the History panel shows internal ids in a few labels.
 
 ## Not yet checked on screen
 
@@ -132,8 +149,11 @@ These are built and tested in code. They were not yet seen working in the runnin
 - Crop numbers cutting the picture in the Monitor and the export.
 - Monitor overlays, guides, background and bars; the preview quality control; frame stepping and the time readout.
 - Colour on old projects compared with v1.1.0, and the graphics card path of the colour engine.
-- The single Format control, the format question for a new project, and the export size following the canvas.
+- Whether the Format control saves frame rate and background settings, and whether exports match the canvas size.
 - Sample projects without missing media, missing-clip marks on the timeline, the Monitor and the Inspector, and the export warning about missing media.
 - The Asset Library Storage dialog and its Open folder button.
 - Scopes in one place, the library card design, transition cards that play the real transition, and the centred Format button with grouped export presets.
 - Animate panel changes, and the panel header menu.
+- Audio fades in the Audio panel.
+- Workspace presets keep their own layout when you switch between Edit, Automate and the others.
+- A clean install and upgrades from v1.0.2 and v1.1.0.
