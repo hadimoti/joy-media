@@ -38,7 +38,11 @@ function show(value) {
 
 const args = (list) => list.map(show).join(',');
 
-export function createFakePage({ answers = () => undefined, urlValue = 'app://joy/', titleValue = 'JOY Media' } = {}) {
+export function createFakePage({
+  answers = () => undefined,
+  urlValue = 'app://joy/',
+  titleValue = 'JOY Media',
+} = {}) {
   const calls = [];
 
   function ask(path, method, argList, fn) {
@@ -88,7 +92,8 @@ export function createFakePage({ answers = () => undefined, urlValue = 'app://jo
         ask(path, method, argList);
       };
     }
-    locator.evaluate = async (fn, arg) => ask(path, 'evaluate', arg === undefined ? [] : [arg], fn.name);
+    locator.evaluate = async (fn, arg) =>
+      ask(path, 'evaluate', arg === undefined ? [] : [arg], fn.name);
     locator.evaluateAll = async (fn, arg) =>
       ask(path, 'evaluateAll', arg === undefined ? [] : [arg], fn.name);
     locator.first = () => locatorAt(`${path}.first()`);
@@ -96,7 +101,9 @@ export function createFakePage({ answers = () => undefined, urlValue = 'app://jo
     locator.nth = (index) => locatorAt(`${path}.nth(${index})`);
     locator.filter = (options) => locatorAt(`${path}.filter(${args([options])})`);
     locator.locator = (selector, options) =>
-      locatorAt(`${path}.locator(${args(options === undefined ? [selector] : [selector, options])})`);
+      locatorAt(
+        `${path}.locator(${args(options === undefined ? [selector] : [selector, options])})`,
+      );
     locator.getByRole = (role, options) =>
       locatorAt(`${path}.getByRole(${args(options === undefined ? [role] : [role, options])})`);
     locator.getByText = (text, options) =>
@@ -104,7 +111,9 @@ export function createFakePage({ answers = () => undefined, urlValue = 'app://jo
     locator.getByLabel = (text, options) =>
       locatorAt(`${path}.getByLabel(${args(options === undefined ? [text] : [text, options])})`);
     locator.getByPlaceholder = (text, options) =>
-      locatorAt(`${path}.getByPlaceholder(${args(options === undefined ? [text] : [text, options])})`);
+      locatorAt(
+        `${path}.getByPlaceholder(${args(options === undefined ? [text] : [text, options])})`,
+      );
     locator.all = async () => {
       const total = Number(ask(path, 'count', []));
       return Array.from({ length: total }, (_, index) => locatorAt(`${path}.nth(${index})`));
@@ -147,7 +156,9 @@ export function createFakePage({ answers = () => undefined, urlValue = 'app://jo
     reload: async () => void ask('page', 'reload', []),
     url: () => urlValue,
     title: async () => titleValue,
-    context: () => ({ newCDPSession: async () => ({ send: async () => undefined, detach: async () => undefined }) }),
+    context: () => ({
+      newCDPSession: async () => ({ send: async () => undefined, detach: async () => undefined }),
+    }),
     root,
   };
   return page;

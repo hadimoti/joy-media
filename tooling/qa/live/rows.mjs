@@ -32,11 +32,7 @@ export function statusOfMessage(message) {
   return BLOCKED_PATTERN.test(message) ? 'blocked' : 'failed';
 }
 
-const clean = (text) =>
-  String(text)
-    .replace(/\s+/gu, ' ')
-    .replace(/\|/gu, '/')
-    .trim();
+const clean = (text) => String(text).replace(/\s+/gu, ' ').replace(/\|/gu, '/').trim();
 
 /** The defect entry text of the T-A16 format. The first line is one table row, the rest is the long form. */
 export function formatDefect({ id, area, what, expected, severity = 'major', owner = 'CX' }) {
