@@ -379,6 +379,22 @@ const QC_REPORT_READ_TOOL: BrowserAgentToolDefinition = {
   },
 };
 
+const QC_REPAIR_RUN_TOOL: BrowserAgentToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'qc_repair_run',
+    description:
+      'When the user asked to fix QC findings, build one deterministic repair plan and show it for manual approval. After approval JOY applies one undoable change, rechecks only changed ranges, and stops at the saved fix-round limit. Unsupported findings are returned as not repairable.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: [],
+      properties: {},
+    },
+  },
+};
+
 const MEDIA_FRAMES_VIEW_TOOL: BrowserAgentToolDefinition = {
   type: 'function',
   function: {
@@ -459,6 +475,7 @@ type ObservationToolName =
   | 'evidence_read'
   | 'evidence_coverage'
   | 'qc_report_read'
+  | 'qc_repair_run'
   | 'media_frames_view'
   | 'media_contact_sheet';
 
@@ -470,6 +487,7 @@ const OBSERVATION_TOOLS: Readonly<Record<ObservationToolName, BrowserAgentToolDe
   evidence_read: EVIDENCE_READ_TOOL,
   evidence_coverage: EVIDENCE_COVERAGE_TOOL,
   qc_report_read: QC_REPORT_READ_TOOL,
+  qc_repair_run: QC_REPAIR_RUN_TOOL,
   media_frames_view: MEDIA_FRAMES_VIEW_TOOL,
   media_contact_sheet: MEDIA_CONTACT_SHEET_TOOL,
 };
@@ -1070,7 +1088,7 @@ export async function runBoundedToolExchange(
                   ? requestedFrames
                   : 0;
             qcFramesUsed += Math.min(requestedFrames, framesSent);
-          } else if (name === 'qc_report_read') {
+          } else if (name === 'qc_report_read' || name === 'qc_repair_run') {
             result = hostResult;
           } else if (name === 'generate_media' || name === 'attach_generated_media') {
             // The host already returns `ok` plus a readable refusal code; wrapping

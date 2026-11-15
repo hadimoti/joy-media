@@ -9360,6 +9360,12 @@ label {
   color: var(--joy-text-faint);
   font-size: var(--joy-type-xs);
 }
+.joy-code-plan-steps {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
 .joy-code-plan-head strong,
 .joy-code-run-card strong {
   color: var(--joy-text);

@@ -369,6 +369,8 @@ export interface JoyAgentQcToolAdapter {
     | JoyAgentQcFrameReviewSuccess
     | JoyAgentQcFrameReviewRefusal
     | Promise<JoyAgentQcFrameReviewSuccess | JoyAgentQcFrameReviewRefusal>;
+  /** Runs the bounded deterministic repair loop; every applied round waits for owner approval. */
+  runRepair?(context: HostRpcHandlerContext): HostRpcJson | Promise<HostRpcJson>;
 }
 
 export type JoyAgentGenerationKind = 'image' | 'video';
@@ -687,6 +689,11 @@ function parseQcReportReadArgs(value: HostRpcJson): JoyAgentQcReportReadRequest 
     reportId: readSafeOpaqueIdentifier(record.reportId, 'reportId'),
     includeFindings: record.includeFindings,
   });
+}
+
+function parseQcRepairRunArgs(value: HostRpcJson): Record<string, never> {
+  readObservationRecord(value, []);
+  return Object.freeze({});
 }
 
 function parseQcFrameIds(value: HostRpcJson): readonly string[] {
@@ -1786,6 +1793,31 @@ export function createJoyAgentHostRpcMethods(
     },
     parseResult: parseQcReportResult,
   };
+  const qcRepairRun: HostRpcMethod<Record<string, never>, HostRpcJson> = {
+    parseArgs: parseQcRepairRunArgs,
+    execute: async (_input, context) => {
+      context.signal.throwIfAborted();
+      const qc = options.qc;
+      if (qc?.runRepair === undefined)
+        return {
+          ok: false,
+          code: 'JOY_AGENT_QC_REPAIR_UNAVAILABLE',
+          message: 'QC repairs are unavailable in this JOY session.',
+        };
+      try {
+        const result = await qc.runRepair(context);
+        context.signal.throwIfAborted();
+        return result;
+      } catch {
+        return {
+          ok: false,
+          code: 'JOY_AGENT_QC_REPAIR_FAILED',
+          message: 'JOY could not complete the QC repair check.',
+        };
+      }
+    },
+    parseResult: (value) => value,
+  };
   const executeQcFrameReview = async (
     input: JoyAgentQcFrameReviewRequest,
     context: HostRpcHandlerContext,
@@ -1848,6 +1880,7 @@ export function createJoyAgentHostRpcMethods(
       ? {}
       : {
           qc_report_read: qcReportRead as HostRpcMethod<unknown, unknown>,
+          qc_repair_run: qcRepairRun as HostRpcMethod<unknown, unknown>,
           media_frames_view: qcFramesView as HostRpcMethod<unknown, unknown>,
           media_contact_sheet: qcContactSheet as HostRpcMethod<unknown, unknown>,
         }),

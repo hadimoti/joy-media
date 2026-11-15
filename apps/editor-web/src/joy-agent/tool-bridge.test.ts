@@ -37,6 +37,7 @@ function method(
     | 'evidence_read'
     | 'evidence_coverage'
     | 'qc_report_read'
+    | 'qc_repair_run'
     | 'media_frames_view'
     | 'media_contact_sheet',
 ): HostRpcMethod<HostRpcJson, HostRpcJson> {
@@ -55,6 +56,7 @@ async function invoke(
     | 'evidence_read'
     | 'evidence_coverage'
     | 'qc_report_read'
+    | 'qc_repair_run'
     | 'media_frames_view'
     | 'media_contact_sheet',
   args: HostRpcJson,
@@ -127,6 +129,21 @@ describe('JOY Agent trusted host tool bridge', () => {
       'read_project_context',
       'validate_proposal',
     ]);
+  });
+
+  it('runs QC repairs only through the explicitly connected repair host', async () => {
+    const runRepair = vi.fn(async () => ({ ok: true, stop: 'clean' }));
+    const methods = createJoyAgentHostRpcMethods({
+      context: createJoyAgentPagedContext({ projectId: 'project-1', revision: 'revision-1' }),
+      prepareProposal: () => preparedResult(),
+      qc: { runRepair } as never,
+    });
+
+    await expect(invoke(methods, 'qc_repair_run', {})).resolves.toEqual({
+      ok: true,
+      stop: 'clean',
+    });
+    expect(runRepair).toHaveBeenCalledTimes(1);
   });
 
   it('gates QC frame review on report membership, cached image support, privacy, and consent', async () => {

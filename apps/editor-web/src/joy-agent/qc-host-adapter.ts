@@ -1,6 +1,7 @@
 /**
- * Host-side QC adapter (card T-B04b). It is the one object that backs the three
- * QC agent tools (`qc_report_read`, `media_frames_view`, `media_contact_sheet`)
+ * Host-side QC adapter (card T-B04b). It is the one object that backs the
+ * QC agent tools (`qc_report_read`, `qc_repair_run`, `media_frames_view`,
+ * `media_contact_sheet`)
  * on the trusted main thread, as ADR-0045 sections 3 to 5 describe.
  *
  * What it does:
@@ -205,9 +206,24 @@ export type QcTimelineCheckResult =
       readonly message: string;
     };
 
+/** A part of the cut to check again, in composition microseconds (end exclusive). */
+export interface QcCheckRange {
+  readonly startUs: number;
+  readonly endUs: number;
+}
+
 export interface QcHostAdapter extends JoyAgentQcToolAdapter {
-  /** Host action: sample the current cut and store one report. Not a model tool. */
-  runTimelineCheck(signal: AbortSignal): Promise<QcTimelineCheckResult>;
+  /**
+   * Host action: sample the current cut and store one report. Not a model tool.
+   * With `ranges` (the T-B06 re-check) only those parts are sampled, and only the
+   * titles and cuts inside them are checked.
+   */
+  runTimelineCheck(
+    signal: AbortSignal,
+    ranges?: readonly QcCheckRange[],
+  ): Promise<QcTimelineCheckResult>;
+  /** The stored report with that id (or `latest`), as the tools would read it. */
+  storedReport(reportId: string): { readonly [key: string]: HostRpcJson } | undefined;
   /** Keeps a file report (the Worker's output) so it can be read back. It lists no frames. */
   storeFileReport(report: Readonly<Record<string, unknown>>): string | undefined;
   dispose(): void;
@@ -286,7 +302,10 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
     return id === undefined || stored === undefined ? undefined : { id, stored };
   };
 
-  const runCheck = async (signal: AbortSignal): Promise<QcTimelineCheckResult> => {
+  const runCheck = async (
+    signal: AbortSignal,
+    rangesInput?: readonly QcCheckRange[],
+  ): Promise<QcTimelineCheckResult> => {
     const identity = deps.identity();
     if (identity === undefined)
       return failure('authority-unavailable', 'The project changed, so no check was started.');
@@ -297,17 +316,34 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         'This build cannot capture composed frames of the cut yet, so no timeline check ran.',
       );
 
+    const ranges =
+      rangesInput === undefined ? undefined : clampRanges(rangesInput, source.durationUs);
+    if (ranges !== undefined && ranges.length === 0)
+      return failure('sampling-failed', 'There is no part of the cut to check again.');
+    const inRanges = (startUs: number, endUs: number): boolean =>
+      ranges === undefined ||
+      ranges.some((range) =>
+        startUs === endUs
+          ? startUs >= range.startUs && startUs < range.endUs
+          : startUs < range.endUs && endUs > range.startUs,
+      );
+    const textBoxes = source.textBoxes.filter((box) => inRanges(box.startUs, box.endUs));
+    const cutTimesUs = source.cutTimesUs.filter((timeUs) => inRanges(timeUs, timeUs));
+
     let plan: ReturnType<typeof planTimelineQcSampling>;
     try {
       plan = planTimelineQcSampling({
         durationUs: source.durationUs,
-        cutTimesUs: source.cutTimesUs,
-        textBoxes: source.textBoxes,
+        cutTimesUs,
+        textBoxes,
         maxFrames: MAX_QC_REPORT_FRAMES,
-        strategy: {
-          kind: 'evenly-spaced-plus-cuts',
-          count: Math.min(evenCount, Math.max(1, source.durationUs)),
-        },
+        strategy:
+          ranges === undefined
+            ? {
+                kind: 'evenly-spaced-plus-cuts',
+                count: Math.min(evenCount, Math.max(1, source.durationUs)),
+              }
+            : { kind: 'times', timesUs: [...timesInsideRanges(ranges, evenCount), ...cutTimesUs] },
       });
     } catch {
       return failure('sampling-failed', 'The cut could not be planned for sampling.');
@@ -350,17 +386,25 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
     if (result.status !== 'captured')
       return failure('sampling-failed', 'The cut could not be sampled, so there is no report.');
 
+    const built = buildTimelineReport({
+      reportId,
+      projectId: identity.projectId,
+      createdAt: new Date(now()).toISOString(),
+      durationUs: source.durationUs,
+      timesUs: plan.timesUs,
+      coverage: plan.coverage,
+      missedCutTimesUs: plan.missedCutTimesUs,
+      textChecks: result.textChecks,
+    });
     remember(reportId, {
-      report: buildTimelineReport({
-        reportId,
-        projectId: identity.projectId,
-        createdAt: new Date(now()).toISOString(),
-        durationUs: source.durationUs,
-        timesUs: plan.timesUs,
-        coverage: plan.coverage,
-        missedCutTimesUs: plan.missedCutTimesUs,
-        textChecks: result.textChecks,
-      }),
+      // A re-check says which parts it looked at; a full check keeps its old shape.
+      report:
+        ranges === undefined
+          ? built
+          : Object.freeze({
+              ...built,
+              checkedRanges: ranges.map((range) => ({ ...range })),
+            }),
       lookup,
       frameIds: new Set(plan.frameIds),
       approvedFrameIds: new Set(),
@@ -368,7 +412,12 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
     return { ok: true, reportId };
   };
 
-  const checkAndStore = (signal: AbortSignal): Promise<QcTimelineCheckResult> => {
+  const checkAndStore = (
+    signal: AbortSignal,
+    ranges?: readonly QcCheckRange[],
+  ): Promise<QcTimelineCheckResult> => {
+    // A re-check of given ranges never joins (or is joined by) a full check.
+    if (ranges !== undefined) return runCheck(signal, ranges);
     // One check at a time: a second request joins the one that is running.
     if (inflight !== undefined) return inflight;
     const running = runCheck(signal).finally(() => {
@@ -404,6 +453,8 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
 
   return {
     runTimelineCheck: checkAndStore,
+
+    storedReport: (reportId) => (disposed ? undefined : resolveStored(reportId)?.stored.report),
 
     storeFileReport(report) {
       if (disposed) return undefined;
@@ -594,6 +645,8 @@ export interface EditorQcAdapterInput {
   readonly runId: string;
   readonly projectId: string;
   readonly revision: string;
+  /** Current revision for a bounded repair loop after its own approved commits. */
+  readonly getRevision?: () => string;
   readonly modelId: string;
   readonly promptPolicyDigest: string;
   /** True only while this run still owns the project at this revision. */
@@ -620,7 +673,7 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
         ? {
             runId: input.runId,
             projectId: input.projectId,
-            revision: input.revision,
+            revision: input.getRevision?.() ?? input.revision,
             modelId: input.modelId,
             promptPolicyDigest: input.promptPolicyDigest,
           }
@@ -796,6 +849,39 @@ function chunk<T>(values: readonly T[], size: number): readonly (readonly T[])[]
   for (let index = 0; index < values.length; index += size)
     pages.push(values.slice(index, index + size));
   return pages;
+}
+
+/** Whole-microsecond ranges inside the cut, merged and sorted. Empty ranges are dropped. */
+function clampRanges(ranges: readonly QcCheckRange[], durationUs: number): QcCheckRange[] {
+  const clamped = ranges
+    .filter((range) => Number.isFinite(range.startUs) && Number.isFinite(range.endUs))
+    .map((range) => ({
+      startUs: Math.max(0, Math.floor(range.startUs)),
+      endUs: Math.min(durationUs, Math.ceil(range.endUs)),
+    }))
+    .filter((range) => range.endUs > range.startUs)
+    .sort((left, right) => left.startUs - right.startUs);
+  const merged: { startUs: number; endUs: number }[] = [];
+  for (const range of clamped) {
+    const last = merged.at(-1);
+    if (last !== undefined && range.startUs <= last.endUs)
+      last.endUs = Math.max(last.endUs, range.endUs);
+    else merged.push(range);
+  }
+  return merged;
+}
+
+/** Up to `count` evenly spread sample times over the ranges, at least one per range. */
+function timesInsideRanges(ranges: readonly QcCheckRange[], count: number): number[] {
+  const total = ranges.reduce((sum, range) => sum + (range.endUs - range.startUs), 0);
+  const times: number[] = [];
+  for (const range of ranges) {
+    const span = range.endUs - range.startUs;
+    const share = Math.max(1, Math.round((count * span) / Math.max(1, total)));
+    for (let index = 0; index < share; index += 1)
+      times.push(range.startUs + Math.floor(((index + 0.5) * span) / share));
+  }
+  return times;
 }
 
 function clampInteger(value: number, min: number, max: number): number {

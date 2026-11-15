@@ -14,6 +14,7 @@ export const JOY_AGENT_HOST_TOOL_NAMES = [
   'evidence_read',
   'evidence_coverage',
   'qc_report_read',
+  'qc_repair_run',
   'media_frames_view',
   'media_contact_sheet',
   // Generated media (T-C04). `generate_media` always raises a cost card and waits

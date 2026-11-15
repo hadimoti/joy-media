@@ -129,7 +129,7 @@ async function sendPrompt(client: JoyAgentEngineClient, prompt: string): Promise
 }
 
 describe('AgentPanel: QC host adapter wiring', () => {
-  it('passes the QC adapter and advertises the three QC tools for a quality-check request', async () => {
+  it('passes the QC adapter and advertises the QC tools for a quality-check request', async () => {
     const { client, hosts } = recordingClient();
 
     await sendPrompt(client, 'Run a quality check on my film');
@@ -140,8 +140,14 @@ describe('AgentPanel: QC host adapter wiring', () => {
       expect(host.allowedToolNames).toContain(name);
       expect(host.methods[name], name).toBeDefined();
     }
+    expect(host.allowedToolNames).toContain('qc_repair_run');
+    expect(host.methods['qc_repair_run']).toBeDefined();
     expect(host.allowedToolNames).toContain('read_project_context');
     expect(host.allowedToolNames).toContain('validate_proposal');
+
+    const repair = host.methods['qc_repair_run'] as HostRpcMethod<HostRpcJson, HostRpcJson>;
+    const repairResult = await repair.execute(repair.parseArgs({}), context());
+    expect(repairResult).toMatchObject({ ok: false, code: 'JOY_AGENT_QC_REPAIR_CHECK_FAILED' });
 
     // The adapter is connected, and it refuses honestly: this build has no
     // composition renderer, so there is no report and no frame to send.

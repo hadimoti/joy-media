@@ -7,6 +7,7 @@ import type {
   EditorContext,
   ExecutionResult,
 } from '@joy-media/agent-tools';
+import type { AudioState } from '@joy-media/commands';
 import {
   ApprovalEngine,
   createAuditTrail,
@@ -109,6 +110,9 @@ import {
   QC_HOST_TOOL_NAMES,
 } from './joy-agent/qc-request-intent.js';
 import { createEditorQcAdapter, type QcHostAdapter } from './joy-agent/qc-host-adapter.js';
+import { createQcRepairHost, timelineQcCheckPort } from './joy-agent/qc-repair-host.js';
+import type { QcRepairPlan } from './joy-agent/qc-repair-plan.js';
+import { audioStateFromProject } from './timeline-presentation.js';
 import {
   createJoyAgentComposerHostLease,
   interruptJoyAgentComposerHostLease,
@@ -375,12 +379,17 @@ export function selectActiveJoyAgentRunId(
 interface PendingPlan {
   readonly runId: string;
   readonly threadId: string;
-  readonly intent: AgentIntent;
+  readonly intent?: AgentIntent;
   readonly plan: AgentEditPlan;
   readonly baseRevision: ProjectRevisionId;
   readonly baseProject: SpikeProject;
   readonly dryRun: DryRunResult;
   readonly approval: ApprovalDecision;
+  readonly qcRepair?: {
+    readonly round: number;
+    readonly notRepairable: QcRepairPlan['notRepairable'];
+    readonly resolve: (approved: boolean) => void;
+  };
 }
 
 interface LastRun {
@@ -555,6 +564,7 @@ export function AgentPanel({
   agentContext,
   onUndo,
   onProjectRevision,
+  onQcAudioApplied,
   session,
   attachedAssets = [],
   onDetachAsset,
@@ -582,6 +592,8 @@ export function AgentPanel({
   readonly onUndo: () => void;
   /** Notify the app shell after a model draft mutates the shared session. */
   readonly onProjectRevision?: () => void;
+  /** Syncs the mixer state after an already-committed QC compound transaction. */
+  readonly onQcAudioApplied?: (audio: AudioState) => void;
   readonly session: EditorSession;
   readonly attachedAssets?: readonly JoyAgentAttachedAsset[];
   readonly onDetachAsset?: (assetId: string) => void;
@@ -734,6 +746,7 @@ export function AgentPanel({
   // The QC host adapter of the current quality-check run, if any. A new run or an
   // unmount disposes the previous one so its report and frame store do not outlive it.
   const qcAdapterRef = useRef<QcHostAdapter | undefined>(undefined);
+  const qcApprovalWaiterRef = useRef<((approved: boolean) => void) | undefined>(undefined);
   // One report card per QC report, kept beside the conversation by message id. The message itself is an
   // ordinary assistant line (the summary), so a reload shows that line and ordinary chat is unchanged.
   const [qcCards, setQcCards] = useState<
@@ -1705,6 +1718,7 @@ export function AgentPanel({
       if (thinkingTimerRef.current !== undefined) {
         window.clearTimeout(thinkingTimerRef.current);
       }
+      qcApprovalWaiterRef.current?.(false);
     },
     [],
   );
@@ -1717,6 +1731,7 @@ export function AgentPanel({
       return;
     }
     if (command.type === 'stop' && pending !== undefined) {
+      pending.qcRepair?.resolve(false);
       auditRef.current.record({
         planId: pending.plan.planId,
         action: 'plan-rejected',
@@ -2239,21 +2254,194 @@ export function AgentPanel({
           qcAdapterRef.current = undefined;
           let qcAdapter: QcHostAdapter | undefined;
           if (structured && isQcCheckRequest(body)) {
-            qcAdapter = createEditorQcAdapter({
+            const qcAdapterInput = {
               runId,
               projectId: contextInput.projectId,
               revision: baseRevision,
               modelId: capturedModelId ?? '',
               promptPolicyDigest: capturedPolicyDigest,
-              isCurrent: () =>
-                activeModelRunIdRef.current === runId &&
-                latestSessionRef.current.visualProject.id === contextInput.projectId &&
-                latestSessionRef.current.projectRevisionId === baseRevision,
               getTimeline: () => latestSessionRef.current.timelineProject,
               isCachedImageSupported: qcImageSupported,
               isPrivacyModeAllowed: qcPrivacyAllowed,
               onReport: onQcReport,
+            };
+            // The QC tools keep their original guard: an edit during the run refuses the check.
+            qcAdapter = createEditorQcAdapter({
+              ...qcAdapterInput,
+              isCurrent: () =>
+                activeModelRunIdRef.current === runId &&
+                latestSessionRef.current.visualProject.id === contextInput.projectId &&
+                latestSessionRef.current.projectRevisionId === baseRevision,
             });
+            // The repair loop commits its own approved plans, so its re-checks follow the live revision.
+            // It has its own adapter: the QC tools above never see this relaxed identity.
+            const repairQcAdapter = createEditorQcAdapter({
+              ...qcAdapterInput,
+              getRevision: () => latestSessionRef.current.projectRevisionId,
+              isCurrent: () =>
+                activeModelRunIdRef.current === runId &&
+                latestSessionRef.current.visualProject.id === contextInput.projectId,
+            });
+            const toolAdapter = qcAdapter;
+            qcAdapter = {
+              ...toolAdapter,
+              dispose() {
+                toolAdapter.dispose();
+                repairQcAdapter.dispose();
+              },
+            };
+            const repairHost = createQcRepairHost({
+              session,
+              checks: [timelineQcCheckPort(repairQcAdapter)],
+              getAudio: () => audioStateFromProject(latestSessionRef.current.visualProject),
+              onAudioApplied: (audio) => onQcAudioApplied?.(audio),
+              textBoxes: () => [],
+              maxRounds: latestSettingsRef.current.qualityCheck.fixRounds,
+              onApplied: () => onProjectRevision?.(),
+              approve: (plan, round, signal) =>
+                new Promise<boolean>((resolve) => {
+                  let settled = false;
+                  const settle = (approved: boolean): void => {
+                    if (settled) return;
+                    settled = true;
+                    signal.removeEventListener('abort', onAbort);
+                    if (qcApprovalWaiterRef.current === settle)
+                      qcApprovalWaiterRef.current = undefined;
+                    resolve(approved);
+                  };
+                  const onAbort = (): void => {
+                    setPending((current) =>
+                      current?.qcRepair?.resolve === settle ? undefined : current,
+                    );
+                    settle(false);
+                  };
+                  if (signal.aborted) {
+                    settle(false);
+                    return;
+                  }
+                  qcApprovalWaiterRef.current = settle;
+                  signal.addEventListener('abort', onAbort, { once: true });
+
+                  const decisions = approvalEngine.evaluatePlan(
+                    plan.agentPlan,
+                    agentContext,
+                    (toolName) => registry.tools.get(toolName)?.scope,
+                  );
+                  const selected =
+                    decisions.find((decision) => decision.decision === 'blocked') ??
+                    decisions.find((decision) => decision.decision === 'requires-manual') ??
+                    decisions[0];
+                  if (selected === undefined) {
+                    settle(false);
+                    return;
+                  }
+                  const approval: ApprovalDecision =
+                    selected.decision === 'blocked'
+                      ? selected
+                      : { ...selected, decision: 'requires-manual' };
+                  const repairCount = plan.edits.length;
+                  const notRepairableCount = plan.notRepairable.length;
+                  const dryRun: DryRunResult = {
+                    planId: plan.agentPlan.planId,
+                    success: true,
+                    stepResults: plan.agentPlan.steps.map((step) => ({
+                      stepId: step.id,
+                      success: true,
+                      preconditionsMet: true,
+                      warnings: [],
+                    })),
+                    aggregateDiff: {
+                      clipsCreated: 0,
+                      clipsModified: plan.edits.filter((edit) => edit.kind === 'cut').length,
+                      clipsDeleted: 0,
+                      tracksAffected: [
+                        ...new Set(
+                          plan.edits.flatMap((edit) => (edit.kind === 'cut' ? [edit.trackId] : [])),
+                        ),
+                      ],
+                      timeRangesAffected: plan.changedRanges,
+                      effectsAdded: 0,
+                      captionsAdded: 0,
+                      jobsRequired: 0,
+                      summary: `${repairCount} repair${repairCount === 1 ? '' : 's'} proposed; ${notRepairableCount} finding${notRepairableCount === 1 ? '' : 's'} cannot be repaired automatically.`,
+                    },
+                    warnings: [],
+                    errors: [],
+                    privacyImpacts: [],
+                  };
+                  auditRef.current.record({
+                    planId: plan.agentPlan.planId,
+                    action: 'plan-created',
+                    userId: 'local-owner',
+                  });
+                  auditRef.current.record({
+                    planId: plan.agentPlan.planId,
+                    action: 'dry-run-completed',
+                    userId: 'local-owner',
+                    metadata: {
+                      summary: dryRun.aggregateDiff.summary,
+                      decision: approval.decision,
+                    },
+                  });
+                  appendMessage(
+                    threadId,
+                    'assistant',
+                    'The quality check has a repair plan ready. Review it below.',
+                  );
+                  updateThreadStatus(threadId, 'planning');
+                  setPending({
+                    runId,
+                    threadId,
+                    plan: plan.agentPlan,
+                    baseRevision: latestSessionRef.current.projectRevisionId,
+                    baseProject: latestSessionRef.current.timelineProject,
+                    dryRun,
+                    approval,
+                    qcRepair: { round, notRepairable: plan.notRepairable, resolve: settle },
+                  });
+                  if (signal.aborted) onAbort();
+                }),
+            });
+            qcAdapter.runRepair = async ({ signal }) => {
+              const result = await repairHost.run(signal);
+              if (result.stop === 'check-failed')
+                return {
+                  ok: false,
+                  code: 'JOY_AGENT_QC_REPAIR_CHECK_FAILED',
+                  message: result.message ?? 'No quality check could run in this JOY session.',
+                };
+              return {
+                ok: true,
+                stop: result.stop,
+                rounds: result.rounds.map((round) => ({
+                  round: round.round,
+                  approved: round.approved,
+                  applied: round.applied,
+                  repairCount: round.plan.edits.length,
+                  notRepairable: round.plan.notRepairable.map(({ type, reason }) => ({
+                    type,
+                    reason,
+                  })),
+                })),
+                ...(result.proposedPlan === undefined
+                  ? {}
+                  : {
+                      proposedPlan: {
+                        repairCount: result.proposedPlan.edits.length,
+                        edits: result.proposedPlan.agentPlan.steps.map((step) => step.description),
+                        notRepairable: result.proposedPlan.notRepairable.map(
+                          ({ type, reason }) => ({ type, reason }),
+                        ),
+                      },
+                    }),
+                remainingFindings: result.remainingFindings.map(({ type, startUs, endUs }) => ({
+                  type,
+                  startUs,
+                  endUs,
+                })),
+                ...(result.message === undefined ? {} : { message: result.message }),
+              };
+            };
             qcAdapterRef.current = qcAdapter;
           }
           let stagedChangeSetId: string | undefined;
@@ -2642,6 +2830,7 @@ export function AgentPanel({
 
   function reject() {
     if (pending === undefined) return;
+    pending.qcRepair?.resolve(false);
     auditRef.current.record({
       planId: pending.plan.planId,
       action: 'plan-rejected',
@@ -3299,7 +3488,21 @@ export function AgentPanel({
 
   async function executePending(manualApprovalGranted: boolean) {
     if (pending === undefined) return;
+    if (pending.qcRepair !== undefined) {
+      const approved = manualApprovalGranted && pending.approval.decision === 'requires-manual';
+      auditRef.current.record({
+        planId: pending.plan.planId,
+        action: approved ? 'plan-approved' : 'plan-rejected',
+        userId: 'local-owner',
+        metadata: { round: pending.qcRepair.round, source: 'qc-repair-card' },
+      });
+      setPending(undefined);
+      clearAgentPreviewForSourceRun(pending.runId);
+      pending.qcRepair.resolve(approved);
+      return;
+    }
     const { threadId, intent, plan: agentPlan, baseRevision, baseProject } = pending;
+    if (intent === undefined) return;
     agentPresenceStore?.dispatch({
       protocolVersion: 1,
       runId: pending.runId,
@@ -3459,7 +3662,7 @@ export function AgentPanel({
   }
 
   const pendingChanges = useMemo(() => {
-    if (pending === undefined) return [];
+    if (pending === undefined || pending.qcRepair !== undefined) return [];
     return extractPendingChanges(pending.plan, project);
   }, [pending, project]);
   const isThinking = thinkingThreadId === activeThread?.id;
@@ -3931,21 +4134,43 @@ export function AgentPanel({
                 <div className="joy-code-plan-head">
                   <div>
                     <span>Proposed edit</span>
-                    <strong>{pending.intent.label}</strong>
+                    <strong>{pending.intent?.label ?? 'QC repair plan'}</strong>
                   </div>
                   <span className={`agent-decision agent-decision-${pending.approval.decision}`}>
                     {pending.approval.decision.replaceAll('-', ' ')}
                   </span>
                 </div>
                 <p>{pending.dryRun.aggregateDiff.summary}</p>
-                <AgentTimelineCanvas
-                  project={project}
-                  playheadUs={playheadUs}
-                  highlightedClipIds={selectedClipIds}
-                  pendingChanges={pendingChanges}
-                  width={400}
-                  height={120}
-                />
+                {pending.qcRepair === undefined ? (
+                  <AgentTimelineCanvas
+                    project={project}
+                    playheadUs={playheadUs}
+                    highlightedClipIds={selectedClipIds}
+                    pendingChanges={pendingChanges}
+                    width={400}
+                    height={120}
+                  />
+                ) : (
+                  <>
+                    <ol className="joy-code-plan-steps">
+                      {pending.plan.steps.map((step) => (
+                        <li key={step.id}>{step.description}</li>
+                      ))}
+                    </ol>
+                    {pending.qcRepair.notRepairable.length > 0 && (
+                      <div className="joy-code-plan-reason">
+                        <strong>Not repairable automatically</strong>
+                        <ul>
+                          {pending.qcRepair.notRepairable.map((finding) => (
+                            <li key={finding.findingId}>
+                              {finding.type}: {finding.reason}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                )}
                 {pending.dryRun.errors.length > 0 && (
                   <p className="agent-error">
                     {joyCodeMessageByKey('JOY_AGENT_INVALID_PROPOSAL').sentence}
