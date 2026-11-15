@@ -33,7 +33,10 @@ export function ffprobeJson(file, { ffprobe, run = spawnSync } = {}) {
 }
 
 /** Pure: checks one ffprobe answer against the 2-second export rule. Returns a summary or throws. */
-export function checkExportProbe(probe, { seconds = EXPORT_SECONDS, tolerance = 0.35, audio = 'any' } = {}) {
+export function checkExportProbe(
+  probe,
+  { seconds = EXPORT_SECONDS, tolerance = 0.35, audio = 'any' } = {},
+) {
   const streams = probe?.streams ?? [];
   const video = streams.find((stream) => stream.codec_type === 'video');
   const sound = streams.find((stream) => stream.codec_type === 'audio');
@@ -44,11 +47,14 @@ export function checkExportProbe(probe, { seconds = EXPORT_SECONDS, tolerance = 
     if (!(Number(video.width) > 0 && Number(video.height) > 0)) problems.push('video has no size');
   }
   if (audio === true && sound === undefined) problems.push('no audio stream');
-  if (audio === false && sound !== undefined) problems.push('an audio stream is there but none was expected');
+  if (audio === false && sound !== undefined)
+    problems.push('an audio stream is there but none was expected');
   const duration = Number(probe?.format?.duration ?? video?.duration);
   if (!Number.isFinite(duration)) problems.push('no duration');
   else if (Math.abs(duration - seconds) > tolerance) {
-    problems.push(`duration is ${duration.toFixed(2)} s, expected ${seconds} s within ${tolerance} s`);
+    problems.push(
+      `duration is ${duration.toFixed(2)} s, expected ${seconds} s within ${tolerance} s`,
+    );
   }
   if (problems.length > 0) throw new Error(`ffprobe: ${problems.join('; ')}`);
   return `ffprobe: h264 ${video.width}x${video.height}, ${duration.toFixed(2)} s, ${
@@ -83,9 +89,13 @@ export async function trimTimelineToSeconds(page, seconds, rowId) {
   for (let round = 0; round < 12; round += 1) {
     const { clips, playheadX } = await page.evaluate(readTimelineBoxes);
     if (playheadX === null) {
-      throw new Error(`${rowId}: the playhead (.timeline-playhead) is not drawn, so the timeline cannot be cut to ${seconds} s`);
+      throw new Error(
+        `${rowId}: the playhead (.timeline-playhead) is not drawn, so the timeline cannot be cut to ${seconds} s`,
+      );
     }
-    const crossing = clips.find((clip) => clip.left < playheadX - edge && clip.right > playheadX + edge);
+    const crossing = clips.find(
+      (clip) => clip.left < playheadX - edge && clip.right > playheadX + edge,
+    );
     if (crossing !== undefined) {
       await page.locator(`.timeline-clip[data-clip-id="${crossing.id}"]`).first().click();
       await page.keyboard.press('KeyS');
@@ -128,9 +138,13 @@ export async function exportAndProbe(page, ctx, rowId, options = {}, deps = {}) 
   const list = deps.list ?? (() => listMp4(ctx.downloadDir));
   const size = deps.size ?? ((name) => statSync(join(ctx.downloadDir, name)).size);
   const probe = deps.probe ?? ((name) => ffprobeJson(join(ctx.downloadDir, name)));
-  const attempts = deps.attempts ?? 600;
+  // Three minutes at one poll a second: a hung export must not stall the run for ten.
+  const attempts = deps.attempts ?? 180;
   const seconds = options.seconds ?? EXPORT_SECONDS;
-  const cut = options.skipTrim === true ? 'timeline not cut' : await trimTimelineToSeconds(page, seconds, rowId);
+  const cut =
+    options.skipTrim === true
+      ? 'timeline not cut'
+      : await trimTimelineToSeconds(page, seconds, rowId);
   const before = list();
   await page.getByRole('button', { name: /^Export MP4/u }).click();
   let name;
@@ -143,6 +157,9 @@ export async function exportAndProbe(page, ctx, rowId, options = {}, deps = {}) 
     const fresh = newFiles(before, list());
     if (fresh.length > 0) {
       const current = size(fresh[0]);
+      if (current === 0 && !state.busy) {
+        throw new Error(`the export wrote a 0-byte file (${fresh[0]})`);
+      }
       if (current === lastSize && !state.busy && current > 0) {
         name = fresh[0];
         break;
@@ -151,7 +168,8 @@ export async function exportAndProbe(page, ctx, rowId, options = {}, deps = {}) 
     }
     await page.waitForTimeout(1_000);
   }
-  if (name === undefined) throw new Error('no exported MP4 appeared in the scratch download folder');
+  if (name === undefined)
+    throw new Error('no exported MP4 appeared in the scratch download folder');
   const info = probe(name);
   const summary = checkExportProbe(info, { seconds, audio: options.audio ?? 'any' });
   const suffix = options.tag === undefined ? '' : `-${options.tag}`;
@@ -176,13 +194,19 @@ export function parseMeanVolumeDb(stderr) {
 /** The mean volume of the exported audio, through ffmpeg volumedetect (`JOY_MEDIA_FFMPEG` or `ffmpeg`). */
 export function measureMeanVolumeDb(file, { run = spawnSync } = {}) {
   const tool = process.env.JOY_MEDIA_FFMPEG ?? 'ffmpeg';
-  const result = run(tool, ['-hide_banner', '-nostats', '-i', file, '-vn', '-af', 'volumedetect', '-f', 'null', '-'], {
-    encoding: 'utf8',
-    timeout: 60_000,
-    windowsHide: true,
-  });
-  if (result.error !== undefined) throw new Error(`ffmpeg failed on ${file}: ${result.error.message}`);
+  const result = run(
+    tool,
+    ['-hide_banner', '-nostats', '-i', file, '-vn', '-af', 'volumedetect', '-f', 'null', '-'],
+    {
+      encoding: 'utf8',
+      timeout: 60_000,
+      windowsHide: true,
+    },
+  );
+  if (result.error !== undefined)
+    throw new Error(`ffmpeg failed on ${file}: ${result.error.message}`);
   const value = parseMeanVolumeDb(result.stderr);
-  if (value === undefined) throw new Error(`ffmpeg volumedetect printed no mean_volume for ${file}`);
+  if (value === undefined)
+    throw new Error(`ffmpeg volumedetect printed no mean_volume for ${file}`);
   return value;
 }

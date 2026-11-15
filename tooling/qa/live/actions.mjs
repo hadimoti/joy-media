@@ -13,7 +13,7 @@
  * must confirm each one.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { blockedRow, notReachable, runParts } from './rows.mjs';
 import {
   blurFocus,
@@ -1013,11 +1013,9 @@ async function chooseWorkspace(page, label) {
     .first();
   await item.waitFor({ state: 'visible' });
   await item.click();
-  if ((await item.getAttribute('aria-checked')) !== 'true') {
-    const trigger = await page.getByRole('button', { name: /^Workspace:/u }).textContent();
-    if (!String(trigger).includes(label))
-      throw new Error(`workspace ${label} did not become active`);
-  }
+  // The click closes the menu, so the item is gone: read the always-mounted trigger instead.
+  const trigger = await page.getByRole('button', { name: /^Workspace:/u }).textContent();
+  if (!String(trigger).includes(label)) throw new Error(`workspace ${label} did not become active`);
 }
 
 export function readVisibleFeatureToolIds() {
@@ -1103,7 +1101,7 @@ async function recentProcesses(page, ctx) {
   const download = page.waitForEvent('download');
   await link.click();
   const item = await download;
-  const destination = join(ctx.downloadDir ?? ctx.outDir, `reopened-${name}`);
+  const destination = join(ctx.downloadDir ?? ctx.outDir, `reopened-${basename(name)}`);
   await item.saveAs(destination);
   return `Recent processes listed ${name} and opened its download again`;
 }
@@ -1148,7 +1146,7 @@ export const A08_ROWS = [
       if (before === customized)
         throw new Error('the layout button did not change the Custom layout');
       await page.getByRole('button', { name: /^Workspace:/u }).click();
-      await page.getByRole('menuitemradio', { name: /^Edit(?:\\s|$)/u }).click();
+      await page.getByRole('menuitemradio', { name: /^Edit(?:\s|$)/u }).click();
       await chooseWorkspace(page, 'Custom');
       const after = await layout.getAttribute('aria-label');
       if (customized !== after) {

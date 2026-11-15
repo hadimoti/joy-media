@@ -95,7 +95,6 @@ export async function effectsAddChangeRemove(page, ctx, deps = {}) {
   await selectClipById(page, base.clips[0].id);
   await previewShot(page, ctx, rowId, 'effect-baseline');
   const baseline = await exportAndProbe(page, ctx, rowId, { tag: 'without-effect' }, deps.export);
-  const baselineHash = md5(baseline.path);
   await selectClipById(page, base.clips[0].id);
 
   const state = { effectId: undefined, target: undefined };
@@ -152,13 +151,10 @@ export async function effectsAddChangeRemove(page, ctx, deps = {}) {
           { tag: 'with-effect' },
           deps.export,
         );
-        const hash = md5(withEffect.path);
-        if (hash === baselineHash) {
-          throw new Error(
-            `the export frame at 1 s is identical with the effect (${state.effectId}) and without it`,
-          );
-        }
-        return `parameter set to ${read}; the export differs from the one without the effect; ${withEffect.message}`;
+        // The proof that the effect does something is made after it is removed: the same timeline exported with
+        // and without the effect. Two unrelated exports (baseline versus with-effect) can differ for other reasons.
+        state.withEffectHash = md5(withEffect.path);
+        return `parameter set to ${read}; export with the effect saved; ${withEffect.message}`;
       }
       await item.locator(FX_SEL.effectRemove).first().click();
       await page.locator(FX_SEL.effectItem).first().waitFor({ state: 'detached' });
@@ -170,7 +166,12 @@ export async function effectsAddChangeRemove(page, ctx, deps = {}) {
         { tag: 'effect-removed' },
         deps.export,
       );
-      return `effect ${state.effectId} removed; the Inspector lists none; ${removedExport.message}`;
+      if (state.withEffectHash !== undefined && md5(removedExport.path) === state.withEffectHash) {
+        throw new Error(
+          `the export frame at 1 s is the same with the effect (${state.effectId}) and after removing it: the effect changes nothing`,
+        );
+      }
+      return `effect ${state.effectId} removed; the Inspector lists none; the export differs from the one with the effect; ${removedExport.message}`;
     },
   );
   return { message: `${outcome.message}; baseline ${baseline.message}`, parts: outcome.parts };
