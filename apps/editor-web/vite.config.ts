@@ -48,15 +48,12 @@ function editorChunk(id: string): string | undefined {
   // bootstrap. They are still eagerly available to the shell, but their code
   // is fetched as one independently cacheable panel bundle instead of pushing
   // the entry chunk over the release budget whenever a panel grows.
+  // Joy Code grew past the shared budget on its own (T-B06, T-B07, T-C05), so it has its own chunk.
+  if (moduleId.includes('/apps/editor-web/src/AgentPanel')) return 'joy-panels-agent';
   if (
-    [
-      'InspectorPanel',
-      'AssetLibraryPanel',
-      'AudioPanel',
-      'MotionPanel',
-      'AgentPanel',
-      'ColorPanel',
-    ].some((panel) => moduleId.includes(`/apps/editor-web/src/${panel}`))
+    ['InspectorPanel', 'AssetLibraryPanel', 'AudioPanel', 'MotionPanel', 'ColorPanel'].some(
+      (panel) => moduleId.includes(`/apps/editor-web/src/${panel}`),
+    )
   )
     return 'joy-panels-core';
   if (
