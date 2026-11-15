@@ -103,7 +103,15 @@ export function updateUniversalTimelineForTransaction(
             durationUs: item.durationUs - deltaUs,
             ...(item.sourceInUs === undefined
               ? {}
-              : { sourceInUs: sourceInAfterStartTrim(project, item, deltaUs) }),
+              : {
+                  sourceInUs: sourceInAfterStartTrim(
+                    project,
+                    timeline,
+                    command.payload.clipId,
+                    item,
+                    deltaUs,
+                  ),
+                }),
           };
         });
         changed = true;
@@ -527,13 +535,18 @@ export function updateUniversalTimelineForTransaction(
 }
 
 function sourceInAfterStartTrim(
-  project: JoyProjectV1 | SpikeProject,
+  project: JoyProjectV1,
+  timeline: SpikeProject | undefined,
+  clipId: string,
   item: UniversalTimelineItem,
   deltaUs: number,
 ): number {
-  const clip = project.compositions[item.compositionId]?.tracks
-    .find((track) => track.id === item.trackId)
-    ?.clips.find((candidate) => candidate.id === item.id);
+  // The timeline is the authority for rate and direction; the visual project is only the fallback.
+  const clip =
+    findTimelineClip(timeline, item, clipId) ??
+    project.compositions[item.compositionId]?.tracks
+      .find((track) => track.id === item.trackId)
+      ?.clips.find((candidate) => candidate.id === clipId);
   if (clip?.kind === 'video') {
     const direction = clip.reversed === true ? -1 : 1;
     return item.sourceInUs! + Math.round(deltaUs * (clip.playbackRate ?? 1)) * direction;
