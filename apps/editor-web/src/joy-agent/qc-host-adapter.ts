@@ -37,6 +37,7 @@
  *     `storeFileReport` and lists no frames, so frame tools refuse for it.
  */
 
+import { QC_DEFAULT_RUN_FRAME_BUDGET } from './qc-request-intent.js';
 import {
   createTimelineContactSheet,
   MAX_TIMELINE_CONTACT_SHEET_FRAMES,
@@ -186,6 +187,11 @@ export interface QcHostAdapterDeps {
   readonly now?: () => number;
   /** SHA-256 hex of a text. Defaults to the platform digest. */
   readonly digest?: (text: string) => Promise<string>;
+  /**
+   * Called with the report when it is stored, and again with the same report id when frames were sent for it
+   * (its `run` then names the model and counts the frames). The Joy Code panel shows one report card from it.
+   */
+  readonly onReport?: (report: Readonly<Record<string, unknown>>) => void;
 }
 
 export type QcTimelineCheckResult =
@@ -250,6 +256,44 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       if (oldest === undefined || oldest === reportId) break;
       reports.delete(oldest);
     }
+    notifyReport(stored.report);
+  };
+
+  const notifyReport = (report: Readonly<Record<string, unknown>>): void => {
+    try {
+      deps.onReport?.(report);
+    } catch {
+      // A display that fails must never fail the check or a frame review.
+    }
+  };
+
+  /**
+   * A model has seen (or may have seen) these frames: the stored report now says which model and how many,
+   * so a later read and the report card tell the truth.
+   */
+  const chargeFrames = (reportId: string, count: number): void => {
+    const stored = reports.get(reportId);
+    if (stored === undefined || disposed) return;
+    const run = stored.report['run'];
+    const prior =
+      typeof run === 'object' && run !== null ? (run as Record<string, HostRpcJson>) : {};
+    const sentBefore = typeof prior['framesSent'] === 'number' ? prior['framesSent'] : 0;
+    const modelId = deps.identity()?.modelId ?? '';
+    const updated = Object.freeze({
+      ...stored.report,
+      run: {
+        ...prior,
+        layer2: true,
+        modelId: modelId.length > 0 ? modelId : (prior['modelId'] ?? null),
+        framesSent: sentBefore + count,
+        frameBudget:
+          typeof prior['frameBudget'] === 'number'
+            ? prior['frameBudget']
+            : QC_DEFAULT_RUN_FRAME_BUDGET,
+      },
+    }) as { readonly [key: string]: HostRpcJson };
+    reports.set(reportId, { ...stored, report: updated });
+    notifyReport(updated);
   };
 
   const resolveStored = (reportId: string): { id: string; stored: StoredReport } | undefined => {
@@ -527,15 +571,29 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         }
       }
       // From here a provider may have seen pixels, so every failure is charged.
+      const resolved = resolveStored(input.reportId);
+      if (resolved === undefined)
+        return refusal(
+          'JOY_AGENT_QC_REVIEW_FAILED',
+          'The check is no longer open. No frames were sent.',
+        );
+      const chargedReportId = resolved.id;
+      let charged = false;
       try {
         const sent = await deps.transport.analyze({
-          reportId: resolveStored(input.reportId)!.id,
+          reportId: chargedReportId,
           tool: input.tool,
           reason: input.tool === 'media_frames_view' ? input.reason : undefined,
           frames,
           contactSheet,
           signal: context.signal,
         });
+        try {
+          chargeFrames(chargedReportId, frames.length);
+          charged = true;
+        } catch {
+          // The report could not be updated; the review result below is still returned honestly.
+        }
         deps.evidenceStore.recordFrames({
           ...lookup,
           stage: 'submitted',
@@ -559,6 +617,13 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
           framesSent: frames.length,
         };
       } catch {
+        if (!charged) {
+          try {
+            chargeFrames(chargedReportId, frames.length);
+          } catch {
+            // The report could not be updated.
+          }
+        }
         return refusal(
           'JOY_AGENT_QC_REVIEW_FAILED',
           'The image review did not complete.',
@@ -591,6 +656,8 @@ export interface EditorQcAdapterInput {
   readonly isPrivacyModeAllowed: () => boolean;
   /** The host's composition request. Absent today; see the note at the top of this file. */
   readonly getComposition?: () => QcTimelineSource['composition'];
+  /** Receives the report when it is stored and again when frames were sent for it. */
+  readonly onReport?: QcHostAdapterDeps['onReport'];
 }
 
 /**
@@ -615,6 +682,7 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
     sampler: createTimelineQcSampler(),
     isCachedImageSupported: input.isCachedImageSupported,
     isPrivacyModeAllowed: input.isPrivacyModeAllowed,
+    ...(input.onReport === undefined ? {} : { onReport: input.onReport }),
   });
 }
 
@@ -692,7 +760,14 @@ function buildTimelineReport(input: TimelineReportInput): { readonly [key: strin
       kind: 'timeline',
       range: { domain: 'composition', startUs: 0, endUs: input.durationUs },
     },
-    run: { layer1: true, layer2: false, modelId: null, framesSent: 0, framesSkipped: 0 },
+    run: {
+      layer1: true,
+      layer2: false,
+      modelId: null,
+      framesSent: 0,
+      framesSkipped: 0,
+      frameBudget: QC_DEFAULT_RUN_FRAME_BUDGET,
+    },
     coverage: {
       completeSourceCoverage: false,
       sampledRanges,

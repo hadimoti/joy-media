@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { FRESH_PROCESS_SCENARIO } from '../src/attended-fresh-process.ts';
+import { EXPORT_SEMANTICS_SCENARIO } from '../src/attended-export-semantics.ts';
 
 /**
  * The real path of a path, with links and short names resolved. A path that does not exist yet is
@@ -199,7 +200,26 @@ export const FRESH_PROCESS_OPTION_NAMES = [
   'out',
 ];
 
-/** Options that either scenario may take. */
+/**
+ * The options the export-semantics scenario takes for a launch. It creates its profile inside the run folder, and
+ * reads its two media files from --fixtures (C:\jgp\v111\fixtures by default).
+ */
+export const SEMANTICS_OPTION_NAMES = [
+  'scenario',
+  'exe',
+  'candidate',
+  'expected-exe-sha256',
+  'library',
+  'out',
+];
+
+/**
+ * The options the export-semantics dry run takes. It needs no app: only a new run folder, and a candidate to bind
+ * its receipt to when one is given.
+ */
+export const SEMANTICS_DRY_RUN_OPTION_NAMES = ['scenario', 'out'];
+
+/** Options that every scenario may take. */
 const SHARED_OPTION_NAMES = ['port', 'owner-library-files'];
 
 /**
@@ -214,17 +234,41 @@ const RUN_ACCEPTED_NAMES = [...RUN_OPTION_NAMES, ...SHARED_OPTION_NAMES];
  */
 const FRESH_ACCEPTED_NAMES = [...FRESH_PROCESS_OPTION_NAMES, ...SHARED_OPTION_NAMES, 'media'];
 
+/** Every option the export-semantics scenario takes for a launch or its plan. */
+const SEMANTICS_ACCEPTED_NAMES = [...SEMANTICS_OPTION_NAMES, ...SHARED_OPTION_NAMES, 'fixtures'];
+
+/** Every option the export-semantics dry run takes. Nothing that names an app, a profile or a library. */
+const SEMANTICS_DRY_RUN_ACCEPTED_NAMES = [...SEMANTICS_DRY_RUN_OPTION_NAMES, 'candidate'];
+
+/** The required and accepted option names for a scenario, and whether it is the dry run. */
+function optionNamesFor(scenario, dryRun) {
+  if (scenario === FRESH_PROCESS_SCENARIO) {
+    return { required: FRESH_PROCESS_OPTION_NAMES, accepted: FRESH_ACCEPTED_NAMES };
+  }
+  if (scenario === EXPORT_SEMANTICS_SCENARIO) {
+    return dryRun
+      ? { required: SEMANTICS_DRY_RUN_OPTION_NAMES, accepted: SEMANTICS_DRY_RUN_ACCEPTED_NAMES }
+      : { required: SEMANTICS_OPTION_NAMES, accepted: SEMANTICS_ACCEPTED_NAMES };
+  }
+  return { required: RUN_OPTION_NAMES, accepted: RUN_ACCEPTED_NAMES };
+}
+
 /**
  * Parses the runner's arguments. `--launch` is the only switch that starts the app, so it is a flag
- * with no value. Throws with the first problem found.
+ * with no value. `--dry-run` runs the export-semantics scenario against fakes, with no app; it cannot be
+ * combined with `--launch`. Throws with the first problem found.
  */
 export function parseRunArgs(argv, scenarios) {
-  const options = { launch: false };
+  const options = { launch: false, 'dry-run': false };
   const given = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--launch') {
       options.launch = true;
+      continue;
+    }
+    if (arg === '--dry-run') {
+      options['dry-run'] = true;
       continue;
     }
     if (!arg.startsWith('--')) throw new Error(`unexpected argument: ${arg}`);
@@ -236,24 +280,28 @@ export function parseRunArgs(argv, scenarios) {
     options[name] = value;
     index += 1;
   }
-  const required =
-    options.scenario === FRESH_PROCESS_SCENARIO ? FRESH_PROCESS_OPTION_NAMES : RUN_OPTION_NAMES;
+  const dryRun = options['dry-run'];
+  if (dryRun && options.scenario !== EXPORT_SEMANTICS_SCENARIO) {
+    throw new Error(`--dry-run is only for the ${EXPORT_SEMANTICS_SCENARIO} scenario`);
+  }
+  if (dryRun && options.launch) {
+    throw new Error('--dry-run and --launch cannot be given together: a dry run starts no app');
+  }
+  const { required, accepted } = optionNamesFor(options.scenario, dryRun);
   for (const name of required) {
     if (typeof options[name] !== 'string' || options[name] === '') {
       throw new Error(`--${name} is required`);
     }
   }
-  const accepted =
-    options.scenario === FRESH_PROCESS_SCENARIO ? FRESH_ACCEPTED_NAMES : RUN_ACCEPTED_NAMES;
   for (const name of given) {
     if (!accepted.includes(name)) throw new Error(`unknown option --${name}`);
   }
   if (!scenarios.includes(options.scenario))
     throw new Error(`unknown scenario: ${options.scenario}`);
-  if (!/^[0-9a-f]{40}$/u.test(options.candidate)) {
+  if ((!dryRun || options.candidate !== undefined) && !/^[0-9a-f]{40}$/u.test(options.candidate)) {
     throw new Error('--candidate must be the full 40-character lowercase commit');
   }
-  if (!/^[0-9a-f]{64}$/u.test(options['expected-exe-sha256'])) {
+  if (!dryRun && !/^[0-9a-f]{64}$/u.test(options['expected-exe-sha256'])) {
     throw new Error(
       '--expected-exe-sha256 must be the 64-character lowercase SHA-256 of the build',
     );

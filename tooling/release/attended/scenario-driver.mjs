@@ -21,6 +21,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { libraryDirectoryOf } from '../src/attended-fresh-process.ts';
+import { parseAstatsRms, semanticsProbeFrom } from '../src/attended-export-semantics.ts';
 import { countFiles, folderSignature, systemTool } from './scenario-rules.mjs';
 
 const JOY_KEY_PATH = 'HKCU\\Software\\Classes\\joy';
@@ -814,6 +815,317 @@ export function createFreshProcessDriver(config) {
     async attach(app) {
       // The shared attach sets both download layers, so both scenarios have them.
       return freshEditorPageOf(await shared.attach(app));
+    },
+
+    /** The attached page with the bridge only, for a scenario that builds its own page on it. */
+    async attachBase(app) {
+      return shared.attach(app);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The export-semantics scenario (tooling/release/src/attended-export-semantics.ts). One process on a new
+// profile in the run folder places the stereo clip and the still through the UI, adds the Dissolve,
+// captures the Monitor and exports. The measurements are taken afterwards from the run folder's files
+// with the preflight's ffmpeg and ffprobe.
+// ---------------------------------------------------------------------------------------------------
+
+/** How long the Monitor is given to draw a frame after the playhead reaches it. */
+const PREVIEW_SETTLE_MS = 1500;
+
+/**
+ * The editor page for the export-semantics scenario. It adds the timeline, Inspector, Transitions and
+ * Monitor steps to the fresh-process page. Controls are found by their accessible names, as the editor
+ * labels them; a timeline clip is found by its label, the file name without the extension.
+ */
+function semanticsEditorPageOf(base) {
+  const fresh = freshEditorPageOf(base);
+  const { page } = base;
+  const button = (name) => page.getByRole('button', { name, exact: true });
+  const menuItem = (name) => page.getByRole('menuitem', { name, exact: true });
+  const timelineClip = (label) => page.locator(`.timeline-clip[aria-label^="${label},"]`).first();
+  const visible = (locator) =>
+    withinTime(locator.isVisible(), 'a visibility check', 30_000).catch(() => false);
+
+  /** Opens a panel from the View menu when its control is not on screen yet. */
+  async function showPanel(control, panelName) {
+    if (await visible(control)) return;
+    await button('View').click();
+    await menuItem(panelName).click();
+    await control.waitFor({ state: 'visible', timeout: 30_000 });
+  }
+
+  /** Types the frame into the Monitor's timecode field and waits until the playhead is on it. */
+  async function goToFrame(frame, frameRate) {
+    const field = page.getByRole('textbox', { name: 'Timecode', exact: true }).first();
+    await field.fill(String(frame));
+    await field.press('Enter');
+    const targetUs = (frame * 1_000_000) / frameRate;
+    await page.waitForFunction(
+      ([target, half]) => {
+        const ruler = document.querySelector('.timeline-ruler[aria-label="Playhead"]');
+        const now = Number(ruler?.getAttribute('aria-valuenow'));
+        return Number.isFinite(now) && Math.abs(now - target) <= half;
+      },
+      [targetUs, 500_000 / frameRate],
+      { timeout: 30_000 },
+    );
+  }
+
+  return {
+    invoke: base.invoke,
+    disconnect: base.disconnect,
+    libraryDirectory: () => fresh.libraryDirectory(),
+    waitForLibrary: () => fresh.waitForLibrary(),
+    createProject: (title) => fresh.createProject(title),
+    readStorage: (keys) => fresh.readStorage(keys),
+    snapshot: () => fresh.snapshot(),
+    exportMp4: () => fresh.renderMp4(),
+
+    async importAndPlace(name, mimeType, bytes, options = {}) {
+      await showPanel(button('Import media').first(), 'Media');
+      await button('Import media').first().click();
+      const dialog = page.getByRole('dialog', { name: 'Import media', exact: true });
+      // The file goes to the dialog's file input directly, so no native file chooser opens.
+      await dialog.locator('input[type="file"][aria-label="Media file"]').setInputFiles({
+        name,
+        mimeType,
+        buffer: Buffer.from(bytes),
+      });
+      await dialog.getByText(name, { exact: true }).waitFor({ timeout: 60_000 });
+      await dialog.getByRole('button', { name: 'Confirm import', exact: true }).click();
+      const card = page.locator('.asset-card', { hasText: name }).first();
+      await card.waitFor({ timeout: 120_000 });
+      if (options.atFrame !== undefined) await goToFrame(options.atFrame, options.frameRate ?? 30);
+      await card.hover();
+      await card.getByRole('button', { name: `Add ${name} to timeline`, exact: true }).click();
+      await timelineClip(name.replace(/\.[^.]+$/u, '')).waitFor({ timeout: 60_000 });
+    },
+
+    async fillFrame(label) {
+      await timelineClip(label).click();
+      const fill = button('Fill frame with clip');
+      await showPanel(fill, 'Inspector');
+      await fill.click();
+    },
+
+    async addDissolve(label) {
+      await timelineClip(label).click();
+      const add = button('Add Dissolve');
+      await showPanel(add, 'Transitions');
+      await add.click();
+      // The panel reports the add, or why there was no cut to add it to, in a toast.
+      const notice = page
+        .getByText(/Added Dissolve|Replaced with Dissolve|Select two adjacent clips|not adjacent/u)
+        .first();
+      await notice.waitFor({ timeout: 30_000 }).catch(() => {});
+      return withinTime(notice.innerText(), 'the transition notice', 30_000).catch(() => '');
+    },
+
+    async capturePreview(frame, composition) {
+      const fit = button('Zoom Fit');
+      if (await visible(fit)) await fit.click();
+      await goToFrame(frame, composition.frameRate);
+      // Two animation frames and a pause, so the Monitor has drawn the frame the playhead is on.
+      await withinTime(
+        page.evaluate(
+          () =>
+            new Promise((resolvePromise) =>
+              window.requestAnimationFrame(() => window.requestAnimationFrame(resolvePromise)),
+            ),
+        ),
+        'the Monitor draw',
+        30_000,
+      );
+      await sleep(PREVIEW_SETTLE_MS);
+      // The composition's area in the Monitor: the viewport's corner plus the pan, at the zoom. The editor's
+      // overlays (selection, transform box, guides, navigator) are hidden for the shot and shown again after.
+      const rect = await withinTime(
+        page.evaluate(
+          ([width, height]) => {
+            const wrap = document.querySelector('.monitor-canvas-wrap');
+            if (wrap === null) return null;
+            for (const child of wrap.children) {
+              if (child.classList.contains('monitor-canvas')) continue;
+              child.setAttribute('data-attended-visibility', child.style.visibility);
+              child.style.visibility = 'hidden';
+            }
+            const box = wrap.getBoundingClientRect();
+            const zoom = Number(wrap.getAttribute('data-monitor-zoom'));
+            const panX = Number(wrap.getAttribute('data-monitor-pan-x'));
+            const panY = Number(wrap.getAttribute('data-monitor-pan-y'));
+            return {
+              x: box.left + panX,
+              y: box.top + panY,
+              width: width * zoom,
+              height: height * zoom,
+            };
+          },
+          [composition.width, composition.height],
+        ),
+        'the Monitor frame area',
+        30_000,
+      );
+      try {
+        if (rect === null || !(rect.width >= 8 && rect.height >= 8)) {
+          throw new Error('the Monitor frame area was not found');
+        }
+        // One pixel in from each edge, so the frame's border is not in the shot.
+        const png = await page.screenshot({
+          clip: { x: rect.x + 1, y: rect.y + 1, width: rect.width - 2, height: rect.height - 2 },
+          animations: 'disabled',
+          timeout: 30_000,
+        });
+        return new Uint8Array(png);
+      } finally {
+        await withinTime(
+          page.evaluate(() => {
+            for (const child of document.querySelectorAll('[data-attended-visibility]')) {
+              child.style.visibility = child.getAttribute('data-attended-visibility') ?? '';
+              child.removeAttribute('data-attended-visibility');
+            }
+          }),
+          'the Monitor overlays',
+          30_000,
+        ).catch(() => {});
+      }
+    },
+  };
+}
+
+/**
+ * Builds the driver for the export-semantics scenario. It reuses the restart driver for the guards, the
+ * writes and the window close, and the fresh-process seeding, launch and attach.
+ * @param {{ exe: string, unpackedDir: string, runDir: string, port: number, defaultLibrary: string,
+ *           installedFolder: string, downloadsFolder: string, fixturesDir: string, ffmpeg: string,
+ *           ffprobe: string }} config
+ */
+export function createExportSemanticsDriver(config) {
+  const fresh = createFreshProcessDriver({ ...config, clipFixture: '' });
+  const runPath = (name) => join(config.runDir, name);
+  const tool = (file, args, what, timeout = 120_000) => {
+    const result = spawnSync(file, args, { timeout, maxBuffer: 64 * 1024 * 1024 });
+    if (result.status !== 0) {
+      throw new Error(`${what} failed: ${tail(String(result.stderr ?? result.error ?? ''))}`);
+    }
+    return result;
+  };
+  return {
+    now: () => fresh.now(),
+    sleep: (ms) => fresh.sleep(ms),
+    joyKeySha256: () => fresh.joyKeySha256(),
+    joyProcessCount: () => fresh.joyProcessCount(),
+    ownerLibraryFileCount: () => fresh.ownerLibraryFileCount(),
+    ownerLibrarySignature: () => fresh.ownerLibrarySignature(),
+    installedFolderSignature: () => fresh.installedFolderSignature(),
+    downloadsSignature: () => fresh.downloadsSignature(),
+    seedProfile: (profile, library) => fresh.seedProfile(profile, library),
+    launch: (attempt, profile) => fresh.launch(attempt, profile),
+    close: (app, page) => fresh.close(app, page),
+    writeRunFile: (name, bytes) => fresh.writeRunFile(name, bytes),
+
+    async attach(app) {
+      return semanticsEditorPageOf(await fresh.attachBase(app));
+    },
+
+    async readFixture(name) {
+      return new Uint8Array(readFileSync(join(config.fixturesDir, name)));
+    },
+
+    async probe(name) {
+      const result = tool(
+        config.ffprobe,
+        ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', runPath(name)],
+        `ffprobe of ${name}`,
+        60_000,
+      );
+      return semanticsProbeFrom(JSON.parse(result.stdout.toString('utf8')));
+    },
+
+    async decodedFrameCount(name) {
+      // -count_frames decodes every frame of the first video stream, so the count is what plays, not the header.
+      const result = tool(
+        config.ffprobe,
+        [
+          '-v',
+          'error',
+          '-count_frames',
+          '-select_streams',
+          'v:0',
+          '-show_entries',
+          'stream=nb_read_frames',
+          '-of',
+          'json',
+          runPath(name),
+        ],
+        `the frame count of ${name}`,
+        300_000,
+      );
+      const parsed = JSON.parse(result.stdout.toString('utf8'));
+      return Number(parsed.streams?.[0]?.nb_read_frames);
+    },
+
+    async audioRmsDb(name) {
+      const result = tool(
+        config.ffmpeg,
+        [
+          '-hide_banner',
+          '-nostats',
+          '-i',
+          runPath(name),
+          '-vn',
+          '-af',
+          'astats=metadata=0:reset=0',
+          '-f',
+          'null',
+          '-',
+        ],
+        `the audio levels of ${name}`,
+        300_000,
+      );
+      return parseAstatsRms(result.stderr.toString('utf8'));
+    },
+
+    async frameOf(source, size) {
+      const path =
+        source.kind === 'fixture-video'
+          ? join(config.fixturesDir, source.name)
+          : runPath(source.name);
+      const scale = `scale=${size.width}:${size.height}:flags=area`;
+      // A video frame is the first one whose time is at or after `seconds`, picked by the select filter.
+      const filter =
+        source.kind === 'run-picture'
+          ? scale
+          : `select=gte(t\\,${source.seconds.toFixed(6)}),${scale}`;
+      const result = tool(
+        config.ffmpeg,
+        [
+          '-v',
+          'error',
+          '-i',
+          path,
+          '-vf',
+          filter,
+          '-fps_mode',
+          'passthrough',
+          '-frames:v',
+          '1',
+          '-f',
+          'rawvideo',
+          '-pix_fmt',
+          'rgb24',
+          'pipe:1',
+        ],
+        `the frame of ${source.name}`,
+      );
+      const expected = size.width * size.height * 3;
+      if (result.stdout.length !== expected) {
+        throw new Error(
+          `the frame of ${source.name} has ${result.stdout.length} bytes, not ${expected}`,
+        );
+      }
+      return { width: size.width, height: size.height, data: new Uint8Array(result.stdout) };
     },
   };
 }

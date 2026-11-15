@@ -1,6 +1,50 @@
 export type JoyCodeMessageRole = 'user' | 'assistant';
 export type JoyCodeThreadStatus = 'draft' | 'planning' | 'completed' | 'failed';
 
+/** The state of a generation job, as the main process names it (apps/desktop generation-job-store). */
+export type JoyCodeJobState =
+  | 'queued'
+  | 'running'
+  | 'downloading'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'abandoned-locally'
+  | 'timed-out';
+
+export const JOY_CODE_JOB_STATES: readonly JoyCodeJobState[] = [
+  'queued',
+  'running',
+  'downloading',
+  'completed',
+  'failed',
+  'cancelled',
+  'abandoned-locally',
+  'timed-out',
+];
+
+/**
+ * One piece of a message. Media is named by job id only: the bytes are read
+ * from the main process when shown, never by file path, and nothing here
+ * carries a path, link or key.
+ */
+export type JoyCodeMessagePart =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'image'; readonly jobId: string; readonly label?: string }
+  | { readonly kind: 'video'; readonly jobId: string; readonly label?: string }
+  | {
+      readonly kind: 'job';
+      readonly jobId: string;
+      readonly mediaKind: 'image' | 'video';
+      readonly state: JoyCodeJobState;
+      /** ISO time the job started; elapsed time counts from here. */
+      readonly startedAt: string;
+      /** ISO time the job ended; absent while it is still working. */
+      readonly endedAt?: string;
+      /** One short plain sentence for a failed job. */
+      readonly reason?: string;
+    };
+
 export interface JoyCodeMessage {
   readonly id: string;
   readonly role: JoyCodeMessageRole;
@@ -11,6 +55,11 @@ export interface JoyCodeMessage {
    * table (joy-code-messages.ts). The card renders from the table, not the body.
    */
   readonly failureKey?: string;
+  /**
+   * Text, pictures, videos and job cards in order. Absent on every message
+   * written before T-C05: those show their body as before.
+   */
+  readonly parts?: readonly JoyCodeMessagePart[];
 }
 
 export interface JoyCodeThread {
@@ -35,6 +84,8 @@ const MAX_MESSAGE_ID_CHARS = 128;
 const MAX_MESSAGE_BODY_CHARS = 8_000;
 const MAX_TIMESTAMP_CHARS = 64;
 const MAX_FAILURE_KEY_CHARS = 64;
+const MAX_PARTS_PER_MESSAGE = 16;
+const MAX_PART_LABEL_CHARS = 200;
 export const JOY_CODE_HISTORY_PREFIX = 'joy-media.joy-code-history.v1';
 
 export function joyCodeHistoryKey(projectId: string): string {
@@ -178,6 +229,46 @@ function isJoyCodeThread(value: unknown): value is JoyCodeThread {
   return candidate.messages.every(isJoyCodeMessage);
 }
 
+function isShortString(value: unknown, max: number): value is string {
+  return typeof value === 'string' && value.length <= max;
+}
+
+function isJoyCodeMessagePart(value: unknown): value is JoyCodeMessagePart {
+  if (typeof value !== 'object' || value === null) return false;
+  const part = value as Record<string, unknown>;
+  switch (part.kind) {
+    case 'text':
+      return isShortString(part.text, MAX_MESSAGE_BODY_CHARS);
+    case 'image':
+    case 'video':
+      return (
+        isShortString(part.jobId, MAX_MESSAGE_ID_CHARS) &&
+        (part.label === undefined || isShortString(part.label, MAX_PART_LABEL_CHARS))
+      );
+    case 'job':
+      return (
+        isShortString(part.jobId, MAX_MESSAGE_ID_CHARS) &&
+        (part.mediaKind === 'image' || part.mediaKind === 'video') &&
+        JOY_CODE_JOB_STATES.includes(part.state as JoyCodeJobState) &&
+        isShortString(part.startedAt, MAX_TIMESTAMP_CHARS) &&
+        (part.endedAt === undefined || isShortString(part.endedAt, MAX_TIMESTAMP_CHARS)) &&
+        (part.reason === undefined || isShortString(part.reason, MAX_PART_LABEL_CHARS))
+      );
+    default:
+      return false;
+  }
+}
+
+/** True when `parts` is absent (an older message) or a short list of valid parts. */
+export function isJoyCodeMessageParts(parts: unknown): boolean {
+  return (
+    parts === undefined ||
+    (Array.isArray(parts) &&
+      parts.length <= MAX_PARTS_PER_MESSAGE &&
+      parts.every(isJoyCodeMessagePart))
+  );
+}
+
 function isJoyCodeMessage(value: unknown): value is JoyCodeMessage {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<JoyCodeMessage>;
@@ -191,6 +282,7 @@ function isJoyCodeMessage(value: unknown): value is JoyCodeMessage {
     candidate.createdAt.length <= MAX_TIMESTAMP_CHARS &&
     (candidate.failureKey === undefined ||
       (typeof candidate.failureKey === 'string' &&
-        candidate.failureKey.length <= MAX_FAILURE_KEY_CHARS))
+        candidate.failureKey.length <= MAX_FAILURE_KEY_CHARS)) &&
+    isJoyCodeMessageParts(candidate.parts)
   );
 }

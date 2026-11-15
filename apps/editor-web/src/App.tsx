@@ -7413,6 +7413,7 @@ function EditorWorkspace({
             setAgentSettingsTab('models');
             setAgentSettingsOpen(true);
           }}
+          onSeek={context.seek}
         />
       );
     }

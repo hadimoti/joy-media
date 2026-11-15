@@ -1,55 +1,23 @@
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert';
+import {
+  assertManifestListsFiles,
+  assertReleasePlanUnsigned,
+  assertZipEntryNames,
+  fileSha256,
+  listedSha256,
+  zipEntryNames,
+} from '../../tooling/release/src/installer-package-assertions.mjs';
 
 console.log('=== JOY Media Installer & Package Verification Suite ===');
 
 const desktopDistDir = resolve('apps/desktop/dist');
 const standaloneDir = resolve(desktopDistDir, 'joy-media-win32-x64');
 const releasesDir = resolve(desktopDistDir, 'releases');
-
-/**
- * The entry names of a zip archive, read from its central directory. Nothing is extracted, so the names are
- * exactly what the archive stores.
- */
-function zipEntryNames(zipPath) {
-  const data = readFileSync(zipPath);
-  const endRecord = data.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
-  assert.ok(endRecord >= 0, `${zipPath} has no end-of-central-directory record`);
-  const entryCount = data.readUInt16LE(endRecord + 10);
-  let offset = data.readUInt32LE(endRecord + 16);
-  const names = [];
-  for (let index = 0; index < entryCount; index++) {
-    assert.strictEqual(data.readUInt32LE(offset), 0x02014b50, 'Bad central directory entry');
-    const nameLength = data.readUInt16LE(offset + 28);
-    const extraLength = data.readUInt16LE(offset + 30);
-    const commentLength = data.readUInt16LE(offset + 32);
-    names.push(data.toString('utf8', offset + 46, offset + 46 + nameLength));
-    offset += 46 + nameLength + extraLength + commentLength;
-  }
-  return names;
-}
-
-/** The lowercase SHA-256 of a file's bytes, as SHA256SUMS.txt lists it. */
-function fileSha256(filePath) {
-  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
-}
-
-/**
- * The digest that a SHA256SUMS.txt text lists for one file name, or undefined when it lists that name zero or
- * more than one time. Lines follow "<64 hex>  <name>"; a name that only ends the same way does not match.
- */
-function listedSha256(sumsText, fileName) {
-  const digests = sumsText.split(/\r?\n/).flatMap((line) => {
-    const match = /^([a-fA-F0-9]{64}) {2}(.+)$/.exec(line);
-    return match && match[2] === fileName ? [match[1].toLowerCase()] : [];
-  });
-  return digests.length === 1 ? digests[0] : undefined;
-}
 
 // 1. Verify Distribution Layout
 console.log('1. Verifying distribution files in joy-media-win32-x64...');
@@ -106,16 +74,7 @@ const packageVersion = JSON.parse(
 const releaseZipPath = resolve(releasesDir, `joy-media-windows-x64-v${packageVersion}.zip`);
 console.log('3b. Testing the release zip entry names and the packaged exe version resource...');
 const zipEntries = zipEntryNames(releaseZipPath);
-assert.ok(zipEntries.length > 0, 'The release zip has no entries');
-assert.deepStrictEqual(
-  zipEntries.filter((name) => name.includes('\\')),
-  [],
-  'The release zip must use forward slashes in every entry name',
-);
-assert.ok(
-  zipEntries.includes('joy-media-win32-x64/joy-media.exe'),
-  'The release zip does not contain joy-media-win32-x64/joy-media.exe',
-);
+assertZipEntryNames(zipEntries, ['joy-media-win32-x64/joy-media.exe']);
 console.log(`✔ Release zip has ${zipEntries.length} entries, none with a backslash.`);
 
 const versionInfoRun = spawnSync(
@@ -708,16 +667,14 @@ assert.strictEqual(manifest.platform, 'windows-x64');
 assert.strictEqual(manifest.installer.environment.pathRegistered, true);
 // The payload is the setup exe, the zip, the app exe, the worker exe, the CLI bundle and this manifest
 // (apps/site/src/release.mjs payloadNames). The manifest lists the setup and the worker.
-for (const fileName of ['joy-media-setup.exe', 'joy-worker.exe']) {
+const payloadFiles = ['joy-media-setup.exe', 'joy-worker.exe'];
+for (const fileName of payloadFiles) {
   assert.ok(
     existsSync(resolve(releasesDir, fileName)),
     `${fileName} is missing from the release folder`,
   );
-  assert.ok(
-    manifest.artifacts.some((artifact) => artifact.fileName === fileName && artifact.sha256),
-    `The release manifest does not list ${fileName}`,
-  );
 }
+assertManifestListsFiles(manifest, payloadFiles);
 
 const shaSums = readFileSync(shaSumsPath, 'utf8');
 for (const artifact of manifest.artifacts) {
@@ -769,12 +726,7 @@ console.log('✔ build-installer.ps1 syntax parse check passed.');
 // its work when imported, so the check reads its source.)
 console.log('8. Verifying the release plan status in package-release.mjs...');
 const releaseScript = readFileSync(resolve('apps/desktop/scripts/package-release.mjs'), 'utf8');
-assert.match(
-  releaseScript,
-  /status: 'unsigned-release'/,
-  'The release plan must say unsigned-release',
-);
-assert.doesNotMatch(releaseScript, /status: 'blocked'/, 'The release plan must not say blocked');
+assertReleasePlanUnsigned(releaseScript);
 console.log('✔ Release plan status is unsigned-release.');
 
 console.log('\n=== All Installer & Packaging Checks PASSED! ===');

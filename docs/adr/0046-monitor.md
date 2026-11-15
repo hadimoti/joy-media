@@ -40,14 +40,14 @@ Three facts make the current design unrepairable by patching, and force the deci
 
 The Monitor keeps **two** separate transformations and they are never mixed:
 
-| | **View transform** | **Element transform** |
-|---|---|---|
-| What | zoom and pan of the viewport | x, y, scaleX, scaleY, rotationDeg, opacity, crop of one element |
-| Owner | the user, per session | the document |
-| Saved in the project | **no** | **yes** |
-| Undoable | **no** | **yes** |
-| Lives in | `MonitorViewState` (React state in the Monitor) | `VisualObjectTransformV1` (`packages/project-schema/src/v1.ts:77-96`) |
-| Applied by | the Monitor layout (CSS size of the canvas, the pan offset) | the renderer, through `RenderFrameIR` |
+|                      | **View transform**                                          | **Element transform**                                                 |
+| -------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------- |
+| What                 | zoom and pan of the viewport                                | x, y, scaleX, scaleY, rotationDeg, opacity, crop of one element       |
+| Owner                | the user, per session                                       | the document                                                          |
+| Saved in the project | **no**                                                      | **yes**                                                               |
+| Undoable             | **no**                                                      | **yes**                                                               |
+| Lives in             | `MonitorViewState` (React state in the Monitor)             | `VisualObjectTransformV1` (`packages/project-schema/src/v1.ts:77-96`) |
+| Applied by           | the Monitor layout (CSS size of the canvas, the pan offset) | the renderer, through `RenderFrameIR`                                 |
 
 Rules:
 
@@ -56,18 +56,25 @@ Rules:
 
    ```ts
    export interface MonitorViewState {
-     readonly zoom: number;      // 0.1 .. 8, 1 = 100 %
-     readonly panX: number;      // CSS px, offset of the canvas origin inside the viewport
+     readonly zoom: number; // 0.1 .. 8, 1 = 100 %
+     readonly panX: number; // CSS px, offset of the canvas origin inside the viewport
      readonly panY: number;
    }
 
    /** Screen (client) point -> canvas point in authored pixels. */
-   export function screenToCanvasPoint(view: MonitorViewState, point: { x: number; y: number }): { x: number; y: number };
+   export function screenToCanvasPoint(
+     view: MonitorViewState,
+     point: { x: number; y: number },
+   ): { x: number; y: number };
    /** Canvas point in authored pixels -> screen (client) point. */
-   export function canvasToScreenPoint(view: MonitorViewState, point: { x: number; y: number }): { x: number; y: number };
+   export function canvasToScreenPoint(
+     view: MonitorViewState,
+     point: { x: number; y: number },
+   ): { x: number; y: number };
    ```
 
    `screenToCanvasPoint` is `(point - pan) / zoom` in the canvas's own coordinate space, and the canvas's own coordinate space **is the authored frame space** (the IR viewport is the authored width and height), so the result is directly comparable to `VisualObjectTransformV1.x/y` and to the node rectangles in `RenderFrameIR`.
+
 3. The **element transform is a third thing** and is not part of the view transform. To test whether a screen point is inside an element, the point must be taken from screen space to the element's **local** space by applying the inverse of that element's transform (rotation about the anchor, then scale, then translation). This inverse is a named function, `elementLocalPoint(transform, canvasPoint)`, in `monitor-transform-maths.ts`, and it is the only place rotation maths appears. The renderer and the hit test must use the same maths, otherwise a rotated element selects differently from how it is drawn.
 4. **The hit test works from the drawn frame, not from the document.** The element's rectangle comes from the node in the `RenderFrameIR` that is on screen (its size plus its `transform`), not from the schema, because the schema carries no size for a picture. That makes the hit test automatically agree with what the user sees, including anything the renderer does with crop or opacity. Until S5.10 lands, `elementLocalPoint` must use the **render** transform (translation and scale only, no rotation), because that is what is drawn; using the document rotation would select a rotated shape that is not drawn rotated.
 5. Zoom range is **10 % to 800 %**, with 100 % meaning "one authored pixel is one CSS pixel" (before the screen's own device pixel ratio). Fit is not a zoom value; it is a derived value computed from the viewport size and the authored size, and it is stored as a mode flag so that the zoom control can show "Fit" while the effective zoom is a number.
@@ -82,13 +89,18 @@ The Monitor stops scaling a small bitmap and starts **rendering at the size the 
 
    ```ts
    /** Device pixels per authored pixel. */
-   export function monitorPixelScale(quality: PreviewQuality, zoom: number, devicePixelRatio: number): number;
+   export function monitorPixelScale(
+     quality: PreviewQuality,
+     zoom: number,
+     devicePixelRatio: number,
+   ): number;
    ```
 
    `monitorPixelScale = qualityScale(quality) * zoom * devicePixelRatio`, where `qualityScale` is `quarter -> 0.25`, `half -> 0.5`, `full -> 1` (`apps/editor-web/src/preview-quality.ts:5-14`).
    - At `full` quality, 100 % zoom and a 1x screen, the scale is 1: **one authored pixel is one device pixel, so the frame is sharp.** This is the acceptance the owner asked for.
    - At `full` quality and 200 % zoom, the scale is 2: the text is drawn at its real size on screen, not a magnified bitmap.
    - At `quarter` quality the scale is 0.25 x zoom: the picture is deliberately soft, which is the point of the setting, and the tooltip must say so.
+
 3. **The renderer clamp must change.** `resize()` clamps the resolution to `[0.1, 2]` (`packages/renderer-pixi/src/browser.ts:189`). A 400 % zoom at full quality needs 4, and 800 % needs 8. The browser renderer must accept the monitor's pixel scale up to a cap. The cap is a **backing-store budget, not a magic number**: the Monitor refuses to ask for a backing store larger than 4096 x 4096 device pixels, and above that it renders at the largest scale that fits and shows the honest note "resolution reduced at this zoom" next to the zoom value. Concretely, `packages/renderer-pixi/src/browser.ts` gains:
 
    ```ts
@@ -97,17 +109,19 @@ The Monitor stops scaling a small bitmap and starts **rendering at the size the 
    ```
 
    replacing the current meaning of `setResolution` (`browser.ts:537-541`), which is used for exactly one thing today: the quality knob (`App.tsx:7677`). `setResolution` is removed, not aliased, so that no other caller can silently keep the old semantics.
+
 4. **The canvas CSS box carries the zoom; no CSS transform is used.** Pixi sets the canvas CSS size to the logical size inside `resize()`. The Monitor therefore owns the displayed size and must re-apply it after every resize, because Pixi overwrites the style on each call:
 
    ```ts
    // monitor/MonitorViewport.tsx
-   const displayWidth = frame.viewport.width * view.zoom;   // CSS px
+   const displayWidth = frame.viewport.width * view.zoom; // CSS px
    const displayHeight = frame.viewport.height * view.zoom;
    canvas.style.width = `${displayWidth}px`;
    canvas.style.height = `${displayHeight}px`;
    ```
 
    The `transform: scale(...)` at `App.tsx:8109` and the `transform-origin: center center` at `app.css:1665` are deleted. The canvas is positioned by the pan offset inside a clipping viewport.
+
 5. **The device pixel ratio is part of the state.** `window.devicePixelRatio` changes when the window moves to a screen with a different scaling. The Monitor listens for it (a `matchMedia('(resolution: …)')` change) and re-renders. A zoom change re-renders too, but **only the pixels, not the frame**: the IR is not rebuilt for a zoom change. The current paint effect depends on `viewerZoom` (`App.tsx:7942`) and rebuilds the whole frame for a purely visual change; that dependency is removed.
 6. **Fit** is computed from the viewport size: `fitZoom = min(viewportWidth / authoredWidth, viewportHeight / authoredHeight)`, clamped to the zoom range, and the canvas is centred when it is smaller than the viewport. This replaces the CSS that letterboxes the frame today, and the checkerboard background becomes an explicit **background choice** (checkerboard, black, grey) rather than an accident of the wrap.
 
@@ -132,6 +146,7 @@ The Monitor has exactly two tools: **Select** (default) and **Hand**. The tool i
    - `type` — a text field or an in-place text edit has focus. Space types a space and nothing else happens. The existing `isInteractiveTarget` (`keyboard-shortcuts.ts:38-54`) is the guard; it is extended to cover the in-place text editor of T-M07.
    - `tap` — Space was held for less than 250 ms and no pointer went down. On **key-up**, it toggles playback, exactly like today (`keyboard-shortcuts.ts:76-77`), so nothing regresses for a user who just taps Space.
    - `hold` — Space is held. The cursor becomes an open hand, the active tool becomes Hand, and a drag pans. Playback does **not** start.
+
 2. Releasing Space restores the tool that was active before the hold. The hand is a **temporary override**, never a sticky mode.
 3. The middle mouse button always pans, at any tool, at any zoom.
 4. When zoomed in past 100 %, the viewport shows thin scrollbars and a small **navigator** picture with a draggable frame that shows where the visible region is.
@@ -146,7 +161,7 @@ The Monitor has exactly two tools: **Select** (default) and **Hand**. The tool i
    // monitor/monitor-hit-test.ts
    export function hitTestElements(
      canvasPoint: { x: number; y: number },
-     elements: readonly HitTestElement[],   // ordered, topmost first
+     elements: readonly HitTestElement[], // ordered, topmost first
    ): readonly string[];
 
    export function marqueeSelect(
@@ -171,12 +186,13 @@ The transform box is an **overlay above the canvas**, in HTML/SVG, never drawn i
    ```ts
    export interface MonitorOverlay {
      readonly elementId: string;
-     readonly localToCanvas: readonly number[];  // 2x3 affine, from the element transform
+     readonly localToCanvas: readonly number[]; // 2x3 affine, from the element transform
      readonly handles: readonly MonitorHandle[];
    }
    ```
 
    and the box reads the same element transform the renderer uses, so the box cannot drift from the picture.
+
 2. **Handles.** Eight scale handles (four corners, four edge midpoints), one rotate handle above the top edge, one anchor point. The corner handles scale, the edge handles scale on one axis, the rotate handle rotates, the anchor point is dragged to the element's pivot.
 3. **Modifier rules.** `Shift` keeps the proportions while scaling; `Alt` scales from the centre instead of the opposite corner; `Shift` while rotating snaps to **15 degree** steps; `Shift+Alt` rotates about the centre.
 4. **Nudge.** Arrow keys move the selection 1 CSS pixel, `Shift+Arrow` moves it 10. Nudge is an undoable step.
@@ -189,7 +205,7 @@ The transform box is an **overlay above the canvas**, in HTML/SVG, never drawn i
     - **(a) IR revision now, rotate in v1.1.1.** `Transform2D` gains `rotationDeg`, the Pixi renderer applies it (`layer.rotation = rotationDeg * Math.PI / 180`), and the Monitor's rotate handle ships with M05b. This is the honest route and it also fixes a real product defect (rotation is stored but invisible today). Cost: an IR change touches the export path and the golden-frame tests.
     - **(b) No IR change, rotate moves to v1.1.2.** The transform box ships with move, scale, anchor, nudge and group, and the rotate handle is drawn disabled with the note "coming in v1.1.2". The owner is told in plain words, as he was for smart guides.
     - **(c) Monitor-only rotation.** The Monitor draws the element rotated on its own layer while the export keeps it unrotated. **Rejected**: preview and export would disagree, which is exactly what the whole Track M is meant to stop.
-    The ADR recommends **(a)**, because the owner named rotation in his request and because a stored-but-invisible value is a defect on its own. This decision is CC's, and it is the first thing the Opus consult should look at.
+      The ADR recommends **(a)**, because the owner named rotation in his request and because a stored-but-invisible value is a defect on its own. This decision is CC's, and it is the first thing the Opus consult should look at.
 11. **Undo and the Inspector stay in step.** The Inspector's Visual tab is the same document, so the numbers move because the document moved. The Monitor never writes a value the Inspector does not show. The Inspector's Visual tab fields are `x, y, scaleX, scaleY, rotationDeg, opacity` (`packages/property-system/src/index.ts:39-47`, rendered at `apps/editor-web/src/InspectorPanel.tsx:609-676`), and they are controlled inputs whose `onChange` only previews and whose `onBlur`/Enter commits (`apps/editor-web/src/components/PropertyControlAdapters.tsx:103-137`) — the Monitor must use the same commit path, not a private one. Note for T-M07: the Crop inputs in the Inspector bypass the transient adapter and dispatch on every keystroke (`apps/editor-web/src/InspectorPanel.tsx:696-714`), which makes one undo step per keystroke. That is a defect; the Monitor's crop must not copy it.
 
 ### 6. Guides and snapping
@@ -252,23 +268,23 @@ The rules for the split:
 
 Each card below may create or change **only** the named functions, plus the files listed. Anything outside this list is a scope change and goes back to CC.
 
-| Card | Owner | May own (function / symbol names) | Files |
-|---|---|---|---|
-| **T-M02a** | GB | `MonitorPanelContent` (move only), `MonitorPanel` | `apps/editor-web/src/monitor/MonitorPanel.tsx` |
-| **T-M02b** | GB | `MonitorViewState`, `screenToCanvasPoint`, `canvasToScreenPoint`, `fitZoom`, `clampPan` | `monitor/monitor-view-state.ts`, `monitor/MonitorViewport.tsx` |
-| **T-M02c** | GB | `setPixelScale`, the resolution clamp, `monitorPixelScale` | `packages/renderer-pixi/src/browser.ts`, `monitor/monitor-quality.ts` |
-| **T-M03** | GB | `MonitorTool`, `resolveSpaceIntent`, the hand cursor states | `monitor/monitor-tools.ts` |
-| **T-M04** | GB | `hitTestElements`, `marqueeSelect`, the clip/object mapping | `monitor/monitor-hit-test.ts`, `monitor/monitor-selection.ts` |
-| **T-M05a** | GB | `MonitorOverlay`, `MonitorHandle`, the handle maths, the box component | `monitor/monitor-overlay-model.ts`, `monitor/monitor-transform-maths.ts` |
-| **T-M05b** | GB | the anchor field on the transform (schema), the keyframe write through `setKeyframe`, the group maths | `packages/project-schema/src/v1.ts` (needs a schema decision), `monitor/monitor-transform-maths.ts` |
-| **T-M05c** | CX, needs an IR revision | `Transform2D.rotationDeg`, the `layer.rotation` write, `transformToRenderTransform` | `packages/render-ir/src/model.ts`, `packages/visual-object-renderer/src/index.ts:452-460`, `packages/renderer-pixi/src/browser.ts:358-365` |
-| **T-M06** | CX | `snapTargets`, `nearestSnapTarget`, the guide drawing, the readout | `monitor/monitor-guides.ts` |
-| **T-M07** | CX | the in-place text editor, the crop mode, the right-click menu items | `monitor/monitor-menu.tsx`, `monitor/MonitorViewport.tsx` |
-| **T-M08** | MC | the View menu, the overlay switches, the background choice, the navigator | `monitor/monitor-view-menu.tsx`, `monitor/monitor.css` |
-| **T-M09** | CX | the quality control, the Auto rule, the migration of the saved preference | `monitor/monitor-quality.ts`, `apps/editor-web/src/ui-preferences.ts` |
-| **T-M10** | CX | the transport bar, the timecode parse/format, the JKL table, the audio meter | `monitor/monitor-transport.tsx` |
-| **T-M11** | GB | the frame-time recorder, the paint throttle while the wheel moves | `monitor/MonitorViewport.tsx` (the paint path) |
-| **T-M12** | MC | the focus ring, the tooltips, the screen-reader names, the keyboard map | `monitor/MonitorViewport.tsx`, `monitor/monitor.css` |
+| Card       | Owner                    | May own (function / symbol names)                                                                     | Files                                                                                                                                      |
+| ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **T-M02a** | GB                       | `MonitorPanelContent` (move only), `MonitorPanel`                                                     | `apps/editor-web/src/monitor/MonitorPanel.tsx`                                                                                             |
+| **T-M02b** | GB                       | `MonitorViewState`, `screenToCanvasPoint`, `canvasToScreenPoint`, `fitZoom`, `clampPan`               | `monitor/monitor-view-state.ts`, `monitor/MonitorViewport.tsx`                                                                             |
+| **T-M02c** | GB                       | `setPixelScale`, the resolution clamp, `monitorPixelScale`                                            | `packages/renderer-pixi/src/browser.ts`, `monitor/monitor-quality.ts`                                                                      |
+| **T-M03**  | GB                       | `MonitorTool`, `resolveSpaceIntent`, the hand cursor states                                           | `monitor/monitor-tools.ts`                                                                                                                 |
+| **T-M04**  | GB                       | `hitTestElements`, `marqueeSelect`, the clip/object mapping                                           | `monitor/monitor-hit-test.ts`, `monitor/monitor-selection.ts`                                                                              |
+| **T-M05a** | GB                       | `MonitorOverlay`, `MonitorHandle`, the handle maths, the box component                                | `monitor/monitor-overlay-model.ts`, `monitor/monitor-transform-maths.ts`                                                                   |
+| **T-M05b** | GB                       | the anchor field on the transform (schema), the keyframe write through `setKeyframe`, the group maths | `packages/project-schema/src/v1.ts` (needs a schema decision), `monitor/monitor-transform-maths.ts`                                        |
+| **T-M05c** | CX, needs an IR revision | `Transform2D.rotationDeg`, the `layer.rotation` write, `transformToRenderTransform`                   | `packages/render-ir/src/model.ts`, `packages/visual-object-renderer/src/index.ts:452-460`, `packages/renderer-pixi/src/browser.ts:358-365` |
+| **T-M06**  | CX                       | `snapTargets`, `nearestSnapTarget`, the guide drawing, the readout                                    | `monitor/monitor-guides.ts`                                                                                                                |
+| **T-M07**  | CX                       | the in-place text editor, the crop mode, the right-click menu items                                   | `monitor/monitor-menu.tsx`, `monitor/MonitorViewport.tsx`                                                                                  |
+| **T-M08**  | MC                       | the View menu, the overlay switches, the background choice, the navigator                             | `monitor/monitor-view-menu.tsx`, `monitor/monitor.css`                                                                                     |
+| **T-M09**  | CX                       | the quality control, the Auto rule, the migration of the saved preference                             | `monitor/monitor-quality.ts`, `apps/editor-web/src/ui-preferences.ts`                                                                      |
+| **T-M10**  | CX                       | the transport bar, the timecode parse/format, the JKL table, the audio meter                          | `monitor/monitor-transport.tsx`                                                                                                            |
+| **T-M11**  | GB                       | the frame-time recorder, the paint throttle while the wheel moves                                     | `monitor/MonitorViewport.tsx` (the paint path)                                                                                             |
+| **T-M12**  | MC                       | the focus ring, the tooltips, the screen-reader names, the keyboard map                               | `monitor/MonitorViewport.tsx`, `monitor/monitor.css`                                                                                       |
 
 Two rules for the whole track:
 
