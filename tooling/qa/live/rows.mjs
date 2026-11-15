@@ -119,12 +119,15 @@ export function writeRowEvidence(outDir, { result, defect }) {
  */
 export async function runParts(id, label, items, fn) {
   const parts = [];
+  let programmingError;
   for (const item of items) {
     const name = item?.name ?? String(item);
     try {
       parts.push({ name, status: 'passed', message: String((await fn(item)) ?? '') });
     } catch (error) {
       const message = firstLine(error);
+      // A TypeError or ReferenceError is a mistake in the script, not an app result: keep it as the cause.
+      if (error instanceof TypeError || error instanceof ReferenceError) programmingError ??= error;
       parts.push({ name, status: statusOfMessage(message), message });
     }
   }
@@ -138,6 +141,7 @@ export async function runParts(id, label, items, fn) {
         .join('; ')}`,
     );
     error.parts = parts;
+    if (programmingError !== undefined) error.cause = programmingError;
     throw error;
   }
   if (passed === 0 && blocked.length > 0) {

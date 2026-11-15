@@ -211,7 +211,13 @@ function contextFor(page, injected) {
 }
 
 function isProgrammingError(error) {
-  return error instanceof TypeError || error instanceof ReferenceError;
+  // runParts wraps a part's mistake in its own Error and keeps the original as the cause.
+  return (
+    error instanceof TypeError ||
+    error instanceof ReferenceError ||
+    error?.cause instanceof TypeError ||
+    error?.cause instanceof ReferenceError
+  );
 }
 
 test('the fake page rejects a selector that is undefined, as a misspelled selector-table key reads', () => {

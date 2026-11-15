@@ -13,10 +13,17 @@ import {
 } from './driver.mjs';
 import * as liveDriver from './driver.mjs';
 
-test('the expected joy protocol hash is the owner baseline', () => {
+test('the expected joy protocol hash is the owner baseline unless the machine sets its own', () => {
+  // On the PC (no JOY_QA_EXPECTED_JOY_HASH) it is the PC baseline; a second machine sets its own value.
+  const own = process.env.JOY_QA_EXPECTED_JOY_HASH;
+  const pcBaseline = 'AF05BE55222C86FECE27E738B7E8A931CB4261C9797261C67DDE3C71A4E5CAC0';
   assert.equal(
     EXPECTED_JOY_HASH,
-    'AF05BE55222C86FECE27E738B7E8A931CB4261C9797261C67DDE3C71A4E5CAC0',
+    own === undefined || own === ''
+      ? pcBaseline
+      : own.toLowerCase() === 'absent'
+        ? ''
+        : own.toUpperCase(),
   );
 });
 
