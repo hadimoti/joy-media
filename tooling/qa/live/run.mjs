@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { createLiveDriver } from './driver.mjs';
+import { labRoots } from './lab-roots.mjs';
 import {
   addToTimelineThroughLeftPanel,
   importThroughLeftPanel,
@@ -22,6 +23,8 @@ import { runRows } from './rows.mjs';
 
 import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
 import { executeRow } from './matrix-core.mjs';
+
+const LAB = labRoots();
 
 const KNOWN_TESTS = new Set([
   'D-000',
@@ -78,13 +81,13 @@ export function parseArgs(argv) {
     throw new Error('D-002 requires --media <scratch-file>');
   }
   if (options.media) {
-    const root = resolve('C:\\jgp\\v111\\fixtures');
+    const root = resolve(LAB.fixtures);
     const media = resolve(options.media);
     if (
       !media.toLowerCase().startsWith(`${root.toLowerCase()}\\`) &&
       !media.toLowerCase().startsWith(`${root.toLowerCase()}/`)
     ) {
-      throw new Error('--media must be inside C:\\jgp\\v111\\fixtures');
+      throw new Error(`--media must be inside ${LAB.fixtures}`);
     }
   }
   return options;
@@ -102,8 +105,8 @@ export async function run(argv = process.argv.slice(2)) {
   const runId = randomUUID();
   const testMode = options.testIds.some((id) => LIVE_ROWS.some((row) => row.id === id));
   const evidenceTask = testMode ? 'T-A07-A08' : 'T-A02';
-  const outDir = resolve(options.out ?? join('C:\\jgp\\v111\\evidence', evidenceTask, runId));
-  const scratchRoot = 'C:\\jgp\\v111\\codex';
+  const outDir = resolve(options.out ?? join(LAB.evidence, evidenceTask, runId));
+  const scratchRoot = LAB.scratch;
   const profileDir = join(scratchRoot, 'profiles', runId);
   const libraryDir = join(scratchRoot, 'libraries', runId);
   const projectTitle = `T-A07/A08 ${runId.slice(0, 8)}`;
@@ -220,7 +223,7 @@ export async function run(argv = process.argv.slice(2)) {
           if (MONITOR_MEDIA_IDS.has(id)) {
             if (!options.media)
               throw new Error(
-                `BLOCKED-on-fixture ${id}: needs --media <file in C:\\jgp\\v111\\fixtures>; run.mjs imports it and adds it to the timeline first, because Play is disabled on an empty timeline`,
+                `BLOCKED-on-fixture ${id}: needs --media <file in the fixtures folder>; run.mjs imports it and adds it to the timeline first, because Play is disabled on an empty timeline`,
               );
             if (!mediaImported) {
               await importThroughLeftPanel(session.page, options.media);

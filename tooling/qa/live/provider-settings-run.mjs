@@ -16,6 +16,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLiveDriver } from './driver.mjs';
+import { labRoots } from './lab-roots.mjs';
 import { newProject, screenshot, setScratchLibrary } from './steps.mjs';
 import { createFakePage } from './provider-settings-fake-page.mjs';
 import { seedPlanOperations } from './provider-settings-seed.mjs';
@@ -29,7 +30,8 @@ import {
 import { buildSettingsFlowScript } from '../stub-model/settings-flow-script.mjs';
 
 const SERVER_PATH = fileURLToPath(new URL('../stub-model/server.mjs', import.meta.url));
-const SCRATCH_ROOT = 'C:\\jgp\\v111\\codex';
+const LAB = labRoots();
+const SCRATCH_ROOT = LAB.scratch;
 
 function parseArgs(argv) {
   const options = { dryRun: false, needsSignIn: false };
@@ -112,7 +114,7 @@ async function run() {
     return;
   }
   const runId = randomUUID();
-  const outDir = resolve(options.out ?? join('C:\\jgp\\v111\\evidence\\T-A11', runId));
+  const outDir = resolve(options.out ?? join(LAB.evidence, 'T-A11', runId));
   mkdirSync(outDir, { recursive: true });
   const scriptPath = join(outDir, 'stub-script.json');
   const logPath = join(outDir, 'stub-requests.ndjson');

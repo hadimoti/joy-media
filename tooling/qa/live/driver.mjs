@@ -24,8 +24,13 @@ import {
   systemTool,
 } from '../../release/attended/scenario-rules.mjs';
 
-export const EXPECTED_JOY_HASH = 'AF05BE55222C86FECE27E738B7E8A931CB4261C9797261C67DDE3C71A4E5CAC0';
-export const LOCK_PATH = 'C:\\jgp\\LOCK-app-run.txt';
+import { labRoots, PC_JOY_HASH } from './lab-roots.mjs';
+
+const LAB = labRoots();
+// PC defaults; a second machine sets JOY_QA_ROOT, JOY_QA_LOCK and JOY_QA_EXPECTED_JOY_HASH (see lab-roots.mjs).
+export const EXPECTED_JOY_HASH = LAB.expectedJoyHash;
+export { PC_JOY_HASH };
+export const LOCK_PATH = LAB.lockPath;
 export const OS_FILE_DROP_SELECTORS = Object.freeze({
   timeline: '.timeline-lane, .timeline-empty-state, .timeline-file-new-track-drop',
   monitor: '.monitor-canvas-wrap',
@@ -34,7 +39,13 @@ export const OS_FILE_DROP_SELECTORS = Object.freeze({
 const APP_NAME = 'joy-media.exe';
 const CDP_HOST = '127.0.0.1';
 const OWNER_HOME = 'C:\\Users\\HadiMoti';
-const DROP_FIXTURE_ROOT = 'C:\\jgp\\v111\\dnd';
+const DROP_FIXTURE_ROOT = LAB.drops;
+
+/** Files in the owner's default library; a machine with no such folder has none to protect. */
+function ownerLibraryCount(home) {
+  const folder = ownerDefaultLibrary(home);
+  return existsSync(folder) ? countFiles(folder) : 0;
+}
 
 function fail(message) {
   const error = new Error(message);
@@ -203,7 +214,7 @@ export async function checkLaunchRules(config, deps = {}) {
   if (joyHash !== EXPECTED_JOY_HASH) {
     throw fail('joy:// registry hash does not match the approved value');
   }
-  const before = deps.ownerLibraryFiles ?? countFiles(ownerDefaultLibrary(ownerHome));
+  const before = deps.ownerLibraryFiles ?? ownerLibraryCount(ownerHome);
   const running = deps.runningProcesses ?? countJoyAndElectronProcesses(appDir);
   if (running !== 0) throw fail('a JOY Media or Electron process is already running');
   const portAvailable = deps.portAvailable ?? (await isPortAvailable());
@@ -268,7 +279,7 @@ export async function dispatchOSFileDrop(
 
 export function createLiveDriver(config, options = {}) {
   const runId = config.runId ?? randomUUID();
-  const agentRoot = 'C:\\jgp\\v111\\codex';
+  const agentRoot = LAB.scratch;
   const profileDir = config.profileDir ?? join(agentRoot, 'profiles', runId);
   const libraryDir = config.libraryDir ?? join(agentRoot, 'libraries', runId);
   const lockPath = config.lockPath ?? LOCK_PATH;
@@ -391,7 +402,7 @@ export function createLiveDriver(config, options = {}) {
         await delay(1_000);
         afterProcesses = countJoyAndElectronProcesses(baseline.appDir);
       }
-      const afterCount = countFiles(ownerDefaultLibrary(OWNER_HOME));
+      const afterCount = ownerLibraryCount(OWNER_HOME);
       verifyAfterRun(baseline, {
         joyHash: afterHash,
         ownerLibraryFiles: afterCount,
