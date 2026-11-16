@@ -308,12 +308,52 @@ export async function readLiveTimeline(page) {
   return json === null || json === undefined ? null : JSON.parse(json);
 }
 
+/**
+ * The editor's live visual project (colour grades, objects, looks), read from the page's own session. Clip colour
+ * grades (`clipColorGrades`) live here, not in the timeline project and not in the stored document before a save.
+ * Returns null when no session is found.
+ */
+export async function readLiveVisualProject(page) {
+  const json = await page.evaluate(function readVisual() {
+    const root = document.getElementById('root');
+    const key = root && Object.keys(root).find((name) => name.startsWith('__reactContainer'));
+    if (!key) return null;
+    const seen = new Set();
+    const stack = [root[key]];
+    while (stack.length > 0) {
+      const fiber = stack.pop();
+      if (!fiber || seen.has(fiber)) continue;
+      seen.add(fiber);
+      for (const props of [fiber.memoizedProps, fiber.memoizedState]) {
+        if (!props || typeof props !== 'object') continue;
+        const session = props.session ?? props.context?.session;
+        if (session?.visualProject?.compositions) {
+          try {
+            return JSON.stringify(session.visualProject);
+          } catch {
+            return null;
+          }
+        }
+      }
+      if (fiber.child) stack.push(fiber.child);
+      if (fiber.sibling) stack.push(fiber.sibling);
+    }
+    return null;
+  });
+  return json === null || json === undefined ? null : JSON.parse(json);
+}
+
 export async function readDocument(page, bridge) {
   const live = await readLiveTimeline(page).catch(() => null);
   const ids = await readProjectIds(page);
   if (!ids?.controlPlaneProjectId) {
     if (live !== null) {
-      return { projectId: ids?.active ?? 'live', revisionId: 'live', document: live };
+      return {
+        projectId: ids?.active ?? 'live',
+        revisionId: 'live',
+        document: live,
+        liveVisualProject: await readLiveVisualProject(page).catch(() => null),
+      };
     }
     throw new Error(
       `BLOCKED: no bridge project id for the open project (active ${ids?.active ?? 'none'}, ${ids?.bindingCount ?? 0} bindings); the project may not have been saved yet`,
@@ -332,6 +372,7 @@ export async function readDocument(page, bridge) {
     // The timeline (clips) is the live one; the stored visual document stays available beside it.
     document: live ?? view.document,
     storedDocument: view?.document ?? null,
+    liveVisualProject: await readLiveVisualProject(page).catch(() => null),
   };
 }
 

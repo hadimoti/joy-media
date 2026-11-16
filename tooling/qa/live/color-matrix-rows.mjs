@@ -16,7 +16,9 @@ import { blockedRow } from './rows.mjs';
 export function clipColourGrade(state, clipId) {
   if (clipId === undefined) return undefined;
   return (
-    state.storedDocument?.clipColorGrades?.[clipId] ?? state.document?.clipColorGrades?.[clipId]
+    state.liveVisualProject?.clipColorGrades?.[clipId] ??
+    state.storedDocument?.clipColorGrades?.[clipId] ??
+    state.document?.clipColorGrades?.[clipId]
   );
 }
 
