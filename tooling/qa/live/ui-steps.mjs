@@ -392,7 +392,26 @@ export async function clickClipById(page, clipId) {
   const clip = page.locator(`.timeline-clip[data-clip-id="${clipId}"]`).first();
   const box = await clip.boundingBox();
   if (box === null) {
-    await clip.click();
+    try {
+      await clip.click({ timeout: 8_000 });
+    } catch (error) {
+      // Say what the page does show: a clip id that is gone usually means the project changed underneath.
+      const shown = await page
+        .evaluate(() => ({
+          clips: Array.from(document.querySelectorAll('.timeline-clip'), (e) =>
+            e.getAttribute('data-clip-id'),
+          ),
+          dialogs: Array.from(
+            document.querySelectorAll('[role="dialog"], [role="alertdialog"]'),
+            (e) => (e.getAttribute('aria-label') ?? e.className ?? '').toString().slice(0, 40),
+          ),
+          library: document.querySelector('.project-library, [data-view="library"]') !== null,
+        }))
+        .catch(() => undefined);
+      throw new Error(
+        `clip ${clipId} is not on the page; the page shows ${JSON.stringify(shown)}: ${String(error?.message ?? error).split('\n')[0]}`,
+      );
+    }
     return;
   }
   await clip.click({
