@@ -241,7 +241,7 @@ async function waitForColourPixel(page, point, ctx, rowId, condition, baseline) 
   );
 }
 
-async function saveAndReopen(page, ctx, rowId, clipId) {
+async function saveAndReopen(page, ctx, rowId, clipId, { comparable = true } = {}) {
   await page.waitForTimeout(1_000);
   const session = await ctx.restartApp();
   const heading = session.page.getByRole('heading', { name: 'Projects', exact: true });
@@ -258,7 +258,8 @@ async function saveAndReopen(page, ctx, rowId, clipId) {
     await session.page.waitForTimeout(100);
   }
   ctx.page = session.page;
-  return await readColourGrade(ctx, clipId);
+  const grade = await readColourGrade(ctx, clipId);
+  return comparable ? comparableGrade(grade) : grade;
 }
 
 async function compareExport(page, pixel, ctx, rowId) {
@@ -545,7 +546,9 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
             readGrade: () => readColourGrade(ctx, clipId),
             edit: async () => {},
             saveAndReopen: async () => {
-              const result = await saveAndReopen(activePage, ctx, 'D-K04', clipId);
+              const result = await saveAndReopen(activePage, ctx, 'D-K04', clipId, {
+                comparable: false,
+              });
               activePage = ctx.page;
               return result;
             },
