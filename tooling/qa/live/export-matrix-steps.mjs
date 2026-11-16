@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   compareFrames,
@@ -139,6 +139,7 @@ async function runPresetRow(page, ctx, presetId) {
   await selectPreset(page, presetId);
   const started = Date.now();
   const exported = await exportAndProbe(page, ctx, rowId, { seconds: 6, audio: true });
+  assertNoStagedLibraryEntries(ctx, rowId);
   const checked = inspectPreset(exported.probe, presetId);
   const decode = (ctx.run ?? spawnSync)(
     process.env.JOY_MEDIA_FFMPEG ?? 'C:\\ffmpeg\\files\\bin\\ffmpeg.exe',
@@ -169,6 +170,27 @@ async function runPresetRow(page, ctx, presetId) {
       `${presetId}: ${[...checked.problems, ...(decodePass ? [] : ['two-second ffmpeg decode failed'])].join('; ')}`,
     );
   return `preset ${presetId} passed; ${fields[2]} ${fields[3]} fps ${fields[4]}, ${fields[5]} s, ${fields[6]} frames, audio; decode 2 s; ${ms} ms`;
+}
+
+export function assertNoStagedLibraryEntries(ctx, rowId) {
+  const catalogPath = join(ctx.libraryDir, 'catalog.json');
+  let catalog;
+  try {
+    catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`${rowId}: could not read the export library catalog: ${error.message}`);
+  }
+  if (!Array.isArray(catalog?.assets))
+    throw new Error(`${rowId}: export library catalog has no assets array`);
+  const staged = catalog.assets.filter(
+    (entry) =>
+      entry &&
+      typeof entry === 'object' &&
+      (entry.internal === true ||
+        (typeof entry.displayName === 'string' && entry.displayName.endsWith('.stage'))),
+  );
+  if (staged.length > 0)
+    throw new Error(`${rowId}: export left ${staged.length} staged entry in the Media catalog`);
 }
 
 async function captureMonitorFrame(page, seconds, path, frameDimensions) {
