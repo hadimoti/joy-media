@@ -1,13 +1,13 @@
 /** T-K07 runnable colour lifecycle rows. */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openColorPanel } from './color-panel-steps.mjs';
 import { addPointAndDrag } from './color-curves-steps.mjs';
 import { pickGreenAndDesaturate } from './color-hsl-steps.mjs';
 import { applyEachBuiltInLook, runColourLifecycle } from './color-persistence-steps.mjs';
 import { dragWheelChangesGrade } from './color-wheels-steps.mjs';
-import { extractExportFrame } from '../compare.mjs';
+import { compareFrames, extractExportFrame } from '../compare.mjs';
 import { exportAndProbe } from './export-probe.mjs';
 import { ensureTimelineClip, previewShot, selectClipById } from './ui-steps.mjs';
 import { readProjectIds, readLiveTimeline } from './matrix-core.mjs';
@@ -286,6 +286,49 @@ async function hsl(page, ctx, pixel, clipId) {
 }
 
 export const COLOR_MATRIX_ROWS = Object.freeze([
+  {
+    id: 'D-F23-01',
+    area: 'first and later exports have matching pixels',
+    title: 'First and later exports have matching pixels',
+    severity: 'major',
+    async run(page, ctx) {
+      const base = await ensureTimelineClip(page, ctx, 'D-F23-01', { fresh: true });
+      await selectClipById(page, base.clips[0].id);
+      const first = await exportAndProbe(page, ctx, 'D-F23-01', {
+        skipTrim: true,
+        tag: 'first',
+      });
+      const firstPath = join(ctx.downloadDir, `D-F23-01-first-${Date.now()}.mp4`);
+      renameSync(first.path, firstPath);
+      const later = await exportAndProbe(page, ctx, 'D-F23-01', {
+        skipTrim: true,
+        tag: 'later',
+      });
+      const dir = join(ctx.outDir, 'D-F23-01');
+      const firstFrame = join(dir, 'first-frame.png');
+      const laterFrame = join(dir, 'later-frame.png');
+      await extractExportFrame(
+        firstPath,
+        0,
+        firstFrame,
+        first.probe.streams.find((s) => s.codec_type === 'video'),
+      );
+      await extractExportFrame(
+        later.path,
+        0,
+        laterFrame,
+        later.probe.streams.find((s) => s.codec_type === 'video'),
+      );
+      const comparison = await compareFrames(firstFrame, laterFrame, join(dir, 'pixel-compare'), 0);
+      writeFileSync(join(dir, 'pixel-compare.json'), `${JSON.stringify(comparison, null, 2)}\n`);
+      if (comparison.status !== 'pass') {
+        throw new Error(
+          `first and later exports differ: mean pixel delta ${comparison.meanAbsoluteChannelDelta}`,
+        );
+      }
+      return `first and later exports have identical decoded pixels (${comparison.totalChannels} channels)`;
+    },
+  },
   {
     id: 'D-K01',
     area: 'Colour',
