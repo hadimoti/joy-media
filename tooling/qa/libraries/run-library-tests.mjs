@@ -202,7 +202,9 @@ async function main() {
   console.log(`Starting Vite server for library harness (${options.kind})...`);
   const { server, url } = await startHarnessViteServer();
 
+  // Without a downloaded Playwright Chromium (no network), point JOY_HARNESS_BROWSER at an installed Chrome or Edge.
   const browser = await chromium.launch({
+    ...(process.env.JOY_HARNESS_BROWSER ? { executablePath: process.env.JOY_HARNESS_BROWSER } : {}),
     headless: true,
     args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'],
   });
