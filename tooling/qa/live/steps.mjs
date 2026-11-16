@@ -1,6 +1,6 @@
 /* global window, document, HTMLInputElement, HTMLTextAreaElement */
 import { dirname, resolve } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, statSync } from 'node:fs';
 
 export async function newProject(page, title) {
   // Inside an editor the Projects page is one menu click away (File > Projects Library).
@@ -18,6 +18,41 @@ export async function newProject(page, title) {
   await page.getByPlaceholder(/project name/i).fill(title);
   await page.getByRole('button', { name: 'Create project', exact: true }).click();
   await page.getByRole('button', { name: 'File', exact: true }).waitFor({ state: 'visible' });
+}
+
+const LARGE_FILE_BYTES = 40 * 1024 * 1024;
+const MEDIA_FILE_INPUT = 'input[type="file"][aria-label="Media file"]';
+
+/**
+ * Sets the import dialog's file input to a file on this machine. Playwright refuses to send files over 50 MB
+ * across the debugging link, so a big file goes by path through the DevTools protocol (DOM.setFileInputFiles),
+ * which fires the change event.
+ */
+export async function setMediaFileInput(page, input, filePath) {
+  let size = 0;
+  try {
+    size = statSync(filePath).size;
+  } catch {
+    size = 0;
+  }
+  if (size <= LARGE_FILE_BYTES) {
+    await input.setInputFiles(filePath);
+    return;
+  }
+  const session = await page.context().newCDPSession(page);
+  try {
+    const { result } = await session.send('Runtime.evaluate', {
+      expression: `document.querySelector(${JSON.stringify(MEDIA_FILE_INPUT)})`,
+    });
+    if (!result.objectId) throw new Error('the Media file input is not on the page');
+    const { node } = await session.send('DOM.describeNode', { objectId: result.objectId });
+    await session.send('DOM.setFileInputFiles', {
+      files: [filePath],
+      backendNodeId: node.backendNodeId,
+    });
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
 }
 
 export async function importThroughLeftPanel(page, filePath) {
@@ -58,9 +93,7 @@ export async function importThroughLeftPanel(page, filePath) {
   }
   await page.getByRole('button', { name: 'Import media', exact: true }).first().click();
   const dialog = page.getByRole('dialog', { name: 'Import media', exact: true });
-  await dialog
-    .locator('input[type="file"][aria-label="Media file"]')
-    .setInputFiles(resolve(filePath));
+  await setMediaFileInput(page, dialog.locator(MEDIA_FILE_INPUT), resolve(filePath));
   const filename = resolve(filePath).split(/[\\/]/u).at(-1);
   await dialog.getByText(filename, { exact: true }).waitFor();
   await dialog.getByRole('button', { name: 'Confirm import', exact: true }).click();
