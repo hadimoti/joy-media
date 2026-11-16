@@ -2283,14 +2283,15 @@ export function AgentPanel({
               onReport: onQcReport,
               sharedState: createQcHostAdapterSharedState(),
             };
-            // The QC tools keep their original guard: an edit during the run refuses the check.
+            // This adapter belongs to the active model run, so approved QC repairs may advance
+            // the project revision without invalidating later tool calls in that same run.
             qcAdapter = createEditorQcAdapter({
               ...qcAdapterInput,
               ...createQcCompositionPorts(),
+              getRevision: () => latestSessionRef.current.projectRevisionId,
               isCurrent: () =>
                 activeModelRunIdRef.current === runId &&
-                latestSessionRef.current.visualProject.id === contextInput.projectId &&
-                latestSessionRef.current.projectRevisionId === baseRevision,
+                latestSessionRef.current.visualProject.id === contextInput.projectId,
             });
             // The repair loop commits its own approved plans, so its re-checks follow the live revision.
             // It has its own adapter: the QC tools above never see this relaxed identity.

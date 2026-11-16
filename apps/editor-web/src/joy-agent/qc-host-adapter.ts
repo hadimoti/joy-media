@@ -275,6 +275,8 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
   let inflight = shared?.inflight;
   let queue = shared?.queue ?? Promise.resolve();
   let disposed = false;
+  const ownedReports = new Set<string>();
+  const ownedInflight = new Set<QcHostSharedInflight>();
   const activeControllers = new Set<AbortController>();
   const now = deps.now ?? Date.now;
   const digest = deps.digest ?? sha256Hex;
@@ -283,6 +285,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
 
   const remember = (reportId: string, stored: StoredReport): void => {
     reports.set(reportId, stored);
+    ownedReports.add(reportId);
     latestReportId = reportId;
     if (shared !== undefined) shared.latestReportId = reportId;
     while (reports.size > MAX_STORED_REPORTS) {
@@ -360,6 +363,15 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       externalSignal.removeEventListener('abort', abortFromCaller);
       return failure('authority-unavailable', 'The project changed, so no check was started.');
     }
+    const identityIsCurrent = (): boolean => {
+      const current = deps.identity();
+      return (
+        current !== undefined &&
+        current.runId === identity.runId &&
+        current.projectId === identity.projectId &&
+        current.revision === identity.revision
+      );
+    };
     let source: QcTimelineSource | undefined;
     try {
       try {
@@ -372,6 +384,8 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         );
       }
       if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
+      if (!identityIsCurrent())
+        return failure('authority-unavailable', 'The project changed, so no check was stored.');
       if (source === undefined || source.composition === undefined || deps.sampler === undefined)
         return failure(
           'composition-unavailable',
@@ -429,6 +443,8 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         },
       };
       if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
+      if (!identityIsCurrent())
+        return failure('authority-unavailable', 'The project changed, so no check was stored.');
       const lookup: EvidenceManifestLookup = { manifestId: `timeline-${reportId}`, scope };
       try {
         deps.evidenceStore.createManifest({
@@ -461,6 +477,8 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       if (result.status !== 'captured')
         return failure('sampling-failed', 'The cut could not be sampled, so there is no report.');
       if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
+      if (!identityIsCurrent())
+        return failure('authority-unavailable', 'The project changed, so no check was stored.');
 
       const built = buildTimelineReport({
         reportId,
@@ -501,7 +519,8 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
     signal: AbortSignal,
     ranges?: readonly QcCheckRange[],
   ): Promise<QcTimelineCheckResult> => {
-    if (disposed) return Promise.resolve(failure('cancelled', 'The check was cancelled.'));
+    if (disposed || signal.aborted)
+      return Promise.resolve(failure('cancelled', 'The check was cancelled.'));
     const currentInflight = shared?.inflight ?? inflight;
     if (ranges === undefined && currentInflight !== undefined)
       return joinInflight(currentInflight, signal);
@@ -514,6 +533,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       });
       const entry: QcHostSharedInflight = { controller, promise: start, callers: new Set() };
       inflight = entry;
+      ownedInflight.add(entry);
       if (shared !== undefined) shared.inflight = entry;
       queue = start
         .then(
@@ -523,6 +543,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         .finally(() => {
           if (inflight === entry) inflight = undefined;
           if (shared?.inflight === entry) shared.inflight = undefined;
+          ownedInflight.delete(entry);
         });
       if (shared !== undefined) shared.queue = queue;
       return joinInflight(entry, signal);
@@ -543,7 +564,10 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
     running: QcHostSharedInflight,
     signal: AbortSignal,
   ): Promise<QcTimelineCheckResult> {
-    if (signal.aborted) return Promise.resolve(failure('cancelled', 'The check was cancelled.'));
+    if (signal.aborted) {
+      if (running.callers.size === 0) running.controller.abort();
+      return Promise.resolve(failure('cancelled', 'The check was cancelled.'));
+    }
     const caller = { active: true };
     running.callers.add(caller);
     return new Promise((resolve) => {
@@ -556,7 +580,11 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       };
       const abortCaller = (): void => {
         finish(failure('cancelled', 'The check was cancelled.'));
-        if (running.callers.size === 0) running.controller.abort();
+        if (running.callers.size === 0) {
+          running.controller.abort();
+          if (inflight === running) inflight = undefined;
+          if (shared?.inflight === running) shared.inflight = undefined;
+        }
       };
       signal.addEventListener('abort', abortCaller, { once: true });
       void running.promise.then(finish, () =>
@@ -773,11 +801,18 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
     dispose() {
       disposed = true;
       for (const controller of activeControllers) controller.abort();
-      if (shared === undefined) {
-        reports.clear();
-        latestReportId = undefined;
-        inflight = undefined;
+      for (const entry of ownedInflight) {
+        entry.controller.abort();
+        if (inflight === entry) inflight = undefined;
+        if (shared?.inflight === entry) shared.inflight = undefined;
       }
+      ownedInflight.clear();
+      for (const reportId of ownedReports) reports.delete(reportId);
+      if (ownedReports.has(shared?.latestReportId ?? latestReportId ?? '')) {
+        latestReportId = undefined;
+        if (shared !== undefined) shared.latestReportId = undefined;
+      }
+      ownedReports.clear();
     },
   };
 }
