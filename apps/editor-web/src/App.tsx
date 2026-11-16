@@ -286,6 +286,10 @@ function loadFinalEncodedExportVerifier(): Promise<LoadedFinalEncodedExportVerif
         // bounded PTS ceiling. Avoid an accidental lower default cap turning
         // an otherwise valid long-form final MP4 into an invalid request.
         maxPresentationPts: verifierModule.MAX_FINAL_ENCODED_PRESENTATION_PTS,
+        // The Landscape 4K preset exports 3840 x 2160. The default frame cap is 1920 x 1080, which blocked the
+        // final check of every 4K export ("decoder-policy") after the file was already written.
+        maxFramePixels: verifierModule.MAX_FINAL_ENCODED_FRAME_PIXELS,
+        maxDecodedPixelBytes: verifierModule.MAX_FINAL_ENCODED_PIXEL_BYTES,
       }),
       decoderVersion: decoderModule.FINAL_ENCODED_EXPORT_BROWSER_DECODER_VERSION,
     }),
