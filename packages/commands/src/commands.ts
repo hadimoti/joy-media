@@ -1702,7 +1702,12 @@ function applySetTrackFamily(project: SpikeProject, payload: SetTrackFamilyPaylo
     },
     inverse: {
       type: 'timeline.setTrackFamily',
-      payload: { ...payload, ...(track.family === undefined ? {} : { family: track.family }) },
+      // The new family must not leak into the inverse when the track had none (Undo would re-apply it).
+      payload: {
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
+        ...(track.family === undefined ? {} : { family: track.family }),
+      },
     },
   };
 }
@@ -1782,8 +1787,10 @@ function applySetTrackLabelColor(
     },
     inverse: {
       type: 'timeline.setTrackLabelColor',
+      // The new colour must not leak into the inverse when the track had none: Undo then did nothing (found live, D-A06-19).
       payload: {
-        ...payload,
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
         ...(track.labelColor === undefined ? {} : { labelColor: track.labelColor }),
       },
     },

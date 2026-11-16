@@ -1186,9 +1186,6 @@ export function TimelinePanel({
   >(undefined);
   const [colorMenuTrackId, setColorMenuTrackId] = useState<string | undefined>();
   const [colorMenuAnchor, setColorMenuAnchor] = useState({ left: 0, bottom: 0 });
-  const [localTrackLabelColors, setLocalTrackLabelColors] = useState<
-    Readonly<Record<string, TimelineTrackLabelColor | undefined>>
-  >({});
   const [marqueeRect, setMarqueeRect] = useState<TimelineRect | undefined>(undefined);
   const marqueeRef = useRef<{
     origin: TimelinePoint;
@@ -3652,10 +3649,8 @@ export function TimelinePanel({
             {visible.map((track, index) => {
               const source = composition.tracks.find((item) => item.id === track.id);
               if (source === undefined) return null;
-              const trackLabelColor =
-                localTrackLabelColors[track.id] ??
-                trackLabelColors?.[track.id] ??
-                source.labelColor;
+              // The deck row follows every colour change and Undo; a local override here kept the old colour after Undo.
+              const trackLabelColor = trackLabelColors?.[track.id] ?? source.labelColor;
               const kind: TimelineTrackKind = track.family === 'audio' ? 'audio' : 'video';
               const trackCode = professionalTrackCode(track.family, track.familyIndex);
               // An unnamed track shows its track code (V1, A1), never its id.
@@ -3847,10 +3842,6 @@ export function TimelinePanel({
                           current={trackLabelColor}
                           anchor={colorMenuAnchor}
                           onSelect={(labelColor?: TimelineTrackLabelColor) => {
-                            setLocalTrackLabelColors((current) => ({
-                              ...current,
-                              [track.id]: labelColor,
-                            }));
                             onDispatch({
                               label: `Color ${trackName}`,
                               commands: [

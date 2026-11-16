@@ -344,4 +344,32 @@ describe('universal placement binding', () => {
       expect.objectContaining({ id: 'intro', sourceInUs: 1_000_000 }),
     );
   });
+
+  it('the track deck row keeps a label colour, and drops it when the command carries none (Undo of the first colour)', () => {
+    const colored = updateUniversalTimelineForTransaction(INITIAL_EDITOR_PROJECT, {
+      label: 'Color Visual 1',
+      commands: [
+        {
+          type: 'timeline.setTrackLabelColor',
+          payload: { compositionId: 'root', trackId: 'caption-track', labelColor: 'forest' },
+        },
+      ],
+    });
+    const row = (project: typeof colored) =>
+      project.timelineTrackDeck?.rows.find(
+        (item) => item.compositionId === 'root' && item.trackId === 'caption-track',
+      );
+    expect(row(colored)?.labelColor).toBe('forest');
+    const cleared = updateUniversalTimelineForTransaction(colored, {
+      label: 'Undo Color Visual 1',
+      commands: [
+        {
+          type: 'timeline.setTrackLabelColor',
+          payload: { compositionId: 'root', trackId: 'caption-track' },
+        },
+      ],
+    });
+    expect(row(cleared)).toBeDefined();
+    expect(row(cleared)).not.toHaveProperty('labelColor');
+  });
 });

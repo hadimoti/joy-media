@@ -15,7 +15,7 @@
  *
  * Profile assumed: the scratch profile of run.mjs with the scratch library set, and the
  * fixtures of T-A04 in C:\jgp\v111\fixtures. Rows add h264-16x9-audio.mp4 to the timeline
- * themselves (ensureClips), and keep working in one project, so the state builds up in row order.
+ * themselves (ensureClips); each row opens its own fresh project, so rows do not depend on each other.
  */
 import { join } from 'node:path';
 import { addToTimelineThroughLeftPanel, importThroughLeftPanel, openMenu } from './steps.mjs';
@@ -100,9 +100,18 @@ async function currentDocument(page, ctx) {
   return (await readDocument(page, ctx.bridge)).document;
 }
 
+let timelineProjectCount = 0;
+
 /** The project has at least `count` clips on the timeline; adds the fixture video until it does. */
 export async function ensureClips(page, ctx, count) {
-  await ensureProject(page, ctx, 'A06 timeline');
+  // Every row starts on its own project: clips, tracks and a moved clip left by an earlier row made the
+  // first clip a sliver that no click could reach (found live, 16 Nov).
+  timelineProjectCount += 1;
+  await ensureProject(
+    page,
+    { ...ctx, freshProjectEveryRow: ctx.freshProjectEveryRow ?? true },
+    `A06 timeline ${timelineProjectCount}`,
+  );
   const mediaPath = join(ctx.fixtures ?? FIXTURE_ROOT, MEDIA_FILE);
   if ((await page.locator('.asset-card', { hasText: MEDIA_FILE }).count()) === 0) {
     await importThroughLeftPanel(page, mediaPath);
@@ -206,17 +215,21 @@ commandRow({
   command: 'timeline.moveElement',
   title: 'Dragging a clip to another track moves it there',
   async prepare(page) {
-    if ((await page.locator('.timeline-lane').count()) < 2) {
+    // The audio lane counts as a lane too, so count the video (visual) lanes: a clip needs another one of its own kind.
+    if ((await page.locator('.timeline-track--visual .timeline-lane').count()) < 2) {
       await page.getByRole('button', { name: 'Add video track', exact: true }).click();
       await page.waitForTimeout(400);
     }
   },
   async act(page, ctx) {
-    const { clip } = await firstClip(page, ctx);
-    const lanes = page.locator('.timeline-lane');
-    if ((await lanes.count()) < 2) throw new Error('BLOCKED: needs a second timeline lane');
+    const { clip, trackId } = await firstClip(page, ctx);
+    // Another video lane: the lane order is not the track order, and an audio lane refuses a video clip.
+    const lanes = page.locator(
+      `.timeline-track--visual:not([data-track-id="${trackId}"]) .timeline-lane`,
+    );
+    if ((await lanes.count()) < 1) throw new Error('BLOCKED: needs a second video timeline lane');
     await selectClip(page, clip.id);
-    const target = await lanes.nth(1).boundingBox();
+    const target = await lanes.first().boundingBox();
     const source = await clipLocator(page, clip.id).boundingBox();
     if (target === null || source === null) throw new Error('lane or clip not on screen');
     await dragBy(page, clipLocator(page, clip.id), 0, target.y - source.y);
@@ -359,7 +372,8 @@ commandRow({
   title: 'Reverse clip flips the reversed flag',
   async act(page, ctx) {
     const { clip } = await firstClip(page, ctx);
-    await rightClickClip(page, clip.id, /^(Reverse clip|Restore forward playback)$/u);
+    // The entry's accessible name ends with its shortcut ("Reverse clipShift+R").
+    await rightClickClip(page, clip.id, /^(Reverse clip|Restore forward playback)/u);
   },
   check(before, after) {
     const a = clipsOf(before)[0];
@@ -442,15 +456,24 @@ commandRow({
       : `tracks ${tracksOf(before).length} -> ${tracksOf(after).length}, wanted -1`,
 });
 
+/**
+ * A track header button. The controls are hidden (pointer-events: none) until the header is
+ * hovered, so the pointer goes to the header first; found live on 16 Nov 2026.
+ */
+async function trackButton(page, name) {
+  const button = page.getByRole('button', { name }).first();
+  await button
+    .locator('xpath=ancestor::*[contains(@class,"timeline-track-header")][1]')
+    .hover({ timeout: 8_000 });
+  return button;
+}
+
 commandRow({
   id: 'D-A06-17',
   command: 'timeline.setTrackLocked',
   title: 'The Lock button locks the track',
   async act(page) {
-    await page
-      .getByRole('button', { name: /^Lock /u })
-      .first()
-      .click();
+    await (await trackButton(page, /^Lock /u)).click();
   },
   check: (_before, after) =>
     tracksOf(after).some((track) => track.locked === true) ? undefined : 'no track is locked',
@@ -461,10 +484,7 @@ commandRow({
   command: 'timeline.setTrackMuted',
   title: 'The Mute button mutes the track',
   async act(page) {
-    await page
-      .getByRole('button', { name: /^Mute /u })
-      .first()
-      .click();
+    await (await trackButton(page, /^Mute /u)).click();
   },
   check: (_before, after) =>
     tracksOf(after).some((track) => track.muted === true) ? undefined : 'no track is muted',
@@ -476,19 +496,31 @@ commandRow({
   title: 'The track colour menu sets a label colour',
   severity: 'minor',
   async act(page) {
+    await (await trackButton(page, /^Change label color for /u)).click();
+    // The colour menu is a portal "Track color" menu of menuitemradio entries named by colour (found live).
     await page
-      .getByRole('button', { name: /^Change label color for /u })
-      .first()
-      .click();
-    await page
-      .getByRole('menuitem', { name: /^Color /u })
+      .getByRole('menu', { name: 'Track color' })
+      .getByRole('menuitemradio')
       .nth(1)
-      .click();
+      .click({ timeout: 8_000 });
   },
   check: (before, after) =>
     JSON.stringify(tracksOf(before)) !== JSON.stringify(tracksOf(after))
       ? undefined
       : 'the track did not change',
+  // The header must show the colour (and drop it on Undo): it once kept the old colour after Undo.
+  async checkScreen(page, phase) {
+    const shown = await page
+      .locator('.timeline-track--visual')
+      .first()
+      .getAttribute('data-track-label-color');
+    const wanted = phase === 'undo' ? 'default' : null;
+    if (wanted !== null && shown !== wanted)
+      return `after Undo the track header shows ${shown}, wanted ${wanted}`;
+    if (wanted === null && shown === 'default')
+      return `after ${phase} the track header still shows the default colour`;
+    return undefined;
+  },
 });
 
 commandRow({
@@ -556,11 +588,21 @@ export async function exerciseControls(page) {
       continue;
     const before = Number(await input.inputValue());
     const max = Number((await input.getAttribute('max')) ?? Number.POSITIVE_INFINITY);
-    const next = before + 1 <= max ? before + 1 : before - 1;
-    await input.fill(String(next));
-    await input.press('Enter');
-    const read = Number(await input.inputValue());
-    if (read !== next) throw new Error(`number control ${index + 1} kept ${read}, wanted ${next}`);
+    // A control may clamp at a limit the page does not declare (Opacity stops at 100): try the other way once.
+    let next = before + 1 <= max ? before + 1 : before - 1;
+    let read = before;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await input.fill(String(next));
+      await input.press('Enter');
+      read = Number(await input.inputValue());
+      // Only a clamp at a limit (the value stays) earns the second try the other way; any other value is a failure.
+      if (read === next || read !== before) break;
+      next = before - (next - before);
+    }
+    if (read !== next) {
+      const why = read === before ? 'would not change either way' : `wanted ${next}`;
+      throw new Error(`number control ${index + 1} kept ${read}, ${why}`);
+    }
     lines.push(`number ${index + 1}: ${before} -> ${read}`);
   }
   const selects = inspector.locator('select');
@@ -603,7 +645,28 @@ const inspectorRows = Object.entries(TAB_LABELS).map(([tab], index) => ({
     await ensureClips(page, ctx, 1);
     const { clip } = await firstClip(page, ctx);
     await selectClip(page, clip.id);
+    if (tab === 'Adjust') {
+      if (
+        (await page.locator(INSPECTOR).getByRole('tab', { name: TAB_LABELS.Visual }).count()) === 0
+      )
+        throw new Error('BLOCKED: the Inspector does not show the selected clip');
+      const present = await page
+        .locator(INSPECTOR)
+        .getByRole('tab', { name: TAB_LABELS[tab] })
+        .count();
+      if (present === 0)
+        throw new Error(
+          'NOT-REACHABLE Adjustment layer tab: the Inspector shows it only for an adjustment layer clip, not for a video clip',
+        );
+    }
     await openInspectorTab(page, tab);
+    if (
+      tab === 'Effects' &&
+      (await page.locator(INSPECTOR).getByText('No effects applied').count()) > 0
+    )
+      throw new Error(
+        'NOT-REACHABLE Effects tab controls: a fresh clip shows "No effects applied"; the effect controls are exercised by the effects rows',
+      );
     const lines = await exerciseControls(page);
     return {
       message: `${tab}: ${lines.length} control(s) changed: ${lines.join('; ')}`,
@@ -637,21 +700,19 @@ const keyframeRow = {
     const { clip } = await firstClip(page, ctx);
     await selectClip(page, clip.id);
     await openInspectorTab(page, 'Visual');
-    const start = countKeyframes(await currentDocument(page, ctx));
-    const button = () =>
+    const first = await readDocument(page, ctx.bridge);
+    const start = countKeyframes(first.document) + countKeyframes(first.storedDocument ?? {});
+    // The same button reads "Add Position X keyframe at playhead", then "Remove ..." (found live).
+    const keyframeButton = (verb) =>
       page
         .locator(INSPECTOR)
-        .getByRole('button', { name: /^Keyframe /u })
+        .getByRole('button', { name: new RegExp(`^${verb} Position X keyframe`, 'u') })
         .first();
-    await button().click();
+    await keyframeButton('Add').click();
     const added = await waitForKeyframes(page, ctx, (count) => count > start);
-    if (!added.ok) throw new Error(`keyframes stayed at ${start} after Keyframe was pressed`);
+    if (!added.ok) throw new Error(`keyframes stayed at ${start} after Add keyframe was pressed`);
     const shot = await ctx.shot('D-A06-40', 'added');
-    await page
-      .locator(INSPECTOR)
-      .getByRole('button', { name: /^Clear .* keyframes$/u })
-      .first()
-      .click();
+    await keyframeButton('Remove').click();
     const removed = await waitForKeyframes(page, ctx, (count) => count === start);
     if (!removed.ok)
       throw new Error(`keyframes stayed at ${removed.value} after removing, wanted ${start}`);
@@ -662,8 +723,16 @@ const keyframeRow = {
   },
 };
 
+/** Keyframes live in the stored visual document, not in the timeline read (found live), so count both. */
 async function waitForKeyframes(page, ctx, accept) {
-  return pollUntil(async () => countKeyframes(await currentDocument(page, ctx)), accept, ctx.poll);
+  return pollUntil(
+    async () => {
+      const read = await readDocument(page, ctx.bridge);
+      return countKeyframes(read.document) + countKeyframes(read.storedDocument ?? {});
+    },
+    accept,
+    ctx.poll,
+  );
 }
 
 /** One row per track control: add, remove, lock and mute are the cycle rows above; this checks the headers. */
@@ -677,16 +746,12 @@ const trackRows = [
     async run(page, ctx) {
       await ensureClips(page, ctx, 1);
       const evidence = [];
-      for (const name of [/^Lock /u, /^(Mute|Unmute) /u]) {
-        const button = page.getByRole('button', { name }).first();
-        const before = await button.getAttribute('aria-pressed');
-        await button.click();
-        const during = await page
-          .getByRole('button', { name })
-          .first()
-          .getAttribute('aria-pressed');
+      for (const name of [/^(Lock|Unlock) /u, /^(Mute|Unmute) /u]) {
+        const before = await (await trackButton(page, name)).getAttribute('aria-pressed');
+        await (await trackButton(page, name)).click();
+        const during = await (await trackButton(page, name)).getAttribute('aria-pressed');
         if (during === before) throw new Error(`${String(name)} did not toggle`);
-        await page.getByRole('button', { name }).first().click();
+        await (await trackButton(page, name)).click();
         evidence.push(await ctx.shot('D-A06-50', String(name).replace(/\W+/gu, '')));
       }
       return { message: 'lock and mute toggle on and off', evidence };
