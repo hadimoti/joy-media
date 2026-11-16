@@ -3,12 +3,14 @@ import { createEvidenceStore } from '../media-observation/evidence-store.js';
 import {
   createTimelineQcSampler,
   type TimelineQcCanvasFactory,
+  type TimelineQcSampleResult,
   type TimelineQcTextBox,
 } from '../media-observation/qc-sampler.js';
 import type { HostRpcHandlerContext } from './host-rpc.js';
 import {
   createEditorQcAdapter,
   createQcHostAdapter,
+  createQcHostAdapterSharedState,
   qcTimelineSourceFromTimeline,
   runDesktopMediaQc,
   type QcFrameConsentRequest,
@@ -582,6 +584,43 @@ describe('QC host adapter: gates in front of every frame', () => {
       adapter.readReport({ reportId, includeFindings: true }, context()),
     ).resolves.toMatchObject({ ok: false });
   });
+
+  it('aborts an in-flight check and does not store its late result on dispose', async () => {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => (markStarted = resolve));
+    const onReport = vi.fn();
+    const adapter = createQcHostAdapter({
+      evidenceStore: createEvidenceStore(),
+      identity: () => IDENTITY,
+      timeline: () => ({
+        durationUs: 1_000_000,
+        cutTimesUs: [],
+        textBoxes: [],
+        composition: fakeComposition(),
+      }),
+      sampler: {
+        sample: ({ signal }) =>
+          new Promise((resolve) => {
+            markStarted();
+            signal!.addEventListener(
+              'abort',
+              () => resolve({ status: 'cancelled', sampledFrameCount: 0 }),
+              { once: true },
+            );
+          }),
+      },
+      isCachedImageSupported: () => false,
+      isPrivacyModeAllowed: () => false,
+      digest: async () => 'c'.repeat(64),
+      onReport,
+    });
+    const check = adapter.runTimelineCheck(new AbortController().signal);
+    await started;
+    adapter.dispose();
+    await expect(check).resolves.toMatchObject({ ok: false, code: 'cancelled' });
+    expect(onReport).not.toHaveBeenCalled();
+    expect(adapter.storedReport('latest')).toBeUndefined();
+  });
 });
 
 describe('QC timeline source', () => {
@@ -723,7 +762,7 @@ describe('editor QC adapter', () => {
     expect(failedRelease).toHaveBeenCalledTimes(1);
   });
 
-  it('releases only the capture owned by the check that just finished', async () => {
+  it('queues a ranged re-check behind the in-flight full check', async () => {
     const firstComposition = fakeComposition();
     const secondComposition = fakeComposition();
     const sourceFor = (composition: typeof firstComposition): QcTimelineSource => ({
@@ -776,14 +815,65 @@ describe('editor QC adapter', () => {
     const secondCheck = adapter.runTimelineCheck(new AbortController().signal, [
       { startUs: 0, endUs: 500_000 },
     ]);
-    await secondSampleStarted;
+    await Promise.resolve();
+    expect(timelineCalls).toBe(1);
 
     finishFirst();
     await expect(firstCheck).resolves.toMatchObject({ ok: true });
     expect(released).toEqual([firstComposition]);
+    await secondSampleStarted;
     finishSecond();
     await expect(secondCheck).resolves.toMatchObject({ ok: true });
     expect(released).toEqual([firstComposition, secondComposition]);
+  });
+
+  it('keeps a joined full check alive when its first caller aborts', async () => {
+    let finishSample!: (result: TimelineQcSampleResult) => void;
+    let sampleSignal!: AbortSignal;
+    let started!: () => void;
+    const sampleStarted = new Promise<void>((resolve) => (started = resolve));
+    const adapter = createQcHostAdapter({
+      evidenceStore: createEvidenceStore(),
+      identity: () => IDENTITY,
+      timeline: () => ({
+        durationUs: 1_000_000,
+        cutTimesUs: [],
+        textBoxes: [],
+        composition: fakeComposition(),
+      }),
+      sampler: {
+        sample: ({ plan, signal }) => {
+          sampleSignal = signal!;
+          started();
+          return new Promise((resolve) => {
+            finishSample = (result) => resolve(result);
+          });
+        },
+      },
+      isCachedImageSupported: () => false,
+      isPrivacyModeAllowed: () => false,
+      digest: async () => 'c'.repeat(64),
+    });
+    const firstController = new AbortController();
+    const first = adapter.runTimelineCheck(firstController.signal);
+    await sampleStarted;
+    const joined = adapter.runTimelineCheck(new AbortController().signal);
+    firstController.abort();
+    expect(sampleSignal.aborted).toBe(false);
+    finishSample({
+      status: 'captured',
+      frameIds: [],
+      coverage: {
+        sourceDurationUs: 1_000_000,
+        sampledFrameCount: 0,
+        sampledCutCount: 0,
+        totalCutCount: 0,
+        completeSourceCoverage: false,
+      },
+      textChecks: [],
+    });
+    await expect(first).resolves.toMatchObject({ ok: false, code: 'cancelled' });
+    await expect(joined).resolves.toMatchObject({ ok: true });
   });
 
   it('reads the drawn text boxes from the host each time it checks the timeline', async () => {
@@ -817,6 +907,48 @@ describe('editor QC adapter', () => {
       ok: false,
       code: 'authority-unavailable',
     });
+  });
+
+  it('shares reports and unique ids across the tool and repair adapters', async () => {
+    const sharedState = createQcHostAdapterSharedState();
+    const timeline: QcTimelineSource = {
+      durationUs: 1_000_000,
+      cutTimesUs: [],
+      textBoxes: [],
+      composition: fakeComposition(),
+    };
+    const makeAdapter = () =>
+      createQcHostAdapter({
+        evidenceStore: sharedState.evidenceStore,
+        sharedState,
+        identity: () => IDENTITY,
+        timeline: () => timeline,
+        sampler: {
+          sample: async ({ plan }) => ({
+            status: 'captured' as const,
+            frameIds: plan.frameIds,
+            coverage: plan.coverage,
+            textChecks: [],
+          }),
+        },
+        isCachedImageSupported: () => false,
+        isPrivacyModeAllowed: () => false,
+        digest: async () => 'c'.repeat(64),
+      });
+    const toolsAdapter = makeAdapter();
+    const repairAdapter = makeAdapter();
+
+    const repaired = await repairAdapter.runTimelineCheck(new AbortController().signal);
+    expect(repaired.ok).toBe(true);
+    if (!repaired.ok) return;
+    expect(toolsAdapter.storedReport(repaired.reportId)).toBeDefined();
+    const second = await toolsAdapter.runTimelineCheck(new AbortController().signal, [
+      { startUs: 0, endUs: 500_000 },
+    ]);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.reportId).not.toBe(repaired.reportId);
+    expect(repairAdapter.storedReport(second.reportId)).toBeDefined();
   });
 });
 

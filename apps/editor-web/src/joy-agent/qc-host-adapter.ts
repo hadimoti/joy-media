@@ -168,6 +168,7 @@ export interface QcFrameTransport {
 
 export interface QcHostAdapterDeps {
   readonly evidenceStore: EvidenceStore;
+  readonly sharedState?: QcHostAdapterSharedState;
   readonly identity: () => QcHostIdentity | undefined;
   readonly timeline: () => QcTimelineSource | undefined | Promise<QcTimelineSource | undefined>;
   readonly releaseComposition?: (
@@ -195,6 +196,32 @@ export interface QcHostAdapterDeps {
    * (its `run` then names the model and counts the frames). The Joy Code panel shows one report card from it.
    */
   readonly onReport?: (report: Readonly<Record<string, unknown>>) => void;
+}
+
+export interface QcHostAdapterSharedState {
+  readonly evidenceStore: EvidenceStore;
+  readonly reports: Map<string, StoredReport>;
+  latestReportId: string | undefined;
+  counter: number;
+  inflight: QcHostSharedInflight | undefined;
+  queue: Promise<void>;
+}
+
+interface QcHostSharedInflight {
+  readonly controller: AbortController;
+  readonly promise: Promise<QcTimelineCheckResult>;
+  readonly callers: Set<{ active: boolean }>;
+}
+
+export function createQcHostAdapterSharedState(): QcHostAdapterSharedState {
+  return {
+    evidenceStore: createEvidenceStore(),
+    reports: new Map(),
+    latestReportId: undefined,
+    counter: 0,
+    inflight: undefined,
+    queue: Promise.resolve(),
+  };
 }
 
 export type QcTimelineCheckResult =
@@ -241,11 +268,14 @@ interface StoredReport {
 
 /** Builds one adapter for one agent run. */
 export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
-  const reports = new Map<string, StoredReport>();
-  let latestReportId: string | undefined;
-  let counter = 0;
-  let inflight: Promise<QcTimelineCheckResult> | undefined;
+  const shared = deps.sharedState;
+  const reports = shared?.reports ?? new Map<string, StoredReport>();
+  let latestReportId = shared?.latestReportId;
+  let counter = shared?.counter ?? 0;
+  let inflight = shared?.inflight;
+  let queue = shared?.queue ?? Promise.resolve();
   let disposed = false;
+  const activeControllers = new Set<AbortController>();
   const now = deps.now ?? Date.now;
   const digest = deps.digest ?? sha256Hex;
   const sheetFactory = deps.createContactSheet ?? createTimelineContactSheet;
@@ -254,6 +284,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
   const remember = (reportId: string, stored: StoredReport): void => {
     reports.set(reportId, stored);
     latestReportId = reportId;
+    if (shared !== undefined) shared.latestReportId = reportId;
     while (reports.size > MAX_STORED_REPORTS) {
       const oldest = reports.keys().next().value;
       if (oldest === undefined || oldest === reportId) break;
@@ -300,7 +331,8 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
   };
 
   const resolveStored = (reportId: string): { id: string; stored: StoredReport } | undefined => {
-    const id = reportId === LATEST_REPORT_ALIAS ? latestReportId : reportId;
+    const id =
+      reportId === LATEST_REPORT_ALIAS ? (shared?.latestReportId ?? latestReportId) : reportId;
     const stored = id === undefined ? undefined : reports.get(id);
     return id === undefined || stored === undefined ? undefined : { id, stored };
   };
@@ -309,19 +341,37 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
     signal: AbortSignal,
     rangesInput?: readonly QcCheckRange[],
   ): Promise<QcTimelineCheckResult> => {
+    if (disposed) return failure('cancelled', 'The check was cancelled.');
+    const controller = new AbortController();
+    const externalSignal = signal;
+    const abortFromCaller = () => controller.abort();
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', abortFromCaller, { once: true });
+    activeControllers.add(controller);
+    signal = controller.signal;
+    if (signal.aborted) {
+      activeControllers.delete(controller);
+      externalSignal.removeEventListener('abort', abortFromCaller);
+      return failure('cancelled', 'The check was cancelled.');
+    }
     const identity = deps.identity();
-    if (identity === undefined)
+    if (identity === undefined) {
+      activeControllers.delete(controller);
+      externalSignal.removeEventListener('abort', abortFromCaller);
       return failure('authority-unavailable', 'The project changed, so no check was started.');
+    }
     let source: QcTimelineSource | undefined;
     try {
       try {
         source = await deps.timeline();
       } catch {
+        if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
         return failure(
           'composition-unavailable',
           'This build cannot capture composed frames of the cut yet, so no timeline check ran.',
         );
       }
+      if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
       if (source === undefined || source.composition === undefined || deps.sampler === undefined)
         return failure(
           'composition-unavailable',
@@ -364,7 +414,8 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         return failure('sampling-failed', 'The cut could not be planned for sampling.');
       }
 
-      counter += 1;
+      counter = Math.max(counter, shared?.counter ?? 0) + 1;
+      if (shared !== undefined) shared.counter = counter;
       const reportId = `qc-report-${identity.runId}-${counter}`;
       const scope = {
         runId: identity.runId,
@@ -377,6 +428,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
             identity.promptPolicyDigest.length > 0 ? identity.promptPolicyDigest : QC_POLICY_DIGEST,
         },
       };
+      if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
       const lookup: EvidenceManifestLookup = { manifestId: `timeline-${reportId}`, scope };
       try {
         deps.evidenceStore.createManifest({
@@ -408,6 +460,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       if (result.status === 'cancelled') return failure('cancelled', 'The check was cancelled.');
       if (result.status !== 'captured')
         return failure('sampling-failed', 'The cut could not be sampled, so there is no report.');
+      if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
 
       const built = buildTimelineReport({
         reportId,
@@ -434,6 +487,8 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       });
       return { ok: true, reportId };
     } finally {
+      activeControllers.delete(controller);
+      externalSignal.removeEventListener('abort', abortFromCaller);
       try {
         await deps.releaseComposition?.(source?.composition);
       } catch {
@@ -446,16 +501,69 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
     signal: AbortSignal,
     ranges?: readonly QcCheckRange[],
   ): Promise<QcTimelineCheckResult> => {
-    // A re-check of given ranges never joins (or is joined by) a full check.
-    if (ranges !== undefined) return runCheck(signal, ranges);
-    // One check at a time: a second request joins the one that is running.
-    if (inflight !== undefined) return inflight;
-    const running = runCheck(signal).finally(() => {
-      if (inflight === running) inflight = undefined;
+    if (disposed) return Promise.resolve(failure('cancelled', 'The check was cancelled.'));
+    const currentInflight = shared?.inflight ?? inflight;
+    if (ranges === undefined && currentInflight !== undefined)
+      return joinInflight(currentInflight, signal);
+    queue = shared?.queue ?? queue;
+    if (ranges === undefined) {
+      const controller = new AbortController();
+      const start = queue.then(() => {
+        if (disposed) return failure('cancelled', 'The check was cancelled.');
+        return runCheck(controller.signal);
+      });
+      const entry: QcHostSharedInflight = { controller, promise: start, callers: new Set() };
+      inflight = entry;
+      if (shared !== undefined) shared.inflight = entry;
+      queue = start
+        .then(
+          () => undefined,
+          () => undefined,
+        )
+        .finally(() => {
+          if (inflight === entry) inflight = undefined;
+          if (shared?.inflight === entry) shared.inflight = undefined;
+        });
+      if (shared !== undefined) shared.queue = queue;
+      return joinInflight(entry, signal);
+    }
+    const start = queue.then(() => {
+      if (disposed) return failure('cancelled', 'The check was cancelled.');
+      return runCheck(signal, ranges);
     });
-    inflight = running;
-    return running;
+    queue = start.then(
+      () => undefined,
+      () => undefined,
+    );
+    if (shared !== undefined) shared.queue = queue;
+    return start;
   };
+
+  function joinInflight(
+    running: QcHostSharedInflight,
+    signal: AbortSignal,
+  ): Promise<QcTimelineCheckResult> {
+    if (signal.aborted) return Promise.resolve(failure('cancelled', 'The check was cancelled.'));
+    const caller = { active: true };
+    running.callers.add(caller);
+    return new Promise((resolve) => {
+      const finish = (result: QcTimelineCheckResult): void => {
+        if (!caller.active) return;
+        caller.active = false;
+        signal.removeEventListener('abort', abortCaller);
+        running.callers.delete(caller);
+        resolve(result);
+      };
+      const abortCaller = (): void => {
+        finish(failure('cancelled', 'The check was cancelled.'));
+        if (running.callers.size === 0) running.controller.abort();
+      };
+      signal.addEventListener('abort', abortCaller, { once: true });
+      void running.promise.then(finish, () =>
+        finish(failure('sampling-failed', 'The cut could not be sampled, so there is no report.')),
+      );
+    });
+  }
 
   const selectionIsListed = (input: JoyAgentQcFrameReviewRequest): StoredReport | undefined => {
     if (disposed) return undefined;
@@ -664,9 +772,12 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
 
     dispose() {
       disposed = true;
-      reports.clear();
-      latestReportId = undefined;
-      inflight = undefined;
+      for (const controller of activeControllers) controller.abort();
+      if (shared === undefined) {
+        reports.clear();
+        latestReportId = undefined;
+        inflight = undefined;
+      }
     },
   };
 }
@@ -697,6 +808,7 @@ export interface EditorQcAdapterInput {
   readonly getTextBoxes?: () => readonly TimelineQcTextBox[];
   /** Receives the report when it is stored and again when frames were sent for it. */
   readonly onReport?: QcHostAdapterDeps['onReport'];
+  readonly sharedState?: QcHostAdapterSharedState;
 }
 
 /**
@@ -706,7 +818,8 @@ export interface EditorQcAdapterInput {
  */
 export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapter {
   return createQcHostAdapter({
-    evidenceStore: createEvidenceStore(),
+    evidenceStore: input.sharedState?.evidenceStore ?? createEvidenceStore(),
+    ...(input.sharedState === undefined ? {} : { sharedState: input.sharedState }),
     identity: () =>
       input.isCurrent()
         ? {

@@ -110,7 +110,11 @@ import {
   isQcHostToolName,
   QC_HOST_TOOL_NAMES,
 } from './joy-agent/qc-request-intent.js';
-import { createEditorQcAdapter, type QcHostAdapter } from './joy-agent/qc-host-adapter.js';
+import {
+  createEditorQcAdapter,
+  createQcHostAdapterSharedState,
+  type QcHostAdapter,
+} from './joy-agent/qc-host-adapter.js';
 import { createQcRepairHost, timelineQcCheckPort } from './joy-agent/qc-repair-host.js';
 import type { QcRepairPlan } from './joy-agent/qc-repair-plan.js';
 import { audioStateFromProject } from './timeline-presentation.js';
@@ -2277,6 +2281,7 @@ export function AgentPanel({
               isCachedImageSupported: qcImageSupported,
               isPrivacyModeAllowed: qcPrivacyAllowed,
               onReport: onQcReport,
+              sharedState: createQcHostAdapterSharedState(),
             };
             // The QC tools keep their original guard: an edit during the run refuses the check.
             qcAdapter = createEditorQcAdapter({
