@@ -23,7 +23,7 @@ export async function newProject(page, title) {
 export async function importThroughLeftPanel(page, filePath) {
   // The Media tab must be the open one: another hub (Enhance, remembered from an earlier run) leaves only the
   // timeline's own "Import media" button on the page, which opens the system file picker, not the dialog.
-  const mediaTab = page.locator('button[role="tab"][data-panel-tab-id="media"]').first();
+  const mediaTab = page.locator('[role="tab"][data-feature-tool="media"]').first();
   const mediaOpen =
     (await mediaTab.isVisible().catch(() => false)) &&
     (await mediaTab.getAttribute('aria-selected').catch(() => null)) === 'true';
