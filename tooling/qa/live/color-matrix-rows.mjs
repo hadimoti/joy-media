@@ -15,10 +15,14 @@ import { blockedRow } from './rows.mjs';
 
 export function clipColourGrade(state, clipId) {
   if (clipId === undefined) return undefined;
+  // With no clip selected a colour edit goes to the whole-output grade (`colorGrade`); with a clip selected it goes
+  // to that clip's entry. A row starts on a fresh project, so whichever one holds a grade is the row's edit.
   return (
     state.liveVisualProject?.clipColorGrades?.[clipId] ??
     state.storedDocument?.clipColorGrades?.[clipId] ??
-    state.document?.clipColorGrades?.[clipId]
+    state.document?.clipColorGrades?.[clipId] ??
+    state.liveVisualProject?.colorGrade ??
+    state.storedDocument?.colorGrade
   );
 }
 
