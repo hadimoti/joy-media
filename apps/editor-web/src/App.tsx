@@ -7412,6 +7412,7 @@ function EditorWorkspace({
       return (
         <AgentPanel
           storage={context.storage}
+          loadProjectAssetBlob={context.loadProjectAssetBlob}
           project={context.timelineProject}
           selectedClipIds={state.selectedIds}
           playheadUs={state.playheadUs}
