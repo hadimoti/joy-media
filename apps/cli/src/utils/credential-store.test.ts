@@ -13,6 +13,7 @@ import {
 } from './config.js';
 import { resolveByokConfig } from '../agent/provider.js';
 import { createDpapiProtector, type SecretProtector } from './dpapi-protector.js';
+import { DPAPI_UNAVAILABLE_REASON } from './test-dpapi-availability.js';
 import {
   createCredentialStore,
   CredentialStoreVersionError,
@@ -177,60 +178,64 @@ describe('credential store', () => {
     expect(readFileSync(storePath, 'utf8')).not.toContain(MINIMAX_API_KEY.apiKey);
   });
 
-  it('keeps two profile keys separate when one of their agent bindings is cleared', () => {
-    const firstProfile = 'openrouter-profile';
-    const secondProfile = 'claude-profile';
-    saveAiProviders({
-      [firstProfile]: { name: 'OpenRouter', provider: 'openrouter', ...OPENROUTER },
-      [secondProfile]: {
-        name: 'Claude',
-        provider: 'claude',
-        ...CUSTOM,
-        baseUrl: 'https://api.anthropic.com/v1',
-        defaultModel: 'claude-test-model',
-      },
-    });
-    saveAgentSlot('workhorse', { profileId: firstProfile, model: 'openrouter-model' });
-    saveAgentSlot('creative', { profileId: secondProfile, model: 'claude-test-model' });
+  (DPAPI_UNAVAILABLE_REASON === undefined ? it : it.skip)(
+    `keeps two profile keys separate when one of their agent bindings is cleared${DPAPI_UNAVAILABLE_REASON ? ` (skipped: ${DPAPI_UNAVAILABLE_REASON})` : ''}`,
+    () => {
+      const firstProfile = 'openrouter-profile';
+      const secondProfile = 'claude-profile';
+      saveAiProviders({
+        [firstProfile]: { name: 'OpenRouter', provider: 'openrouter', ...OPENROUTER },
+        [secondProfile]: {
+          name: 'Claude',
+          provider: 'claude',
+          ...CUSTOM,
+          baseUrl: 'https://api.anthropic.com/v1',
+          defaultModel: 'claude-test-model',
+        },
+      });
+      saveAgentSlot('workhorse', { profileId: firstProfile, model: 'openrouter-model' });
+      saveAgentSlot('creative', { profileId: secondProfile, model: 'claude-test-model' });
 
-    expect(resolveByokConfig({ slot: 'workhorse' })).toMatchObject({
-      provider: 'openrouter',
-      apiKey: OPENROUTER.apiKey,
-      modelId: 'openrouter-model',
-    });
-    expect(resolveByokConfig({ slot: 'creative' })).toMatchObject({
-      provider: 'anthropic-messages',
-      apiKey: CUSTOM.apiKey,
-      modelId: 'claude-test-model',
-    });
+      expect(resolveByokConfig({ slot: 'workhorse' })).toMatchObject({
+        provider: 'openrouter',
+        apiKey: OPENROUTER.apiKey,
+        modelId: 'openrouter-model',
+      });
+      expect(resolveByokConfig({ slot: 'creative' })).toMatchObject({
+        provider: 'anthropic-messages',
+        apiKey: CUSTOM.apiKey,
+        modelId: 'claude-test-model',
+      });
 
-    clearAgentSlot('workhorse');
+      clearAgentSlot('workhorse');
 
-    expect(loadAgentSlot('workhorse').profileId).toBeUndefined();
-    expect(loadAgentSlot('creative')).toMatchObject({
-      profileId: secondProfile,
-      model: 'claude-test-model',
-    });
-    expect(resolveByokConfig({ slot: 'creative' })).toMatchObject({
-      provider: 'anthropic-messages',
-      apiKey: CUSTOM.apiKey,
-      modelId: 'claude-test-model',
-    });
-    const store = openCredentialStore();
-    expect(store.read(firstProfile)).toMatchObject({ apiKey: OPENROUTER.apiKey });
-    expect(store.read(secondProfile)).toMatchObject({ apiKey: CUSTOM.apiKey });
-    expect(loadAiProviders()).toMatchObject({
-      [firstProfile]: { apiKey: OPENROUTER.apiKey },
-      [secondProfile]: { apiKey: CUSTOM.apiKey },
-    });
-    expect(store.list()).toEqual([firstProfile, secondProfile]);
-    const stored = readFileSync(join(getJoyMediaDir(), 'credentials.json'), 'utf8');
-    expect(stored).not.toContain(OPENROUTER.apiKey);
-    expect(stored).not.toContain(CUSTOM.apiKey);
-    const providerMetadata = readFileSync(getAiProvidersPath(), 'utf8');
-    expect(providerMetadata).not.toContain(OPENROUTER.apiKey);
-    expect(providerMetadata).not.toContain(CUSTOM.apiKey);
-  }, 30_000);
+      expect(loadAgentSlot('workhorse').profileId).toBeUndefined();
+      expect(loadAgentSlot('creative')).toMatchObject({
+        profileId: secondProfile,
+        model: 'claude-test-model',
+      });
+      expect(resolveByokConfig({ slot: 'creative' })).toMatchObject({
+        provider: 'anthropic-messages',
+        apiKey: CUSTOM.apiKey,
+        modelId: 'claude-test-model',
+      });
+      const store = openCredentialStore();
+      expect(store.read(firstProfile)).toMatchObject({ apiKey: OPENROUTER.apiKey });
+      expect(store.read(secondProfile)).toMatchObject({ apiKey: CUSTOM.apiKey });
+      expect(loadAiProviders()).toMatchObject({
+        [firstProfile]: { apiKey: OPENROUTER.apiKey },
+        [secondProfile]: { apiKey: CUSTOM.apiKey },
+      });
+      expect(store.list()).toEqual([firstProfile, secondProfile]);
+      const stored = readFileSync(join(getJoyMediaDir(), 'credentials.json'), 'utf8');
+      expect(stored).not.toContain(OPENROUTER.apiKey);
+      expect(stored).not.toContain(CUSTOM.apiKey);
+      const providerMetadata = readFileSync(getAiProvidersPath(), 'utf8');
+      expect(providerMetadata).not.toContain(OPENROUTER.apiKey);
+      expect(providerMetadata).not.toContain(CUSTOM.apiKey);
+    },
+    30_000,
+  );
 
   it('refuses a save whose value does not read back as the same credential', () => {
     const lying: SecretProtector = {
@@ -427,35 +432,39 @@ describe('credential store', () => {
 
 describe('provider metadata', () => {
   // This path invokes several real Windows DPAPI subprocesses; allow for full-suite CPU load.
-  it('keeps authKind as metadata and excludes access and refresh tokens', () => {
-    const credential = OAUTH_CREDENTIALS[1]!;
-    openCredentialStore().save('kimi-profile', credential);
-    const unsafeMetadata = {
-      'kimi-profile': {
-        name: 'Kimi',
-        provider: 'kimi',
-        authKind: 'oauth',
-        accessToken: credential.tokenRecord.accessToken,
-        refreshToken: credential.tokenRecord.refreshToken,
-        tokenRecord: credential.tokenRecord,
-      },
-      legacy: { name: 'Custom', provider: 'custom', ...CUSTOM },
-    } as unknown as Record<string, AiProviderConfig>;
+  (DPAPI_UNAVAILABLE_REASON === undefined ? it : it.skip)(
+    `keeps authKind as metadata and excludes access and refresh tokens${DPAPI_UNAVAILABLE_REASON ? ` (skipped: ${DPAPI_UNAVAILABLE_REASON})` : ''}`,
+    () => {
+      const credential = OAUTH_CREDENTIALS[1]!;
+      openCredentialStore().save('kimi-profile', credential);
+      const unsafeMetadata = {
+        'kimi-profile': {
+          name: 'Kimi',
+          provider: 'kimi',
+          authKind: 'oauth',
+          accessToken: credential.tokenRecord.accessToken,
+          refreshToken: credential.tokenRecord.refreshToken,
+          tokenRecord: credential.tokenRecord,
+        },
+        legacy: { name: 'Custom', provider: 'custom', ...CUSTOM },
+      } as unknown as Record<string, AiProviderConfig>;
 
-    saveAiProviders(unsafeMetadata);
+      saveAiProviders(unsafeMetadata);
 
-    const metadata = readFileSync(getAiProvidersPath(), 'utf8');
-    const stored = readFileSync(join(getJoyMediaDir(), 'credentials.json'), 'utf8');
-    expect(metadata).toContain('"authKind": "oauth"');
-    expect(metadata).not.toContain(credential.tokenRecord.accessToken);
-    expect(metadata).not.toContain(credential.tokenRecord.refreshToken);
-    expect(stored).not.toContain(credential.tokenRecord.accessToken);
-    expect(stored).not.toContain(credential.tokenRecord.refreshToken);
-    expect(loadAiProviders()['kimi-profile']).not.toHaveProperty('apiKey');
-    expect(loadAiProviders()['kimi-profile']?.authKind).toBe('oauth');
-    expect(loadAiProviders().legacy).toMatchObject({ apiKey: CUSTOM.apiKey });
-    expect(loadAiProviders().legacy?.authKind).toBeUndefined();
-  }, 15_000);
+      const metadata = readFileSync(getAiProvidersPath(), 'utf8');
+      const stored = readFileSync(join(getJoyMediaDir(), 'credentials.json'), 'utf8');
+      expect(metadata).toContain('"authKind": "oauth"');
+      expect(metadata).not.toContain(credential.tokenRecord.accessToken);
+      expect(metadata).not.toContain(credential.tokenRecord.refreshToken);
+      expect(stored).not.toContain(credential.tokenRecord.accessToken);
+      expect(stored).not.toContain(credential.tokenRecord.refreshToken);
+      expect(loadAiProviders()['kimi-profile']).not.toHaveProperty('apiKey');
+      expect(loadAiProviders()['kimi-profile']?.authKind).toBe('oauth');
+      expect(loadAiProviders().legacy).toMatchObject({ apiKey: CUSTOM.apiKey });
+      expect(loadAiProviders().legacy?.authKind).toBeUndefined();
+    },
+    15_000,
+  );
 });
 
 describe('provider migration', () => {
@@ -538,8 +547,10 @@ describe('provider migration', () => {
     expect(existsSync(storePath)).toBe(false);
   });
 
-  it.runIf(process.platform === 'win32')(
-    'the Windows DPAPI protector round-trips a secret and never writes it in clear',
+  const nativeDpapiSkipReason =
+    process.platform !== 'win32' ? 'Windows DPAPI requires Windows' : DPAPI_UNAVAILABLE_REASON;
+  (nativeDpapiSkipReason === undefined ? it : it.skip)(
+    `the Windows DPAPI protector round-trips a secret and never writes it in clear${nativeDpapiSkipReason ? ` (skipped: ${nativeDpapiSkipReason})` : ''}`,
     () => {
       const protector = createDpapiProtector();
       const cipher = protector.protect(OPENROUTER.apiKey);

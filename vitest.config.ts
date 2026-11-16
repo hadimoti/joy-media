@@ -72,8 +72,8 @@ export default defineConfig({
     },
   },
   test: {
-    // Bound file parallelism so Windows DPAPI and filesystem checks stay within their test timeouts.
-    maxWorkers: 8,
+    // CLI subprocesses, Chromium captures, and Windows DPAPI compete for the same laptop resources.
+    maxWorkers: 4,
     // The CLI e2e suites spawn real processes on Windows, so they need more than the 5 s default.
     testTimeout: 30_000,
     hookTimeout: 30_000,
