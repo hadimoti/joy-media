@@ -254,7 +254,9 @@ export async function setAgentSlots(page, ctx) {
     const profileSelect = card.getByRole('combobox', { name: `${label} profile`, exact: true });
     await expectVisible(profileSelect, `${label} profile list`);
     const offered = await profileSelect.evaluate((node) =>
-      [...node.options].map((option) => option.textContent ?? ''),
+      node.options === undefined
+        ? [`(not a list: <${node.tagName.toLowerCase()}> ${node.outerHTML.slice(0, 160)})`]
+        : Array.from(node.options, (option) => option.textContent ?? ''),
     );
     if (!offered.includes(CONNECTION_NAME)) {
       throw new Error(
@@ -277,7 +279,7 @@ export async function setAgentSlots(page, ctx) {
     const tag = await modelControl.evaluate((element) => element.tagName);
     if (tag === 'SELECT') {
       const models = await modelControl.evaluate((node) =>
-        [...node.options].map((option) => option.value),
+        node.options === undefined ? [] : Array.from(node.options, (option) => option.value),
       );
       if (!models.includes(ctx.model)) {
         throw new Error(
