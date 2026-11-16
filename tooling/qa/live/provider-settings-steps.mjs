@@ -609,6 +609,29 @@ export async function runQualityCheck(page, ctx) {
   return { message: `a quality check ran: ${summary}`, results: [] };
 }
 
+/**
+ * D-093: the same quality check with a title on the cut. The title comes from the Text tab's first template; the
+ * report must not say the text was not measured (the check measures title and caption boxes on its own renderer).
+ */
+export async function runQualityCheckWithTitle(page, ctx) {
+  await closeSettings(page);
+  await page.getByRole('menuitem', { name: 'View', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Create', exact: true }).click();
+  const textTab = page.locator('[role="tab"][data-feature-tool="text"]').first();
+  await textTab.waitFor({ state: 'visible', timeout: 10_000 });
+  await textTab.click();
+  await page
+    .locator('section[aria-label="Text templates"] button[aria-label^="Add "]')
+    .first()
+    .click();
+  await page.locator('.timeline-clip[data-clip-id]').nth(1).waitFor({ state: 'attached' });
+  const result = await runQualityCheck(page, ctx);
+  if (/Text was not measured|Some text was not measured/iu.test(result.message)) {
+    throw new Error(`the title was not measured: ${result.message.slice(0, 600)}`);
+  }
+  return { ...result, message: `with a title on the cut: ${result.message}` };
+}
+
 // ----- D-091: public endpoint consent ---------------------------------------------------------
 
 export async function publicEndpointConsent(page) {
@@ -734,6 +757,7 @@ export const PROVIDER_SETTINGS_CASES = {
   'D-090': runInModes,
   'D-090c': cancelRun,
   'D-092': runQualityCheck,
+  'D-093': runQualityCheckWithTitle,
   'D-091': publicEndpointConsent,
   'D-087r': removeStubProfile,
 };
@@ -743,5 +767,5 @@ export const PROVIDER_SETTINGS_CASES = {
  * timeline and a real GPU) is live only: name it with --tests after D-088 and D-090.
  */
 export const PROVIDER_SETTINGS_ORDER = Object.freeze(
-  Object.keys(PROVIDER_SETTINGS_CASES).filter((id) => id !== 'D-092'),
+  Object.keys(PROVIDER_SETTINGS_CASES).filter((id) => id !== 'D-092' && id !== 'D-093'),
 );
