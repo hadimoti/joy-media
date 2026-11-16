@@ -230,6 +230,7 @@ export async function run(argv = process.argv.slice(2)) {
             return launchOrClose(driver);
           },
         });
+        return session;
       },
     };
     if (taskRows.length > 0) {
