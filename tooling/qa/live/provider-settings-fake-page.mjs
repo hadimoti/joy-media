@@ -377,7 +377,8 @@ class FakeLocator {
   }
 
   async evaluate() {
-    return 'SELECT';
+    // A slot's profile list offers the one saved connection; any other control is a plain SELECT.
+    return /combobox.* profile/u.test(this.desc) ? ['QA stub'] : 'SELECT';
   }
 }
 

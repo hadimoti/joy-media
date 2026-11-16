@@ -203,11 +203,14 @@ export async function addLoopbackProfile(page, ctx) {
 export async function fetchModelsAndCheckMedia(page, ctx) {
   const dialog = await openSettings(page);
   await ui.findModels(dialog).click();
-  // The drawer containing the actual model buttons is collapsed by default.
-  const drawer = ui.modelDrawer(dialog);
-  if ((await drawer.getAttribute('aria-expanded')) !== 'true') await drawer.click();
-  await expectVisible(ui.modelChip(dialog, ctx.model), `the model ${ctx.model} in the list`);
+  // The list fills first. The app may open the drawer by itself, so it is opened here only when
+  // the model button is not showing (a blind click would close it again).
   await expectVisible(dialog.getByText('1 models ready'), 'the models-ready tag');
+  const chip = ui.modelChip(dialog, ctx.model);
+  if ((await chip.count()) === 0 || !(await chip.first().isVisible())) {
+    await ui.modelDrawer(dialog).click();
+  }
+  await expectVisible(chip, `the model ${ctx.model} in the list`);
   await waitUntil(async () => !(await ui.checkMedia(dialog).isDisabled()), {
     timeoutMs: 15_000,
     message: 'Check media support to be enabled',
@@ -248,9 +251,17 @@ export async function setAgentSlots(page, ctx) {
     const label = await slotLabel(card);
     labels.push(label);
     // Choosing the one saved profile reads its models at once.
-    await card
-      .getByRole('combobox', { name: `${label} profile`, exact: true })
-      .selectOption({ label: CONNECTION_NAME });
+    const profileSelect = card.getByRole('combobox', { name: `${label} profile`, exact: true });
+    await expectVisible(profileSelect, `${label} profile list`);
+    const offered = await profileSelect.evaluate((node) =>
+      [...node.options].map((option) => option.textContent ?? ''),
+    );
+    if (!offered.includes(CONNECTION_NAME)) {
+      throw new Error(
+        `the ${label} profile list does not offer "${CONNECTION_NAME}"; it offers: ${offered.join(' | ')}`,
+      );
+    }
+    await profileSelect.selectOption({ label: CONNECTION_NAME });
     const modelControl = card.locator(`[aria-label="${label} model"]`);
     await expectVisible(modelControl, `${label} model control`);
     await waitUntil(async () => !(await modelControl.isDisabled()), {
