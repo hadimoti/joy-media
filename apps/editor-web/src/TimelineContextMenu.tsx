@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ComponentType } from 'react';
+import { createPortal } from 'react-dom';
 
 export const SPEED_PRESETS = [0.5, 0.75, 1, 1.5, 2] as const;
 
@@ -78,7 +79,9 @@ export function TimelineContextMenu({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [menu.items, onClose]);
 
-  return (
+  // Drawn on the page body, not inside the timeline panel: the dock boxes clip what is drawn inside them, so a
+  // menu opened near the bottom of the timeline was cut by the panel edge (found live on small windows).
+  return createPortal(
     <>
       <button
         type="button"
@@ -130,6 +133,7 @@ export function TimelineContextMenu({
           );
         })}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

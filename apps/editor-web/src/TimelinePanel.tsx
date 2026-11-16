@@ -3189,7 +3189,12 @@ export function TimelinePanel({
     root?.addEventListener('pointerleave', leave);
     const removeScope = scopedKeyTable.setScope(TIMELINE_KEY_SCOPE, () => {
       const focused = document.activeElement;
-      return pointerOver || (root !== null && focused !== null && root.contains(focused));
+      // The clip menu is drawn on the page body (outside the panel), so an open menu counts as being in the timeline.
+      return (
+        pointerOver ||
+        (root !== null && focused !== null && root.contains(focused)) ||
+        document.querySelector('.timeline-context-menu') !== null
+      );
     });
     const removeKeys = scopedKeyTable.register({
       scope: TIMELINE_KEY_SCOPE,

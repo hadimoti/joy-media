@@ -65,6 +65,7 @@ test('the cases cover the five matrix rows in a fixed order', () => {
 test('a full dry run passes every case on the fake page', async () => {
   const page = createFakePage();
   const outcomes = await runAll(page);
+  assert.equal(page.app.state.endpointOpen, true, 'the endpoint form accordion is open');
   assert.match(outcomes['D-088a'], /Refresh models is disabled/);
   assert.match(outcomes['D-088'], /Image Supported/);
   assert.match(outcomes['D-089'], /Workhorse, Creative Brain/);
@@ -76,6 +77,28 @@ test('a full dry run passes every case on the fake page', async () => {
   assert.equal(preview.afterUndo.clips, preview.baselineClips);
   assert.equal(page.app.state.profiles, 0, 'the profile is removed at the end');
   assert.equal(page.app.state.clips, 1, 'the timeline is back where it started');
+});
+
+test('model discovery and slot profile selection use their visible app containers', async () => {
+  const page = createFakePage();
+  await PROVIDER_SETTINGS_CASES['D-088a'](page, CTX);
+  await PROVIDER_SETTINGS_CASES['D-087'](page, CTX);
+  await PROVIDER_SETTINGS_CASES['D-088'](page, CTX);
+  await PROVIDER_SETTINGS_CASES['D-089'](page, CTX);
+  const modelLookup = page.app.calls.find(
+    ([kind, desc]) =>
+      kind === 'click' && desc.includes('css[.joy-own-key]') && desc.includes('Find models'),
+  );
+  assert.ok(modelLookup, 'Find models is scoped to the own endpoint form');
+  const profileChoices = page.app.calls.filter(
+    ([kind, desc]) => kind === 'selectOption' && desc.includes('profile'),
+  );
+  assert.equal(profileChoices.length, 2);
+  assert.ok(
+    profileChoices.every(
+      ([, desc]) => desc.includes('Workhorse profile') || desc.includes('Creative Brain profile'),
+    ),
+  );
 });
 
 test('the dry run presses the consent before connecting and presses Undo run after approving', async () => {
@@ -155,6 +178,23 @@ test('a run that is cancelled leaves the timeline as it was (D-090c)', async () 
   const message = await PROVIDER_SETTINGS_CASES['D-090c'](page, CTX);
   assert.match(message, /run cancelled/);
   assert.equal(page.app.state.cancelled, true);
+  assert.ok(
+    page.app.calls.some(
+      ([kind, desc]) =>
+        kind === 'click' &&
+        desc.includes('[role="status"][aria-live="polite"]') &&
+        desc.includes('role=button[Stop]'),
+    ),
+    'the run status banner Stop action is clicked',
+  );
+});
+
+test('D-090 reports the app safe-stop state instead of waiting for a run card', async () => {
+  const page = createFakePage({ safeStopMode: 'preview-and-approve' });
+  await assert.rejects(
+    () => runInModes(page, CTX),
+    /Preview and approve \(default\): the app reported "Joy Code could not finish this run safely\. No edits were applied\."/u,
+  );
 });
 
 test('classifyOutcome waits for two new messages and ignores a reverted run card', () => {
