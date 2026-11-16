@@ -192,7 +192,7 @@ test.describe('WP-35 universal timeline closeout', () => {
     await expect(page.locator('.timeline-track-header .track-code').first()).toHaveText('V1');
     await expect(trackNames.first()).toHaveText('V1');
     await expect(audioTracks.locator('.track-code')).toHaveText('A1');
-    await expect(audioTracks.locator('.track-name')).toHaveText('Audio');
+    await expect(audioTracks.locator('.track-name')).toHaveText('A1');
     const lastVisualBox = await visualTracks.last().boundingBox();
     const firstAudioBox = await audioTracks.first().boundingBox();
     expect(lastVisualBox).not.toBeNull();

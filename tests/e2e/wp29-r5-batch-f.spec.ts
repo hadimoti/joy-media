@@ -441,7 +441,7 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
 
         await templates.getByRole('tab', { name: 'Titles' }).click();
         await expect(templates.locator('.template-card')).toHaveCount(4);
-        await expect(templates.locator('.template-card-category')).toHaveText([
+        await expect(templates.locator('.library-card-category-badge')).toHaveText([
           'Titles',
           'Titles',
           'Titles',

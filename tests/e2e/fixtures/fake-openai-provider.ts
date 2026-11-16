@@ -534,19 +534,23 @@ export async function configureJoyAgent(
   const dialog = page.getByRole('dialog', { name: 'Joy Code Settings' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: /Connection and sign-in/ }).click();
-  await dialog.getByRole('combobox', { name: 'Provider' }).selectOption('openai-compatible');
+  // The current settings form exposes provider choices in the custom endpoint section.
+  // Use its own selector rather than a stale accessible name from the former BYOK form.
+  await dialog.locator('.joy-own-key select').first().selectOption('openai-compatible');
   await dialog
     .getByRole('textbox', { name: 'Service address (base URL)' })
     .fill(FAKE_PROVIDER_BASE_URL);
-  await dialog
-    .getByRole('textbox', { name: 'Model ID' })
-    .fill(options.modelId ?? FAKE_PROVIDER_MODEL);
+  // Enter the key before acknowledging the custom endpoint, then pick the known
+  // fake model in the service model controls.
+  await dialog.getByLabel('Your API key').fill(apiKey);
   await dialog
     .getByRole('checkbox', {
       name: 'I understand that custom endpoints may log requests according to their own policy.',
     })
     .check();
-  await dialog.getByLabel('Your API key').fill(apiKey);
+  await dialog
+    .getByRole('textbox', { name: 'Model ID' })
+    .fill(options.modelId ?? FAKE_PROVIDER_MODEL);
   await dialog.getByRole('button', { name: 'Connect model', exact: true }).click();
   const expectedConnectionNotice = options.allowFailure
     ? [
