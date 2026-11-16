@@ -551,6 +551,64 @@ export async function cancelRun(page, ctx) {
   return `run cancelled while waiting; clips stayed at ${after.clips}`;
 }
 
+// ----- D-092: a real quality check ------------------------------------------------------------
+
+/**
+ * Asks Joy Code for a quality check on the open project. The stub answers with the `qc_repair_run` tool, whose
+ * first step is the timeline check: the app must capture frames of the composition, sample them and report.
+ * The row passes when a check actually RAN (a report, a repair plan, or "no problems"), and fails with the
+ * app's own words when it refused (for example "cannot capture composed frames").
+ */
+export async function runQualityCheck(page, ctx) {
+  await closeSettings(page);
+  await rejectLeftoverPreview(page);
+  await setExecutionMode(page, EXECUTION_MODES[1]);
+  const baseline = await readJoyCodeSnapshot(page);
+  const consoleLines = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') {
+      consoleLines.push(`${message.type()}: ${message.text().slice(0, 300)}`);
+    }
+  });
+  page.on('pageerror', (error) =>
+    consoleLines.push(`pageerror: ${String(error.message).slice(0, 300)}`),
+  );
+  await sendInstruction(page, 'STUB-QC please run a quality check on my cut and fix the problems');
+  await waitUntil(
+    async () => {
+      const state = await readJoyCodeSnapshot(page);
+      return (
+        state.messages >= baseline.messages + 2 &&
+        !state.thinking &&
+        (await ui.stop(page).count()) === 0
+      );
+    },
+    { timeoutMs: ctx.timeoutMs ?? 120_000, message: 'the quality check run to end' },
+  );
+  await page.waitForTimeout(1_500);
+  const texts = await page
+    .locator('.joy-code-message')
+    .evaluateAll((nodes) =>
+      nodes
+        .slice(-4)
+        .map((node) => (node.textContent ?? '').replace(/\s+/gu, ' ').trim().slice(0, 400)),
+    );
+  const panel = await page
+    .locator('.joy-code-panel, .agent-panel')
+    .first()
+    .innerText()
+    .catch(() => '');
+  const joined = `${texts.join(' | ')} || ${panel.replace(/\s+/gu, ' ').slice(-600)}`;
+  const refused =
+    /cannot capture|composition-unavailable|could not finish this run safely|No quality check|could not run|unavailable/iu.test(
+      joined,
+    );
+  const ran = /repair plan|no problems|nothing to fix|finding|report/iu.test(joined);
+  const summary = `${joined.slice(0, 900)} || console: ${consoleLines.slice(0, 4).join(' ; ')}`;
+  if (refused || !ran) throw new Error(`the quality check did not run: ${summary}`);
+  return { message: `a quality check ran: ${summary}`, results: [] };
+}
+
 // ----- D-091: public endpoint consent ---------------------------------------------------------
 
 export async function publicEndpointConsent(page) {
@@ -675,8 +733,15 @@ export const PROVIDER_SETTINGS_CASES = {
   'D-087c': chatWithStub,
   'D-090': runInModes,
   'D-090c': cancelRun,
+  'D-092': runQualityCheck,
   'D-091': publicEndpointConsent,
   'D-087r': removeStubProfile,
 };
 
-export const PROVIDER_SETTINGS_ORDER = Object.freeze(Object.keys(PROVIDER_SETTINGS_CASES));
+/**
+ * A full run takes these in order. D-092 (a real quality check, which needs the model's media check, a clip on the
+ * timeline and a real GPU) is live only: name it with --tests after D-088 and D-090.
+ */
+export const PROVIDER_SETTINGS_ORDER = Object.freeze(
+  Object.keys(PROVIDER_SETTINGS_CASES).filter((id) => id !== 'D-092'),
+);

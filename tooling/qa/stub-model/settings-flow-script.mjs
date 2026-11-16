@@ -7,7 +7,7 @@
  *
  * Marker words the flow types into Joy Code: STUB-HELLO (plain reply), STUB-PLAN (read project
  * context, stage a `validate_proposal`, then a closing line), STUB-SLOW (a reply held for five
- * seconds, so a run can be cancelled), STUB-IMAGE (a reply to a request that carries an image).
+ * seconds, so a run can be cancelled), STUB-QC (call the `qc_repair_run` tool, which runs the quality check), STUB-IMAGE (a reply to a request that carries an image).
  */
 
 export const STUB_MODEL = 'joy-stub-model';
@@ -155,6 +155,23 @@ export function buildSettingsFlowScript({
           last_tool: 'validate_proposal',
           tool: 'validate_proposal',
         },
+      },
+      {
+        content: null,
+        reusable: true,
+        match: { user_includes: 'STUB-QC', last_role: 'user', tool: 'qc_repair_run' },
+        tool_calls: [
+          {
+            id: 'call-stub-qc',
+            type: 'function',
+            function: { name: 'qc_repair_run', arguments: '{}' },
+          },
+        ],
+      },
+      {
+        content: 'The quality check ran.',
+        reusable: true,
+        match: { user_includes: 'STUB-QC', last_role: 'tool', last_tool: 'qc_repair_run' },
       },
       ...Array.from({ length: 8 }, (_, index) => ({
         content: `Stub fallback reply ${index + 1}.`,
