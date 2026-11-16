@@ -28,6 +28,7 @@ import {
   exerciseControls,
 } from './desktop-timeline-steps.mjs';
 import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
+import { EXPORT_MATRIX_ROWS } from './export-matrix-steps.mjs';
 import { createFakePage } from './fake-page.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -456,12 +457,18 @@ test('executeRow: pass writes no defect; fail writes defect text and a file; blo
 });
 
 test('row tables: unique ids in the T-A05, T-A06 and T-A09 ranges, each with a title and run function', () => {
-  const ids = [...PROJECTS_IMPORT_ROWS, ...TIMELINE_ROWS, ...PERSISTENCE_ROWS].map((row) => row.id);
+  const ids = [
+    ...PROJECTS_IMPORT_ROWS,
+    ...TIMELINE_ROWS,
+    ...PERSISTENCE_ROWS,
+    ...EXPORT_MATRIX_ROWS,
+  ].map((row) => row.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(MATRIX_IDS.toSorted(), ids.toSorted());
   for (const row of PROJECTS_IMPORT_ROWS) assert.match(row.id, /^D-A05-\d{2}$/u);
   for (const row of TIMELINE_ROWS) assert.match(row.id, /^D-A06-\d{2}$/u);
   for (const row of PERSISTENCE_ROWS) assert.match(row.id, /^D-A09-\d{2}$/u);
+  for (const row of EXPORT_MATRIX_ROWS) assert.match(row.id, /^D-A10-\d{2}$/u);
   for (const row of Object.values(MATRIX_ROWS)) {
     assert.ok(row.title && typeof row.run === 'function', row.id);
     assert.ok(['blocker', 'major', 'minor'].includes(row.severity), row.id);

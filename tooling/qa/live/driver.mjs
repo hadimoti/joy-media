@@ -501,6 +501,9 @@ export function createLiveDriver(config, options = {}) {
   return {
     launch,
     close,
+    get appPid() {
+      return child?.pid;
+    },
     get page() {
       return page;
     },

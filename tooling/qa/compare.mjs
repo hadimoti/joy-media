@@ -4,7 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-const tolerance = 1;
+export const DEFAULT_MEAN_ABSOLUTE_TOLERANCE = 1;
 const ffmpeg = process.env.JOY_MEDIA_FFMPEG || 'ffmpeg';
 const ffprobe = process.env.JOY_MEDIA_FFPROBE || 'ffprobe';
 
@@ -70,10 +70,7 @@ async function decodeRgb(file) {
   return { width: stream.width, height: stream.height, bytes };
 }
 
-export async function compareFrames(previewPath, exportPath, outputDir) {
-  await mkdir(outputDir, { recursive: true });
-  const preview = await decodeRgb(previewPath);
-  const exported = await decodeRgb(exportPath);
+export function compareRgbFrames(preview, exported, tolerance = DEFAULT_MEAN_ABSOLUTE_TOLERANCE) {
   let differingChannels = 0;
   let maxChannelDelta = 0;
   let sumChannelDelta = 0;
@@ -84,10 +81,12 @@ export async function compareFrames(previewPath, exportPath, outputDir) {
       preview: { width: preview.width, height: preview.height },
       export: { width: exported.width, height: exported.height },
     };
+  } else if (preview.bytes.length !== exported.bytes.length) {
+    firstDifference = { reason: 'byte-count-mismatch' };
   } else {
     for (let index = 0; index < preview.bytes.length; index += 1) {
       const delta = Math.abs(preview.bytes[index] - exported.bytes[index]);
-      if (delta > tolerance) {
+      if (delta > 0) {
         differingChannels += 1;
         firstDifference ??= {
           channelIndex: index,
@@ -102,6 +101,33 @@ export async function compareFrames(previewPath, exportPath, outputDir) {
       sumChannelDelta += delta;
     }
   }
+  const totalChannels = preview.bytes.length;
+  const meanAbsoluteChannelDelta = totalChannels ? sumChannelDelta / totalChannels : 0;
+  const failed =
+    firstDifference?.reason === 'dimension-mismatch' ||
+    firstDifference?.reason === 'byte-count-mismatch' ||
+    meanAbsoluteChannelDelta > tolerance;
+  return {
+    status: failed ? 'fail' : 'pass',
+    toleranceMeanAbsolutePerChannel: tolerance,
+    differingChannels,
+    totalChannels,
+    maxChannelDelta,
+    meanAbsoluteChannelDelta,
+    firstDifference: failed ? firstDifference : null,
+  };
+}
+
+export async function compareFrames(
+  previewPath,
+  exportPath,
+  outputDir,
+  tolerance = DEFAULT_MEAN_ABSOLUTE_TOLERANCE,
+) {
+  await mkdir(outputDir, { recursive: true });
+  const preview = await decodeRgb(previewPath);
+  const exported = await decodeRgb(exportPath);
+  const comparison = compareRgbFrames(preview, exported, tolerance);
   const sideBySidePath = path.join(outputDir, 'side-by-side.png');
   await run(ffmpeg, [
     '-y',
@@ -120,15 +146,9 @@ export async function compareFrames(previewPath, exportPath, outputDir) {
     sideBySidePath,
   ]);
   const result = {
-    status: !firstDifference ? 'pass' : 'fail',
-    tolerancePerChannel: tolerance,
+    ...comparison,
     preview: { path: path.resolve(previewPath), width: preview.width, height: preview.height },
     export: { path: path.resolve(exportPath), width: exported.width, height: exported.height },
-    differingChannels,
-    totalChannels: preview.bytes.length,
-    maxChannelDelta,
-    meanAbsoluteChannelDelta: preview.bytes.length ? sumChannelDelta / preview.bytes.length : 0,
-    firstDifference,
     sideBySide: sideBySidePath,
   };
   const resultPath = path.join(outputDir, 'result.json');
@@ -201,6 +221,29 @@ export async function extractExportFrame(exportPath, timestamp, outputPath, dime
   return outputPath;
 }
 
+export async function probeFrameDimensions(file) {
+  const probe = JSON.parse(
+    await run(
+      ffprobe,
+      [
+        '-v',
+        'error',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=width,height',
+        '-of',
+        'json',
+        file,
+      ],
+      { encoding: 'utf8' },
+    ),
+  );
+  const stream = probe.streams?.[0];
+  if (!stream?.width || !stream?.height) throw new Error(`No video frame found in ${file}`);
+  return { width: stream.width, height: stream.height };
+}
+
 function usage() {
   return 'Usage: node tooling/qa/compare.mjs --preview <monitor-fit.png> --export <video> --time <seconds> --out <directory> [--probe <media>]';
 }
@@ -218,7 +261,12 @@ async function main(args) {
   const framePath = path.join(options.out, 'export-frame.png');
   const preview = await decodeRgb(options.preview);
   await extractExportFrame(options.export, Number(options.time), framePath, preview);
-  const result = await compareFrames(options.preview, framePath, options.out);
+  const result = await compareFrames(
+    options.preview,
+    framePath,
+    options.out,
+    Number(options.tolerance ?? DEFAULT_MEAN_ABSOLUTE_TOLERANCE),
+  );
   if (options.probe) result.media = await probeMedia(options.probe);
   if (result.media) await writeFile(result.resultPath, `${JSON.stringify(result, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
