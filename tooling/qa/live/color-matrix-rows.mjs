@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { openColorPanel } from './color-panel-steps.mjs';
+import { openColorPanel, restoreColorRowUi } from './color-panel-steps.mjs';
 import { addPointAndDrag } from './color-curves-steps.mjs';
 import { pickGreenAndDesaturate } from './color-hsl-steps.mjs';
 import { applyEachBuiltInLook, runColourLifecycle } from './color-persistence-steps.mjs';
@@ -134,9 +134,10 @@ function dimensions(png, rowId) {
 }
 
 async function monitorPixel(page, point, ctx, rowId) {
-  const picture = await monitorPicture(page, ctx);
-  const xRatio = Math.max(0, Math.min(1, (point.x - picture.x) / picture.width));
-  const yRatio = Math.max(0, Math.min(1, (point.y - picture.y) / picture.height));
+  const canvasBox = await page.locator('.monitor-canvas').first().boundingBox();
+  if (!canvasBox) throw blockedRow(rowId, 'the Monitor canvas is not visible');
+  const xRatio = Math.max(0, Math.min(1, (point.x - canvasBox.x) / canvasBox.width));
+  const yRatio = Math.max(0, Math.min(1, (point.y - canvasBox.y) / canvasBox.height));
   const sample = await page
     .locator('.monitor-canvas')
     .first()
@@ -166,6 +167,7 @@ async function monitorPixel(page, point, ctx, rowId) {
       { x: xRatio, y: yRatio },
     );
   if (!sample) throw blockedRow(rowId, 'the Monitor canvas pixel is unavailable');
+  ctx.monitorCanvasSize = { width: sample.width, height: sample.height };
   if (ctx.outDir) {
     const dir = join(ctx.outDir, rowId);
     mkdirSync(dir, { recursive: true });
@@ -175,7 +177,7 @@ async function monitorPixel(page, point, ctx, rowId) {
 }
 
 const MONITOR_BACKGROUND = { r: 12, g: 16, b: 28 };
-const MONITOR_PIXEL_TOLERANCE = 4;
+const MONITOR_PIXEL_TOLERANCE = 3;
 
 function pixelDistance(left, right) {
   return Math.max(
@@ -189,7 +191,7 @@ export async function waitForMonitorPixel(page, point, ctx, rowId, predicate, de
   let previous;
   let stableReads = 0;
   let last;
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
     last = await monitorPixel(page, point, ctx, rowId);
     if (predicate(last)) {
       stableReads =
@@ -202,7 +204,7 @@ export async function waitForMonitorPixel(page, point, ctx, rowId, predicate, de
     await page.waitForTimeout(100);
   }
   throw new Error(
-    `${rowId}: timed out waiting for ${description}; last pixel ${JSON.stringify(last)}`,
+    `${rowId}: timed out waiting for ${description}; last pixel ${JSON.stringify(last)}; Monitor canvas ${JSON.stringify(ctx.monitorCanvasSize ?? null)}`,
   );
 }
 
@@ -347,6 +349,16 @@ async function runLifecycle(
       }
       if (description === 'colour edit to reach the Monitor')
         return waitForColourPixel(page, p, ctx, rowId, 'changed', baselinePixel);
+      if (description === 'Redo to restore the edited Monitor pixel') {
+        return waitForMonitorPixel(
+          page,
+          p,
+          ctx,
+          rowId,
+          (sample) => pixelDistance(sample, baselinePixel) > MONITOR_PIXEL_TOLERANCE,
+          'Redo to restore the edited picture pixel',
+        );
+      }
       return waitForColourPixel(page, p, ctx, rowId, 'restored', baselinePixel);
     },
     readGrade: () => readColourGrade(ctx, clipId),
@@ -355,6 +367,10 @@ async function runLifecycle(
     undo: async () => {
       await blurFocus(ctx.page);
       await ctx.page.keyboard.press('Control+KeyZ');
+    },
+    redo: async () => {
+      await blurFocus(ctx.page);
+      await ctx.page.keyboard.press('Control+KeyY');
     },
     ...(includeExport
       ? { compareExportFrame: (_page, p) => compareExport(ctx.page, p, ctx, rowId) }
@@ -379,10 +395,18 @@ async function curve(page, ctx, _pixel, clipId) {
 async function hsl(page, ctx, pixel, clipId) {
   await pickGreenAndDesaturate(page, {
     patch: pixel,
-    readPreviewPixel: (point) => monitorPixel(page, point, ctx, 'D-K03'),
+    readPreviewPixel: (point) => waitForColourPixel(page, point, ctx, 'D-K03', 'baseline'),
     readGrade: () => readHslGrade(ctx, clipId),
     undo: false,
   });
+}
+
+async function runColorRow(page, ctx, run) {
+  try {
+    return await run();
+  } finally {
+    await restoreColorRowUi(ctx.page ?? page);
+  }
 }
 
 export const COLOR_MATRIX_ROWS = Object.freeze([
@@ -435,7 +459,7 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
     title: 'Drag a colour wheel and check its lifecycle',
     severity: 'major',
     async run(page, ctx) {
-      return runLifecycle('D-K01', wheel, ctx);
+      return runColorRow(page, ctx, () => runLifecycle('D-K01', wheel, ctx));
     },
   },
   {
@@ -444,7 +468,7 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
     title: 'Add and drag a curve point and check its lifecycle',
     severity: 'major',
     async run(page, ctx) {
-      return runLifecycle('D-K02', curve, ctx);
+      return runColorRow(page, ctx, () => runLifecycle('D-K02', curve, ctx));
     },
   },
   {
@@ -453,7 +477,9 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
     title: 'Pick green and drop its HSL saturation',
     severity: 'major',
     async run(page, ctx) {
-      return runLifecycle('D-K03', hsl, ctx, { sampleRatios: [0.25, 0.2] });
+      return runColorRow(page, ctx, () =>
+        runLifecycle('D-K03', hsl, ctx, { sampleRatios: [0.25, 0.2] }),
+      );
     },
   },
   {
@@ -462,39 +488,68 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
     title: 'Apply each built-in Look and check its lifecycle',
     severity: 'major',
     async run(page, ctx) {
-      const base = await ensureTimelineClip(page, ctx, 'D-K04', { fresh: true });
-      const clipId = base.clips[0].id;
-      await selectClipById(page, clipId);
-      await openColorPanel(page, 'looks');
-      let activePage = page;
-      const results = await applyEachBuiltInLook(page, async () => {
-        const picture = await monitorPicture(activePage, ctx);
-        const pixel = monitorPicturePoint(picture, 0.25, 0.2);
+      return runColorRow(page, ctx, async () => {
+        const base = await ensureTimelineClip(page, ctx, 'D-K04', { fresh: true });
+        const clipId = base.clips[0].id;
+        await selectClipById(page, clipId);
+        await openColorPanel(page, 'looks');
+        let activePage = page;
+        const results = await applyEachBuiltInLook(page, async () => {
+          const picture = await monitorPicture(activePage, ctx);
+          const pixel = monitorPicturePoint(picture, 0.25, 0.2);
+          let baselinePixel;
+          return {
+            pixel,
+            readPreviewPixel: (target, p) => monitorPixel(target, p, ctx, 'D-K04'),
+            waitForPreviewPixel: (target, p, _predicate, description) => {
+              if (description === 'stable picture pixel') {
+                return waitForColourPixel(target, p, ctx, 'D-K04', 'baseline').then((sample) => {
+                  baselinePixel = sample;
+                  return sample;
+                });
+              }
+              if (description === 'colour edit to reach the Monitor') {
+                return waitForColourPixel(target, p, ctx, 'D-K04', 'changed', baselinePixel);
+              }
+              if (description === 'Redo to restore the edited Monitor pixel') {
+                return waitForMonitorPixel(
+                  target,
+                  p,
+                  ctx,
+                  'D-K04',
+                  (sample) => pixelDistance(sample, baselinePixel) > MONITOR_PIXEL_TOLERANCE,
+                  'Redo to restore the edited picture pixel',
+                );
+              }
+              return waitForColourPixel(target, p, ctx, 'D-K04', 'restored', baselinePixel);
+            },
+            readGrade: () => readColourGrade(ctx, clipId),
+            edit: async () => {},
+            saveAndReopen: async () => {
+              const result = await saveAndReopen(activePage, ctx, 'D-K04', clipId);
+              activePage = ctx.page;
+              return result;
+            },
+            undo: async () => {
+              await blurFocus(ctx.page);
+              await ctx.page.keyboard.press('Control+KeyZ');
+            },
+            redo: async () => {
+              await blurFocus(ctx.page);
+              await ctx.page.keyboard.press('Control+KeyY');
+            },
+            compareExportFrame: (_target, p) => compareExport(ctx.page, p, ctx, 'D-K04'),
+            getPage: async () => {
+              activePage = ctx.page;
+              await openColorPanel(activePage, 'looks');
+              return activePage;
+            },
+          };
+        });
         return {
-          pixel,
-          readPreviewPixel: (target, p) => monitorPixel(target, p, ctx, 'D-K04'),
-          readGrade: () => readColourGrade(ctx, clipId),
-          edit: async () => {},
-          saveAndReopen: async () => {
-            const result = await saveAndReopen(activePage, ctx, 'D-K04', clipId);
-            activePage = ctx.page;
-            return result;
-          },
-          undo: async () => {
-            await blurFocus(ctx.page);
-            await ctx.page.keyboard.press('Control+KeyZ');
-          },
-          compareExportFrame: (_target, p) => compareExport(ctx.page, p, ctx, 'D-K04'),
-          getPage: async () => {
-            activePage = ctx.page;
-            await openColorPanel(activePage, 'looks');
-            return activePage;
-          },
+          message: `checked ${results.length} built-in Looks through preview, export, save/reopen, Undo and Redo`,
         };
       });
-      return {
-        message: `checked ${results.length} built-in Looks through preview, export, save/reopen and Undo`,
-      };
     },
   },
 ]);

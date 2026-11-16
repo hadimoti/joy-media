@@ -14,6 +14,7 @@ function lifecycleState() {
     exported: false,
     reopened: false,
     undone: false,
+    redone: false,
   };
 }
 
@@ -48,11 +49,17 @@ function lifecycle(state, page) {
       state.undone = true;
       await page.keyboard.press('Control+z');
     },
+    redo: async () => {
+      state.grade = { lut: 'monochrome' };
+      state.pixel = { r: 120, g: 120, b: 120 };
+      state.redone = true;
+      await page.keyboard.press('Control+y');
+    },
     pixel: { x: 100, y: 100 },
   };
 }
 
-test('colour lifecycle checks preview, save/reopen, optional export compare, then Undo', async () => {
+test('colour lifecycle checks preview, Undo, Redo, save/reopen and optional export compare', async () => {
   const page = createFakePage();
   const state = lifecycleState();
   const deps = lifecycle(state, page);
@@ -62,13 +69,16 @@ test('colour lifecycle checks preview, save/reopen, optional export compare, the
   assert.equal(state.reopened, true);
   assert.equal(state.exported, true);
   assert.equal(state.undone, true);
+  assert.equal(state.redone, true);
   assert.deepEqual(deps.waits, [
     'stable picture pixel',
     'colour edit to reach the Monitor',
     'Undo to restore the baseline Monitor pixel',
+    'Redo to restore the edited Monitor pixel',
   ]);
   assert.ok(page.calls.some((call) => call.includes('monochrome')));
   assert.ok(page.calls.some((call) => call.includes('Control+z')));
+  assert.ok(page.calls.some((call) => call.includes('Control+y')));
 });
 
 test('colour lifecycle can run with only fake readers and waits for the changed and restored pixels', async () => {
@@ -78,8 +88,9 @@ test('colour lifecycle can run with only fake readers and waits for the changed 
 
   await runColourLifecycle(page, deps);
 
-  assert.equal(deps.waits.length, 3);
+  assert.equal(deps.waits.length, 4);
   assert.equal(state.undone, true);
+  assert.equal(state.redone, true);
   assert.ok(page.calls.includes('keyboard.press("Control+z")'));
 });
 
@@ -120,6 +131,9 @@ test('the Look driver covers all six built-in Looks and checks each lifecycle', 
       saveAndReopen: async () => grade,
       undo: async () => {
         active = 'none';
+      },
+      redo: async () => {
+        active = look.id;
       },
       edit: async () => {
         active = look.id;

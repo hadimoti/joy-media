@@ -28,9 +28,32 @@ export async function importThroughLeftPanel(page, filePath) {
     (await mediaTab.isVisible().catch(() => false)) &&
     (await mediaTab.getAttribute('aria-selected').catch(() => null)) === 'true';
   if (!mediaOpen) {
-    await openMenu(page, 'View');
-    await page.getByRole('menuitem', { name: 'Create', exact: true }).click();
-    await mediaTab.waitFor({ state: 'visible' });
+    const openCreate = async () => {
+      await openMenu(page, 'View');
+      await page.getByRole('menuitem', { name: 'Create', exact: true }).click();
+    };
+    await openCreate();
+    const mediaVisible = () =>
+      mediaTab.waitFor({ state: 'visible', timeout: 3_000 }).then(
+        () => true,
+        () => false,
+      );
+    if (!(await mediaVisible())) {
+      await openCreate();
+      if (!(await mediaVisible())) {
+        const dockTabs = await page
+          .locator('.panel-tab:visible')
+          .evaluateAll((tabs) =>
+            tabs.map(
+              (tab) => tab.getAttribute('aria-label') ?? tab.getAttribute('title') ?? 'unnamed',
+            ),
+          )
+          .catch(() => []);
+        throw new Error(
+          `the Media tab did not appear after View > Create twice; visible dock tabs: ${dockTabs.join(', ') || '(none)'}`,
+        );
+      }
+    }
     await mediaTab.click();
   }
   await page.getByRole('button', { name: 'Import media', exact: true }).first().click();
