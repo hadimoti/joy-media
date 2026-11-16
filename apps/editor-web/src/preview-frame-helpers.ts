@@ -114,6 +114,14 @@ export function activeTransitionAt(
 }
 
 /**
+ * A copy of a bitmap with new pixels. A browser `ImageData` keeps `width` and `height` as accessors on its
+ * prototype, so an object spread drops them and the renderer then sizes the transition texture from nothing.
+ */
+export function bitmapWithData(bitmap: ImageDataLike, data: Uint8ClampedArray): ImageDataLike {
+  return { width: bitmap.width, height: bitmap.height, data };
+}
+
+/**
  * Transition inputs are uploaded as independent textures, so they do not
  * pass through the ordinary video-frame layer filters. Apply each source
  * clip's grade to a private bitmap copy before the transition blends it.
@@ -135,7 +143,7 @@ export function applyClipGradesToTransitionBitmaps(
     const data = new Uint8ClampedArray(bitmap.data);
     const normalizedGrade = normalizeColorGrade(grade);
     applyColorGradeToPixels(data, normalizedGrade, resolveColorLut?.(normalizedGrade));
-    bitmaps.set(clipId, { ...bitmap, data });
+    bitmaps.set(clipId, bitmapWithData(bitmap, data));
   }
 }
 
