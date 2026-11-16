@@ -492,7 +492,13 @@ export async function runInModes(page, ctx) {
       }
       if (staged.approve) await ui.approve(page).click();
       else await ui.applyEdit(page).click();
-      await expectVisible(ui.lastRun(page).first(), `${mode.name}: the run card after approval`);
+      // A model proposal ends with the line "Approved and applied Revision ..."; the older plan path ends with a run card.
+      await waitUntil(
+        async () =>
+          (await ui.lastRun(page).count()) > 0 ||
+          (await page.getByText(/Approved and applied/u).count()) > 0,
+        { timeoutMs: 30_000, message: `${mode.name}: the completion after approval` },
+      );
     }
     const after = await readJoyCodeSnapshot(page);
     entry.afterApproval = after;
@@ -500,8 +506,17 @@ export async function runInModes(page, ctx) {
       if (after.clips <= baseline.clips) {
         throw new Error(`${mode.name}: approving did not add a clip`);
       }
-      await ui.undoRun(page).click();
-      await expectVisible(page.getByText('Reverted.'), `${mode.name}: Reverted after Undo run`);
+      if ((await ui.undoRun(page).count()) > 0) {
+        await ui.undoRun(page).click();
+        await expectVisible(page.getByText('Reverted.'), `${mode.name}: Reverted after Undo run`);
+      } else {
+        // A model edit is one entry in the editor's own Undo: "one Undo restores the prior state".
+        await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+        await waitUntil(async () => (await ui.clips(page).count()) === baseline.clips, {
+          timeoutMs: 10_000,
+          message: `${mode.name}: the timeline to go back after Undo`,
+        });
+      }
       const undone = await readJoyCodeSnapshot(page);
       entry.afterUndo = undone;
       if (undone.clips !== baseline.clips) {
