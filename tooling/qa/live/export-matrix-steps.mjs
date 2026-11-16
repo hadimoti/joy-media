@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   compareFrames,
   extractExportFrame,
@@ -52,6 +52,13 @@ export const EXPORT_MATRIX_ROWS = Object.freeze([
     title: 'Process tree working set during export',
     severity: 'minor',
     run: runMemoryRow,
+  },
+  {
+    id: 'D-A10-12',
+    area: 'working set sampled during the ten-minute export',
+    title: 'Process tree working set during the ten-minute export (T-F04 baseline)',
+    severity: 'minor',
+    run: runTenMinuteMemoryRow,
   },
 ]);
 
@@ -435,4 +442,67 @@ async function runMemoryRow(page, ctx) {
     'utf8',
   );
   return `sampled ${samples.length} process-tree points during six-second export; peak ${(peakBytes / 1024 / 1024).toFixed(1)} MiB; ${exported.message}`;
+}
+
+const TEN_MINUTE_FIXTURE = 'h264-1080p-10min.mp4';
+
+/** The 10-minute 1080p fixture exported whole, with the app's process tree sampled every 2 s (the T-F04 baseline). */
+async function runTenMinuteMemoryRow(page, ctx) {
+  const rowId = 'D-A10-12';
+  if (!ctx.downloadDir)
+    throw new Error(`BLOCKED ${rowId}: driver test-download folder is unavailable`);
+  if (!ctx.media) throw new Error(`BLOCKED ${rowId}: run with --media <fixture folder file>`);
+  const fixture = join(dirname(resolve(ctx.media)), TEN_MINUTE_FIXTURE);
+  const shortMedia = ctx.media;
+  ctx.media = fixture;
+  try {
+    await ensureTimelineClip(page, ctx, rowId, { fresh: true });
+  } finally {
+    ctx.media = shortMedia;
+  }
+  await selectPreset(page, 'youtube-1080');
+  const samples = [];
+  const take = () => {
+    const processes = processTreeWorkingSet(ctx.appPid);
+    samples.push({
+      time: new Date().toISOString(),
+      processes,
+      workingSetBytes: processes.reduce((sum, item) => sum + item.workingSetBytes, 0),
+      atMs: Date.now(),
+    });
+  };
+  take();
+  const started = Date.now();
+  const exported = await exportAndProbe(
+    page,
+    ctx,
+    rowId,
+    {
+      seconds: 600,
+      skipTrim: true,
+      audio: 'any',
+      onPoll: () => {
+        if (Date.now() - (samples.at(-1)?.atMs ?? started) >= 2_000) take();
+      },
+    },
+    { attempts: 3_000 },
+  );
+  take();
+  const peakBytes = Math.max(...samples.map((item) => item.workingSetBytes));
+  const dir = rowEvidenceDir(ctx, rowId);
+  const csvRows = samples.map(
+    (item) =>
+      `${csv(item.time)},${item.workingSetBytes},${item.processes.length},${csv(item.processes.map((proc) => proc.pid).join(';'))}`,
+  );
+  writeFileSync(
+    join(dir, 'memory.csv'),
+    ['time,working_set_bytes,process_count,pids', ...csvRows, ''].join('\n'),
+    'utf8',
+  );
+  writeFileSync(
+    join(dir, 'memory-peak.txt'),
+    `Peak process-tree working set: ${peakBytes} bytes\n`,
+    'utf8',
+  );
+  return `ten-minute export took ${Math.round((Date.now() - started) / 1000)} s; sampled ${samples.length} points; peak ${(peakBytes / 1024 / 1024).toFixed(1)} MiB; ${exported.message}`;
 }
