@@ -379,11 +379,11 @@ class FakeLocator {
   }
 
   async evaluate(read) {
-    // A control that reads its options: a slot's profile list offers the one saved connection and
-    // its model list the stub model. Anything else is asked for its tag name.
-    if (String(read ?? '').includes('.options')) {
-      return /combobox.* profile/u.test(this.desc) ? ['QA stub'] : ['joy-stub-model'];
-    }
+    // A slot's profile list offers the one saved connection, its model control is a list holding the
+    // stub model. Anything else is asked for its tag name.
+    const source = String(read ?? '');
+    if (source.includes('values:')) return { tag: 'SELECT', values: ['joy-stub-model'] };
+    if (source.includes('.options')) return ['QA stub'];
     return 'SELECT';
   }
 }

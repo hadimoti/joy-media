@@ -276,18 +276,29 @@ export async function setAgentSlots(page, ctx) {
       timeoutMs: 20_000,
       message: `${label}: the model reading to finish`,
     });
-    const tag = await modelControl.evaluate((element) => element.tagName);
-    if (tag === 'SELECT') {
-      const models = await modelControl.evaluate((node) =>
-        node.options === undefined ? [] : Array.from(node.options, (option) => option.value),
+    // The model control is a text box until the profile's models are read, then a list.
+    let seen = 'nothing yet';
+    try {
+      await waitUntil(
+        async () => {
+          const info = await modelControl
+            .evaluate((node) => ({
+              tag: node.tagName,
+              values: node.options === undefined ? [] : Array.from(node.options, (o) => o.value),
+            }))
+            .catch(() => undefined);
+          if (info !== undefined) seen = `${info.tag}: ${info.values.join(' | ')}`;
+          return info?.tag === 'SELECT' && info.values.includes(ctx.model);
+        },
+        {
+          timeoutMs: 20_000,
+          message: `the ${label} model list to offer ${ctx.model}`,
+        },
       );
-      if (!models.includes(ctx.model)) {
-        throw new Error(
-          `the ${label} model list does not offer ${ctx.model}; it offers: ${models.join(' | ')}`,
-        );
-      }
-      await modelControl.selectOption(ctx.model);
-    } else await modelControl.fill(ctx.model);
+    } catch (error) {
+      throw new Error(`${error.message}; the control showed ${seen}`);
+    }
+    await modelControl.selectOption(ctx.model);
     const refresh = card.getByRole('button', { name: 'Refresh models', exact: true });
     await refresh.click();
     await card.getByRole('button', { name: `Save ${label}`, exact: true }).click();
@@ -335,6 +346,13 @@ export async function setExecutionMode(page, mode) {
   await closeSettings(page);
 }
 
+async function lastMessageText(page) {
+  const messages = ui.messages(page);
+  if ((await messages.count()) === 0) return '';
+  const text = await messages.nth((await messages.count()) - 1).innerText();
+  return String(text).replace(/\s+/gu, ' ').trim().slice(0, 300);
+}
+
 /** What the page shows now, as plain numbers and flags. */
 export async function readJoyCodeSnapshot(page) {
   return {
@@ -348,6 +366,7 @@ export async function readJoyCodeSnapshot(page) {
     reverted: (await page.getByText('Reverted.').count()) > 0,
     thinking: (await ui.thinking(page).count()) > 0,
     messages: await ui.messages(page).count(),
+    lastMessage: await lastMessageText(page),
   };
 }
 
@@ -375,7 +394,9 @@ export function checkModeOutcome(modeId, outcome, snapshot, before) {
   }
   if (modeId === 'preview-and-approve') {
     if (snapshot.clips !== before) return 'the preview wrote to the timeline before approval';
-    if (outcome !== 'proposal') return `expected a proposal to approve, saw: ${outcome}`;
+    if (outcome !== 'proposal') {
+      return `expected a proposal to approve, saw: ${outcome}${snapshot.lastMessage ? ` (last message: ${snapshot.lastMessage})` : ''}`;
+    }
   }
   if (modeId !== 'suggest-only' && outcome === 'reply') {
     return 'no proposal card was staged';
