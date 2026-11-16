@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { createLiveDriver, launchForRun } from './driver.mjs';
 import { labRoots } from './lab-roots.mjs';
 import { newProject, screenshot, setScratchLibrary } from './steps.mjs';
+import { firstLine } from './rows.mjs';
 import { createFakePage } from './provider-settings-fake-page.mjs';
 import { seedPlanOperations } from './provider-settings-seed.mjs';
 import {
@@ -185,9 +186,8 @@ async function run() {
         detail = await PROVIDER_SETTINGS_CASES[id](page, ctx);
       } catch (error) {
         status = 'failed';
-        detail = String(error?.message ?? error)
-          .split('\n')[0]
-          .slice(0, 400);
+        // The first line plus the locator a timeout waited for.
+        detail = firstLine(error, 900);
       }
       const shot = options.dryRun
         ? null
