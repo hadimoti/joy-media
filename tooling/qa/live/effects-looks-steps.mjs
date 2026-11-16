@@ -21,6 +21,7 @@ import {
   ensureTimelineClip,
   previewShot,
   selectClipById,
+  selectFirstClipOfKind,
   snapshot,
 } from './ui-steps.mjs';
 import { exportAndProbe, measureMeanVolumeDb } from './export-probe.mjs';
@@ -91,7 +92,7 @@ async function showInspectorTab(page, id) {
 export async function effectsAddChangeRemove(page, ctx, deps = {}) {
   const rowId = 'D-057';
   const md5 = deps.md5 ?? firstFrameMd5;
-  const base = await ensureTimelineClip(page, ctx, rowId);
+  const base = await ensureTimelineClip(page, ctx, rowId, { fresh: true });
   await selectClipById(page, base.clips[0].id);
   await previewShot(page, ctx, rowId, 'effect-baseline');
   const baseline = await exportAndProbe(page, ctx, rowId, { tag: 'without-effect' }, deps.export);
@@ -185,13 +186,14 @@ export async function clipAudioControls(page, ctx, deps = {}) {
       'needs --media <video fixture with audio> (a name with "audio", not "silent")',
     );
   }
-  const base = await ensureTimelineClip(page, ctx, rowId);
+  const base = await ensureTimelineClip(page, ctx, rowId, { fresh: true });
   const measure = deps.measure ?? measureMeanVolumeDb;
   await selectClipById(page, base.clips[0].id);
   await previewShot(page, ctx, rowId, 'gain-1');
   const full = await exportAndProbe(page, ctx, rowId, { tag: 'gain-1', audio: true }, deps.export);
   const fullDb = measure(full.path);
-  await selectClipById(page, base.clips[0].id);
+  // Volume and Mute are controls of the audio clip (the A1 lane), not of the video clip.
+  await selectFirstClipOfKind(page, 'audio');
   await showInspectorTab(page, 'audio');
   const gain = page.locator(FX_SEL.gain).first();
   await gain.fill('0.5');

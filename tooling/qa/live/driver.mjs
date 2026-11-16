@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
@@ -106,6 +106,19 @@ export function buildLaunchEnvironment({
 }
 
 /** True for the editor window (served from the app scheme); false for devtools and the loading window. */
+/**
+ * A Playwright connection over CDP takes over the page's downloads (it saves them under a temp name of its
+ * own), so the app's will-download handler never writes the file into the scratch download folder: found live,
+ * every export row then waited three minutes for a file that was not there. Save each download there instead.
+ * `downloadDir` is the scratch folder inside the profile (the driver checked that already).
+ */
+export function keepDownloadsInScratch(page, downloadDir) {
+  page.on('download', (download) => {
+    const name = basename(download.suggestedFilename() || 'download.bin');
+    download.saveAs(join(downloadDir, name)).catch(() => undefined);
+  });
+}
+
 export function isAppEditorUrl(url) {
   return typeof url === 'string' && url.startsWith('joy-media-app://');
 }
@@ -425,6 +438,7 @@ export function createLiveDriver(config, options = {}) {
     }
     if (!page) throw fail('CDP connected but no app window was found');
     await page.waitForLoadState('domcontentloaded', { timeout: 30_000 });
+    if (config.testMode === true) keepDownloadsInScratch(page, downloadDir);
     return {
       page,
       profileDir,
