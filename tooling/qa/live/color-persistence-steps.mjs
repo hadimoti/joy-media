@@ -152,7 +152,11 @@ export async function applyEachBuiltInLook(page, lifecycleForLook) {
         .click();
       await edit(target);
     };
-    results.push({ look: look.id, ...(await runColourLifecycle(activePage, deps)) });
+    try {
+      results.push({ look: look.id, ...(await runColourLifecycle(activePage, deps)) });
+    } catch (error) {
+      throw new Error(`Look ${look.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
     activePage = (await deps.getPage?.()) ?? activePage;
   }
   return results;

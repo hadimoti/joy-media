@@ -59,7 +59,11 @@ async function readHslGrade(ctx, clipId) {
   const grade = await readColourGrade(ctx, clipId);
   if (!Array.isArray(grade?.hsl))
     throw new Error('the saved colour grade has no readable HSL bands');
-  return grade;
+  // A grade that was edited and undone keeps identity bands; at rest has none: compare only the bands that act.
+  const acting = grade.hsl.filter(
+    (band) => (band.hueShift ?? 0) !== 0 || band.saturation !== 0 || band.luminance !== 0,
+  );
+  return { hsl: acting };
 }
 
 async function readWheel(ctx, clipId) {
