@@ -157,9 +157,21 @@ export function buildSettingsFlowScript({
         },
       },
       {
+        // The QC tools refuse until the project context has been read once.
         content: null,
         reusable: true,
-        match: { user_includes: 'STUB-QC', last_role: 'user', tool: 'qc_repair_run' },
+        match: { user_includes: 'STUB-QC', last_role: 'user', tool: 'read_project_context' },
+        tool_calls: [readContextCall],
+      },
+      {
+        content: null,
+        reusable: true,
+        match: {
+          user_includes: 'STUB-QC',
+          last_role: 'tool',
+          last_tool: 'read_project_context',
+          tool: 'qc_repair_run',
+        },
         tool_calls: [
           {
             id: 'call-stub-qc',
