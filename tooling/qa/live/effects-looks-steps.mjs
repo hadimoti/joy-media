@@ -19,12 +19,13 @@ import {
   blurFocus,
   clickMenuItem,
   ensureTimelineClip,
+  openCreateTool,
   previewShot,
   selectClipById,
-  snapshot,
+  waitForSnapshot,
 } from './ui-steps.mjs';
 import { exportAndProbe, measureMeanVolumeDb } from './export-probe.mjs';
-import { mediaHasAudio, readNodeLabels, readOptionValues } from './left-panels-steps.mjs';
+import { LEFT_SEL, mediaHasAudio, readNodeLabels, readOptionValues } from './left-panels-steps.mjs';
 
 export const FX_SEL = Object.freeze({
   effectsTool: '[role="tab"][data-feature-tool="effects"]',
@@ -266,13 +267,19 @@ async function appliedCount(page) {
 
 export async function joyCodeLooks(page, ctx, deps = {}) {
   const rowId = 'D-070';
-  await ensureTimelineClip(page, ctx, rowId);
-  const state = await snapshot(page);
+  await ensureTimelineClip(page, ctx, rowId, { fresh: true });
+  // The Look binds to a text element: add the first text template, so the row does not depend on an earlier row.
+  await openCreateTool(page, 'text');
+  const labels = await page.locator(LEFT_SEL.textAddButtons).evaluateAll(readNodeLabels);
+  if (labels.length === 0) throw new Error('the Text panel lists no template to add');
+  await page.getByRole('button', { name: labels[0], exact: true }).click();
+  const state = await waitForSnapshot(
+    page,
+    (now) => now.clips.length >= 2,
+    'adding a text template did not put a text element on the timeline',
+  );
   if (state.clips.length < 2) {
-    throw blockedRow(
-      rowId,
-      'needs a text element on the timeline to bind the Look to (run D-065 or D-066 first)',
-    );
+    throw blockedRow(rowId, 'needs a text element on the timeline to bind the Look to');
   }
   await openLooks(page);
   const flow = { title: undefined, applied: false };

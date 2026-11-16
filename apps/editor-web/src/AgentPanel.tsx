@@ -38,7 +38,7 @@ import {
   type EditorPointerDragPayload,
 } from './editor-pointer-dnd.js';
 import { PanelShell } from './PanelShell.js';
-import { objectDisplayLabel, objectDisplayLabels } from './object-display-label.js';
+import { lookEntityOptions } from './look-entities.js';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import { approvalPolicyForAgentPolicy } from './agent-policy-settings.js';
 import { JoyCodeLogo } from './JoyCodeLogo.js';
@@ -1513,30 +1513,10 @@ export function AgentPanel({
       }),
     [],
   );
-  const lookEntities = useMemo<readonly LivingLooksEntityOption[]>(() => {
-    const objects = Object.values(session.visualProject.visualObjects ?? {});
-    const objectLabels = objectDisplayLabels(objects);
-    const visual = objects.map((object) => ({
-      id: object.id,
-      label: objectLabels.get(object.id) ?? objectDisplayLabel(object),
-      kind: 'visual-object' as const,
-    }));
-    // Caption clips are named by their order on the timeline, never by id.
-    const captions: LivingLooksEntityOption[] = [];
-    for (const composition of Object.values(session.visualProject.compositions)) {
-      for (const track of composition.tracks) {
-        if (track.kind !== 'caption') continue;
-        for (const clip of track.clips) {
-          captions.push({
-            id: clip.id,
-            label: `Caption ${captions.length + 1}`,
-            kind: 'caption-clip',
-          });
-        }
-      }
-    }
-    return [...visual, ...captions];
-  }, [session.visualProject]);
+  const lookEntities = useMemo<readonly LivingLooksEntityOption[]>(
+    () => lookEntityOptions(session.visualProject),
+    [session.visualProject],
+  );
   const compositionAudioClip = useMemo(
     () => selectCompositionAudioClip(session.visualProject),
     [session.visualProject],
