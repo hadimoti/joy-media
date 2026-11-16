@@ -214,7 +214,10 @@ async function runLookStaging(
   } catch (error) {
     if (error instanceof HostRpcDiagnosticError) {
       // The owner sees one plain sentence; the reason goes to the console so a failed Look can be traced.
-      console.warn('[joy-code] a Look was rejected while it was being staged', error.diagnostic);
+      console.warn(
+        '[joy-code] a Look was rejected while it was being staged',
+        JSON.stringify(error.diagnostic),
+      );
       return {
         kind: 'blocked',
         reason: canonicalCompilerCode(error),
