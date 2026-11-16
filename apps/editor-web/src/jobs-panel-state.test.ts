@@ -84,14 +84,14 @@ describe('desktop Worker process state', () => {
     });
   });
 
-  it('offers a retry once the automatic restarts are used up, or the Worker is stopped', () => {
+  it('offers Restart once the automatic restarts are used up, or the Worker is stopped', () => {
     expect(workerProcessView('degraded')).toEqual({
-      label: 'stopped',
+      label: 'Worker stopped',
       tone: 'disconnected',
       canRetry: true,
     });
     expect(workerProcessView('offline')).toEqual({
-      label: 'stopped',
+      label: 'Worker stopped',
       tone: 'disconnected',
       canRetry: true,
     });

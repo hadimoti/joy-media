@@ -291,10 +291,10 @@ function WorkerProcessRow({
         <button
           type="button"
           className="jobs-retry-button"
-          aria-label="Retry local service"
+          aria-label="Restart local service"
           onClick={onRetry}
         >
-          Retry
+          Restart
         </button>
       )}
     </div>
