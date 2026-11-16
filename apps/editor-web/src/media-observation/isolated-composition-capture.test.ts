@@ -8,6 +8,7 @@ import {
   type VisualObjectV1,
 } from '@joy-media/project-schema';
 import { videoFrameNodeFromDecoded } from '@joy-media/playback-engine';
+import { nodeBoundsFromBox } from '@joy-media/render-ir';
 import { createCompositionObserver } from './composition-observer.js';
 import { StickerImageCache } from '../sticker-image-cache.js';
 
@@ -325,6 +326,64 @@ afterEach(() => {
 });
 
 describe('isolated composition capture', () => {
+  it('collects renderer title bounds and leaves missing-font text unmeasured', async () => {
+    const renderer = fakeRenderer();
+    renderer.nodeBounds.mockImplementation((id: string) =>
+      id === 'title'
+        ? nodeBoundsFromBox(
+            id,
+            { translateX: 0, translateY: 10, scaleX: 1, scaleY: 1 },
+            { x: -2, y: 0, width: 20, height: 10 },
+          )
+        : undefined,
+    );
+    const title: VisualObjectV1 = {
+      id: 'title',
+      kind: 'text',
+      text: 'Title',
+      transform: transform(),
+    };
+    const fixtureProject = visualProject({ title });
+    const root = fixtureProject.compositions.root!;
+    const project = {
+      ...fixtureProject,
+      compositions: { ...fixtureProject.compositions, root: { ...root, tracks: [] } },
+      pluginData: { ...fixtureProject.pluginData, 'joy.captions.burnIn': false },
+    };
+    const capture = createIsolatedCompositionCapture({
+      visualProject: project,
+      timelineProject: timelineProject(),
+      loadProjectAssetBlob: async () => undefined,
+    });
+    try {
+      const measured = await capture.collectTextBoxes();
+      expect(measured.boxes).toHaveLength(1);
+      expect(measured.boxes[0]?.x).toBeLessThan(0);
+      expect(measured.notMeasured).toBe(false);
+    } finally {
+      capture.release();
+    }
+
+    const missingRenderer = fakeRenderer();
+    mocks.waitFonts.mockRejectedValueOnce(new Error('font missing'));
+    const missingFont = createIsolatedCompositionCapture({
+      visualProject: visualProject({
+        title: { ...title, textStyle: { fontFamily: 'Missing Font' } as never },
+      }),
+      timelineProject: timelineProject(),
+      loadProjectAssetBlob: async () => undefined,
+    });
+    try {
+      await expect(missingFont.collectTextBoxes()).resolves.toEqual({
+        boxes: [],
+        notMeasured: true,
+      });
+    } finally {
+      missingFont.release();
+    }
+    expect(missingRenderer.render).not.toHaveBeenCalled();
+  });
+
   it('reads the full frame pixels and turns render throws into a failed result', async () => {
     const renderer = fakeRenderer();
     const successful = createIsolatedCompositionCapture({

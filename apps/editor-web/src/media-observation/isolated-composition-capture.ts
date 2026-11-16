@@ -26,6 +26,9 @@ import {
   type BrowserVideoFrameBitmap,
 } from '@joy-media/renderer-pixi/browser';
 import type { ImageDataLike } from '@joy-media/playback-engine';
+import { captionCuesAt, layoutTemplatedCaptionNodes } from '@joy-media/captions-core';
+import type { NodeBounds, TextNode } from '@joy-media/render-ir';
+import type { TimelineQcTextBox } from './qc-sampler.js';
 import type { ExportFrameSource } from '../export-frame-source.js';
 import { createProjectColorLutResolver } from '../project-color-luts.js';
 import { seekUsForSource, type SeekFrameTiming } from '../export-seek-target.js';
@@ -46,7 +49,7 @@ import {
 import { withCaptionBurnInNodes } from '../caption-burn-in.js';
 import { waitForContentFonts } from '../font-readiness.js';
 import { effectInstancesForTimelineClip } from '../adjustment-render.js';
-import { resolveObjectIdForSelection } from '../sticker-bindings.js';
+import { readClipObjectIdsMap, resolveObjectIdForSelection } from '../sticker-bindings.js';
 import { readImageMatteMap } from '../sticker-bindings.js';
 import { sourceTimeForTransitionSample } from '../transition-source-time.js';
 import {
@@ -64,6 +67,12 @@ import type {
   CompositionObservationRequest,
   IsolatedCompositionReadback,
 } from './composition-observer.js';
+import {
+  collectTextLayoutBounds,
+  type TextLayoutCandidate,
+  type TextLayoutFrameMeasurement,
+  type TextLayoutNodeMeasurement,
+} from './text-layout-bounds-collect.js';
 
 export type ProjectAssetBlobLoader = (assetId: string) => Promise<Blob | undefined>;
 
@@ -75,6 +84,10 @@ export interface IsolatedCompositionCaptureInput {
 
 export interface IsolatedCompositionCapture {
   readonly composition: Omit<CompositionObservationRequest, 'outputTimesUs'>;
+  readonly collectTextBoxes: () => Promise<{
+    readonly boxes: readonly TimelineQcTextBox[];
+    readonly notMeasured: boolean;
+  }>;
   readonly release: () => void;
 }
 
@@ -107,7 +120,14 @@ export function createIsolatedCompositionCapture(
   const stickerCache = new StickerImageCache();
   const sceneCache = new HtmlSceneSurfaceCache();
   const objectSizes: Record<string, { width: number; height: number }> = {};
+  const textBoundsByTime = new Map<number, readonly TextLayoutNodeMeasurement[]>();
   let rendererPromise: Promise<BrowserPixiRenderer> | undefined;
+  let textBoxesCache:
+    | {
+        readonly boxes: readonly TimelineQcTextBox[];
+        readonly notMeasured: boolean;
+      }
+    | undefined;
   let closed = false;
   const videoResources = new Map<string, VideoResource>();
   const resourceKeyFor = (clip: RootTimelineVideoClip): string =>
@@ -195,6 +215,21 @@ export function createIsolatedCompositionCapture(
         const pixels = renderer.readPixels(width, height);
         if (pixels === undefined || pixels.width !== width || pixels.height !== height)
           throw new Error('Capture readback is unavailable');
+        const textBounds = renderFrame.nodes
+          .filter((node): node is TextNode => node.kind === 'text')
+          .map((node) => {
+            const bounds = renderer.nodeBounds(node.id) as NodeBounds | undefined;
+            return {
+              id: node.id,
+              ...(bounds === undefined ? {} : { bounds }),
+              textColor: node.color,
+              ...(node.background === undefined ? {} : { plateColor: node.background }),
+              ...(node.background === undefined || bounds === undefined
+                ? {}
+                : { plateBounds: bounds }),
+            };
+          });
+        textBoundsByTime.set(request.outputTimeUs, textBounds);
         return {
           width: pixels.width,
           height: pixels.height,
@@ -636,6 +671,114 @@ export function createIsolatedCompositionCapture(
 
   return {
     composition,
+    async collectTextBoxes() {
+      if (textBoxesCache !== undefined) return textBoxesCache;
+      const root = visualProject.compositions[visualProject.rootCompositionId];
+      if (root === undefined) return (textBoxesCache = { boxes: [], notMeasured: true });
+      const revision = visualProject.updatedAt || visualProject.id;
+      const hidden = hiddenClipIds(timelineProject);
+      const bindingsByClip = readClipObjectIdsMap(visualProject);
+      const timelineRoot = timelineProject.compositions[timelineProject.rootCompositionId];
+      const timelineClips = timelineRoot?.tracks.flatMap((track) => track.clips) ?? [];
+      const titleCandidates: TextLayoutCandidate[] = Object.values(visualProject.visualObjects)
+        .filter((object) => object.kind === 'text')
+        .map((object) => {
+          const bindings = Object.entries(bindingsByClip)
+            .filter(([, ids]) => ids.includes(object.id))
+            .map(([clipId]) => clipId);
+          const clips = timelineClips.filter((clip) => bindings.includes(clip.id));
+          const clip = clips[0];
+          const startUs = clip?.startUs ?? 0;
+          const endUs = clip === undefined ? root.durationUs : clip.startUs + clip.durationUs;
+          return {
+            id: object.id,
+            kind: 'title' as const,
+            startUs,
+            endUs,
+            sampleUs: Math.floor(startUs + (endUs - startUs) / 2),
+            revision,
+            ...(clips.some((item) => hidden.has(item.id)) ||
+            (bindings.length > 0 && clip === undefined)
+              ? { hidden: true }
+              : {}),
+          };
+        });
+      const captionCandidates: TextLayoutCandidate[] = [];
+      for (const track of root.tracks) {
+        if (track.kind !== 'caption' || !track.enabled) continue;
+        for (const clip of track.clips) {
+          if (clip.kind !== 'caption') continue;
+          const document = visualProject.captionDocuments[clip.captionDocumentId];
+          if (document === undefined) continue;
+          for (const segment of document.segments) {
+            const startUs = clip.startUs + segment.startUs;
+            const endUs = Math.min(clip.startUs + clip.durationUs, clip.startUs + segment.endUs);
+            if (endUs <= startUs) continue;
+            const sampleUs = Math.floor(startUs + (endUs - startUs) / 2);
+            const cues = captionCuesAt(
+              root,
+              visualProject.captionDocuments,
+              sampleUs,
+              visualProject.propertyAnimations,
+            ).filter((cue) => cue.clipId === clip.id && cue.segment.id === segment.id);
+            const nodes = layoutTemplatedCaptionNodes(cues, {
+              viewportWidth: root.width,
+              viewportHeight: root.height,
+            });
+            for (const node of nodes)
+              captionCandidates.push({
+                id: node.id,
+                kind: 'caption',
+                startUs,
+                endUs,
+                sampleUs,
+                revision,
+                ...(hidden.has(clip.id) ? { hidden: true } : {}),
+              });
+          }
+        }
+      }
+      const candidates = [...titleCandidates, ...captionCandidates];
+      const cutCount = new Set(
+        timelineClips.map((clip) => clip.startUs).filter((timeUs) => timeUs > 0),
+      ).size;
+      const boxCap = Math.max(0, 48 - 12 - cutCount);
+      const frameMeasurements: TextLayoutFrameMeasurement[] = [];
+      const times = [
+        ...new Set(candidates.filter((item) => !item.hidden).map((item) => item.sampleUs)),
+      ]
+        .sort((a, b) => a - b)
+        .slice(0, boxCap);
+      const signal = new AbortController().signal;
+      let readiness;
+      try {
+        readiness = await composition.readiness.check(composition.snapshot, signal);
+      } catch {
+        return (textBoxesCache = { boxes: [], notMeasured: true });
+      }
+      if (readiness.font !== 'ready') return (textBoxesCache = { boxes: [], notMeasured: true });
+      for (const timeUs of times) {
+        signal.throwIfAborted();
+        const frame = await composition.evaluator.evaluate(composition.snapshot, timeUs, signal);
+        await composition.renderer.renderAndReadback(frame, {
+          purpose: 'composition-evidence',
+          includeEditorOverlays: false,
+          outputTimeUs: timeUs,
+          maxPixels: MAX_CAPTURE_PIXELS,
+          maxReadbackBytes: MAX_CAPTURE_PIXELS * 4,
+          signal,
+        });
+        frameMeasurements.push({
+          timeUs,
+          revision,
+          composition: { width: frame.viewport.width, height: frame.viewport.height },
+          nodes: textBoundsByTime.get(timeUs) ?? [],
+        });
+        textBoundsByTime.delete(timeUs);
+      }
+      const collected = collectTextLayoutBounds(candidates, frameMeasurements, boxCap);
+      return (textBoxesCache = { boxes: collected.boxes, notMeasured: collected.notMeasured });
+    },
     release() {
       if (closed) return;
       closed = true;
@@ -647,6 +790,7 @@ export function createIsolatedCompositionCapture(
       stickerCache.clear();
       sceneCache.destroy();
       assets.clear();
+      textBoundsByTime.clear();
       fallbackSeekTiming.clear();
     },
   };

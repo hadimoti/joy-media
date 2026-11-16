@@ -246,6 +246,60 @@ describe('QC host adapter: timeline check and report', () => {
     expect(coverage.completeSourceCoverage).toBe(false);
   });
 
+  it('uses collected renderer boxes for the safe-area finding', async () => {
+    let report: Readonly<Record<string, unknown>> | undefined;
+    const planHasBox = vi.fn();
+    const adapter = createQcHostAdapter({
+      evidenceStore: createEvidenceStore(),
+      identity: () => IDENTITY,
+      timeline: () => ({
+        durationUs: 6_000_000,
+        cutTimesUs: [],
+        textBoxes: [],
+        composition: fakeComposition(),
+      }),
+      collectTextBoxes: async () => ({ boxes: [WIDE_TITLE], notMeasured: false }),
+      sampler: {
+        sample: async ({ plan }) => {
+          planHasBox(plan.textBoxes.some((box) => box.id === WIDE_TITLE.id));
+          return {
+            status: 'captured',
+            frameIds: plan.frameIds,
+            coverage: plan.coverage,
+            textChecks: [
+              {
+                id: WIDE_TITLE.id,
+                kind: 'title',
+                startUs: WIDE_TITLE.startUs,
+                endUs: WIDE_TITLE.endUs,
+                safeArea: { inside90Percent: false },
+                legibility: {
+                  status: 'unavailable',
+                  sampledAtUs: null,
+                  contrastRatio: null,
+                  meetsMinimumContrast: null,
+                },
+              },
+            ],
+          };
+        },
+      },
+      isCachedImageSupported: () => false,
+      isPrivacyModeAllowed: () => false,
+      onReport: (next) => {
+        report = next;
+      },
+      digest: async () => 'c'.repeat(64),
+    });
+    await expect(adapter.runTimelineCheck(new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+    });
+    expect((report?.['findings'] as { type: string }[]).map((item) => item.type)).toContain(
+      'safe-area',
+    );
+    expect(planHasBox).toHaveBeenCalledWith(true);
+  });
+
   it('reuses one report for repeated latest reads and omits findings on request', async () => {
     const { adapter } = createFixture();
     const first = await readLatest(adapter);
@@ -964,8 +1018,8 @@ describe('editor QC adapter', () => {
     expect(samples).toBe(2);
   });
 
-  it('reads the drawn text boxes from the host each time it checks the timeline', async () => {
-    const getTextBoxes = vi.fn(() => []);
+  it('does not start text measurement when a check has no composition request', async () => {
+    const collectTextBoxes = vi.fn(async () => ({ boxes: [], notMeasured: false }));
     const adapter = createEditorQcAdapter({
       ...IDENTITY,
       isCurrent: () => true,
@@ -975,10 +1029,10 @@ describe('editor QC adapter', () => {
       }),
       isCachedImageSupported: () => true,
       isPrivacyModeAllowed: () => true,
-      getTextBoxes,
+      collectTextBoxes,
     });
     await adapter.runTimelineCheck(new AbortController().signal);
-    expect(getTextBoxes).toHaveBeenCalled();
+    expect(collectTextBoxes).not.toHaveBeenCalled();
   });
 
   it('stops identifying the run once it is no longer current', async () => {

@@ -665,6 +665,13 @@ export function AgentPanel({
               captures.delete(capture);
               capture.release();
             },
+            collectTextBoxes: async (
+              composition: IsolatedCompositionCapture['composition'] | undefined,
+            ) => {
+              const capture = [...captures].find((item) => item.composition === composition);
+              if (capture === undefined) return { boxes: [], notMeasured: true };
+              return capture.collectTextBoxes();
+            },
           }),
     };
   };

@@ -171,6 +171,10 @@ export interface QcHostAdapterDeps {
   readonly sharedState?: QcHostAdapterSharedState;
   readonly identity: () => QcHostIdentity | undefined;
   readonly timeline: () => QcTimelineSource | undefined | Promise<QcTimelineSource | undefined>;
+  readonly collectTextBoxes?: (composition: QcTimelineSource['composition']) => Promise<{
+    readonly boxes: readonly TimelineQcTextBox[];
+    readonly notMeasured: boolean;
+  }>;
   readonly releaseComposition?: (
     composition: QcTimelineSource['composition'] | undefined,
   ) => void | Promise<void>;
@@ -391,6 +395,27 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
           'composition-unavailable',
           'This build cannot capture composed frames of the cut yet, so no timeline check ran.',
         );
+      const compositionRequest = source.composition;
+
+      let textMeasurementNote: string | undefined;
+      if (
+        deps.collectTextBoxes !== undefined &&
+        !disposed &&
+        !signal.aborted &&
+        identityIsCurrent()
+      ) {
+        try {
+          const measured = await deps.collectTextBoxes(compositionRequest);
+          if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
+          if (!identityIsCurrent())
+            return failure('authority-unavailable', 'The project changed, so no check was stored.');
+          source = { ...source, textBoxes: measured.boxes };
+          if (measured.notMeasured) textMeasurementNote = 'Some text was not measured.';
+        } catch {
+          source = { ...source, textBoxes: [] };
+          textMeasurementNote = 'Text was not measured.';
+        }
+      }
 
       const ranges =
         rangesInput === undefined ? undefined : clampRanges(rangesInput, source.durationUs);
@@ -465,7 +490,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       try {
         result = await deps.sampler.sample({
           plan,
-          composition: source.composition,
+          composition: compositionRequest,
           evidenceStore: deps.evidenceStore,
           evidenceLookup: lookup,
           signal,
@@ -489,6 +514,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         coverage: plan.coverage,
         missedCutTimesUs: plan.missedCutTimesUs,
         textChecks: result.textChecks,
+        ...(textMeasurementNote === undefined ? {} : { textMeasurementNote }),
       });
       remember(reportId, {
         // A re-check says which parts it looked at; a full check keeps its old shape.
@@ -836,11 +862,7 @@ export interface EditorQcAdapterInput {
   readonly releaseComposition?: (
     composition: QcTimelineSource['composition'] | undefined,
   ) => void | Promise<void>;
-  /**
-   * The drawn title and caption boxes, normalized (see `projectTextLayoutBounds`). Absent today: no host
-   * measures them yet, so QC runs without box checks until one does (T-B06).
-   */
-  readonly getTextBoxes?: () => readonly TimelineQcTextBox[];
+  readonly collectTextBoxes?: QcHostAdapterDeps['collectTextBoxes'];
   /** Receives the report when it is stored and again when frames were sent for it. */
   readonly onReport?: QcHostAdapterDeps['onReport'];
   readonly sharedState?: QcHostAdapterSharedState;
@@ -873,11 +895,7 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
         composition = undefined;
       }
       try {
-        const source = qcTimelineSourceFromTimeline(
-          input.getTimeline(),
-          composition,
-          input.getTextBoxes?.() ?? [],
-        );
+        const source = qcTimelineSourceFromTimeline(input.getTimeline(), composition, []);
         if (source === undefined) await input.releaseComposition?.(composition);
         return source;
       } catch (error) {
@@ -885,6 +903,7 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
         throw error;
       }
     },
+    ...(input.collectTextBoxes === undefined ? {} : { collectTextBoxes: input.collectTextBoxes }),
     ...(input.releaseComposition === undefined
       ? {}
       : { releaseComposition: input.releaseComposition }),
@@ -919,6 +938,7 @@ interface TimelineReportInput {
   };
   readonly missedCutTimesUs: readonly number[];
   readonly textChecks: readonly TimelineQcTextAnalysis[];
+  readonly textMeasurementNote?: string;
 }
 
 /** The ADR-0045 section 11 shape for a timeline target. Layer 1 only: no model claim in it. */
@@ -987,7 +1007,7 @@ function buildTimelineReport(input: TimelineReportInput): { readonly [key: strin
       missedCutTimesUs: [...input.missedCutTimesUs],
     },
     findings,
-    notes: [],
+    notes: input.textMeasurementNote === undefined ? [] : [{ text: input.textMeasurementNote }],
     frames: input.timesUs.map((timeUs) => ({ frameId: timelineQcFrameId(timeUs), timeUs })),
     modelComprehensionGuaranteed: false,
   } as { readonly [key: string]: HostRpcJson });
