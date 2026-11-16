@@ -703,13 +703,13 @@ async function firePaletteAction(page, item) {
       `command palette > ${item.label} is disabled in this project state`,
     );
   }
-  const escaped = item.label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  // Scoped to the palette: Cut, Copy, Export, Joy Code and others also name buttons elsewhere on the page.
+  // The row is picked by its place in the list: "Export" is also the start of "Export Editable Project…", and
+  // Cut, Copy, Joy Code and others name buttons elsewhere on the page too.
   try {
     await page
       .locator(SEL.palette)
-      .getByRole('button', { name: new RegExp(`^${escaped}(?:\\s|$)`, 'u') })
-      .first()
+      .locator('button')
+      .nth(palette.items.indexOf(found))
       .click({ timeout: 8_000 });
   } catch (error) {
     const after = await page
