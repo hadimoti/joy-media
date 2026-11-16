@@ -988,6 +988,13 @@ async function checkShortcut(page, ctx, rowId, row, chord) {
     }
     const selection = page.locator('.monitor-selection-overlay polygon').first();
     if (row.keys.includes('Monitor picture') && !(await selection.isVisible().catch(() => false))) {
+      // The keys act on the selected picture: put a clip on a fresh project and select it, which draws its box.
+      if (ctx.media) {
+        const state = await ensureTimelineClip(page, ctx, rowId, { fresh: true });
+        await selectClipById(page, state.clips[0].id);
+      }
+    }
+    if (row.keys.includes('Monitor picture') && !(await selection.isVisible().catch(() => false))) {
       await pressChord(page, chord);
       throw notReachable(rowId, `${row.keys}: select a text or picture in the Monitor first`);
     }
