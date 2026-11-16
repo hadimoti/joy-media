@@ -70,6 +70,99 @@ describe('timeline OS-drop placement', () => {
     ]);
   });
 
+  it('adds media to an empty timeline without inventing a clip before the drop time', () => {
+    const target = baseComposition({ tracks: [] });
+    const transaction = buildTimelineMediaImportTransaction(
+      target,
+      [media('empty-timeline', 'video', 10_000_000)],
+      0,
+      new Set(),
+      (asset) => `clip-${asset.id}`,
+      { mode: 'new-track', startUs: 12_000_000 },
+    );
+
+    expect(transaction.commands).toContainEqual(
+      expect.objectContaining({
+        type: 'timeline.insertClip',
+        payload: expect.objectContaining({
+          trackId: 'V1',
+          clip: expect.objectContaining({ id: 'clip-empty-timeline', startUs: 12_000_000 }),
+        }),
+      }),
+    );
+  });
+
+  it('never places a file on a locked target track', () => {
+    const target = baseComposition({ tracks: [track('V1', 0)] });
+    const transaction = buildTimelineMediaImportTransaction(
+      target,
+      [media('locked-drop', 'video', 1_000_000)],
+      0,
+      new Set(['V1']),
+      (asset) => `clip-${asset.id}`,
+      { mode: 'timeline-track', startUs: 2_000_000, targetTrackId: 'V1' },
+    );
+
+    expect(transaction.commands).toContainEqual(
+      expect.objectContaining({ type: 'timeline.addTrack' }),
+    );
+    expect(transaction.commands).toContainEqual(
+      expect.objectContaining({
+        type: 'timeline.insertClip',
+        payload: expect.objectContaining({ trackId: 'V2' }),
+      }),
+    );
+    expect(transaction.commands).not.toContainEqual(
+      expect.objectContaining({
+        type: 'timeline.insertClip',
+        payload: expect.objectContaining({ trackId: 'V1' }),
+      }),
+    );
+  });
+
+  it('places a ten-minute clip with its full duration', () => {
+    const transaction = buildTimelineMediaImportTransaction(
+      baseComposition(),
+      [media('long-drop', 'video', 600_000_000)],
+      0,
+      new Set(),
+      (asset) => `clip-${asset.id}`,
+      { mode: 'timeline-track', startUs: 0, targetTrackId: 'V1' },
+    );
+
+    expect(transaction.commands).toContainEqual(
+      expect.objectContaining({
+        type: 'timeline.insertClip',
+        payload: expect.objectContaining({
+          clip: expect.objectContaining({ durationUs: 600_000_000 }),
+        }),
+      }),
+    );
+  });
+
+  it('gives a duplicate asset drop a distinct clip id', () => {
+    const target = baseComposition({
+      tracks: [track('V1', 0, [{ id: 'clip-same', startUs: 0, durationUs: 1_000_000 }])],
+    });
+    const transaction = buildTimelineMediaImportTransaction(
+      target,
+      [media('same', 'video', 1_000_000)],
+      0,
+      new Set(),
+      () => 'clip-same',
+      { mode: 'timeline-track', startUs: 2_000_000, targetTrackId: 'V1' },
+    );
+
+    expect(transaction.commands).toContainEqual(
+      expect.objectContaining({
+        type: 'timeline.insertClip',
+        payload: expect.objectContaining({
+          clip: expect.objectContaining({ id: 'clip-same-2' }),
+        }),
+      }),
+    );
+  });
+
   it('uses the first free visual track for a monitor drop at the playhead', () => {
     const target = baseComposition({
       tracks: [track('V1', 0, [{ id: 'busy', startUs: 0, durationUs: 2_000_000 }]), track('V2', 1)],
