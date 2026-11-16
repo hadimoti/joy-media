@@ -14,7 +14,27 @@ export interface PreviewRuleInput {
   readonly adjustedVsDefaultMeanDiffs: readonly number[];
 }
 
-export const PREVIEW_VISIBLE_MEAN_DIFF = 0.1;
+export const PREVIEW_VISIBLE_MEAN_DIFF = 1.0;
+export const PARAMETER_VISIBLE_MEAN_DIFF = 1.0;
+export const KEYFRAME_VISIBLE_MEAN_DIFF = 0.4;
+
+export function visiblePixelChange(meanAbsDiff: number, changedPixels: number): boolean {
+  return changedPixels > 0 && meanAbsDiff > PARAMETER_VISIBLE_MEAN_DIFF;
+}
+
+export function keyframeChangesMiddle(
+  midVsStartMeanDiff: number,
+  midVsStartChangedPixels: number,
+  midVsEndMeanDiff: number,
+  midVsEndChangedPixels: number,
+): boolean {
+  return (
+    midVsStartChangedPixels > 0 &&
+    midVsEndChangedPixels > 0 &&
+    midVsStartMeanDiff > KEYFRAME_VISIBLE_MEAN_DIFF &&
+    midVsEndMeanDiff > KEYFRAME_VISIBLE_MEAN_DIFF
+  );
+}
 
 export function previewAccepted(input: PreviewRuleInput): {
   accepted: boolean;

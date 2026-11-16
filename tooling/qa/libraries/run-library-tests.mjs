@@ -599,6 +599,11 @@ async function main() {
         if (!browserResult.resetUndoRedo.passed) {
           failureReasons.push(`Reset/Undo/Redo failed: ${browserResult.resetUndoRedo.reason}`);
         }
+        if (!browserResult.resetUndoRedo.resetToBeforeOk) {
+          failureReasons.push(
+            `Reset to Before left a pixel delta of ${browserResult.resetUndoRedo.resetToBeforeMeanDiff.toFixed(2)} (allowed 0.50)`,
+          );
+        }
         if (!browserResult.keyframes.passed) {
           failureReasons.push(
             `Keyframes mid frame did not differ from both ends (startΔ=${browserResult.keyframes.midVsStartMeanDiff.toFixed(3)}, endΔ=${browserResult.keyframes.midVsEndMeanDiff.toFixed(3)})`,

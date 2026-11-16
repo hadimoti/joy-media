@@ -204,6 +204,38 @@ describe('library test harness metadata and reporting', () => {
     expect(markdown).toContain('**PASS**');
   });
 
+  it('puts each failure reason in the results table', () => {
+    const markdown = buildLibraryMarkdownReport({
+      kind: 'effects',
+      generatedAt: '2026-11-14T00:00:00.000Z',
+      gitCommit: 'deadbeef',
+      previewResolution: { width: 960, height: 540 },
+      benchmarkResolution: { width: 1920, height: 1080 },
+      exportDurationSec: 2,
+      exportFps: 30,
+      knownTestFramePath: 'known-test-frame-1080p.png',
+      items: [
+        {
+          id: 'crt',
+          label: 'CRT',
+          passed: false,
+          failureReasons: ['Export frame delta 14.46 exceeds 12.00'],
+          preview: { passed: true, vsBeforeMeanDiff: 29.7 },
+          exportComparison: { ok: false, error: 'Export delta 14.46 exceeds 12.00' },
+          paramChecks: [],
+          resetUndoRedo: { passed: true },
+          keyframes: { skipped: true, policy: 'no', reason: 'fixed', passed: true },
+          perf1080p: { meanMsPerFrame: 10 },
+          consoleErrors: [],
+          pageErrors: [],
+        },
+      ],
+    });
+
+    expect(markdown).toContain('| Status | Failure reason |');
+    expect(markdown).toContain('**FAIL** | Export frame delta 14.46 exceeds 12.00 |');
+  });
+
   it('reports the transition progress check from real values and keeps the known limits', () => {
     const transitionItem = (progressPassed: boolean) => ({
       id: 'gl:fade',
