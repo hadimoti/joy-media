@@ -857,6 +857,78 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     );
   });
 
+  it('finds models right after Connect saved the profile, without asking for the acknowledgement again', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'https://custom.example/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    let stored: readonly unknown[] = [];
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return stored;
+      if (channel === 'desktop.provider-profile.save') {
+        stored = [savedLocal];
+        return savedLocal;
+      }
+      if (channel === 'desktop.provider.models') return [{ id: 'llama3' }];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.save',
+        'desktop.provider.models',
+      ],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const rendered = await render(client(), undefined);
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openai-compatible');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    const model = rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!baseUrl || !model || !key || !consent)
+      throw new Error('Expected the custom endpoint fields');
+    await act(async () => {
+      setInputValue(baseUrl, 'https://custom.example/v1');
+      setInputValue(model, 'llama3');
+      setInputValue(key, 'local-key');
+      consent.click();
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      const drawer = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes(SETTINGS_MODELS.modelsTitle),
+      );
+      drawer?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      const discover = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes(SETTINGS_MODELS.findModels),
+      );
+      discover?.click();
+      await Promise.resolve();
+    });
+
+    expect(rendered.textContent).not.toContain(
+      'Enter the custom-provider acknowledgement before discovering models.',
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      'desktop.provider.models',
+      expect.objectContaining({ id: 'prof-local' }),
+    );
+  });
+
   it('clears a key typed for one provider when the provider changes', async () => {
     const invoke = vi.fn().mockResolvedValue([]);
     window.joyDesktop = {

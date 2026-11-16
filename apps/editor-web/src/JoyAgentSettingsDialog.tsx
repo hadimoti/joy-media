@@ -402,6 +402,19 @@ export function JoyAgentSettingsDialog({
   const [mediaProbeWorking, setMediaProbeWorking] = useState(false);
   const [mediaProbeNotice, setMediaProbeNotice] = useState<AgentSettingsNotice | undefined>();
 
+  // A ticked acknowledgement follows the saved profile the form describes. It was recorded before Connect
+  // saved the profile (no profile id yet), so once the profile exists it is recorded for it too; without
+  // this the box stayed ticked while Find models and Connect asked for the acknowledgement again.
+  const matchedProfileId = matchedProfile?.id;
+  useEffect(() => {
+    if (!customDisclosure || !requiresCustomEndpointConsent(provider, baseUrl)) return;
+    acknowledgeCustomEndpoint({
+      provider: 'custom',
+      baseUrl: normalizeProviderBaseUrl(baseUrl),
+      profileId: matchedProfileId,
+    });
+  }, [customDisclosure, provider, baseUrl, matchedProfileId]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
