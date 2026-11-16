@@ -625,8 +625,10 @@ describe('editor QC adapter', () => {
       ...IDENTITY,
       isCurrent: () => true,
       getTimeline: () => ({
-        rootCompositionId: 'root',
-        compositions: { root: { tracks: [{ clips: [{ startUs: 0, durationUs: 1_000_000 }] }] } },
+        rootCompositionId: 'composition-1',
+        compositions: {
+          'composition-1': { tracks: [{ clips: [{ startUs: 0, durationUs: 1_000_000 }] }] },
+        },
       }),
       isCachedImageSupported: () => true,
       isPrivacyModeAllowed: () => true,
@@ -638,6 +640,87 @@ describe('editor QC adapter', () => {
       ok: false,
       code: 'composition-unavailable',
     });
+  });
+
+  it('turns a throwing composition loader into composition-unavailable', async () => {
+    const adapter = createEditorQcAdapter({
+      ...IDENTITY,
+      isCurrent: () => true,
+      getTimeline: () => ({
+        rootCompositionId: 'composition-1',
+        compositions: {
+          'composition-1': { tracks: [{ clips: [{ startUs: 0, durationUs: 1_000_000 }] }] },
+        },
+      }),
+      getComposition: () => {
+        throw new Error('capture unavailable');
+      },
+      isCachedImageSupported: () => true,
+      isPrivacyModeAllowed: () => true,
+    });
+
+    await expect(adapter.runTimelineCheck(new AbortController().signal)).resolves.toMatchObject({
+      ok: false,
+      code: 'composition-unavailable',
+    });
+  });
+
+  it('releases a composition after successful and failed samples, swallowing cleanup errors', async () => {
+    const released = vi.fn(() => {
+      throw new Error('cleanup failed');
+    });
+    const timeline: QcTimelineSource = {
+      durationUs: 1_000_000,
+      cutTimesUs: [],
+      textBoxes: [],
+      composition: fakeComposition(),
+    };
+    const successful = createQcHostAdapter({
+      evidenceStore: createEvidenceStore(),
+      identity: () => IDENTITY,
+      timeline: () => timeline,
+      sampler: {
+        sample: async ({ plan }) => ({
+          status: 'captured',
+          frameIds: plan.frameIds,
+          coverage: plan.coverage,
+          textChecks: [],
+        }),
+      },
+      isCachedImageSupported: () => false,
+      isPrivacyModeAllowed: () => false,
+      releaseComposition: released,
+      digest: async () => 'c'.repeat(64),
+    });
+
+    await expect(successful.runTimelineCheck(new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(released).toHaveBeenCalledTimes(1);
+
+    const failedRelease = vi.fn(() => {
+      throw new Error('cleanup failed after failed sample');
+    });
+    const failed = createQcHostAdapter({
+      evidenceStore: createEvidenceStore(),
+      identity: () => IDENTITY,
+      timeline: () => timeline,
+      sampler: {
+        sample: async () => {
+          throw new Error('sample failed');
+        },
+      },
+      isCachedImageSupported: () => false,
+      isPrivacyModeAllowed: () => false,
+      releaseComposition: failedRelease,
+      digest: async () => 'c'.repeat(64),
+    });
+
+    await expect(failed.runTimelineCheck(new AbortController().signal)).resolves.toMatchObject({
+      ok: false,
+      code: 'sampling-failed',
+    });
+    expect(failedRelease).toHaveBeenCalledTimes(1);
   });
 
   it('reads the drawn text boxes from the host each time it checks the timeline', async () => {

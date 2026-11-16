@@ -31,6 +31,7 @@ import { AgentTimelineCanvas } from './AgentTimelineCanvas.js';
 import { extractPendingChanges } from './agent-plan-visualizer.js';
 import { saveWorkflow } from './workflow-recorder.js';
 import type { EditorSession } from './editor-session.js';
+import type { IsolatedCompositionCapture } from './media-observation/isolated-composition-capture.js';
 import type { ProjectWriterStorage } from './project-writer.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import {
@@ -580,6 +581,7 @@ export function AgentPanel({
   agentPreviewStore,
   observationAdapterFactory,
   resolveAudioAssetUrl,
+  loadProjectAssetBlob,
   storage,
   onOpenSettings,
   generatedMedia,
@@ -620,6 +622,7 @@ export function AgentPanel({
    * hidden.
    */
   readonly resolveAudioAssetUrl?: (assetId: string) => Promise<string>;
+  readonly loadProjectAssetBlob?: (assetId: string) => Promise<Blob | undefined>;
   /** Writer-fenced browser persistence owned by the writable editor root. */
   readonly storage: ProjectWriterStorage;
   readonly onOpenSettings?: () => void;
@@ -632,6 +635,30 @@ export function AgentPanel({
   /** Moves the editor playhead (microseconds). A QC report card's timecodes call it. */
   readonly onSeek?: (timeUs: number) => void;
 }) {
+  const createQcCompositionPorts = () => {
+    let capture: IsolatedCompositionCapture | undefined;
+    return {
+      ...(loadProjectAssetBlob === undefined
+        ? {}
+        : {
+            getComposition: async () => {
+              const { createIsolatedCompositionCapture } =
+                await import('./media-observation/isolated-composition-capture.js');
+              const savedSession = latestSessionRef.current;
+              capture = createIsolatedCompositionCapture({
+                visualProject: savedSession.visualProject,
+                timelineProject: savedSession.timelineProject,
+                loadProjectAssetBlob,
+              });
+              return capture.composition;
+            },
+            releaseComposition: () => {
+              capture?.release();
+              capture = undefined;
+            },
+          }),
+    };
+  };
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
   const handledCommandRef = useRef<number | undefined>(undefined);
@@ -1591,6 +1618,7 @@ export function AgentPanel({
       },
       createQcAdapter: (scope) =>
         createEditorQcAdapter({
+          ...createQcCompositionPorts(),
           runId: scope.runId,
           projectId: latestSessionRef.current.visualProject.id,
           revision: scope.revision,
@@ -2248,6 +2276,7 @@ export function AgentPanel({
             // The QC tools keep their original guard: an edit during the run refuses the check.
             qcAdapter = createEditorQcAdapter({
               ...qcAdapterInput,
+              ...createQcCompositionPorts(),
               isCurrent: () =>
                 activeModelRunIdRef.current === runId &&
                 latestSessionRef.current.visualProject.id === contextInput.projectId &&
@@ -2257,6 +2286,7 @@ export function AgentPanel({
             // It has its own adapter: the QC tools above never see this relaxed identity.
             const repairQcAdapter = createEditorQcAdapter({
               ...qcAdapterInput,
+              ...createQcCompositionPorts(),
               getRevision: () => latestSessionRef.current.projectRevisionId,
               isCurrent: () =>
                 activeModelRunIdRef.current === runId &&

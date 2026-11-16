@@ -169,7 +169,8 @@ export interface QcFrameTransport {
 export interface QcHostAdapterDeps {
   readonly evidenceStore: EvidenceStore;
   readonly identity: () => QcHostIdentity | undefined;
-  readonly timeline: () => QcTimelineSource | undefined;
+  readonly timeline: () => QcTimelineSource | undefined | Promise<QcTimelineSource | undefined>;
+  readonly releaseComposition?: () => void | Promise<void>;
   readonly sampler?: {
     sample(request: TimelineQcSampleRequest): Promise<TimelineQcSampleResult>;
   };
@@ -309,107 +310,134 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
     const identity = deps.identity();
     if (identity === undefined)
       return failure('authority-unavailable', 'The project changed, so no check was started.');
-    const source = deps.timeline();
-    if (source === undefined || source.composition === undefined || deps.sampler === undefined)
-      return failure(
-        'composition-unavailable',
-        'This build cannot capture composed frames of the cut yet, so no timeline check ran.',
-      );
-
-    const ranges =
-      rangesInput === undefined ? undefined : clampRanges(rangesInput, source.durationUs);
-    if (ranges !== undefined && ranges.length === 0)
-      return failure('sampling-failed', 'There is no part of the cut to check again.');
-    const inRanges = (startUs: number, endUs: number): boolean =>
-      ranges === undefined ||
-      ranges.some((range) =>
-        startUs === endUs
-          ? startUs >= range.startUs && startUs < range.endUs
-          : startUs < range.endUs && endUs > range.startUs,
-      );
-    const textBoxes = source.textBoxes.filter((box) => inRanges(box.startUs, box.endUs));
-    const cutTimesUs = source.cutTimesUs.filter((timeUs) => inRanges(timeUs, timeUs));
-
-    let plan: ReturnType<typeof planTimelineQcSampling>;
     try {
-      plan = planTimelineQcSampling({
-        durationUs: source.durationUs,
-        cutTimesUs,
-        textBoxes,
-        maxFrames: MAX_QC_REPORT_FRAMES,
-        strategy:
-          ranges === undefined
-            ? {
-                kind: 'evenly-spaced-plus-cuts',
-                count: Math.min(evenCount, Math.max(1, source.durationUs)),
-              }
-            : { kind: 'times', timesUs: [...timesInsideRanges(ranges, evenCount), ...cutTimesUs] },
-      });
-    } catch {
-      return failure('sampling-failed', 'The cut could not be planned for sampling.');
-    }
+      let source: QcTimelineSource | undefined;
+      try {
+        source = await deps.timeline();
+      } catch {
+        return failure(
+          'composition-unavailable',
+          'This build cannot capture composed frames of the cut yet, so no timeline check ran.',
+        );
+      }
+      if (source === undefined || source.composition === undefined || deps.sampler === undefined)
+        return failure(
+          'composition-unavailable',
+          'This build cannot capture composed frames of the cut yet, so no timeline check ran.',
+        );
 
-    counter += 1;
-    const reportId = `qc-report-${identity.runId}-${counter}`;
-    const scope = {
-      runId: identity.runId,
-      identity: {
+      const ranges =
+        rangesInput === undefined ? undefined : clampRanges(rangesInput, source.durationUs);
+      if (ranges !== undefined && ranges.length === 0)
+        return failure('sampling-failed', 'There is no part of the cut to check again.');
+      const inRanges = (startUs: number, endUs: number): boolean =>
+        ranges === undefined ||
+        ranges.some((range) =>
+          startUs === endUs
+            ? startUs >= range.startUs && startUs < range.endUs
+            : startUs < range.endUs && endUs > range.startUs,
+        );
+      const textBoxes = source.textBoxes.filter((box) => inRanges(box.startUs, box.endUs));
+      const cutTimesUs = source.cutTimesUs.filter((timeUs) => inRanges(timeUs, timeUs));
+
+      let plan: ReturnType<typeof planTimelineQcSampling>;
+      try {
+        plan = planTimelineQcSampling({
+          durationUs: source.durationUs,
+          cutTimesUs,
+          textBoxes,
+          maxFrames: MAX_QC_REPORT_FRAMES,
+          strategy:
+            ranges === undefined
+              ? {
+                  kind: 'evenly-spaced-plus-cuts',
+                  count: Math.min(evenCount, Math.max(1, source.durationUs)),
+                }
+              : {
+                  kind: 'times',
+                  timesUs: [...timesInsideRanges(ranges, evenCount), ...cutTimesUs],
+                },
+        });
+      } catch {
+        return failure('sampling-failed', 'The cut could not be planned for sampling.');
+      }
+
+      counter += 1;
+      const reportId = `qc-report-${identity.runId}-${counter}`;
+      const scope = {
+        runId: identity.runId,
+        identity: {
+          projectId: identity.projectId,
+          assetDigest: await digest(`${identity.projectId}:${identity.revision}:timeline`),
+          projectRevision: identity.revision,
+          modelId: identity.modelId.length > 0 ? identity.modelId : QC_FALLBACK_MODEL_ID,
+          promptPolicyDigest:
+            identity.promptPolicyDigest.length > 0 ? identity.promptPolicyDigest : QC_POLICY_DIGEST,
+        },
+      };
+      const lookup: EvidenceManifestLookup = { manifestId: `timeline-${reportId}`, scope };
+      try {
+        deps.evidenceStore.createManifest({
+          id: lookup.manifestId,
+          scope,
+          mode: 'overview',
+          persistence: 'ephemeral',
+          intendedFrameIdPages: chunk(plan.frameIds, 512),
+        });
+      } catch {
+        return failure(
+          'sampling-failed',
+          'JOY could not open a private frame store for this check.',
+        );
+      }
+
+      let result: TimelineQcSampleResult;
+      try {
+        result = await deps.sampler.sample({
+          plan,
+          composition: source.composition,
+          evidenceStore: deps.evidenceStore,
+          evidenceLookup: lookup,
+          signal,
+        });
+      } catch {
+        return failure('sampling-failed', 'The cut could not be sampled, so there is no report.');
+      }
+      if (result.status === 'cancelled') return failure('cancelled', 'The check was cancelled.');
+      if (result.status !== 'captured')
+        return failure('sampling-failed', 'The cut could not be sampled, so there is no report.');
+
+      const built = buildTimelineReport({
+        reportId,
         projectId: identity.projectId,
-        assetDigest: await digest(`${identity.projectId}:${identity.revision}:timeline`),
-        projectRevision: identity.revision,
-        modelId: identity.modelId.length > 0 ? identity.modelId : QC_FALLBACK_MODEL_ID,
-        promptPolicyDigest:
-          identity.promptPolicyDigest.length > 0 ? identity.promptPolicyDigest : QC_POLICY_DIGEST,
-      },
-    };
-    const lookup: EvidenceManifestLookup = { manifestId: `timeline-${reportId}`, scope };
-    try {
-      deps.evidenceStore.createManifest({
-        id: lookup.manifestId,
-        scope,
-        mode: 'overview',
-        persistence: 'ephemeral',
-        intendedFrameIdPages: chunk(plan.frameIds, 512),
+        createdAt: new Date(now()).toISOString(),
+        durationUs: source.durationUs,
+        timesUs: plan.timesUs,
+        coverage: plan.coverage,
+        missedCutTimesUs: plan.missedCutTimesUs,
+        textChecks: result.textChecks,
       });
-    } catch {
-      return failure('sampling-failed', 'JOY could not open a private frame store for this check.');
+      remember(reportId, {
+        // A re-check says which parts it looked at; a full check keeps its old shape.
+        report:
+          ranges === undefined
+            ? built
+            : Object.freeze({
+                ...built,
+                checkedRanges: ranges.map((range) => ({ ...range })),
+              }),
+        lookup,
+        frameIds: new Set(plan.frameIds),
+        approvedFrameIds: new Set(),
+      });
+      return { ok: true, reportId };
+    } finally {
+      try {
+        await deps.releaseComposition?.();
+      } catch {
+        // Capture cleanup is best-effort and must not alter the check result.
+      }
     }
-
-    const result = await deps.sampler.sample({
-      plan,
-      composition: source.composition,
-      evidenceStore: deps.evidenceStore,
-      evidenceLookup: lookup,
-      signal,
-    });
-    if (result.status === 'cancelled') return failure('cancelled', 'The check was cancelled.');
-    if (result.status !== 'captured')
-      return failure('sampling-failed', 'The cut could not be sampled, so there is no report.');
-
-    const built = buildTimelineReport({
-      reportId,
-      projectId: identity.projectId,
-      createdAt: new Date(now()).toISOString(),
-      durationUs: source.durationUs,
-      timesUs: plan.timesUs,
-      coverage: plan.coverage,
-      missedCutTimesUs: plan.missedCutTimesUs,
-      textChecks: result.textChecks,
-    });
-    remember(reportId, {
-      // A re-check says which parts it looked at; a full check keeps its old shape.
-      report:
-        ranges === undefined
-          ? built
-          : Object.freeze({
-              ...built,
-              checkedRanges: ranges.map((range) => ({ ...range })),
-            }),
-      lookup,
-      frameIds: new Set(plan.frameIds),
-      approvedFrameIds: new Set(),
-    });
-    return { ok: true, reportId };
   };
 
   const checkAndStore = (
@@ -655,7 +683,9 @@ export interface EditorQcAdapterInput {
   readonly isCachedImageSupported: () => boolean;
   readonly isPrivacyModeAllowed: () => boolean;
   /** The host's composition request. Absent today; see the note at the top of this file. */
-  readonly getComposition?: () => QcTimelineSource['composition'];
+  readonly getComposition?: () =>
+    QcTimelineSource['composition'] | Promise<QcTimelineSource['composition']>;
+  readonly releaseComposition?: () => void | Promise<void>;
   /**
    * The drawn title and caption boxes, normalized (see `projectTextLayoutBounds`). Absent today: no host
    * measures them yet, so QC runs without box checks until one does (T-B06).
@@ -683,12 +713,22 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
             promptPolicyDigest: input.promptPolicyDigest,
           }
         : undefined,
-    timeline: () =>
-      qcTimelineSourceFromTimeline(
+    timeline: async () => {
+      let composition: QcTimelineSource['composition'];
+      try {
+        composition = await input.getComposition?.();
+      } catch {
+        composition = undefined;
+      }
+      return qcTimelineSourceFromTimeline(
         input.getTimeline(),
-        input.getComposition?.(),
+        composition,
         input.getTextBoxes?.() ?? [],
-      ),
+      );
+    },
+    ...(input.releaseComposition === undefined
+      ? {}
+      : { releaseComposition: input.releaseComposition }),
     sampler: createTimelineQcSampler(),
     isCachedImageSupported: input.isCachedImageSupported,
     isPrivacyModeAllowed: input.isPrivacyModeAllowed,
