@@ -155,10 +155,9 @@ describe('AgentPanel: QC report card', () => {
   it('shows the report as a card and moves the playhead from a finding', async () => {
     const onSeek = vi.fn();
     const host = await sendPrompt('Run a quality check on my film', onSeek);
-    // Two adapters per QC run: the tools' own (guarded by the run's revision) and the repair loop's (it follows
-    // the live revision after its own approved commits). Only the repair loop may have a live revision.
+    // Both adapters follow the live revision for this run; the repair loop is the one that commits it.
     expect(built).toHaveLength(2);
-    expect(built[0]!.getRevision).toBeUndefined();
+    expect(built[0]!.getRevision).toBeTypeOf('function');
     expect(built[1]!.getRevision).toBeTypeOf('function');
     expect(host.querySelector('[aria-label="QC report"]')).toBeNull();
 

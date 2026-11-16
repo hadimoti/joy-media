@@ -40,7 +40,6 @@ import {
   applyClipGradesToTransitionBitmaps,
   activeTransitionAt,
   colorGradeForClipAtTime,
-  findVideoClipById,
   renderFrameOptions,
   transitionClipTimes,
 } from '../preview-frame-helpers.js';
@@ -50,7 +49,10 @@ import { effectInstancesForTimelineClip } from '../adjustment-render.js';
 import { resolveObjectIdForSelection } from '../sticker-bindings.js';
 import { readImageMatteMap } from '../sticker-bindings.js';
 import { sourceTimeForTransitionSample } from '../transition-source-time.js';
-import { flattenRootTimelineVideoClips } from '../timeline-nested-playback.js';
+import {
+  flattenRootTimelineVideoClips,
+  type RootTimelineVideoClip,
+} from '../timeline-nested-playback.js';
 import { releaseMediaObjectUrl, revokeDetachedObjectUrl } from '../media-object-url.js';
 import { isExportVisualTimelineClip } from '../export-media-readiness.js';
 import { readVideoMaskSourceMap } from '../masking.js';
@@ -108,7 +110,8 @@ export function createIsolatedCompositionCapture(
   let rendererPromise: Promise<BrowserPixiRenderer> | undefined;
   let closed = false;
   const videoResources = new Map<string, VideoResource>();
-  const resourceKeyFor = (clip: VideoClip): string => `${clip.id}@${clip.startUs}`;
+  const resourceKeyFor = (clip: RootTimelineVideoClip): string =>
+    `${clip.id}@${clip.startUs}@${clip.compositionPath.join('/')}`;
   const colorLutResolver = createProjectColorLutResolver({
     project: visualProject,
     loadProjectAssetBlob: loader,
@@ -310,7 +313,14 @@ export function createIsolatedCompositionCapture(
     for (const id of transition === undefined
       ? []
       : [transition.leftClipId, transition.rightClipId]) {
-      const clip = findVideoClipById(timelineProject, id);
+      const clip =
+        candidates.find((item) => item.id === id || item.compositionPath?.includes(id)) ??
+        flattenRootTimelineVideoClips(timelineProject).find(
+          (item) =>
+            (item.id === id || item.compositionPath?.includes(id)) &&
+            timeUs >= item.startUs - (transition?.durationUs ?? 0) &&
+            timeUs < item.startUs + item.durationUs + (transition?.durationUs ?? 0),
+        );
       if (
         clip !== undefined &&
         !hidden.has(clip.id) &&
@@ -318,7 +328,7 @@ export function createIsolatedCompositionCapture(
           timelineElementKindForClip(clip, elementKinds),
           visualProject.assets[maskSources[clip.id] ?? clip.assetId]?.kind,
         ) &&
-        !candidates.some((item) => item.id === clip.id)
+        !candidates.some((item) => resourceKeyFor(item) === resourceKeyFor(clip))
       )
         candidates.push(clip);
     }
@@ -328,23 +338,50 @@ export function createIsolatedCompositionCapture(
         Number(timelineElementKindForClip(right, elementKinds) !== 'video'),
     );
     const neededKeys = new Set(candidates.map(resourceKeyFor));
+    const duplicateClipIds = new Set(
+      candidates
+        .filter((clip, index) => candidates.findIndex((item) => item.id === clip.id) !== index)
+        .map((clip) => clip.id),
+    );
     for (const clip of flattenRootTimelineVideoClips(timelineProject)) {
       const key = resourceKeyFor(clip);
-      if (!neededKeys.has(key) && timeUs > clip.startUs + clip.durationUs + 1_500_000)
+      const transitionEndUs = Math.max(
+        0,
+        ...(visualProject.transitions ?? [])
+          .filter(
+            (item) =>
+              item.leftClipId === clip.id || clip.compositionPath?.includes(item.leftClipId),
+          )
+          .map((item) => clip.startUs + clip.durationUs + item.durationUs),
+      );
+      if (
+        !neededKeys.has(key) &&
+        timeUs > Math.max(clip.startUs + clip.durationUs, transitionEndUs)
+      )
         closeVideoResource(videoResources, key);
     }
     const bitmaps = new Map<string, ImageDataLike>();
     for (const clip of candidates) {
+      const nodeId = duplicateClipIds.has(clip.id) ? resourceKeyFor(clip) : clip.id;
       signal.throwIfAborted();
       const resource = await videoForClip(clip, signal);
       assertOpen(signal);
       const sourceUs = sourceTimeForTransitionSample(clip, timeUs, transition);
       if (resource.still !== undefined) {
         const bitmap = copyPixels(resource.still);
-        bitmaps.set(clip.id, bitmap);
+        bitmaps.set(nodeId, bitmap);
         nodes.push(
           videoFrameNodeFromDecoded(
-            videoClipSpecAt(visualProject, timelineProject, clip, timeUs, frame.viewport.height),
+            {
+              ...videoClipSpecAt(
+                visualProject,
+                timelineProject,
+                clip,
+                timeUs,
+                frame.viewport.height,
+              ),
+              id: nodeId,
+            },
             {
               assetId: maskSources[clip.id] ?? clip.assetId,
               bitmap,
@@ -359,10 +396,19 @@ export function createIsolatedCompositionCapture(
       if (resource.animated !== undefined) {
         const image = resource.animated.frameAt(sourceUs - clip.sourceInUs);
         const bitmap = copyPixels(image.bitmap);
-        bitmaps.set(clip.id, bitmap);
+        bitmaps.set(nodeId, bitmap);
         nodes.push(
           videoFrameNodeFromDecoded(
-            videoClipSpecAt(visualProject, timelineProject, clip, timeUs, frame.viewport.height),
+            {
+              ...videoClipSpecAt(
+                visualProject,
+                timelineProject,
+                clip,
+                timeUs,
+                frame.viewport.height,
+              ),
+              id: nodeId,
+            },
             {
               assetId: maskSources[clip.id] ?? clip.assetId,
               bitmap,
@@ -385,13 +431,30 @@ export function createIsolatedCompositionCapture(
         const key = resourceKeyFor(clip);
         activeResource = { ...resource, forward: undefined };
         videoResources.set(key, activeResource);
+        if (
+          resource.forward.seekTiming === undefined &&
+          fallbackSeekTiming.get(key) === undefined
+        ) {
+          const timingUrl = URL.createObjectURL(
+            await getBlob(readVideoMaskSourceMap(visualProject)[clip.id] ?? clip.assetId, signal),
+          );
+          try {
+            const timing = await import('../export-source-frame.js').then((module) =>
+              module.readSourceFrameTimingWithin(timingUrl, signal, EXPORT_PRELOAD_TIMEOUT_MS),
+            );
+            assertOpen(signal);
+            if (timing !== undefined) fallbackSeekTiming.set(key, timing);
+          } finally {
+            revokeDetachedObjectUrl(timingUrl);
+          }
+        }
       }
       const frameDecoded = decoded ?? (await activeResource.seek(sourceUs, timeUs, signal));
       assertOpen(signal);
       if (frameDecoded?.bitmap === undefined)
         throw new Error('Visible video frame could not be decoded');
       const bitmap = copyPixels(frameDecoded.bitmap);
-      bitmaps.set(clip.id, bitmap);
+      bitmaps.set(nodeId, bitmap);
       const copiedFrame = { ...frameDecoded, bitmap };
       const currentResource = videoResources.get(resourceKeyFor(clip)) ?? resource;
       const intrinsic =
@@ -403,7 +466,10 @@ export function createIsolatedCompositionCapture(
           : resource.forward!.size();
       nodes.push(
         videoFrameNodeFromDecoded(
-          videoClipSpecAt(visualProject, timelineProject, clip, timeUs, frame.viewport.height),
+          {
+            ...videoClipSpecAt(visualProject, timelineProject, clip, timeUs, frame.viewport.height),
+            id: nodeId,
+          },
           copiedFrame,
           intrinsic,
         ),
@@ -412,7 +478,10 @@ export function createIsolatedCompositionCapture(
     return { nodes, bitmaps };
   }
 
-  async function videoForClip(clip: VideoClip, signal: AbortSignal): Promise<VideoResource> {
+  async function videoForClip(
+    clip: RootTimelineVideoClip,
+    signal: AbortSignal,
+  ): Promise<VideoResource> {
     const key = resourceKeyFor(clip);
     const cached = videoResources.get(key);
     if (cached !== undefined) return cached;
@@ -487,7 +556,12 @@ export function createIsolatedCompositionCapture(
         timedOutOrReleased = true;
         forward = undefined;
       }
-      assertOpen(signal);
+      try {
+        assertOpen(signal);
+      } catch (error) {
+        forward?.close();
+        throw error;
+      }
     }
     if (forward === undefined) {
       const urlForTiming = URL.createObjectURL(blob);
@@ -514,12 +588,12 @@ export function createIsolatedCompositionCapture(
           video = document.createElement('video');
           url = URL.createObjectURL(blob);
           video.muted = true;
-          videoResources.set(key, { ...resource, video, url });
+          videoResources.set(key, { ...resource, forward: undefined, video, url });
           try {
             await loadDetachedVideo(video, url, seekSignal);
             assertOpen(seekSignal);
             decoder = createHtmlMediaDecoder(video, document.createElement('canvas'));
-            videoResources.set(key, { ...resource, video, decoder, url });
+            videoResources.set(key, { ...resource, forward: undefined, video, decoder, url });
           } catch (error) {
             closeVideoResource(videoResources, key);
             throw error;
@@ -633,7 +707,7 @@ function activeVideoClips(
   timeline: SpikeProject,
   project: JoyProjectV1,
   timeUs: number,
-): VideoClip[] {
+): RootTimelineVideoClip[] {
   const hidden = hiddenClipIds(timeline);
   const kinds = readTimelineElementKindMap(project);
   return flattenRootTimelineVideoClips(timeline).filter(
