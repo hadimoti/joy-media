@@ -10,9 +10,13 @@
  * BLOCKED or NOT REACHABLE. Each body's stopping point is printed as a diagnostic, so the reach is visible.
  */
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { MENU_SPEC, paletteSpec } from './actions.mjs';
 import { createFakePage } from './fake-page.mjs';
+import { PERSISTENCE_ROWS } from './desktop-persistence-steps.mjs';
 import { LIVE_ROWS } from './matrix.mjs';
 
 /** The label of a header menu, from the locator path: `filter({"hasText":"/^File$/u"})`. */
@@ -249,6 +253,126 @@ for (const row of LIVE_ROWS) {
     }
     t.diagnostic(`${row.id} made ${page.calls.length} page calls; stopped at: ${stoppedAt}`);
     // A body that refuses before it touches the page must say why (BLOCKED or NOT REACHABLE).
+    if (page.calls.length === 0) assert.match(stoppedAt, /^(BLOCKED|NOT REACHABLE) /u);
+  });
+}
+
+for (const row of PERSISTENCE_ROWS) {
+  // Smoke coverage only: the fake page verifies row wiring and file-input calls, not package downloads or app state.
+  test(`${row.id} body runs against the fake page without a programming error`, async (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'a09-row-body-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const downloadDir = join(root, 'downloads');
+    mkdirSync(downloadDir, { recursive: true });
+    const exportedPath = join(downloadDir, 'export.joyproject.json');
+    const packageContents = JSON.stringify({
+      media: [
+        { asset: { displayName: 'h264-16x9-audio.mp4' }, status: 'embedded', dataBase64: 'eA==' },
+      ],
+    });
+    const page = createFakePage({
+      answers: ({ path, method, fn }) => {
+        if (method === 'evaluate' && fn === 'readIds') {
+          return {
+            active: 'fake-project',
+            title: 'A09 fake project',
+            controlPlaneProjectId: 'fake-project',
+            bindingCount: 1,
+          };
+        }
+        if (method === 'evaluate' && fn === 'readTimeline') {
+          return JSON.stringify({ id: 'fake-project', compositions: { c: { tracks: [] } } });
+        }
+        if (method === 'click' && path.includes('Export Editable Project')) {
+          writeFileSync(exportedPath, packageContents, 'utf8');
+          utimesSync(exportedPath, new Date(), new Date());
+        }
+        return undefined;
+      },
+    });
+    let undone = false;
+    const baseline = {
+      id: 'fake-project',
+      compositions: { c: { tracks: [] } },
+    };
+    const storedBaseline = { assets: {} };
+    const overridden = {
+      ...baseline,
+      compositions: { c: { tracks: [{ clips: [{ id: 'new' }] }] } },
+    };
+    let stoppedAt = 'the body finished';
+    try {
+      await row.run(page, {
+        editDocument: async () => {},
+        fixtures: root,
+        outDir: root,
+        downloadDir,
+        undo: async () => {
+          undone = true;
+        },
+        async readDocument() {
+          return {
+            projectId: 'fake-project',
+            storedDocument: storedBaseline,
+            document:
+              row.id === 'D-A09-05' &&
+              !undone &&
+              page.calls.some((call) =>
+                call.includes('Use a different file for h264-16x9-audio.mp4'),
+              )
+                ? overridden
+                : baseline,
+          };
+        },
+        async restartApp() {
+          return {
+            page: createFakePage({
+              answers: ({ method, fn }) => {
+                if (method === 'evaluate' && fn === 'readIds') {
+                  return {
+                    active: 'fake-project',
+                    title: 'A09 fake project',
+                    controlPlaneProjectId: 'fake-project',
+                    bindingCount: 1,
+                  };
+                }
+                if (method === 'evaluate' && fn === 'readTimeline') {
+                  return JSON.stringify({
+                    id: 'fake-project',
+                    compositions: { c: { tracks: [] } },
+                  });
+                }
+                return undefined;
+              },
+            }),
+          };
+        },
+        shot: async () => 'fake.png',
+      });
+    } catch (error) {
+      stoppedAt = String(error?.message ?? error).split('\n')[0];
+      if (isProgrammingError(error)) {
+        assert.fail(`${row.id}: ${error.name}: ${error.message}`);
+      }
+    }
+    t.diagnostic(`${row.id} made ${page.calls.length} page calls; stopped at: ${stoppedAt}`);
+    if (row.id === 'D-A09-02') assert.match(stoppedAt, /^BLOCKED D-A09-02:/u);
+    if (row.id === 'D-A09-03') {
+      assert.ok(page.calls.some((call) => call.includes('.setInputFiles(')));
+      assert.ok(page.calls.some((call) => call.includes('waitForFunction(')));
+    }
+    if (row.id === 'D-A09-04' || row.id === 'D-A09-05') {
+      assert.ok(page.calls.some((call) => call.includes('setInputFiles')));
+      assert.ok(page.calls.some((call) => call.includes('waitForFunction(')));
+      assert.ok(page.calls.some((call) => call.includes('getByRole("button",{"name":"Review"')));
+      assert.ok(
+        page.calls.some((call) => call.includes('getByRole("dialog",{"name":"Missing media"')),
+      );
+      assert.ok(
+        page.calls.some((call) => call.includes(`${row.id}`) && call.includes('missing-media')),
+      );
+    }
+    if (row.id === 'D-A09-05') assert.equal(stoppedAt, 'the body finished');
     if (page.calls.length === 0) assert.match(stoppedAt, /^(BLOCKED|NOT REACHABLE) /u);
   });
 }

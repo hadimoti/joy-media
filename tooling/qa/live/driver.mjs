@@ -534,7 +534,7 @@ async function recordSignInPage(page, outDir) {
 }
 
 /** Launches the driver. A launch that throws still closes it, so the app lock is released and no app is left running. */
-async function launchOrClose(driver, options) {
+export async function launchOrClose(driver, options) {
   try {
     return await driver.launch(options);
   } catch (error) {

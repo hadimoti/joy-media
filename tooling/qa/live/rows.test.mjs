@@ -3,13 +3,19 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { abandonedRow, restartAppOnto, runRows } from './rows.mjs';
+import { abandonedRow, restartAppOnto, runRows, selectRows } from './rows.mjs';
 
 function scratchDir(t) {
   const dir = mkdtempSync(join(tmpdir(), 'live-rows-test-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
+
+test('row selection accepts the D-A09 desktop persistence ids and prefix', () => {
+  const rows = ['01', '02', '03'].map((suffix) => ({ id: `D-A09-${suffix}` }));
+  assert.deepEqual(selectRows(rows, ['D-A09-02']), [rows[1]]);
+  assert.deepEqual(selectRows(rows, ['D-A09-*']), rows);
+});
 
 test('a close failure fails the restart row and the rows after it are not run on the closed window', async (t) => {
   const outDir = scratchDir(t);
