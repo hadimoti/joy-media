@@ -472,7 +472,18 @@ export async function runInModes(page, ctx) {
     const problem = checkModeOutcome(mode.id, outcome, staged, baseline.clips);
     if (problem) throw new Error(`${mode.name}: ${problem}`);
     const entry = { mode: mode.id, baselineClips: baseline.clips, staged: { outcome, ...staged } };
-    // A preview that stays staged (Suggest only offers nothing to approve) blocks the next edit.
+    // Suggest only offers nothing to approve, and it must leave the timeline alone. Its preview stays
+    // staged and would block the next edit, so it is rejected here and the mode is done.
+    if (mode.id === 'suggest-only') {
+      entry.rejectedLeftoverPreview = await rejectLeftoverPreview(page);
+      const settled = await readJoyCodeSnapshot(page);
+      if (settled.clips !== baseline.clips)
+        throw new Error(`${mode.name}: rejecting changed the timeline`);
+      entry.afterApproval = settled;
+      results.push(entry);
+      continue;
+    }
+    // A reply that leaves a preview staged would block the next edit too.
     if (outcome !== 'proposal') entry.rejectedLeftoverPreview = await rejectLeftoverPreview(page);
 
     if (outcome === 'proposal') {
