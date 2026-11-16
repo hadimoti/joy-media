@@ -165,8 +165,8 @@ export function readModeCards() {
 
 const KEY_UNDO = 'Control+KeyZ';
 
-async function prep(t, minClips = 1) {
-  return ensureTimelineClip(t.page, t.ctx, t.rowId, { minClips });
+async function prep(t, minClips = 1, fresh = false) {
+  return ensureTimelineClip(t.page, t.ctx, t.rowId, { minClips, fresh });
 }
 
 async function selectBase(t, state) {
@@ -370,7 +370,8 @@ export const ACTION_CHECKS = {
   },
 
   'edit.undo': async (t) => {
-    const state = await prep(t);
+    // A new project each time: clips left by earlier rows put a transition button over the one to click.
+    const state = await prep(t, 1, true);
     await selectBase(t, state);
     const count = state.clips.length;
     // Focus off any field, so the key reaches the editor (a palette row leaves it in the page's input).
@@ -383,7 +384,8 @@ export const ACTION_CHECKS = {
   },
 
   'edit.redo': async (t) => {
-    const state = await prep(t);
+    // A new project each time: clips left by earlier rows put a transition button over the one to click.
+    const state = await prep(t, 1, true);
     await selectBase(t, state);
     const count = state.clips.length;
     // Focus off any field, so the key reaches the editor (a palette row leaves it in the page's input).
@@ -403,7 +405,8 @@ export const ACTION_CHECKS = {
   },
 
   'clip.delete': async (t) => {
-    const state = await prep(t);
+    // A new project each time: clips left by earlier rows put a transition button over the one to click.
+    const state = await prep(t, 1, true);
     await selectBase(t, state);
     const count = state.clips.length;
     await t.fire();
@@ -417,7 +420,8 @@ export const ACTION_CHECKS = {
   },
 
   'clip.duplicate': async (t) => {
-    const state = await prep(t);
+    // A new project each time: clips left by earlier rows put a transition button over the one to click.
+    const state = await prep(t, 1, true);
     await selectBase(t, state);
     const count = state.clips.length;
     await t.fire();
@@ -435,7 +439,8 @@ export const ACTION_CHECKS = {
   },
 
   'clip.cut': async (t) => {
-    const state = await prep(t);
+    // A new project each time: clips left by earlier rows put a transition button over the one to click.
+    const state = await prep(t, 1, true);
     await selectBase(t, state);
     const count = state.clips.length;
     await t.fire();
@@ -446,7 +451,8 @@ export const ACTION_CHECKS = {
   },
 
   'clip.copy': async (t) => {
-    const state = await prep(t);
+    // A new project each time: clips left by earlier rows put a transition button over the one to click.
+    const state = await prep(t, 1, true);
     await selectBase(t, state);
     const count = state.clips.length;
     await t.fire();
@@ -459,7 +465,8 @@ export const ACTION_CHECKS = {
   },
 
   'clip.paste': async (t) => {
-    const state = await prep(t);
+    // A new project each time: clips left by earlier rows put a transition button over the one to click.
+    const state = await prep(t, 1, true);
     await selectBase(t, state);
     const count = state.clips.length;
     await t.page.keyboard.press('Control+KeyC');
@@ -471,7 +478,8 @@ export const ACTION_CHECKS = {
   },
 
   'clip.split': async (t) => {
-    const state = await prep(t);
+    // A new project each time: clips left by earlier rows put a transition button over the one to click.
+    const state = await prep(t, 1, true);
     await selectBase(t, state);
     const count = state.clips.length;
     // The playhead goes one second in, inside the clip, with the clip still selected.
@@ -486,7 +494,8 @@ export const ACTION_CHECKS = {
   },
 
   'clip.speed': async (t) => {
-    const state = await prep(t);
+    // A new project each time: clips left by earlier rows put a transition button over the one to click.
+    const state = await prep(t, 1, true);
     await selectBase(t, state);
     await t.fire();
     const tab = t.page.locator('button[role="tab"][data-panel-tab-id="speed"]').first();
