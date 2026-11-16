@@ -31,6 +31,7 @@ export function createFakeApp(options = {}) {
     panelOpen: false,
     settingsOpen: false,
     settingsPage: 'AI models',
+    endpointOpen: false,
     provider: '',
     url: '',
     key: '',
@@ -56,6 +57,7 @@ export function createFakeApp(options = {}) {
     hello: false,
     slow: false,
     cancelled: false,
+    safeStop: false,
     ipc: [],
   };
   const calls = [];
@@ -81,6 +83,7 @@ export function createFakeApp(options = {}) {
     } else if (text.startsWith('STUB-PLAN')) {
       state.stage = 'none';
       state.orphanApproval = false;
+      state.safeStop = options.safeStopMode === state.mode;
       if (options.orphanApprovalMode === state.mode) {
         state.orphanApproval = true;
         state.messages += 1;
@@ -104,6 +107,7 @@ export function createFakeApp(options = {}) {
     const tail = last(desc);
     const inDialog = desc.includes('role=dialog[Joy Code Settings]');
     if (tail === 'role=dialog[Joy Code Settings]') return state.settingsOpen;
+    if (tail.includes('Joy Code could not finish this run safely')) return state.safeStop;
     if (inDialog && !state.settingsOpen) return false;
     if (tail.startsWith('role=textbox[Message Joy Code]')) return state.panelOpen;
     if (tail.includes('Enter the custom-provider acknowledgement before connecting'))
@@ -150,6 +154,7 @@ export function createFakeApp(options = {}) {
     if (tail.includes('.joy-code-message')) return state.messages;
     if (tail.includes('role=button[Stop current plan]'))
       return state.slow && !state.cancelled ? 1 : 0;
+    if (tail.includes('role=button[Stop]')) return state.slow && !state.cancelled ? 1 : 0;
     if (tail.includes('agent-slot-card')) return 2;
     return visible(desc) ? 1 : 0;
   }
@@ -165,6 +170,8 @@ export function createFakeApp(options = {}) {
       /role=button\[(AI models|Safety and limits)\]/u.test(tail)
     ) {
       state.settingsPage = /\[(AI models|Safety and limits)\]/u.exec(tail)[1];
+    } else if (tail.includes('Connection and sign-in')) {
+      state.endpointOpen = !state.endpointOpen;
     } else if (tail.startsWith('role=button[Connect model]')) {
       if (state.consentUrl !== state.url) state.notice = 'connect-refusal';
       else if (state.url.startsWith('http://127.0.0.1')) {
@@ -205,7 +212,7 @@ export function createFakeApp(options = {}) {
     } else if (tail.includes('Undo run')) {
       state.stage = 'reverted';
       state.clips -= 1;
-    } else if (tail.startsWith('role=button[Stop current plan]')) {
+    } else if (tail.startsWith('role=button[Stop current plan]') || tail === 'role=button[Stop]') {
       state.cancelled = true;
       state.slow = false;
     } else if (/role=button\[\/\^Remove/u.test(tail)) {
@@ -341,6 +348,9 @@ class FakeLocator {
   }
 
   async getAttribute(name) {
+    if (name === 'aria-expanded' && this.desc.includes('Connection and sign-in')) {
+      return String(this.app.state.endpointOpen);
+    }
     if (name === 'class') {
       const mode = /has text\[(.+?)\]/u.exec(this.desc)?.[1];
       const ids = {

@@ -46,13 +46,17 @@ export const ui = {
   close: (page) => page.getByRole('button', { name: 'Close settings', exact: true }),
   nav: (dialog, name) => dialog.getByRole('button', { name, exact: true }),
   providerSelect: (dialog) => dialog.locator('.joy-own-key select').first(),
+  endpointAccordion: (dialog) =>
+    dialog.getByRole('button', { name: /Connection and sign-in/u }).first(),
   nameInput: (dialog) => dialog.getByPlaceholder('e.g. My OpenRouter, Local Ollama'),
   addressInput: (dialog) => dialog.getByPlaceholder('https://...'),
   keyInput: (dialog) => dialog.locator('.joy-own-key input[type="password"]'),
   consent: (dialog) => dialog.getByRole('checkbox', { name: CONSENT_TEXT }),
   modelIdInput: (dialog) => dialog.getByRole('textbox', { name: 'Model ID', exact: true }),
-  findModels: (dialog) => dialog.getByRole('button', { name: 'Find models' }),
-  showModelList: (dialog) => dialog.getByRole('button', { name: 'Show model list' }),
+  findModels: (dialog) =>
+    dialog.locator('.joy-own-key').getByRole('button', { name: 'Find models', exact: true }),
+  showModelList: (dialog) =>
+    dialog.locator('.joy-own-key').getByRole('button', { name: 'Show model list', exact: true }),
   connect: (dialog) => dialog.getByRole('button', { name: 'Connect model', exact: true }),
   modelChip: (dialog, model) => dialog.locator('.joy-settings-model-chip', { hasText: model }),
   checkMedia: (dialog) => dialog.getByRole('button', { name: 'Check media support', exact: true }),
@@ -70,7 +74,12 @@ export const ui = {
   reject: (page) => page.getByRole('button', { name: /^Reject$/u }),
   undoRun: (page) => page.getByRole('button', { name: /Undo run/u }),
   // The send button turns into this while a run is busy (AgentPanel.tsx aria-label).
-  stop: (page) => page.getByRole('button', { name: 'Stop current plan', exact: true }),
+  stop: (page) =>
+    page
+      .locator('[role="status"][aria-live="polite"]')
+      .getByRole('button', { name: 'Stop', exact: true }),
+  safeStop: (page) =>
+    page.getByText('Joy Code could not finish this run safely.', { exact: false }),
   liveProposal: (page) => page.locator('[aria-label="JOY Agent live proposal"]'),
   plan: (page) => page.locator('[aria-label="Proposed timeline plan"]'),
   lastRun: (page) => page.locator('[aria-label="Last Joy Code run"]'),
@@ -123,6 +132,10 @@ export async function openSettings(page, pageName = 'AI models') {
     await expectVisible(dialog, 'the Joy Code Settings dialog');
   }
   await ui.nav(dialog, pageName).click();
+  if (pageName === 'AI models') {
+    const endpoint = ui.endpointAccordion(dialog);
+    if ((await endpoint.getAttribute('aria-expanded')) !== 'true') await endpoint.click();
+  }
   return dialog;
 }
 
@@ -230,7 +243,9 @@ export async function setAgentSlots(page, ctx) {
     const label = await slotLabel(card);
     labels.push(label);
     // Choosing the one saved profile reads its models at once.
-    await card.locator('select').first().selectOption({ index: 1 });
+    await card
+      .getByRole('combobox', { name: `${label} profile`, exact: true })
+      .selectOption({ label: CONNECTION_NAME });
     const modelControl = card.locator(`[aria-label="${label} model"]`);
     await expectVisible(modelControl, `${label} model control`);
     const tag = await modelControl.evaluate((element) => element.tagName);
@@ -348,10 +363,15 @@ export async function runInModes(page, ctx) {
       async () => {
         staged = await readJoyCodeSnapshot(page);
         outcome = classifyOutcome(staged, baseline.messages);
-        return outcome !== 'waiting';
+        return outcome !== 'waiting' || (await ui.safeStop(page).count()) > 0;
       },
       { timeoutMs, message: `${mode.name}: the run to reach a result` },
     );
+    if ((await ui.safeStop(page).count()) > 0) {
+      throw new Error(
+        `${mode.name}: the app reported "Joy Code could not finish this run safely. No edits were applied."`,
+      );
+    }
     const problem = checkModeOutcome(mode.id, outcome, staged, baseline.clips);
     if (problem) throw new Error(`${mode.name}: ${problem}`);
     const entry = { mode: mode.id, baselineClips: baseline.clips, staged: { outcome, ...staged } };
