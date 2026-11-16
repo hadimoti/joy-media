@@ -270,12 +270,19 @@ function requestSummary(body, model) {
       ? [entry.function.name]
       : [],
   );
+  // What a tool answered (project data, never a key), so a live row can see why a run went as it did.
+  const last = messages.at(-1);
+  const lastToolContent =
+    isRecord(last) && last.role === 'tool' && typeof last.content === 'string'
+      ? last.content.slice(0, 1500)
+      : undefined;
   return {
     model_matches: body.model === model,
     stream: body.stream === true,
     message_count: messages.length,
     image_url_count: imageUrlCount,
     tool_names: toolNames,
+    ...(lastToolContent === undefined ? {} : { last_tool_content: lastToolContent }),
   };
 }
 
