@@ -26,12 +26,32 @@ export function clipColourGrade(state, clipId) {
   );
 }
 
+/** What the app holds before any colour edit: no grade is stored yet, which means every control at rest. */
+const IDENTITY_POINTS = [
+  { x: 0, y: 0 },
+  { x: 1, y: 1 },
+];
+const AT_REST_GRADE = Object.freeze({
+  wheels: Object.freeze({
+    lift: Object.freeze({ r: 0, g: 0, b: 0, master: 0 }),
+    gamma: Object.freeze({ r: 0, g: 0, b: 0, master: 0 }),
+    gain: Object.freeze({ r: 0, g: 0, b: 0, master: 0 }),
+    offset: Object.freeze({ r: 0, g: 0, b: 0, master: 0 }),
+  }),
+  curves: Object.freeze({
+    rgb: IDENTITY_POINTS,
+    red: IDENTITY_POINTS,
+    green: IDENTITY_POINTS,
+    blue: IDENTITY_POINTS,
+  }),
+  hsl: Object.freeze([]),
+});
+
 export async function readColourGrade(ctx, clipId) {
   const state = await ctx.readDocument();
   const grade = clipColourGrade(state, clipId);
-  if (grade === undefined)
-    throw new Error(`the saved colour grade for clip ${clipId} is unavailable`);
-  return grade;
+  // Before the first edit nothing is stored: read that as the controls at rest, so a before and after compare works.
+  return grade === undefined ? AT_REST_GRADE : grade;
 }
 
 async function readHslGrade(ctx, clipId) {
