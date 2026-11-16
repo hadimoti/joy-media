@@ -364,6 +364,16 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
     const definition = featureTool(route.hub, route.toolId);
     if (definition === undefined) throw new Error(`Unknown feature route for ${label}`);
     const hub = page.locator(`.feature-hub--${route.hub}`);
+    if (!(await hub.isVisible())) {
+      const viewMenu = page
+        .locator('.app-menubar button.app-menu-trigger')
+        .getByText('View', { exact: true });
+      await viewMenu.click();
+      const hubMenuItem = page.getByRole('menuitem', { name: hubLabel, exact: true });
+      await expect(hubMenuItem).toBeVisible();
+      await hubMenuItem.click();
+    }
+    await expect(hub).toBeVisible();
     const featureTab = hub.locator(`[data-feature-tool="${route.toolId}"]`);
     await expect(featureTab).toBeVisible();
     await featureTab.click();
