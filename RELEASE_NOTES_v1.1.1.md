@@ -109,6 +109,15 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - On a 16-inch laptop screen the app window moved a few pixels up, down and sideways while you worked. It no longer does. Only the Inspector list scrolls.
 - The New project form fits a small screen. The Project name field and the Create button are visible, and the format cards lay out in a grid.
 - The timeline right-click menu shows only keys that work, and empty divider lines no longer leave blank rows.
+- The timeline right-click menu opens on top of the panel, so a menu opened near the bottom of a small window is no longer cut.
+- Full screen works. The F key and View > Toggle Full Screen did nothing before.
+- J (reverse) and the faster speeds now move the playhead. Before, reverse never moved.
+- Window > Focus puts the keyboard inside the panel, not only the panel in front.
+- Adding a template to the timeline asks first, with a "Don't ask next time" tick.
+- The Automate workspace has a Workflows tab beside Joy Code and Jobs.
+- Joy Code Looks: a Look can no longer be bound to the invisible Null object, which made the preview fail with "The preview could not be prepared". The approval card names the change and the time in seconds.
+- Joy Code Settings: the custom endpoint tick stays valid after the connection is saved, a profile chosen for an agent slot is no longer lost while its models load, and Suggest only shows no Approve button.
+- Undo of a track colour or track family works, and the track header follows.
 
 ## Known limits
 
@@ -121,7 +130,6 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - **Sample project export.** Exporting one sample project can fail with "cannot resolve visual asset".
 - **Some drags.** One clip dragged from the asset panel showed on the timeline but was missing from the saved project; this is not yet explained. Dropping an image from the Asset Library onto the filter layer can do nothing, with no message.
 - **Export size.** Export size may follow the selected preset instead of the canvas size.
-- **Small windows.** A right-click (context) menu opened near the bottom edge of a small window can be cut by the window.
 - **Projects page when maximised.** The bottom of the Projects page can sit behind the Windows taskbar.
 - **Persian and Arabic text is not finished.** Right-to-left shaping and line direction are not correct in titles or captions in the video. This is planned for a later version.
 - **Transitions.** TV Static uses random noise, so the preview and the export cannot match. Kaleidoscope and Ripple: the Speed option showed no change in the test (open). Slide and push transitions are tested with a looser limit for the last frame. Full table: `docs/qa/v1.1.1/TRANSITIONS.md`.

@@ -656,6 +656,11 @@ export interface EditorQcAdapterInput {
   readonly isPrivacyModeAllowed: () => boolean;
   /** The host's composition request. Absent today; see the note at the top of this file. */
   readonly getComposition?: () => QcTimelineSource['composition'];
+  /**
+   * The drawn title and caption boxes, normalized (see `projectTextLayoutBounds`). Absent today: no host
+   * measures them yet, so QC runs without box checks until one does (T-B06).
+   */
+  readonly getTextBoxes?: () => readonly TimelineQcTextBox[];
   /** Receives the report when it is stored and again when frames were sent for it. */
   readonly onReport?: QcHostAdapterDeps['onReport'];
 }
@@ -678,7 +683,12 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
             promptPolicyDigest: input.promptPolicyDigest,
           }
         : undefined,
-    timeline: () => qcTimelineSourceFromTimeline(input.getTimeline(), input.getComposition?.(), []),
+    timeline: () =>
+      qcTimelineSourceFromTimeline(
+        input.getTimeline(),
+        input.getComposition?.(),
+        input.getTextBoxes?.() ?? [],
+      ),
     sampler: createTimelineQcSampler(),
     isCachedImageSupported: input.isCachedImageSupported,
     isPrivacyModeAllowed: input.isPrivacyModeAllowed,

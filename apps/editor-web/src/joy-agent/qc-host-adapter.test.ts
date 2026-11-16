@@ -640,6 +640,23 @@ describe('editor QC adapter', () => {
     });
   });
 
+  it('reads the drawn text boxes from the host each time it checks the timeline', async () => {
+    const getTextBoxes = vi.fn(() => []);
+    const adapter = createEditorQcAdapter({
+      ...IDENTITY,
+      isCurrent: () => true,
+      getTimeline: () => ({
+        rootCompositionId: 'root',
+        compositions: { root: { tracks: [{ clips: [{ startUs: 0, durationUs: 1_000_000 }] }] } },
+      }),
+      isCachedImageSupported: () => true,
+      isPrivacyModeAllowed: () => true,
+      getTextBoxes,
+    });
+    await adapter.runTimelineCheck(new AbortController().signal);
+    expect(getTextBoxes).toHaveBeenCalled();
+  });
+
   it('stops identifying the run once it is no longer current', async () => {
     let current = true;
     const adapter = createEditorQcAdapter({
