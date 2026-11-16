@@ -57,6 +57,7 @@ export const ui = {
     dialog.locator('.joy-own-key').getByRole('button', { name: 'Find models', exact: true }),
   showModelList: (dialog) =>
     dialog.locator('.joy-own-key').getByRole('button', { name: 'Show model list', exact: true }),
+  modelDrawer: (dialog) => dialog.getByRole('button', { name: /Models found on this service/u }),
   connect: (dialog) => dialog.getByRole('button', { name: 'Connect model', exact: true }),
   modelChip: (dialog, model) => dialog.locator('.joy-settings-model-chip', { hasText: model }),
   checkMedia: (dialog) => dialog.getByRole('button', { name: 'Check media support', exact: true }),
@@ -74,10 +75,7 @@ export const ui = {
   reject: (page) => page.getByRole('button', { name: /^Reject$/u }),
   undoRun: (page) => page.getByRole('button', { name: /Undo run/u }),
   // The send button turns into this while a run is busy (AgentPanel.tsx aria-label).
-  stop: (page) =>
-    page
-      .locator('[role="status"][aria-live="polite"]')
-      .getByRole('button', { name: 'Stop', exact: true }),
+  stop: (page) => page.getByRole('button', { name: 'Stop current plan', exact: true }),
   safeStop: (page) =>
     page.getByText('Joy Code could not finish this run safely.', { exact: false }),
   liveProposal: (page) => page.locator('[aria-label="JOY Agent live proposal"]'),
@@ -153,17 +151,21 @@ async function chooseOwnEndpoint(dialog) {
 
 export async function modelDrawerBeforeConnecting(page) {
   const dialog = await openSettings(page);
-  // Nothing is connected and no provider is chosen: the drawer opens and says so.
-  await ui.showModelList(dialog).click();
+  // The model list is a separate accordion below the connection form; the form's
+  // Show model list control does not exist until that form is populated.
+  await ui.modelDrawer(dialog).click();
   await expectVisible(
-    dialog.getByText('Choose a provider before discovering models.'),
-    'the drawer saying to choose a provider first',
+    dialog.getByText(/No models yet\./u),
+    'the empty model drawer before a provider is selected',
   );
-  const refresh = dialog.getByRole('button', { name: 'Refresh models', exact: true }).first();
+  const refresh = ui.slotCards(dialog).first().getByRole('button', {
+    name: 'Refresh models',
+    exact: true,
+  });
   const disabled = await refresh.isDisabled();
   if (!disabled) throw new Error('Refresh models must be disabled before a profile is chosen');
   await closeSettings(page);
-  return 'drawer opens with the choose-a-provider line; Refresh models is disabled with no profile';
+  return 'the empty model drawer opens; Workhorse Refresh models is disabled with no profile';
 }
 
 // ----- D-087: add the loopback profile -----------------------------------------------------
@@ -201,6 +203,9 @@ export async function addLoopbackProfile(page, ctx) {
 export async function fetchModelsAndCheckMedia(page, ctx) {
   const dialog = await openSettings(page);
   await ui.findModels(dialog).click();
+  // The drawer containing the actual model buttons is collapsed by default.
+  const drawer = ui.modelDrawer(dialog);
+  if ((await drawer.getAttribute('aria-expanded')) !== 'true') await drawer.click();
   await expectVisible(ui.modelChip(dialog, ctx.model), `the model ${ctx.model} in the list`);
   await expectVisible(dialog.getByText('1 models ready'), 'the models-ready tag');
   await waitUntil(async () => !(await ui.checkMedia(dialog).isDisabled()), {
@@ -248,6 +253,10 @@ export async function setAgentSlots(page, ctx) {
       .selectOption({ label: CONNECTION_NAME });
     const modelControl = card.locator(`[aria-label="${label} model"]`);
     await expectVisible(modelControl, `${label} model control`);
+    await waitUntil(async () => !(await modelControl.isDisabled()), {
+      timeoutMs: 15_000,
+      message: `${label} model control to enable after choosing a profile`,
+    });
     const tag = await modelControl.evaluate((element) => element.tagName);
     if (tag === 'SELECT') await modelControl.selectOption(ctx.model);
     else await modelControl.fill(ctx.model);
@@ -436,14 +445,10 @@ export async function publicEndpointConsent(page) {
   const consent = ui.consent(dialog);
   if (await consent.isChecked()) throw new Error('consent must start unticked');
   const refusal = 'Enter the custom-provider acknowledgement before connecting.';
-  // Declined: Connect refuses before any request, and so does the model list.
+  // Declined: Connect refuses before any request. The public consent row only
+  // needs to prove the acknowledgement and URL-edit behavior.
   await ui.connect(dialog).click();
   await expectVisible(dialog.getByText(refusal), 'the refusal while consent is not given');
-  await ui.showModelList(dialog).click();
-  await expectVisible(
-    dialog.getByText('Enter the custom-provider acknowledgement before discovering models.'),
-    'the model-list refusal while consent is not given',
-  );
   // Accepted.
   await consent.check();
   if (!(await consent.isChecked())) throw new Error('consent did not tick');
