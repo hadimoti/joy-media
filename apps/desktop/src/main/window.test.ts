@@ -64,8 +64,8 @@ describe('devLoadingPageHtml', () => {
 });
 
 describe('PACKAGED_LOADING_DELAY_MS', () => {
-  it('shows the loading window at once, so a packaged start looks like the development start', () => {
-    expect(PACKAGED_LOADING_DELAY_MS).toBe(0);
+  it('waits briefly before showing the loading window on packaged starts', () => {
+    expect(PACKAGED_LOADING_DELAY_MS).toBe(300);
   });
 });
 
