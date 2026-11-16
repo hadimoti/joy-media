@@ -13,12 +13,36 @@ import { createCompositionObserver } from './composition-observer.js';
 const mocks = vi.hoisted(() => ({
   createRenderer: vi.fn(),
   waitFonts: vi.fn(async () => undefined),
+  loadDetachedVideo: vi.fn(async (video: HTMLVideoElement) => {
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 2 });
+  }),
+  seekDetachedVideo: vi.fn(async () => undefined),
+  createDecoder: vi.fn(() => ({
+    captureCurrentFrame: vi.fn((token: number) => ({
+      assetId: 'video-asset',
+      sourceTimeUs: 0,
+      token,
+      bitmap: {
+        width: 4,
+        height: 4,
+        data: new Uint8ClampedArray(4 * 4 * 4).fill(90),
+      },
+    })),
+  })),
 }));
 
 vi.mock('@joy-media/renderer-pixi/browser', () => ({
   createBrowserPixiRenderer: mocks.createRenderer,
 }));
 vi.mock('../font-readiness.js', () => ({ waitForContentFonts: mocks.waitFonts }));
+vi.mock('../export-preload.js', () => ({
+  loadDetachedVideo: mocks.loadDetachedVideo,
+  seekDetachedVideo: mocks.seekDetachedVideo,
+}));
+vi.mock('@joy-media/playback-engine', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, createHtmlMediaDecoder: mocks.createDecoder };
+});
 
 import {
   createIsolatedCompositionCapture,
@@ -127,6 +151,7 @@ function timelineProject(enabled = false): SpikeProject {
     rootCompositionId: 'root',
     compositions: {
       root: {
+        durationUs: 1_000_000,
         tracks: [
           {
             id: 'hidden-track',
@@ -162,7 +187,7 @@ function fakeRenderer(options: { readonly throwOnRender?: boolean } = {}) {
     setPixelScale: vi.fn(),
     setView: vi.fn(),
     nodeBounds: vi.fn(),
-    render: vi.fn(() => {
+    render: vi.fn((_frame: unknown, _bitmaps: unknown) => {
       if (options.throwOnRender) throw new Error('render failed');
       return { width: 4, height: 4, drawCalls: 1, created: 1, reused: 0 };
     }),
@@ -188,10 +213,60 @@ function requestFor(
   };
 }
 
+function activeVideoTimeline(clip: VideoClip): SpikeProject {
+  return {
+    rootCompositionId: 'root',
+    compositions: {
+      root: {
+        durationUs: 1_000_000,
+        tracks: [
+          {
+            id: 'video-track',
+            kind: 'video',
+            name: 'Video',
+            order: 0,
+            enabled: true,
+            locked: false,
+            clips: [clip],
+          },
+        ],
+      },
+    },
+  } as unknown as SpikeProject;
+}
+
+function stubImageDecode(): void {
+  vi.stubGlobal(
+    'createImageBitmap',
+    vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })),
+  );
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    clearRect: vi.fn(),
+    drawImage: vi.fn(),
+    getImageData: vi.fn(() => ({
+      width: 4,
+      height: 4,
+      data: new Uint8ClampedArray(4 * 4 * 4).fill(120),
+    })),
+  } as never);
+}
+
+function stubObjectUrls(): void {
+  vi.stubGlobal('URL', {
+    createObjectURL: vi.fn(() => 'blob:capture-fixture'),
+    revokeObjectURL: vi.fn(),
+  });
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   mocks.createRenderer.mockReset();
+  mocks.loadDetachedVideo.mockClear().mockImplementation(async (video) => {
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 2 });
+  });
+  mocks.seekDetachedVideo.mockReset().mockResolvedValue(undefined);
+  mocks.createDecoder.mockClear();
   mocks.waitFonts.mockReset().mockResolvedValue(undefined);
 });
 
@@ -355,6 +430,180 @@ describe('isolated composition capture', () => {
       capture.release();
     }
     expect(renderer.readPixels).not.toHaveBeenCalled();
+  });
+
+  it('passes a decoded video bitmap to the renderer with its clip grade', async () => {
+    stubImageDecode();
+    const renderer = fakeRenderer();
+    const clip: VideoClip = {
+      id: 'video-clip',
+      kind: 'video',
+      assetId: 'video-asset',
+      sourceInUs: 0,
+      startUs: 0,
+      durationUs: 1_000_000,
+    };
+    const grade = createIdentityColorGrade();
+    const project = {
+      ...visualProject(),
+      assets: { 'video-asset': { id: 'video-asset', kind: 'image', displayName: 'Still clip' } },
+      clipColorGrades: {
+        'video-clip': { ...grade, adjust: { ...grade.adjust, saturation: 0.4 } },
+      },
+    } as unknown as JoyProjectV1;
+    const capture = createIsolatedCompositionCapture({
+      visualProject: project,
+      timelineProject: activeVideoTimeline(clip),
+      loadProjectAssetBlob: async () => ({ arrayBuffer: async () => new ArrayBuffer(0) }) as Blob,
+    });
+    try {
+      const result = await createCompositionObserver().capture(requestFor(capture));
+      expect(result.status, JSON.stringify(result)).toBe('captured');
+      const renderArgs = renderer.render.mock.calls[0];
+      const frame = renderArgs?.[0] as { nodes: Array<{ id: string; colorGrade?: unknown }> };
+      const bitmaps = renderArgs?.[1] as Map<string, { width: number; height: number }>;
+      expect(bitmaps.get('video-clip')).toMatchObject({ width: 4, height: 4 });
+      expect(frame.nodes.find((node) => node.id === 'video-clip')?.colorGrade).toMatchObject({
+        saturation: 0.4,
+      });
+    } finally {
+      capture.release();
+    }
+  });
+
+  it('sizes a cropped sticker from the returned cropped bitmap', async () => {
+    stubImageDecode();
+    fakeRenderer();
+    const image: VisualObjectV1 = {
+      id: 'cropped-image',
+      kind: 'image',
+      assetId: 'image-asset',
+      transform: transform({ crop: { left: 0.25, top: 0, right: 0, bottom: 0 } }),
+    };
+    const project = {
+      ...visualProject({ 'cropped-image': image }),
+      assets: { 'image-asset': { id: 'image-asset', kind: 'image', displayName: 'Sticker' } },
+    } as JoyProjectV1;
+    const capture = createIsolatedCompositionCapture({
+      visualProject: project,
+      timelineProject: timelineProject(),
+      loadProjectAssetBlob: async () => new Blob(['image']),
+    });
+    try {
+      const frame = await capture.composition.evaluator.evaluate(
+        capture.composition.snapshot,
+        0,
+        new AbortController().signal,
+      );
+      expect(frame.nodes.find((node) => node.id === 'cropped-image')).toMatchObject({ width: 3 });
+    } finally {
+      capture.release();
+    }
+  });
+
+  it('captures a reversed clip at source time zero with decoded pixels', async () => {
+    stubObjectUrls();
+    const renderer = fakeRenderer();
+    const clip: VideoClip = {
+      id: 'reverse-clip',
+      kind: 'video',
+      assetId: 'video-asset',
+      sourceInUs: 0,
+      startUs: 0,
+      durationUs: 1_000_000,
+      reversed: true,
+    };
+    const project = {
+      ...visualProject(),
+      assets: { 'video-asset': { id: 'video-asset', kind: 'video', displayName: 'Video' } },
+    } as JoyProjectV1;
+    const capture = createIsolatedCompositionCapture({
+      visualProject: project,
+      timelineProject: activeVideoTimeline(clip),
+      loadProjectAssetBlob: async () => ({ arrayBuffer: async () => new ArrayBuffer(0) }) as Blob,
+    });
+    try {
+      const result = await createCompositionObserver().capture(requestFor(capture));
+      expect(result.status, JSON.stringify(result)).toBe('captured');
+      expect(mocks.seekDetachedVideo).toHaveBeenCalledWith(expect.anything(), 0, expect.anything());
+      const bitmaps = renderer.render.mock.calls[0]?.[1] as Map<
+        string,
+        { data: Uint8ClampedArray }
+      >;
+      expect(bitmaps.get('reverse-clip')?.data).toEqual(new Uint8ClampedArray(4 * 4 * 4).fill(90));
+    } finally {
+      capture.release();
+    }
+  });
+
+  it('reuses a clip decoder across samples until the capture is released', async () => {
+    stubObjectUrls();
+    fakeRenderer();
+    const clip: VideoClip = {
+      id: 'reverse-clip',
+      kind: 'video',
+      assetId: 'video-asset',
+      sourceInUs: 0,
+      startUs: 0,
+      durationUs: 1_000_000,
+      reversed: true,
+    };
+    const project = {
+      ...visualProject(),
+      assets: { 'video-asset': { id: 'video-asset', kind: 'video', displayName: 'Video' } },
+    } as JoyProjectV1;
+    const capture = createIsolatedCompositionCapture({
+      visualProject: project,
+      timelineProject: activeVideoTimeline(clip),
+      loadProjectAssetBlob: async () => ({ arrayBuffer: async () => new ArrayBuffer(0) }) as Blob,
+    });
+    try {
+      await expect(
+        createCompositionObserver().capture({
+          ...capture.composition,
+          outputTimesUs: [0, 100_000],
+        }),
+      ).resolves.toMatchObject({ status: 'captured', frames: [{}, {}] });
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+      expect(mocks.createDecoder).toHaveBeenCalledTimes(1);
+      expect(mocks.seekDetachedVideo).toHaveBeenCalledTimes(2);
+    } finally {
+      capture.release();
+    }
+  });
+
+  it('fails a reversed frame when its detached seek times out', async () => {
+    stubObjectUrls();
+    const renderer = fakeRenderer();
+    mocks.seekDetachedVideo.mockRejectedValueOnce(new Error('seeking video timed out'));
+    const clip: VideoClip = {
+      id: 'reverse-clip',
+      kind: 'video',
+      assetId: 'video-asset',
+      sourceInUs: 0,
+      startUs: 0,
+      durationUs: 1_000_000,
+      reversed: true,
+    };
+    const project = {
+      ...visualProject(),
+      assets: { 'video-asset': { id: 'video-asset', kind: 'video', displayName: 'Video' } },
+    } as JoyProjectV1;
+    const capture = createIsolatedCompositionCapture({
+      visualProject: project,
+      timelineProject: activeVideoTimeline(clip),
+      loadProjectAssetBlob: async () => new Blob(['video']),
+    });
+    try {
+      await expect(createCompositionObserver().capture(requestFor(capture))).resolves.toMatchObject(
+        {
+          status: 'failed',
+        },
+      );
+      expect(renderer.readPixels).not.toHaveBeenCalled();
+    } finally {
+      capture.release();
+    }
   });
 
   it('copies video transform, grade, and effects from the export clip-spec glue', () => {

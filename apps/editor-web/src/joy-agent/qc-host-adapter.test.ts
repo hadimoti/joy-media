@@ -625,9 +625,9 @@ describe('editor QC adapter', () => {
       ...IDENTITY,
       isCurrent: () => true,
       getTimeline: () => ({
-        rootCompositionId: 'composition-1',
+        rootCompositionId: 'root',
         compositions: {
-          'composition-1': { tracks: [{ clips: [{ startUs: 0, durationUs: 1_000_000 }] }] },
+          root: { tracks: [{ clips: [{ startUs: 0, durationUs: 1_000_000 }] }] },
         },
       }),
       isCachedImageSupported: () => true,

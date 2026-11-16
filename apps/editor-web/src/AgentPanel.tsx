@@ -2286,7 +2286,6 @@ export function AgentPanel({
             // It has its own adapter: the QC tools above never see this relaxed identity.
             const repairQcAdapter = createEditorQcAdapter({
               ...qcAdapterInput,
-              ...createQcCompositionPorts(),
               getRevision: () => latestSessionRef.current.projectRevisionId,
               isCurrent: () =>
                 activeModelRunIdRef.current === runId &&

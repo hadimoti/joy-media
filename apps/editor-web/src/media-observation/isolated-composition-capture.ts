@@ -29,7 +29,7 @@ import type { ImageDataLike } from '@joy-media/playback-engine';
 import type { ExportFrameSource } from '../export-frame-source.js';
 import { createProjectColorLutResolver } from '../project-color-luts.js';
 import { seekUsForSource } from '../export-seek-target.js';
-import { seekPreviewMedia } from '../preview-media-seek.js';
+import { loadDetachedVideo, seekDetachedVideo } from '../export-preload.js';
 import { createAnimatedImageFrameSource } from '../animated-image-decoder.js';
 import { inspectImageAnimation } from '../animated-image-metadata.js';
 import { StickerImageCache } from '../sticker-image-cache.js';
@@ -159,7 +159,7 @@ export function createIsolatedCompositionCapture(
           resolution: 1,
           resolveColorLut: colorLutResolver.resolveColorLut,
         }));
-        const nodes = await decodeFrameVideos(frame, request.outputTimeUs, request.signal);
+        const decodedVideos = await decodeFrameVideos(frame, request.outputTimeUs, request.signal);
         request.signal.throwIfAborted();
         const bitmaps = await capturePrivateBitmaps(
           request.outputTimeUs,
@@ -167,7 +167,15 @@ export function createIsolatedCompositionCapture(
           height,
           request.signal,
         );
-        renderer.render(withVideoFrameNodes(frame, nodes), bitmaps);
+        for (const [id, bitmap] of decodedVideos.bitmaps) bitmaps.set(id, bitmap);
+        applyClipGradesToTransitionBitmaps(
+          visualProject,
+          activeTransition(visualProject, timelineProject, request.outputTimeUs),
+          request.outputTimeUs,
+          bitmaps,
+          colorLutResolver.resolveColorLut,
+        );
+        renderer.render(withVideoFrameNodes(frame, decodedVideos.nodes), bitmaps);
         const pixels = renderer.readPixels(width, height);
         if (pixels === undefined || pixels.width !== width || pixels.height !== height)
           throw new Error('Capture readback is unavailable');
@@ -238,6 +246,7 @@ export function createIsolatedCompositionCapture(
         loadBlob: getBlob,
       });
       if (bitmap === undefined) throw new Error('Image decode failed');
+      objectSizes[object.id] = { width: bitmap.width, height: bitmap.height };
     }
   }
 
@@ -292,71 +301,68 @@ export function createIsolatedCompositionCapture(
       signal.throwIfAborted();
       const resource = await videoForClip(clip, signal);
       const sourceUs = sourceTimeForTransitionSample(clip, timeUs, transition);
-      try {
-        if (resource.still !== undefined) {
-          bitmaps.set(clip.id, resource.still);
-          nodes.push(
-            videoFrameNodeFromDecoded(
-              videoClipSpecAt(visualProject, timelineProject, clip, timeUs, frame.viewport.height),
-              {
-                assetId: clip.assetId,
-                bitmap: resource.still,
-                sourceTimeUs: clip.sourceInUs,
-                token: `still:${clip.assetId}`,
-              },
-              { width: resource.still.width, height: resource.still.height },
-            ),
-          );
-          continue;
-        }
-        if (resource.animated !== undefined) {
-          const image = resource.animated.frameAt(sourceUs - clip.sourceInUs);
-          bitmaps.set(clip.id, image.bitmap);
-          nodes.push(
-            videoFrameNodeFromDecoded(
-              videoClipSpecAt(visualProject, timelineProject, clip, timeUs, frame.viewport.height),
-              {
-                assetId: clip.assetId,
-                bitmap: image.bitmap,
-                sourceTimeUs: sourceUs,
-                token: `animated:${clip.assetId}:${image.startUs}`,
-              },
-              { width: resource.animated.width, height: resource.animated.height },
-            ),
-          );
-          continue;
-        }
-        const decoded =
-          resource.forward === undefined
-            ? undefined
-            : await resource.forward.frameAt(sourceUs, timeUs, signal);
-        const frameDecoded = decoded ?? (await resource.seek(sourceUs, timeUs, signal));
-        if (frameDecoded?.bitmap === undefined)
-          throw new Error('Visible video frame could not be decoded');
-        bitmaps.set(clip.id, frameDecoded.bitmap);
-        const intrinsic =
-          decoded === undefined
-            ? { width: resource.video?.videoWidth ?? 0, height: resource.video?.videoHeight ?? 0 }
-            : resource.forward!.size();
+      if (resource.still !== undefined) {
+        const bitmap = copyPixels(resource.still);
+        bitmaps.set(clip.id, bitmap);
         nodes.push(
           videoFrameNodeFromDecoded(
             videoClipSpecAt(visualProject, timelineProject, clip, timeUs, frame.viewport.height),
-            frameDecoded,
-            intrinsic,
+            {
+              assetId: clip.assetId,
+              bitmap,
+              sourceTimeUs: clip.sourceInUs,
+              token: `still:${clip.assetId}`,
+            },
+            { width: bitmap.width, height: bitmap.height },
           ),
         );
-      } finally {
-        closeVideoResource(videoResources, clip.id);
+        continue;
       }
+      if (resource.animated !== undefined) {
+        const image = resource.animated.frameAt(sourceUs - clip.sourceInUs);
+        const bitmap = copyPixels(image.bitmap);
+        bitmaps.set(clip.id, bitmap);
+        nodes.push(
+          videoFrameNodeFromDecoded(
+            videoClipSpecAt(visualProject, timelineProject, clip, timeUs, frame.viewport.height),
+            {
+              assetId: clip.assetId,
+              bitmap,
+              sourceTimeUs: sourceUs,
+              token: `animated:${clip.assetId}:${image.startUs}`,
+            },
+            { width: bitmap.width, height: bitmap.height },
+          ),
+        );
+        continue;
+      }
+      const decoded =
+        resource.forward === undefined
+          ? undefined
+          : await resource.forward.frameAt(sourceUs, timeUs, signal);
+      const frameDecoded = decoded ?? (await resource.seek(sourceUs, timeUs, signal));
+      if (frameDecoded?.bitmap === undefined)
+        throw new Error('Visible video frame could not be decoded');
+      const bitmap = copyPixels(frameDecoded.bitmap);
+      bitmaps.set(clip.id, bitmap);
+      const copiedFrame = { ...frameDecoded, bitmap };
+      const currentResource = videoResources.get(clip.id) ?? resource;
+      const intrinsic =
+        decoded === undefined
+          ? {
+              width: currentResource.video?.videoWidth ?? 0,
+              height: currentResource.video?.videoHeight ?? 0,
+            }
+          : resource.forward!.size();
+      nodes.push(
+        videoFrameNodeFromDecoded(
+          videoClipSpecAt(visualProject, timelineProject, clip, timeUs, frame.viewport.height),
+          copiedFrame,
+          intrinsic,
+        ),
+      );
     }
-    applyClipGradesToTransitionBitmaps(
-      visualProject,
-      transition,
-      timeUs,
-      bitmaps,
-      colorLutResolver.resolveColorLut,
-    );
-    return nodes;
+    return { nodes, bitmaps };
   }
 
   async function videoForClip(clip: VideoClip, signal: AbortSignal): Promise<VideoResource> {
@@ -411,12 +417,10 @@ export function createIsolatedCompositionCapture(
         if (video === undefined || decoder === undefined) {
           video = document.createElement('video');
           url = URL.createObjectURL(blob);
-          video.src = url;
           video.muted = true;
-          video.preload = 'auto';
           videoResources.set(clip.id, { ...resource, video, url });
           try {
-            await waitForVideo(video, seekSignal);
+            await loadDetachedVideo(video, url, seekSignal);
             decoder = createHtmlMediaDecoder(video, document.createElement('canvas'));
             videoResources.set(clip.id, { ...resource, video, decoder, url });
           } catch (error) {
@@ -425,9 +429,13 @@ export function createIsolatedCompositionCapture(
           }
         }
         const sourceTimeUs = seekUsForSource(sourceUs, forward?.seekTiming);
-        await seekPreviewMediaWithSignal(video, sourceTimeUs, seekSignal);
+        await seekDetachedVideo(video, sourceTimeUs, seekSignal);
+        if (video.readyState < 2) throw new Error('Video frame is not ready');
         seekSignal.throwIfAborted();
-        return decoder.captureCurrentFrame(token);
+        const decoded = decoder.captureCurrentFrame(token);
+        if (decoded.bitmap === undefined) throw new Error('Video frame could not be captured');
+        if (video.readyState < 2) throw new Error('Video frame is not ready');
+        return { ...decoded, bitmap: copyPixels(decoded.bitmap) };
       },
     };
     videoResources.set(clip.id, resource);
@@ -538,33 +546,6 @@ function closeVideoResource(resources: Map<string, VideoResource>, clipId: strin
     releaseMediaObjectUrl(resource.video, resource.url);
 }
 
-function seekPreviewMediaWithSignal(
-  video: HTMLVideoElement,
-  timeUs: number,
-  signal: AbortSignal,
-): Promise<void> {
-  signal.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const cleanup = () => signal.removeEventListener('abort', aborted);
-    const aborted = () => {
-      cleanup();
-      reject(new DOMException('Capture cancelled', 'AbortError'));
-    };
-    signal.addEventListener('abort', aborted, { once: true });
-    seekPreviewMedia(video, timeUs).then(
-      () => {
-        cleanup();
-        resolve();
-      },
-      (error: unknown) => {
-        cleanup();
-        reject(error);
-      },
-    );
-    if (signal.aborted) aborted();
-  });
-}
-
 function activeTransition(project: JoyProjectV1, timeline: SpikeProject, timeUs: number) {
   return activeTransitionAt(project, timeUs, transitionClipTimes(timeline));
 }
@@ -612,30 +593,8 @@ async function decodeBlobPixels(blob: Blob): Promise<ImageDataLike> {
   }
 }
 
-function waitForVideo(video: HTMLVideoElement, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      video.removeEventListener('loadedmetadata', loaded);
-      video.removeEventListener('error', failed);
-      signal.removeEventListener('abort', aborted);
-    };
-    const loaded = () => {
-      cleanup();
-      resolve();
-    };
-    const failed = () => {
-      cleanup();
-      reject(new Error('Video metadata is unavailable'));
-    };
-    const aborted = () => {
-      cleanup();
-      reject(new DOMException('Capture cancelled', 'AbortError'));
-    };
-    video.addEventListener('loadedmetadata', loaded, { once: true });
-    video.addEventListener('error', failed, { once: true });
-    signal.addEventListener('abort', aborted, { once: true });
-    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) loaded();
-  });
+function copyPixels(bitmap: ImageDataLike): ImageDataLike {
+  return { ...bitmap, data: new Uint8ClampedArray(bitmap.data) };
 }
 
 function cloneProject<T>(value: T): T {
