@@ -31,7 +31,8 @@ export const BUILT_IN_COLOUR_LOOKS = Object.freeze([
 
 /**
  * Checks one colour edit on a known preview frame, through persistence, and
- * back through Undo. `saveAndReopen` must return the persisted grade; an
+ * back through Undo in the same app session, then reapplies the edit before
+ * `saveAndReopen`, which must return the persisted grade; an
  * optional `compareExportFrame` uses the caller's existing compare helper.
  */
 export async function runColourLifecycle(
@@ -71,15 +72,6 @@ export async function runColourLifecycle(
   if (sameValue(baselineGrade, editedGrade))
     throw new Error('the colour edit did not change the grade');
 
-  const reopenedGrade = await saveAndReopen(page);
-  if (!sameValue(editedGrade, reopenedGrade)) {
-    throw new Error('the saved project did not keep the colour grade after reopen');
-  }
-  if (compareExportFrame !== undefined) {
-    requireFunction('compareExportFrame', compareExportFrame);
-    await compareExportFrame(page, pixel);
-  }
-
   await undo(page);
   const restoredPixel = await readPreviewPixel(page, pixel);
   const restoredGrade = await readGrade(page);
@@ -88,6 +80,23 @@ export async function runColourLifecycle(
   }
   if (!sameValue(baselineGrade, restoredGrade))
     throw new Error('Undo did not restore the colour grade');
+
+  await edit(page);
+  const reappliedGrade = await readGrade(page);
+  const reappliedPixel = await readPreviewPixel(page, pixel);
+  if (!sameValue(editedGrade, reappliedGrade))
+    throw new Error('reapplying the colour edit did not restore its grade');
+  if (pixelDistance(changedPixel, reappliedPixel) > pixelTolerance)
+    throw new Error('reapplying the colour edit did not restore its preview');
+
+  const reopenedGrade = await saveAndReopen(page);
+  if (!sameValue(reappliedGrade, reopenedGrade)) {
+    throw new Error('the saved project did not keep the colour grade after reopen');
+  }
+  if (compareExportFrame !== undefined) {
+    requireFunction('compareExportFrame', compareExportFrame);
+    await compareExportFrame(page, pixel);
+  }
 
   return `preview changed by ${pixelDistance(baselinePixel, changedPixel)} levels; saved grade survived reopen; Undo restored the frame`;
 }

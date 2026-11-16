@@ -22,7 +22,7 @@ import { LIVE_ROWS } from './matrix.mjs';
 import { abandonedRow, restartAppOnto, runRows } from './rows.mjs';
 
 import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
-import { createBridge, createBridgeLog, executeRow } from './matrix-core.mjs';
+import { createBridge, createBridgeLog, executeRow, readDocument } from './matrix-core.mjs';
 
 const LAB = labRoots();
 
@@ -210,6 +210,7 @@ export async function run(argv = process.argv.slice(2)) {
       }
     }
     const taskRows = LIVE_ROWS.filter((row) => options.testIds.includes(row.id));
+    const liveBridgeLog = createBridgeLog(join(outDir, 'bridge-replies.jsonl'));
     const taskContext = {
       page: session.page,
       outDir,
@@ -217,6 +218,9 @@ export async function run(argv = process.argv.slice(2)) {
       media: options.media,
       libraryDir,
       projectTitle,
+      async readDocument(target = taskContext.page) {
+        return readDocument(target, createBridge(target, liveBridgeLog));
+      },
       shot: async (path) => screenshot(taskContext.page, path),
       restartApp: async () => {
         session = await restartAppOnto(taskContext, {

@@ -18,6 +18,8 @@
  * document reader, so the case cannot read it by itself.
  */
 
+import { openColorPanel } from './color-panel-steps.mjs';
+
 const GRAPH = '[data-curve-graph="rgb"]';
 const LINE = '[data-curve-line="rgb"]';
 const POINTS = '[data-curve-point]';
@@ -25,8 +27,7 @@ const READOUT = '[data-curve-readout]';
 
 /** The Enhance hub's Color tool, then the panel's Curves tab and its RGB curve. */
 async function openCurves(page) {
-  await page.locator('[data-feature-tool="color"]').first().click();
-  await page.locator('[data-panel-tab-id="curves"]').first().click();
+  await openColorPanel(page, 'curves');
   await page.locator('[data-curve-channel="rgb"]').first().click();
   await page.locator(GRAPH).first().waitFor();
 }

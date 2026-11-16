@@ -17,13 +17,14 @@
  * by itself.
  */
 
+import { openColorPanel } from './color-panel-steps.mjs';
+
 const FACE = '[data-color-wheel="lift"]';
 const NUMBERS = '[data-color-wheel-numbers="lift"] output';
 
 /** The Enhance hub's Color tool, then the panel's Wheels tab. */
 async function openWheels(page) {
-  await page.locator('[data-feature-tool="color"]').first().click();
-  await page.locator('[data-panel-tab-id="wheels"]').first().click();
+  await openColorPanel(page, 'wheels');
   await page.locator(FACE).first().waitFor();
 }
 

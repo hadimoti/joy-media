@@ -34,7 +34,7 @@ function lifecycle(state, page) {
       state.exported = true;
     },
     undo: async () => {
-      assert.equal(state.reopened, true);
+      assert.equal(state.reopened, false);
       state.grade = { lut: 'none' };
       state.pixel = { r: 40, g: 180, b: 50 };
       state.undone = true;
@@ -76,7 +76,7 @@ test('colour lifecycle fails when save and reopen loses the edited grade', async
   deps.saveAndReopen = async () => ({ lut: 'none' });
 
   await assert.rejects(runColourLifecycle(page, deps), /did not keep the colour grade/u);
-  assert.equal(state.undone, false);
+  assert.equal(state.undone, true);
 });
 
 test('the Look driver covers all six built-in Looks and checks each lifecycle', async () => {
