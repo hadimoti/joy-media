@@ -162,8 +162,10 @@ async function runPresetRow(page, ctx, presetId) {
 async function captureMonitorFrame(page, seconds, path) {
   await page.keyboard.press('Home');
   for (let index = 0; index < seconds; index += 1) await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Escape');
+  await page.locator('.monitor-canvas-wrap').click({ position: { x: 1, y: 1 } });
   await page.keyboard.press('Control+0');
-  await page.locator('.monitor-canvas-wrap canvas').screenshot({ path });
+  await page.locator('.monitor-canvas').screenshot({ path });
 }
 
 async function runFrameCompareRow(page, ctx) {
@@ -201,22 +203,53 @@ async function runFrameCompareRow(page, ctx) {
 export function processTreeWorkingSet(rootPid, { run = spawnSync } = {}) {
   if (!Number.isInteger(Number(rootPid)) || Number(rootPid) <= 0)
     throw new Error('a launched app pid is required');
-  const script = `$root=${Number(rootPid)}; $all=Get-CimInstance Win32_Process; $ids=@($root); for($i=0;$i -lt $ids.Count;$i++){ $parent=$ids[$i]; $ids+=@($all | Where-Object { $_.ParentProcessId -eq $parent } | ForEach-Object { [int]$_.ProcessId }) }; Get-Process -Id $ids -ErrorAction SilentlyContinue | Select-Object Id,WorkingSet64 | ConvertTo-Json -Compress`;
-  const result = run('powershell.exe', ['-NoProfile', '-Command', script], {
+  const script = `$root=${Number(rootPid)}; $all=Get-CimInstance Win32_Process; $ids=@($root); for($i=0;$i -lt $ids.Count;$i++){ $parent=$ids[$i]; $ids+=@($all | Where-Object { $_.ParentProcessId -eq $parent } | ForEach-Object { [int]$_.ProcessId }) }; $all | Where-Object { $ids -contains [int]$_.ProcessId } | Select-Object ProcessId,WorkingSetSize | ConvertTo-Json -Compress`;
+  const result = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
     encoding: 'utf8',
     timeout: 10_000,
     windowsHide: true,
   });
-  if (result.status !== 0)
-    throw new Error(`process memory sample failed: ${String(result.stderr ?? '').trim()}`);
-  const parsed = JSON.parse(result.stdout || '[]');
+  if (result.error || result.status !== 0) {
+    const detail = [
+      result.error?.message,
+      String(result.stderr ?? '').trim(),
+      result.signal ? `terminated by ${result.signal}` : undefined,
+      result.status !== null && result.status !== undefined
+        ? `exit code ${result.status}`
+        : undefined,
+    ]
+      .filter(Boolean)
+      .join('; ');
+    throw new Error(
+      `process memory sample failed: ${detail || 'PowerShell returned no error details'}`,
+    );
+  }
+  const parsed = parseProcessTreeWorkingSet(result.stdout);
+  if (!parsed.some((item) => item.pid === Number(rootPid)))
+    throw new Error(`launched app process ${rootPid} was not present in the memory sample`);
+  return parsed;
+}
+
+export function parseProcessTreeWorkingSet(stdout) {
+  let parsed;
+  try {
+    parsed = JSON.parse(String(stdout ?? '').trim() || '[]');
+  } catch (error) {
+    throw new Error(`invalid process memory sample JSON: ${error.message}`);
+  }
   const processes = Array.isArray(parsed) ? parsed : [parsed];
   const rows = processes.map((item) => ({
-    pid: Number(item.Id),
-    workingSetBytes: Number(item.WorkingSet64),
+    pid: Number(item.ProcessId),
+    workingSetBytes: Number(item.WorkingSetSize),
   }));
-  if (!rows.some((item) => item.pid === Number(rootPid)))
-    throw new Error(`launched app process ${rootPid} was not present in the memory sample`);
+  if (
+    rows.some(
+      (item) =>
+        !Number.isInteger(item.pid) || item.pid <= 0 || !Number.isFinite(item.workingSetBytes),
+    )
+  ) {
+    throw new Error('process memory sample has an invalid PID or working set');
+  }
   return rows;
 }
 

@@ -5,6 +5,7 @@ import {
   EXPORT_MATRIX_IDS,
   EXPORT_MATRIX_ROWS,
   inspectPreset,
+  parseProcessTreeWorkingSet,
   processTreeWorkingSet,
 } from './export-matrix-steps.mjs';
 
@@ -51,11 +52,40 @@ test('memory sampler reads launched process tree working sets', () => {
   const rows = processTreeWorkingSet(12, {
     run: (_exe, _args) => ({
       status: 0,
-      stdout: '[{"Id":12,"WorkingSet64":1024},{"Id":13,"WorkingSet64":512}]',
+      stdout: '[{"ProcessId":12,"WorkingSetSize":1024},{"ProcessId":13,"WorkingSetSize":512}]',
     }),
   });
   assert.deepEqual(rows, [
     { pid: 12, workingSetBytes: 1024 },
     { pid: 13, workingSetBytes: 512 },
   ]);
+});
+
+test('memory sample parser accepts a single PowerShell object and validates its fields', () => {
+  assert.deepEqual(parseProcessTreeWorkingSet('{"ProcessId":12,"WorkingSetSize":1024}'), [
+    { pid: 12, workingSetBytes: 1024 },
+  ]);
+  assert.deepEqual(parseProcessTreeWorkingSet(''), []);
+  assert.throws(
+    () => parseProcessTreeWorkingSet('{bad json'),
+    /invalid process memory sample JSON/u,
+  );
+  assert.throws(
+    () => parseProcessTreeWorkingSet('{"ProcessId":12,"WorkingSetSize":"unknown"}'),
+    /invalid PID or working set/u,
+  );
+});
+
+test('memory sampler reports spawn and PowerShell failures with useful details', () => {
+  assert.throws(
+    () =>
+      processTreeWorkingSet(12, {
+        run: () => ({ error: new Error('spawn failed'), status: null }),
+      }),
+    /process memory sample failed: spawn failed/u,
+  );
+  assert.throws(
+    () => processTreeWorkingSet(12, { run: () => ({ status: 1, stderr: 'CIM access denied' }) }),
+    /process memory sample failed: CIM access denied; exit code 1/u,
+  );
 });
