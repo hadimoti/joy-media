@@ -118,6 +118,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Joy Code Looks: a Look can no longer be bound to the invisible Null object, which made the preview fail with "The preview could not be prepared". The approval card names the change and the time in seconds.
 - Joy Code Settings: the custom endpoint tick stays valid after the connection is saved, a profile chosen for an agent slot is no longer lost while its models load, and Suggest only shows no Approve button.
 - Undo of a track colour or track family works, and the track header follows.
+- A colour-graded clip inside a transition kept no size, so the transition picture could come out wrong or blank in the Monitor and in the export. Fixed.
 
 ## Known limits
 
