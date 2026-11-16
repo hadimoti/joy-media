@@ -48,6 +48,20 @@ label.app-dialog-message {
   display: block;
 }
 
+/* The "don't ask next time" tick box of a confirm dialog. */
+.app-dialog-remember {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--joy-type-sm);
+  color: var(--joy-text-secondary);
+  cursor: pointer;
+}
+
+.app-dialog-remember input {
+  accent-color: var(--joy-accent);
+}
+
 .app-dialog-input {
   box-sizing: border-box;
   width: 100%;

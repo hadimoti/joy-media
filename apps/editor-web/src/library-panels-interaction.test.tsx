@@ -4,7 +4,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
-import { TemplatesPanel } from './TemplatesPanel.js';
+import { AppDialogHost } from './AppDialogs.js';
+import { SKIP_TEMPLATE_APPLY_CONFIRM_KEY, TemplatesPanel } from './TemplatesPanel.js';
+import { EDITOR_UI_PREFERENCES_KEY } from './ui-preferences.js';
 import { TransitionsPanel } from './TransitionsPanel.js';
 import { TEMPLATE_FAVORITES_KEY } from './template-favorites.js';
 import { TRANSITION_FAVORITES_KEY } from './transition-panel-state.js';
@@ -101,6 +103,51 @@ describe('Transitions and Templates library interactions', () => {
     expect(panel.querySelectorAll('.transition-card')).toHaveLength(1);
     expect(panel.querySelector('[data-library-id="gl:fade"]')).not.toBeNull();
     expect(storageMap.get(TRANSITION_FAVORITES_KEY)).toBe('["gl:fade"]');
+  });
+
+  it("asks before a template is added, and the don't-ask tick skips the question after that", async () => {
+    const applied: string[] = [];
+    const panel = await mount(
+      <>
+        <TemplatesPanel
+          onApplyTemplate={(seeded) => applied.push(seeded.template.id)}
+          showToast={() => undefined}
+          storage={storage}
+        />
+        <AppDialogHost />
+      </>,
+    );
+    const addButton = () =>
+      panel.querySelector<HTMLButtonElement>('[data-library-id="joy.title"] .library-card-add');
+    const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
+
+    // The first Add asks; Cancel adds nothing.
+    await act(async () => addButton()?.click());
+    expect(dialog()).not.toBeNull();
+    await act(async () => {
+      Array.from(dialog()?.querySelectorAll('button') ?? [])
+        .find((button) => button.textContent === 'Cancel')
+        ?.click();
+    });
+    expect(applied).toHaveLength(0);
+
+    // Add with the tick box ticked: the template is added and the choice is stored.
+    await act(async () => addButton()?.click());
+    await act(async () =>
+      dialog()?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click(),
+    );
+    await act(async () => {
+      Array.from(dialog()?.querySelectorAll('button') ?? [])
+        .find((button) => button.textContent === 'Add')
+        ?.click();
+    });
+    expect(applied).toHaveLength(1);
+    expect(storageMap.get(EDITOR_UI_PREFERENCES_KEY)).toContain(SKIP_TEMPLATE_APPLY_CONFIRM_KEY);
+
+    // From now on the template is added at once, with no question.
+    await act(async () => addButton()?.click());
+    expect(dialog()).toBeNull();
+    expect(applied).toHaveLength(2);
   });
 
   it('searches templates by name across categories', async () => {

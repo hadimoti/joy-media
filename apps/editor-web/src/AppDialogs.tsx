@@ -87,7 +87,7 @@ export function useModalKeys({
 }
 
 export type ConfirmDialogProps = ConfirmDialogOptions & {
-  readonly onResolve: (value: boolean) => void;
+  readonly onResolve: (value: boolean, remember?: boolean) => void;
 };
 
 /** Yes or no question. Enter and the confirm button resolve true; Esc and Cancel resolve false. */
@@ -97,10 +97,12 @@ export function ConfirmDialog({
   confirmLabel = 'OK',
   cancelLabel = 'Cancel',
   tone = 'default',
+  rememberLabel,
   onResolve,
 }: ConfirmDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const [remember, setRemember] = useState(false);
   const titleId = useId();
   const messageId = useId();
 
@@ -108,7 +110,7 @@ export function ConfirmDialog({
     dialogRef,
     primaryRef: confirmRef,
     initialFocusRef: confirmRef,
-    onConfirm: () => onResolve(true),
+    onConfirm: () => onResolve(true, remember),
     onCancel: () => onResolve(false),
   });
 
@@ -131,6 +133,16 @@ export function ConfirmDialog({
         <p id={messageId} className="app-dialog-message">
           {message}
         </p>
+        {rememberLabel !== undefined && (
+          <label className="app-dialog-remember">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(event) => setRemember(event.currentTarget.checked)}
+            />
+            <span>{rememberLabel}</span>
+          </label>
+        )}
         <div className="app-dialog-actions">
           <button type="button" className="app-dialog-button" onClick={() => onResolve(false)}>
             {cancelLabel}
@@ -143,7 +155,7 @@ export function ConfirmDialog({
                 ? 'app-dialog-button app-dialog-button-primary app-dialog-button-danger'
                 : 'app-dialog-button app-dialog-button-primary'
             }
-            onClick={() => onResolve(true)}
+            onClick={() => onResolve(true, remember)}
           >
             {confirmLabel}
           </button>
@@ -246,7 +258,7 @@ export function AppDialogHost() {
       <ConfirmDialog
         key={active.id}
         {...active.options}
-        onResolve={(value) => settleAppDialog(active.id, value)}
+        onResolve={(value, remember) => settleAppDialog(active.id, value, remember)}
       />
     );
   }

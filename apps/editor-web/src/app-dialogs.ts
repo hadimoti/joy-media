@@ -17,6 +17,15 @@ export interface ConfirmDialogOptions {
   readonly cancelLabel?: string;
   /** `danger` styles the confirm button for deletes and other actions that cannot be undone. */
   readonly tone?: 'default' | 'danger';
+  /** A tick box under the message (for "Don't ask next time"). Read the tick with `confirmDialogRemember`. */
+  readonly rememberLabel?: string;
+}
+
+/** The answer of a confirm dialog that has a "remember" tick box. */
+export interface ConfirmDialogAnswer {
+  readonly confirmed: boolean;
+  /** True when the tick box was ticked at the moment of the answer. Always false when the owner cancelled. */
+  readonly remember: boolean;
 }
 
 export interface PromptDialogOptions {
@@ -36,13 +45,13 @@ export type AppDialogEntry =
       readonly id: number;
       readonly kind: 'confirm';
       readonly options: ConfirmDialogOptions;
-      readonly settle: (value: boolean | string | null) => void;
+      readonly settle: (value: boolean | string | null, remember?: boolean) => void;
     }
   | {
       readonly id: number;
       readonly kind: 'prompt';
       readonly options: PromptDialogOptions;
-      readonly settle: (value: boolean | string | null) => void;
+      readonly settle: (value: boolean | string | null, remember?: boolean) => void;
     };
 
 let queue: readonly AppDialogEntry[] = [];
@@ -66,6 +75,22 @@ export function confirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
       kind: 'confirm',
       options,
       settle: (value) => resolve(value === true),
+    });
+  });
+}
+
+/**
+ * Like `confirmDialog`, with a tick box (`options.rememberLabel`). The caller stores the choice, for example a
+ * preference that skips the question next time.
+ */
+export function confirmDialogRemember(options: ConfirmDialogOptions): Promise<ConfirmDialogAnswer> {
+  return new Promise<ConfirmDialogAnswer>((resolve) => {
+    enqueue({
+      id: nextId++,
+      kind: 'confirm',
+      options,
+      settle: (value, remember) =>
+        resolve({ confirmed: value === true, remember: value === true && remember === true }),
     });
   });
 }
@@ -96,10 +121,14 @@ export function getAppDialogQueue(): readonly AppDialogEntry[] {
 }
 
 /** Closes a dialog and resolves its promise. Unknown ids are ignored. */
-export function settleAppDialog(id: number, value: boolean | string | null): void {
+export function settleAppDialog(
+  id: number,
+  value: boolean | string | null,
+  remember?: boolean,
+): void {
   const entry = queue.find((candidate) => candidate.id === id);
   if (entry === undefined) return;
   queue = queue.filter((candidate) => candidate.id !== id);
   emit();
-  entry.settle(value);
+  entry.settle(value, remember);
 }

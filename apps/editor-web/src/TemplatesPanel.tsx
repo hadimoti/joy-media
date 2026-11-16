@@ -7,7 +7,8 @@ import {
   useId,
   type ComponentType,
 } from 'react';
-import { confirmDialog, promptDialog } from './app-dialogs.js';
+import { confirmDialog, confirmDialogRemember, promptDialog } from './app-dialogs.js';
+import { loadEditorUiPreferences, updateEditorUiPreferences } from './ui-preferences.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import {
@@ -70,6 +71,9 @@ const SIDEBAR_VIEWS: readonly {
   { id: 'Effects', label: 'Effects', icon: EnhanceIcon },
 ];
 
+/** The preference key (in `disclosures`) that skips the "add this template?" question. */
+export const SKIP_TEMPLATE_APPLY_CONFIRM_KEY = 'templates.skipApplyConfirm';
+
 export function TemplatesPanel({ onApplyTemplate, showToast, storage }: TemplatesPanelProps) {
   const railPanelId = useId();
   const [view, setView] = useState<TemplateView>('library');
@@ -82,19 +86,43 @@ export function TemplatesPanel({ onApplyTemplate, showToast, storage }: Template
     setFavorites(readTemplateFavorites(catalogStorage));
   }, [catalogStorage]);
 
+  // Adding a template puts new elements on the timeline: ask first, unless the owner ticked "Don't ask next time".
+  const confirmApply = useCallback(
+    async (label: string): Promise<boolean> => {
+      if (loadEditorUiPreferences(storage).disclosures[SKIP_TEMPLATE_APPLY_CONFIRM_KEY] === true) {
+        return true;
+      }
+      const answer = await confirmDialogRemember({
+        message: `Add "${label}" to the timeline?`,
+        confirmLabel: 'Add',
+        rememberLabel: "Don't ask next time",
+      });
+      if (answer.confirmed && answer.remember) {
+        updateEditorUiPreferences(storage, (current) => ({
+          ...current,
+          disclosures: { ...current.disclosures, [SKIP_TEMPLATE_APPLY_CONFIRM_KEY]: true },
+        }));
+      }
+      return answer.confirmed;
+    },
+    [storage],
+  );
+
   const handleApplyLibraryTemplate = useCallback(
-    (templateId: string) => {
+    async (templateId: string) => {
       const template = contentTemplateById(templateId);
       if (template === undefined) return;
+      if (!(await confirmApply(template.label))) return;
       const seed = Date.now().toString(36).slice(-5);
       onApplyTemplate({ template, seed, scopeLabel: template.category });
       showToast(`Template "${template.label}" applied`, 'success');
     },
-    [onApplyTemplate, showToast],
+    [confirmApply, onApplyTemplate, showToast],
   );
 
   const handleApplyCatalogTemplate = useCallback(
-    (entry: TemplateCatalogEntry) => {
+    async (entry: TemplateCatalogEntry) => {
+      if (!(await confirmApply(entry.label))) return;
       const seed = Date.now().toString(36).slice(-5);
       const template = {
         id: entry.id,
@@ -108,7 +136,7 @@ export function TemplatesPanel({ onApplyTemplate, showToast, storage }: Template
       onApplyTemplate({ template, seed, scopeLabel: entry.category });
       showToast(`Template "${entry.label}" applied`, 'success');
     },
-    [onApplyTemplate, showToast],
+    [confirmApply, onApplyTemplate, showToast],
   );
 
   const handleDeleteTemplate = useCallback(
@@ -201,8 +229,8 @@ export function TemplatesPanel({ onApplyTemplate, showToast, storage }: Template
             isFavorite={favorites.has(template.id)}
             onToggleFavorite={() => toggleFavorite(template.id)}
             onAdd={() => {
-              if (isMine) handleApplyCatalogTemplate(template as TemplateCatalogEntry);
-              else handleApplyLibraryTemplate(template.id);
+              if (isMine) void handleApplyCatalogTemplate(template as TemplateCatalogEntry);
+              else void handleApplyLibraryTemplate(template.id);
             }}
             addAriaLabel={`Add ${template.label}`}
             className="template-card"

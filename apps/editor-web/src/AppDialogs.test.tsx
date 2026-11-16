@@ -3,7 +3,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AppDialogHost } from './AppDialogs.js';
-import { confirmDialog, getAppDialogQueue, promptDialog, settleAppDialog } from './app-dialogs.js';
+import {
+  confirmDialog,
+  confirmDialogRemember,
+  getAppDialogQueue,
+  promptDialog,
+  settleAppDialog,
+} from './app-dialogs.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -264,6 +270,53 @@ describe('promptDialog', () => {
     expect(input?.id).toBeTruthy();
     expect(openDialog()?.querySelector('label')?.htmlFor).toBe(input?.id);
     await press('Escape');
+    await pending;
+  });
+});
+
+describe('confirmDialogRemember', () => {
+  function openRemember() {
+    let pending: ReturnType<typeof confirmDialogRemember> | undefined;
+    act(() => {
+      pending = confirmDialogRemember({
+        message: 'Add "Title" to the timeline?',
+        confirmLabel: 'Add',
+        rememberLabel: "Don't ask next time",
+      });
+    });
+    if (pending === undefined) throw new Error('confirmDialogRemember did not start');
+    return pending;
+  }
+
+  it('shows a tick box and reports it with the confirmation', async () => {
+    const pending = openRemember();
+    const tick = openDialog()?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(tick).not.toBeNull();
+    expect(openDialog()?.textContent).toContain("Don't ask next time");
+    expect(tick?.checked).toBe(false);
+    await act(async () => tick?.click());
+    await click(dialogButton('Add'));
+    await expect(pending).resolves.toEqual({ confirmed: true, remember: true });
+  });
+
+  it('reports remember false when the tick box is left alone', async () => {
+    const pending = openRemember();
+    await click(dialogButton('Add'));
+    await expect(pending).resolves.toEqual({ confirmed: true, remember: false });
+  });
+
+  it('never remembers a cancelled question', async () => {
+    const pending = openRemember();
+    const tick = openDialog()?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    await act(async () => tick?.click());
+    await click(dialogButton('Cancel'));
+    await expect(pending).resolves.toEqual({ confirmed: false, remember: false });
+  });
+
+  it('a plain confirm has no tick box', async () => {
+    const pending = openConfirm({ message: 'Delete?', confirmLabel: 'Delete' });
+    expect(openDialog()?.querySelector('input[type="checkbox"]')).toBeNull();
+    await click(dialogButton('Cancel'));
     await pending;
   });
 });
