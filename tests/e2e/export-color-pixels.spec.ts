@@ -1,10 +1,11 @@
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 test('offline and recorder MP4 exports keep stable real pixels on repeated exports', async ({
   page,
 }) => {
   await page.goto('/');
-  const rendererExportModule = `/@fs${new URL('../../packages/renderer-pixi/src/browser-export.ts', import.meta.url).pathname}`;
+  const rendererExportModule = `/@fs/${join(process.cwd(), 'packages/renderer-pixi/src/browser-export.ts').split(String.fromCharCode(92)).join('/')}`;
   const result = await page.evaluate(async (rendererModuleUrl) => {
     const { detectOfflineMp4Capability, exportOfflineMp4 } =
       await import('/src/offline-mp4-export.ts');
