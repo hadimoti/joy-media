@@ -13,53 +13,74 @@ import { ensureTimelineClip, previewShot, selectClipById } from './ui-steps.mjs'
 import { readProjectIds, readLiveTimeline } from './matrix-core.mjs';
 import { blockedRow } from './rows.mjs';
 
-const COLOR_KEYS = /color|colour|grade|look|lut|curve|wheel|hsl/iu;
-
-function collectColorState(value, path = '', out = {}) {
-  if (value === null || typeof value !== 'object') return out;
-  for (const [key, child] of Object.entries(value)) {
-    const nextPath = path ? `${path}.${key}` : key;
-    if (COLOR_KEYS.test(key)) out[nextPath] = child;
-    else if (child !== null && typeof child === 'object') collectColorState(child, nextPath, out);
-  }
-  return out;
+export function clipColourGrade(state, clipId) {
+  if (clipId === undefined) return undefined;
+  return (
+    state.storedDocument?.clipColorGrades?.[clipId] ?? state.document?.clipColorGrades?.[clipId]
+  );
 }
 
-function findNested(value, predicate) {
-  if (value === null || typeof value !== 'object') return undefined;
-  if (predicate(value)) return value;
-  for (const child of Object.values(value)) {
-    const found = findNested(child, predicate);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-}
-
-export async function readColourGrade(ctx) {
+export async function readColourGrade(ctx, clipId) {
   const state = await ctx.readDocument();
-  return collectColorState({ document: state.document, storedDocument: state.storedDocument });
-}
-
-async function readHslGrade(ctx) {
-  const grade = findNested(await readColourGrade(ctx), (value) => Array.isArray(value?.hsl));
-  if (grade === undefined) throw new Error('the saved colour grade has no readable HSL bands');
+  const grade = clipColourGrade(state, clipId);
+  if (grade === undefined)
+    throw new Error(`the saved colour grade for clip ${clipId} is unavailable`);
   return grade;
 }
 
-async function readWheel(ctx) {
-  const grade = await readColourGrade(ctx);
-  const lift = findNested(grade, (value) => value?.lift)?.lift;
+async function readHslGrade(ctx, clipId) {
+  const grade = await readColourGrade(ctx, clipId);
+  if (!Array.isArray(grade?.hsl))
+    throw new Error('the saved colour grade has no readable HSL bands');
+  return grade;
+}
+
+async function readWheel(ctx, clipId) {
+  const grade = await readColourGrade(ctx, clipId);
+  const lift = grade?.wheels?.lift ?? grade?.lift;
   if (!lift || !['r', 'g', 'b'].every((key) => Number.isFinite(lift[key]))) {
     throw new Error('the saved colour grade has no readable Lift wheel');
   }
   return lift;
 }
 
-async function readCurve(ctx) {
-  const grade = await readColourGrade(ctx);
-  const points = findNested(grade, (value) => Array.isArray(value?.rgb))?.rgb;
+async function readCurve(ctx, clipId) {
+  const grade = await readColourGrade(ctx, clipId);
+  const points = grade?.curves?.rgb ?? grade?.rgb;
   if (!Array.isArray(points)) throw new Error('the saved colour grade has no readable RGB curve');
   return points;
+}
+
+export function monitorPictureRect(box, composition, view = {}) {
+  if (!composition || !Number.isFinite(composition.width) || !Number.isFinite(composition.height))
+    throw new Error('the Monitor picture dimensions are unavailable');
+  const zoom = Number(view.zoom ?? 1);
+  const left = Number(view.panX ?? 0);
+  const top = Number(view.panY ?? 0);
+  return {
+    x: box.x + left,
+    y: box.y + top,
+    width: composition.width * zoom,
+    height: composition.height * zoom,
+  };
+}
+
+export function monitorPicturePoint(rect, xRatio, yRatio) {
+  return { x: rect.x + rect.width * xRatio, y: rect.y + rect.height * yRatio };
+}
+
+async function monitorPicture(page, ctx) {
+  const stage = page.locator('.monitor-canvas-wrap').first();
+  const box = await stage.boundingBox();
+  if (!box) throw new Error('the Monitor frame is not visible');
+  const document = (await ctx.readDocument()).document;
+  const composition = document?.compositions?.[document?.rootCompositionId];
+  const view = {
+    zoom: Number(await stage.getAttribute('data-monitor-zoom')) || 1,
+    panX: Number(await stage.getAttribute('data-monitor-pan-x')) || 0,
+    panY: Number(await stage.getAttribute('data-monitor-pan-y')) || 0,
+  };
+  return monitorPictureRect(box, composition, view);
 }
 
 function ffmpegRaw(input, args) {
@@ -86,13 +107,17 @@ function dimensions(png, rowId) {
 }
 
 async function monitorPixel(page, point, ctx, rowId) {
-  const monitor = page.locator('.monitor-canvas-wrap').first();
-  const box = await monitor.boundingBox();
-  if (!box) throw new Error('the Monitor frame is not visible');
-  const png = await monitor.screenshot();
+  const picture = await monitorPicture(page, ctx);
+  const png = await page.screenshot({ clip: picture });
   const size = dimensions(png, rowId);
-  const x = Math.max(0, Math.min(size.width - 1, Math.round(point.x - box.x)));
-  const y = Math.max(0, Math.min(size.height - 1, Math.round(point.y - box.y)));
+  const x = Math.max(
+    0,
+    Math.min(size.width - 1, Math.round(((point.x - picture.x) / picture.width) * size.width)),
+  );
+  const y = Math.max(
+    0,
+    Math.min(size.height - 1, Math.round(((point.y - picture.y) / picture.height) * size.height)),
+  );
   const rgb = ffmpegRaw(png, [
     '-v',
     'error',
@@ -119,7 +144,7 @@ async function monitorPixel(page, point, ctx, rowId) {
   return { r: rgb[offset], g: rgb[offset + 1], b: rgb[offset + 2] };
 }
 
-async function saveAndReopen(page, ctx, rowId) {
+async function saveAndReopen(page, ctx, rowId, clipId) {
   await page.waitForTimeout(1_000);
   const session = await ctx.restartApp();
   const heading = session.page.getByRole('heading', { name: 'Projects', exact: true });
@@ -136,7 +161,7 @@ async function saveAndReopen(page, ctx, rowId) {
     await session.page.waitForTimeout(100);
   }
   ctx.page = session.page;
-  return await readColourGrade(ctx);
+  return await readColourGrade(ctx, clipId);
 }
 
 async function compareExport(page, pixel, ctx, rowId) {
@@ -176,18 +201,15 @@ async function compareExport(page, pixel, ctx, rowId) {
     'rgb24',
     'pipe:1',
   ]);
-  const monitorBox = await page.locator('.monitor-canvas-wrap').first().boundingBox();
-  const screenshotDimensions = dimensions(
-    await page.locator('.monitor-canvas-wrap').first().screenshot(),
-    rowId,
-  );
+  const picture = await monitorPicture(page, ctx);
+  const screenshotDimensions = dimensions(await page.screenshot({ clip: picture }), rowId);
   const x = Math.max(
     0,
-    Math.min(width - 1, Math.round(((pixel.x - monitorBox.x) / monitorBox.width) * width)),
+    Math.min(width - 1, Math.round(((pixel.x - picture.x) / picture.width) * width)),
   );
   const y = Math.max(
     0,
-    Math.min(height - 1, Math.round(((pixel.y - monitorBox.y) / monitorBox.height) * height)),
+    Math.min(height - 1, Math.round(((pixel.y - picture.y) / picture.height) * height)),
   );
   const offset = (y * width + x) * 3;
   const expected = await monitorPixel(page, pixel, ctx, rowId);
@@ -219,40 +241,46 @@ async function compareExport(page, pixel, ctx, rowId) {
   );
 }
 
-async function runLifecycle(rowId, gesture, ctx, { point, includeExport = true } = {}) {
+async function runLifecycle(
+  rowId,
+  gesture,
+  ctx,
+  { point, sampleRatios = [0.5, 0.5], includeExport = true } = {},
+) {
   const base = await ensureTimelineClip(ctx.page, ctx, rowId, { fresh: true });
-  await selectClipById(ctx.page, base.clips[0].id);
+  const clipId = base.clips[0].id;
+  await selectClipById(ctx.page, clipId);
   const pixel = point ?? { x: 0, y: 0 };
   const lifecycle = {
+    clipId,
     pixel,
     readPreviewPixel: (page, p) => monitorPixel(page, p, ctx, rowId),
-    readGrade: () => readColourGrade(ctx),
-    edit: (page) => gesture(page, ctx, lifecycle.pixel),
-    saveAndReopen: (page) => saveAndReopen(page, ctx, rowId),
+    readGrade: () => readColourGrade(ctx, clipId),
+    edit: (page) => gesture(page, ctx, lifecycle.pixel, clipId),
+    saveAndReopen: (page) => saveAndReopen(page, ctx, rowId, clipId),
     undo: async () => ctx.page.keyboard.press('Control+z'),
     ...(includeExport
       ? { compareExportFrame: (_page, p) => compareExport(ctx.page, p, ctx, rowId) }
       : {}),
   };
-  const box = await ctx.page.locator('.monitor-canvas-wrap').first().boundingBox();
-  if (!box) throw new Error('the Monitor frame is not visible');
-  lifecycle.pixel = point ?? { x: box.x + box.width * 0.5, y: box.y + box.height * 0.5 };
+  const picture = await monitorPicture(ctx.page, ctx);
+  lifecycle.pixel = point ?? monitorPicturePoint(picture, sampleRatios[0], sampleRatios[1]);
   return await runColourLifecycle(ctx.page, lifecycle);
 }
 
-async function wheel(page, ctx) {
-  await dragWheelChangesGrade(page, () => readWheel(ctx), { undo: false });
+async function wheel(page, ctx, _pixel, clipId) {
+  await dragWheelChangesGrade(page, () => readWheel(ctx, clipId), { undo: false });
 }
 
-async function curve(page, ctx) {
-  await addPointAndDrag(page, () => readCurve(ctx), { undo: false });
+async function curve(page, ctx, _pixel, clipId) {
+  await addPointAndDrag(page, () => readCurve(ctx, clipId), { undo: false });
 }
 
-async function hsl(page, ctx, pixel) {
+async function hsl(page, ctx, pixel, clipId) {
   await pickGreenAndDesaturate(page, {
     patch: pixel,
     readPreviewPixel: (point) => monitorPixel(page, point, ctx, 'D-K03'),
-    readGrade: () => readHslGrade(ctx),
+    readGrade: () => readHslGrade(ctx, clipId),
     undo: false,
   });
 }
@@ -282,7 +310,7 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
     title: 'Pick green and drop its HSL saturation',
     severity: 'major',
     async run(page, ctx) {
-      return runLifecycle('D-K03', hsl, ctx);
+      return runLifecycle('D-K03', hsl, ctx, { sampleRatios: [0.25, 0.2] });
     },
   },
   {
@@ -292,19 +320,20 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
     severity: 'major',
     async run(page, ctx) {
       const base = await ensureTimelineClip(page, ctx, 'D-K04', { fresh: true });
-      await selectClipById(page, base.clips[0].id);
+      const clipId = base.clips[0].id;
+      await selectClipById(page, clipId);
       await openColorPanel(page, 'looks');
       let activePage = page;
       const results = await applyEachBuiltInLook(page, async () => {
-        const box = await activePage.locator('.monitor-canvas-wrap').first().boundingBox();
-        const pixel = { x: box.x + box.width * 0.5, y: box.y + box.height * 0.5 };
+        const picture = await monitorPicture(activePage, ctx);
+        const pixel = monitorPicturePoint(picture, 0.5, 0.5);
         return {
           pixel,
           readPreviewPixel: (target, p) => monitorPixel(target, p, ctx, 'D-K04'),
-          readGrade: () => readColourGrade(ctx),
+          readGrade: () => readColourGrade(ctx, clipId),
           edit: async () => {},
           saveAndReopen: async () => {
-            const result = await saveAndReopen(activePage, ctx, 'D-K04');
+            const result = await saveAndReopen(activePage, ctx, 'D-K04', clipId);
             activePage = ctx.page;
             return result;
           },
