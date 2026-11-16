@@ -615,7 +615,7 @@ export async function runQualityCheck(page, ctx) {
  */
 export async function runQualityCheckWithTitle(page, ctx) {
   await closeSettings(page);
-  await page.getByRole('menuitem', { name: 'View', exact: true }).click();
+  await openMenu(page, 'View');
   await page.getByRole('menuitem', { name: 'Create', exact: true }).click();
   const textTab = page.locator('[role="tab"][data-feature-tool="text"]').first();
   await textTab.waitFor({ state: 'visible', timeout: 10_000 });
