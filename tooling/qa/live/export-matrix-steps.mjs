@@ -1,12 +1,24 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { compareFrames, extractExportFrame, probeFrameDimensions } from '../compare.mjs';
+import {
+  compareFrames,
+  extractExportFrame,
+  extractFrameRegion,
+  probeFrameDimensions,
+} from '../compare.mjs';
 import { EXPORT_PRESETS } from './export-preset-spec.mjs';
 import { exportAndProbe } from './export-probe.mjs';
 import { blurFocus, ensureTimelineClip, selectClipById, waitForSnapshot } from './ui-steps.mjs';
 
-const FRAME_TOLERANCE = 1;
+const FRAME_TOLERANCE = 3;
+const BURN_IN_TOLERANCE = 4;
+export const FRAME_COMPARE_SAMPLES = Object.freeze([
+  { seconds: 1, sourceSeconds: 1 },
+  { seconds: 2, sourceSeconds: 2 },
+  { seconds: 4, sourceSeconds: 1 },
+  { seconds: 5, sourceSeconds: 2 },
+]);
 const PRESET_ORDER = [
   'youtube-1080',
   'landscape-4k',
@@ -29,8 +41,8 @@ export const EXPORT_MATRIX_ROWS = Object.freeze([
   })),
   {
     id: 'D-A10-10',
-    area: 'export frame matches the Fit monitor at three times',
-    title: 'Export frame matches Fit monitor at three times',
+    area: 'export frame matches the Fit monitor at four times',
+    title: 'Export frame matches Fit monitor at four times',
     severity: 'major',
     run: runFrameCompareRow,
   },
@@ -159,25 +171,56 @@ async function runPresetRow(page, ctx, presetId) {
   return `preset ${presetId} passed; ${fields[2]} ${fields[3]} fps ${fields[4]}, ${fields[5]} s, ${fields[6]} frames, audio; decode 2 s; ${ms} ms`;
 }
 
-async function captureMonitorFrame(page, seconds, path) {
-  await page.keyboard.press('Home');
-  for (let index = 0; index < seconds; index += 1) await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('Escape');
-  await page.locator('.monitor-canvas-wrap').click({ position: { x: 1, y: 1 } });
-  await page.keyboard.press('Control+0');
-  await page.locator('.monitor-canvas').screenshot({ path });
+async function captureMonitorFrame(page, seconds, path, frameDimensions) {
+  const timecode = page.getByLabel('Timecode', { exact: true }).first();
+  const target = `00:00:${String(seconds).padStart(2, '0')}:00`;
+  await timecode.fill(target);
+  await timecode.press('Enter');
+  const expectedFrames = seconds * 30;
+  const state = await waitForSnapshot(
+    page,
+    (shown) => timecodeIsWithinFrame(shown.timecode, expectedFrames, 30),
+    `D-A10-10: playhead did not seek to ${target}`,
+  );
+  if (!timecodeIsWithinFrame(state.timecode, expectedFrames, 30))
+    throw new Error(`D-A10-10: playhead is ${state.timecode}, expected ${target}`);
+
+  await page.getByRole('button', { name: 'Zoom Fit', exact: true }).click();
+  const wrap = page.locator('.monitor-canvas-wrap').first();
+  const rect = await wrap.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      left: box.left,
+      top: box.top,
+      width: box.width,
+      height: box.height,
+      zoom: Number(element.getAttribute('data-monitor-zoom')),
+    };
+  });
+  const picture = monitorPictureRect(rect, frameDimensions);
+  const capture = async () => page.screenshot({ path, clip: picture, animations: 'disabled' });
+  let previous = await capture();
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await page.waitForTimeout(100);
+    const current = await capture();
+    if (current.equals(previous)) return { playheadTimecode: state.timecode, picture };
+    previous = current;
+  }
+  throw new Error(`D-A10-10: Monitor did not settle on ${target} before capture`);
 }
 
 async function runFrameCompareRow(page, ctx) {
   const rowId = 'D-A10-10';
   await prepareSixSecondProject(page, ctx, rowId);
   const exported = await exportAndProbe(page, ctx, rowId, { seconds: 6, audio: true });
+  const exportDimensions = await probeFrameDimensions(exported.path);
   const dir = rowEvidenceDir(ctx, rowId);
   const results = [];
-  for (const seconds of [1, 3, 5]) {
+  for (const sample of FRAME_COMPARE_SAMPLES) {
+    const { seconds, sourceSeconds } = sample;
     const preview = join(dir, `monitor-${seconds}s.png`);
     const frame = join(dir, `export-${seconds}s.png`);
-    await captureMonitorFrame(page, seconds, preview);
+    const captured = await captureMonitorFrame(page, seconds, preview, exportDimensions);
     await extractExportFrame(exported.path, seconds, frame, await probeFrameDimensions(preview));
     const result = await compareFrames(
       preview,
@@ -185,19 +228,88 @@ async function runFrameCompareRow(page, ctx) {
       join(dir, `compare-${seconds}s`),
       FRAME_TOLERANCE,
     );
-    results.push({ seconds, ...result });
+    const burnIn = await compareBurnInRegion(
+      preview,
+      frame,
+      join(dir, `burn-in-${seconds}s`),
+      BURN_IN_TOLERANCE,
+    );
+    results.push({
+      seconds,
+      expectedSourceSeconds: sourceSeconds,
+      playheadTimecode: captured.playheadTimecode,
+      burnIn,
+      ...result,
+    });
   }
   writeFileSync(
     join(dir, 'frame-compare.json'),
-    `${JSON.stringify({ toleranceMeanAbsolutePerChannel: FRAME_TOLERANCE, results }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        toleranceMeanAbsolutePerChannel: FRAME_TOLERANCE,
+        burnInToleranceMeanAbsolutePerChannel: BURN_IN_TOLERANCE,
+        frameToleranceReason:
+          '3 levels allow small per-channel differences from GPU preview scaling versus ffmpeg Lanczos resampling',
+        burnInCheck:
+          'top-left 25% width by 10% height image comparison; expected source times are recorded per sample',
+        results,
+      },
+      null,
+      2,
+    )}\n`,
     'utf8',
   );
-  const failed = results.filter((result) => result.status !== 'pass');
+  const failed = results.filter(
+    (result) => result.status !== 'pass' || result.burnIn.status !== 'pass',
+  );
   if (failed.length)
     throw new Error(
-      `frame compare failed at ${failed.map((item) => `${item.seconds}s MAE ${item.meanAbsoluteChannelDelta}`).join(', ')}`,
+      `frame/burn-in compare failed at ${failed.map((item) => `${item.seconds}s frame MAE ${item.meanAbsoluteChannelDelta}, burn-in ${item.burnIn.status}`).join(', ')}`,
     );
-  return `three monitor/export frames passed; mean absolute per-channel tolerance ${FRAME_TOLERANCE}`;
+  return `four monitor/export frames passed (1, 2, 4, 5 s); frame MAE tolerance ${FRAME_TOLERANCE}, burn-in check tolerance ${BURN_IN_TOLERANCE}`;
+}
+
+export function timecodeIsWithinFrame(timecode, expectedFrame, fps) {
+  if (typeof timecode !== 'string' || !Number.isInteger(expectedFrame) || !(fps > 0)) return false;
+  const match = timecode.match(/^(\d{2}):(\d{2}):(\d{2}):(\d{2})$/u);
+  if (!match) return false;
+  const [, hours, minutes, seconds, frames] = match.map(Number);
+  if (minutes >= 60 || seconds >= 60 || frames >= fps) return false;
+  const actualFrame = ((hours * 60 + minutes) * 60 + seconds) * fps + frames;
+  return Math.abs(actualFrame - expectedFrame) <= 1;
+}
+
+export function monitorPictureRect(viewport, frame) {
+  const { left, top, width, height, zoom } = viewport;
+  if (![left, top, width, height, zoom, frame.width, frame.height].every(Number.isFinite))
+    throw new Error('Monitor picture bounds are incomplete');
+  if (zoom <= 0 || frame.width <= 0 || frame.height <= 0)
+    throw new Error('Monitor picture dimensions must be positive');
+  return {
+    x: left + (width - frame.width * zoom) / 2,
+    y: top + (height - frame.height * zoom) / 2,
+    width: frame.width * zoom,
+    height: frame.height * zoom,
+  };
+}
+
+export function burnInRegionDimensions(dimensions) {
+  return {
+    x: 0,
+    y: 0,
+    width: Math.max(1, Math.floor(dimensions.width * 0.25)),
+    height: Math.max(1, Math.floor(dimensions.height * 0.1)),
+  };
+}
+
+async function compareBurnInRegion(preview, frame, outputDir, tolerance) {
+  const dimensions = await probeFrameDimensions(preview);
+  const region = burnInRegionDimensions(dimensions);
+  const previewRegion = join(outputDir, 'monitor-burn-in.png');
+  const exportRegion = join(outputDir, 'export-burn-in.png');
+  await extractFrameRegion(preview, previewRegion, region);
+  await extractFrameRegion(frame, exportRegion, region);
+  return compareFrames(previewRegion, exportRegion, join(outputDir, 'compare'), tolerance);
 }
 
 export function processTreeWorkingSet(rootPid, { run = spawnSync } = {}) {

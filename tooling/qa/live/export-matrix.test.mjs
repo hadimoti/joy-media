@@ -2,11 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compareRgbFrames } from '../compare.mjs';
 import {
+  FRAME_COMPARE_SAMPLES,
   EXPORT_MATRIX_IDS,
   EXPORT_MATRIX_ROWS,
+  burnInRegionDimensions,
   inspectPreset,
+  monitorPictureRect,
   parseProcessTreeWorkingSet,
   processTreeWorkingSet,
+  timecodeIsWithinFrame,
 } from './export-matrix-steps.mjs';
 
 const validProbe = {
@@ -24,7 +28,7 @@ const validProbe = {
   ],
 };
 
-test('A10 has nine selectable preset rows, one three-frame compare and one memory row', () => {
+test('A10 has nine selectable preset rows, one four-frame compare and one memory row', () => {
   assert.deepEqual(
     EXPORT_MATRIX_IDS,
     Array.from({ length: 11 }, (_, index) => `D-A10-${String(index + 1).padStart(2, '0')}`),
@@ -46,6 +50,35 @@ test('RGB compare uses the stated mean absolute per-channel threshold', () => {
   const shifted = { width: 2, height: 1, bytes: Buffer.from([14, 10, 10, 14, 10, 10]) };
   assert.equal(compareRgbFrames(preview, near, 1).status, 'pass');
   assert.equal(compareRgbFrames(preview, shifted, 1).status, 'fail');
+});
+
+test('D-A10-10 samples matching source times on both duplicated clips', () => {
+  assert.deepEqual(FRAME_COMPARE_SAMPLES, [
+    { seconds: 1, sourceSeconds: 1 },
+    { seconds: 2, sourceSeconds: 2 },
+    { seconds: 4, sourceSeconds: 1 },
+    { seconds: 5, sourceSeconds: 2 },
+  ]);
+  assert.equal(timecodeIsWithinFrame('00:00:01:01', 30, 30), true);
+  assert.equal(timecodeIsWithinFrame('00:00:01:02', 30, 30), false);
+  assert.equal(timecodeIsWithinFrame('00:00:01:30', 30, 30), false);
+  assert.equal(timecodeIsWithinFrame(null, 30, 30), false);
+});
+
+test('Monitor picture crop uses the centered Fit frame and excludes stage margins', () => {
+  assert.deepEqual(
+    monitorPictureRect(
+      { left: 100, top: 40, width: 800, height: 500, zoom: 0.4 },
+      { width: 1920, height: 1080 },
+    ),
+    { x: 116, y: 74, width: 768, height: 432 },
+  );
+  assert.deepEqual(burnInRegionDimensions({ width: 768, height: 432 }), {
+    x: 0,
+    y: 0,
+    width: 192,
+    height: 43,
+  });
 });
 
 test('memory sampler reads launched process tree working sets', () => {
