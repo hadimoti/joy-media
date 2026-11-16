@@ -5729,9 +5729,12 @@ function EditorWorkspace({
     const label = panelLabel(dockPanelId);
     // A moment later, so a closing palette or menu has given focus back before this takes it.
     window.setTimeout(() => {
-      const root = Array.from(
-        document.querySelectorAll<HTMLElement>('article.joy-panel-root'),
-      ).find((element) => element.getAttribute('aria-label') === label && element.offsetWidth > 0);
+      const root = Array.from(document.querySelectorAll<HTMLElement>('[aria-label]')).find(
+        (element) =>
+          element.getAttribute('aria-label') === label &&
+          element.offsetWidth > 0 &&
+          element.closest('.app-menubar, .workspace-switcher, .palette, .header-group') === null,
+      );
       if (root === undefined) return;
       const target =
         root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ??
