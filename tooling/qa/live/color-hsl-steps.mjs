@@ -23,6 +23,8 @@
  *   example from the saved project file or a test hook.
  */
 
+import { openColorPanel } from './color-panel-steps.mjs';
+
 const EYEDROPPER = '[data-hsl-eyedropper]';
 const OVERLAY = '[data-monitor-eyedropper]';
 const GREEN = '[data-hsl-band="green"]';
@@ -30,8 +32,7 @@ const GREEN_SATURATION = '[data-hsl-band="green"] input[data-hsl-control="satura
 const COMPARE = '[data-color-compare]';
 
 async function openHsl(page) {
-  await page.locator('[data-feature-tool="color"]').first().click();
-  await page.locator('[data-panel-tab-id="hsl"]').first().click();
+  await openColorPanel(page, 'hsl');
   await page.locator(EYEDROPPER).first().waitFor();
 }
 

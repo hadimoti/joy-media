@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COLOR_MATRIX_ROWS, COLOR_MATRIX_ROWS_BY_ID } from './color-matrix-rows.mjs';
+import {
+  COLOR_MATRIX_ROWS,
+  COLOR_MATRIX_ROWS_BY_ID,
+  readColourGrade,
+} from './color-matrix-rows.mjs';
 import { createFakePage } from './fake-page.mjs';
 import { executeRow } from './matrix-core.mjs';
 
@@ -23,6 +27,22 @@ test('a fake registered row passes through the matrix executor', async () => {
   assert.equal(result.id, 'D-K01');
   assert.equal(result.status, 'passed');
   assert.equal(result.message, 'fake colour pass');
+});
+
+test('colour grade reads use the document reader supplied by the matrix context', async () => {
+  const page = createFakePage();
+  const state = { document: { colorGrade: { lift: { r: 0.2, g: 0, b: 0 } } } };
+  let calls = 0;
+  const grade = await readColourGrade({
+    page,
+    async readDocument() {
+      calls += 1;
+      return state;
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(grade['document.colorGrade'], state.document.colorGrade);
 });
 
 test('a fake registered row failure is reported as failed', async () => {

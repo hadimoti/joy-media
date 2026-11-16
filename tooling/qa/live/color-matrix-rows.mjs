@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { openColorPanel } from './color-panel-steps.mjs';
 import { addPointAndDrag } from './color-curves-steps.mjs';
 import { pickGreenAndDesaturate } from './color-hsl-steps.mjs';
 import { applyEachBuiltInLook, runColourLifecycle } from './color-persistence-steps.mjs';
@@ -34,20 +35,19 @@ function findNested(value, predicate) {
   return undefined;
 }
 
-async function readGrade(ctx) {
+export async function readColourGrade(ctx) {
   const state = await ctx.readDocument();
   return collectColorState({ document: state.document, storedDocument: state.storedDocument });
 }
 
 async function readHslGrade(ctx) {
-  const state = await ctx.readDocument();
-  const grade = findNested(state, (value) => Array.isArray(value?.hsl));
+  const grade = findNested(await readColourGrade(ctx), (value) => Array.isArray(value?.hsl));
   if (grade === undefined) throw new Error('the saved colour grade has no readable HSL bands');
   return grade;
 }
 
 async function readWheel(ctx) {
-  const grade = await readGrade(ctx);
+  const grade = await readColourGrade(ctx);
   const lift = findNested(grade, (value) => value?.lift)?.lift;
   if (!lift || !['r', 'g', 'b'].every((key) => Number.isFinite(lift[key]))) {
     throw new Error('the saved colour grade has no readable Lift wheel');
@@ -56,7 +56,7 @@ async function readWheel(ctx) {
 }
 
 async function readCurve(ctx) {
-  const grade = await readGrade(ctx);
+  const grade = await readColourGrade(ctx);
   const points = findNested(grade, (value) => Array.isArray(value?.rgb))?.rgb;
   if (!Array.isArray(points)) throw new Error('the saved colour grade has no readable RGB curve');
   return points;
@@ -136,7 +136,7 @@ async function saveAndReopen(page, ctx, rowId) {
     await session.page.waitForTimeout(100);
   }
   ctx.page = session.page;
-  return await readGrade(ctx);
+  return await readColourGrade(ctx);
 }
 
 async function compareExport(page, pixel, ctx, rowId) {
@@ -226,7 +226,7 @@ async function runLifecycle(rowId, gesture, ctx, { point, includeExport = true }
   const lifecycle = {
     pixel,
     readPreviewPixel: (page, p) => monitorPixel(page, p, ctx, rowId),
-    readGrade: () => readGrade(ctx),
+    readGrade: () => readColourGrade(ctx),
     edit: (page) => gesture(page, ctx, lifecycle.pixel),
     saveAndReopen: (page) => saveAndReopen(page, ctx, rowId),
     undo: async () => ctx.page.keyboard.press('Control+z'),
@@ -293,8 +293,7 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
     async run(page, ctx) {
       const base = await ensureTimelineClip(page, ctx, 'D-K04', { fresh: true });
       await selectClipById(page, base.clips[0].id);
-      await page.locator('[data-feature-tool="color"]').first().click();
-      await page.locator('[data-panel-tab-id="looks"]').first().click();
+      await openColorPanel(page, 'looks');
       let activePage = page;
       const results = await applyEachBuiltInLook(page, async () => {
         const box = await activePage.locator('.monitor-canvas-wrap').first().boundingBox();
@@ -302,7 +301,7 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
         return {
           pixel,
           readPreviewPixel: (target, p) => monitorPixel(target, p, ctx, 'D-K04'),
-          readGrade: () => readGrade(ctx),
+          readGrade: () => readColourGrade(ctx),
           edit: async () => {},
           saveAndReopen: async () => {
             const result = await saveAndReopen(activePage, ctx, 'D-K04');
@@ -313,8 +312,7 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
           compareExportFrame: (_target, p) => compareExport(ctx.page, p, ctx, 'D-K04'),
           getPage: async () => {
             activePage = ctx.page;
-            await activePage.locator('[data-feature-tool="color"]').first().click();
-            await activePage.locator('[data-panel-tab-id="looks"]').first().click();
+            await openColorPanel(activePage, 'looks');
             return activePage;
           },
         };
