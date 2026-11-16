@@ -239,11 +239,9 @@ rows.push({
     const relink = await importWithMissingMedia(page, ctx, 'D-A09-05');
     const importedBaseline = await ctx.readDocument(page);
     await relink.setInputFiles(join(ctx.fixtures, 'picture-1080.jpg'));
-    const warning = page
-      .getByRole('alert')
-      .filter({
-        hasText: /different size from the original|does not match the original checksum/u,
-      });
+    const warning = page.getByRole('alert').filter({
+      hasText: /different size from the original|does not match the original checksum/u,
+    });
     await warning.waitFor({ state: 'visible' });
     const refused = await ctx.readDocument(page);
     if (normalizeDocument(refused.document) !== normalizeDocument(importedBaseline.document)) {
