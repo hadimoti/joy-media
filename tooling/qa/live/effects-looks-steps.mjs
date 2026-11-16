@@ -297,8 +297,13 @@ export async function joyCodeLooks(page, ctx, deps = {}) {
         const total = await slots.count();
         for (let index = 0; index < total; index += 1) {
           const values = await slots.nth(index).evaluate(readOptionValues);
+          // A slot with nothing to offer (the Captions slot while the project has no caption) stays empty: the first
+          // slot is the required headline, and a Look runs without its optional slots.
           if (values.length === 0) {
-            throw blockedRow(rowId, `${flow.title} has a slot with no element to bind to`);
+            if (index === 0) {
+              throw blockedRow(rowId, `${flow.title} has no element to bind its first slot to`);
+            }
+            continue;
           }
           await slots.nth(index).selectOption(values[0]);
         }
