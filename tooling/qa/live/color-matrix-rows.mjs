@@ -52,7 +52,8 @@ const AT_REST_GRADE = Object.freeze({
 function comparableGrade(grade) {
   if (!Array.isArray(grade?.hsl)) return grade;
   return {
-    ...grade,
+    wheels: grade.wheels,
+    curves: grade.curves,
     hsl: grade.hsl.filter(
       (band) => (band.hueShift ?? 0) !== 0 || band.saturation !== 0 || band.luminance !== 0,
     ),
