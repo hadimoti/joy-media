@@ -5,6 +5,7 @@ import {
   buildTimelineTrackReorderTransaction,
   nextProfessionalTrackId,
   professionalTrackCode,
+  professionalTrackLabel,
   sortTracksForTimelineDisplay,
   timelineTrackFamily,
 } from './timeline-track-family.js';
@@ -105,5 +106,18 @@ describe('professional timeline track families', () => {
         targetTrackId: 'A1',
       }),
     ).toBeUndefined();
+  });
+
+  it('labels a row by its name or its code, never by its id (Inspector, T-D16)', () => {
+    const tracks = [
+      track('track-0', 0, 'visual'),
+      { ...track('track-1', 1, 'visual'), name: 'B-roll' },
+      track('track-2', 2, 'audio'),
+    ];
+    // Display order is top visual first, so track-1 (order 1) is V1 and named.
+    expect(professionalTrackLabel(tracks, 'track-1')).toBe('B-roll');
+    expect(professionalTrackLabel(tracks, 'track-0')).toBe('V2');
+    expect(professionalTrackLabel(tracks, 'track-2')).toBe('A1');
+    expect(professionalTrackLabel(tracks, 'missing')).toBeUndefined();
   });
 });
