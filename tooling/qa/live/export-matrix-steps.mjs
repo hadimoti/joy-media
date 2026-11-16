@@ -207,7 +207,13 @@ async function captureMonitorFrame(page, seconds, path, frameDimensions) {
   if (!timecodeIsWithinFrame(state.timecode, expectedFrames, 30))
     throw new Error(`D-A10-10: playhead is ${state.timecode}, expected ${target}`);
 
-  await page.getByRole('button', { name: 'Zoom Fit', exact: true }).click();
+  // The Fit chip lives in the zoom drawer: open it when it is closed.
+  const fit = page.getByRole('button', { name: 'Zoom Fit', exact: true });
+  if (!(await fit.isVisible().catch(() => false))) {
+    await page.locator('[aria-controls="monitor-zoom-drawer"]').first().click();
+    await fit.waitFor({ state: 'visible', timeout: 5_000 });
+  }
+  await fit.click();
   const wrap = page.locator('.monitor-canvas-wrap').first();
   const rect = await wrap.evaluate((element) => {
     const box = element.getBoundingClientRect();
