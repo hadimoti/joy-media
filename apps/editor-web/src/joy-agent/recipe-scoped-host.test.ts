@@ -224,6 +224,17 @@ describe('runScopedCreativeSkillEditToolLoop', () => {
       }
     });
 
+    it('disposes the recipe QC adapter when the recipe run completes', async () => {
+      const d = deps();
+      const dispose = vi.fn();
+      const adapter = { ...qcAdapter, dispose } as JoyAgentQcToolAdapter;
+      await runScopedCreativeSkillEditToolLoop(
+        { ...d.value, createQcAdapter: () => adapter },
+        input({ allowedToolNames: QC_NAMES }),
+      );
+      expect(dispose).toHaveBeenCalledOnce();
+    });
+
     it('never builds the adapter for a recipe that does not name a QC tool', async () => {
       const d = deps();
       const createQcAdapter = vi.fn(() => qcAdapter);

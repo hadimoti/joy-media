@@ -201,6 +201,13 @@ export function runScopedCreativeSkillEditToolLoop(
       workerRun = Object.freeze({ runId, epoch: 1 });
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
+  }).finally(() => {
+    const dispose = (qcAdapter as { readonly dispose?: () => void } | undefined)?.dispose;
+    try {
+      dispose?.call(qcAdapter);
+    } catch {
+      // A recipe's private QC resources must not change its terminal result.
+    }
   });
 }
 
