@@ -605,13 +605,22 @@ function syncTrackDeckMetadata(
     else rows.push(next);
   };
   for (const command of transaction.commands) {
-    if (command.type === 'timeline.setTrackLabelColor')
+    if (command.type === 'timeline.setTrackLabelColor') {
       upsert(
         command.payload.compositionId,
         command.payload.trackId,
         command.payload.labelColor === undefined ? {} : { labelColor: command.payload.labelColor },
       );
-    else if (command.type === 'timeline.setTrackLocked')
+      // No colour in the command means "back to the default": the row must lose its colour (Undo of the first
+      // colour, and the Default choice, left the old colour in the deck before).
+      if (command.payload.labelColor === undefined) {
+        const index = rowIndex(command.payload.compositionId, command.payload.trackId);
+        if (index >= 0) {
+          const { labelColor: _removed, ...rest } = rows[index]!;
+          rows[index] = rest;
+        }
+      }
+    } else if (command.type === 'timeline.setTrackLocked')
       upsert(command.payload.compositionId, command.payload.trackId, {
         locked: command.payload.locked,
       });

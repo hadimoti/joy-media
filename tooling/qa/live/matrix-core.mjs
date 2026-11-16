@@ -33,7 +33,29 @@ export function stableStringify(value) {
 export function normalizeDocument(document) {
   if (document === null || typeof document !== 'object') return stableStringify(document);
   const { updatedAt: _updatedAt, ...rest } = document;
-  return stableStringify(rest);
+  return stableStringify(withoutFalseTrackFlags(rest));
+}
+
+/** A track flag that is false means the same as no flag (Lock then Undo leaves `locked: false`; found live). */
+function withoutFalseTrackFlags(document) {
+  const compositions = document.compositions;
+  if (compositions === null || typeof compositions !== 'object') return document;
+  const next = {};
+  for (const [id, composition] of Object.entries(compositions)) {
+    if (!Array.isArray(composition?.tracks)) {
+      next[id] = composition;
+      continue;
+    }
+    next[id] = {
+      ...composition,
+      tracks: composition.tracks.map((track) => {
+        const copy = { ...track };
+        for (const flag of ['locked', 'muted', 'solo']) if (copy[flag] === false) delete copy[flag];
+        return copy;
+      }),
+    };
+  }
+  return { ...document, compositions: next };
 }
 
 /** The text of a defect entry in the T-A16 format. CC assigns the ID, owner and branch. */
@@ -263,13 +285,15 @@ export async function readDocument(page, bridge) {
     projectId: ids.controlPlaneProjectId,
   });
   const view = reply?.data ?? reply;
-  if (!view?.document) throw new Error('desktop.media.project.document.get returned no document');
+  // A project that has not been saved yet has no stored document; the live timeline then stands in.
+  if (!view?.document && live === null)
+    throw new Error('desktop.media.project.document.get returned no document');
   return {
     projectId: ids.controlPlaneProjectId,
-    revisionId: view.revisionId,
+    revisionId: view?.revisionId ?? 'live',
     // The timeline (clips) is the live one; the stored visual document stays available beside it.
     document: live ?? view.document,
-    storedDocument: view.document,
+    storedDocument: view?.document ?? null,
   };
 }
 
@@ -334,18 +358,25 @@ export async function runCommandCycle(row, page, ctx) {
   evidence.push(writeSnapshot(ctx, row.id, 'after', after));
   const problem = row.check?.(before, after);
   if (problem) throw new Error(`${row.command}: ${problem}`);
+  // What the screen shows must agree with the document (a stale header colour hid behind a correct document).
+  const screenAfter = await row.checkScreen?.(page, 'do');
+  if (screenAfter) throw new Error(`${row.command}: ${screenAfter}`);
 
   ctx.bridge.log.setLabel(`${row.id} undo`);
   await ctx.undo(page);
   const undone = await waitFor((document) => key(document) === key(before));
   evidence.push(writeSnapshot(ctx, row.id, 'after-undo', undone.value));
   if (!undone.ok) throw new Error(`${row.command}: undo did not bring the document back`);
+  const screenUndone = await row.checkScreen?.(page, 'undo');
+  if (screenUndone) throw new Error(`${row.command}: ${screenUndone}`);
 
   ctx.bridge.log.setLabel(`${row.id} redo`);
   await ctx.redo(page);
   const redone = await waitFor((document) => key(document) === key(after));
   evidence.push(writeSnapshot(ctx, row.id, 'after-redo', redone.value));
   if (!redone.ok) throw new Error(`${row.command}: redo did not bring the edit back`);
+  const screenRedone = await row.checkScreen?.(page, 'redo');
+  if (screenRedone) throw new Error(`${row.command}: ${screenRedone}`);
 
   return {
     message: `${row.command}: done, checked, undone and redone through the bridge`,

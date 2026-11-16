@@ -200,6 +200,7 @@ function makeContext(t, app) {
     libraryDir: 'C:\\scratch\\library',
     altLibraryDir: join(outDir, 'alt'),
     runTag: 'test',
+    freshProjectEveryRow: false,
     bridge: createBridge(app.page, log),
     bridgeLogPath: join(outDir, 'bridge-replies.jsonl'),
     poll: { timeoutMs: 60, intervalMs: 5 },
@@ -662,7 +663,65 @@ test('exerciseControls changes number controls, and throws when a control loses 
   assert.deepEqual(lines, ['number 1: 5 -> 6', 'number 2: 10 -> 11']);
   await assert.rejects(
     exerciseControls(pageWith([input(5, false)])),
-    /number control 1 kept 5, wanted 6/u,
+    /number control 1 kept 5, would not change either way/u,
   );
   await assert.rejects(exerciseControls(pageWith([])), /no control to change/u);
+});
+
+test('exerciseControls goes the other way when a control clamps at an undeclared limit', async () => {
+  let current = 100;
+  const clamped = {
+    isVisible: async () => true,
+    isEnabled: async () => true,
+    inputValue: async () => String(current),
+    getAttribute: async () => null,
+    fill: async (next) => {
+      current = Math.min(100, Number(next));
+    },
+    press: async () => {},
+  };
+  const page = {
+    locator: () => ({
+      locator: (selector) =>
+        selector === 'input[type="number"]'
+          ? { count: async () => 1, nth: () => clamped }
+          : { count: async () => 0 },
+    }),
+  };
+  assert.deepEqual(await exerciseControls(page), ['number 1: 100 -> 99']);
+});
+
+test('exerciseControls fails a control that lands on some other value', async () => {
+  let current = 10;
+  const wrong = {
+    isVisible: async () => true,
+    isEnabled: async () => true,
+    inputValue: async () => String(current),
+    getAttribute: async () => null,
+    fill: async () => {
+      current = 50;
+    },
+    press: async () => {},
+  };
+  const page = {
+    locator: () => ({
+      locator: (selector) =>
+        selector === 'input[type="number"]'
+          ? { count: async () => 1, nth: () => wrong }
+          : { count: async () => 0 },
+    }),
+  };
+  await assert.rejects(exerciseControls(page), /number control 1 kept 50, wanted 11/u);
+});
+
+test('normalizeDocument treats a false track flag as no flag (Lock then Undo leaves locked: false)', () => {
+  const doc = (track) => ({ rootCompositionId: 'c', compositions: { c: { tracks: [track] } } });
+  assert.equal(
+    normalizeDocument(doc({ id: 't' })),
+    normalizeDocument(doc({ id: 't', locked: false, muted: false, solo: false })),
+  );
+  assert.notEqual(
+    normalizeDocument(doc({ id: 't' })),
+    normalizeDocument(doc({ id: 't', locked: true })),
+  );
 });

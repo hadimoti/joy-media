@@ -309,6 +309,40 @@ describe('applyCommand', () => {
     expect(applyCommand(renamed.project, renamed.inverse).project).toEqual(project);
   });
 
+  it('Undo of a track colour set on a track with no colour removes the colour (D-A06-19)', () => {
+    const project = baseProject();
+    expect(project.compositions.root!.tracks[0]!.labelColor).toBeUndefined();
+    const colored = applyCommand(project, {
+      type: 'timeline.setTrackLabelColor',
+      payload: { compositionId: 'root', trackId: 'track-0', labelColor: 'forest' },
+    });
+    expect(colored.project.compositions.root!.tracks[0]!.labelColor).toBe('forest');
+    expect(colored.inverse.payload).not.toHaveProperty('labelColor');
+    expect(applyCommand(colored.project, colored.inverse).project).toEqual(project);
+  });
+
+  it('Undo of a track family set on a track with no family removes the family', () => {
+    const base = baseProject();
+    const track = { ...base.compositions.root!.tracks[0]! };
+    Reflect.deleteProperty(track, 'family');
+    const project: SpikeProject = {
+      ...base,
+      compositions: {
+        ...base.compositions,
+        root: {
+          ...base.compositions.root!,
+          tracks: [track, ...base.compositions.root!.tracks.slice(1)],
+        },
+      },
+    };
+    const changed = applyCommand(project, {
+      type: 'timeline.setTrackFamily',
+      payload: { compositionId: 'root', trackId: 'track-0', family: 'visual' },
+    });
+    expect(changed.inverse.payload).not.toHaveProperty('family');
+    expect(applyCommand(changed.project, changed.inverse).project).toEqual(project);
+  });
+
   it('trim start shifts the source in-point by the same delta', () => {
     const project = baseProject();
     const { project: next, inverse } = applyCommand(project, {
