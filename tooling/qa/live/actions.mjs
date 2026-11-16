@@ -170,7 +170,27 @@ async function prep(t, minClips = 1) {
 }
 
 async function selectBase(t, state) {
-  await selectClipById(t.page, state.clips[0].id);
+  try {
+    await selectClipById(t.page, state.clips[0].id);
+  } catch (error) {
+    // Say what the page shows: a clip that is gone usually means the project changed underneath.
+    const shown = await t.page
+      .evaluate(() => ({
+        title: document.title,
+        clips: Array.from(document.querySelectorAll('.timeline-clip'), (e) =>
+          e.getAttribute('data-clip-id'),
+        ),
+        dialogs: Array.from(
+          document.querySelectorAll('[role="dialog"], [role="alertdialog"]'),
+          (e) => (e.getAttribute('aria-label') ?? e.className ?? '').toString().slice(0, 40),
+        ),
+        text: (document.body.innerText ?? '').replace(/\s+/gu, ' ').slice(0, 160),
+      }))
+      .catch(() => undefined);
+    throw new Error(
+      `the clip ${state.clips[0].id} is not on the page; it shows ${JSON.stringify(shown)}: ${String(error?.message ?? error).split('\n')[0]}`,
+    );
+  }
 }
 
 async function expectCount(page, count, why) {
