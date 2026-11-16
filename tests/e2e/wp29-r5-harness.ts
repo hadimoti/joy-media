@@ -363,8 +363,8 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
 
     const definition = featureTool(route.hub, route.toolId);
     if (definition === undefined) throw new Error(`Unknown feature route for ${label}`);
-    const hub = page.getByRole('region', { name: `${hubLabel} tools`, exact: true });
-    const featureTab = hub.getByRole('tab', { name: definition.label, exact: true });
+    const hub = page.locator(`.feature-hub--${route.hub}`);
+    const featureTab = hub.locator(`[data-feature-tool="${route.toolId}"]`);
     await expect(featureTab).toBeVisible();
     await featureTab.click();
     const panelTitle = PANEL_TITLE_BY_ID[panelId];
@@ -379,7 +379,10 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
   const liveLabel = label;
   let tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();
   if (!(await tab.isVisible())) {
-    await page.getByRole('button', { name: 'View', exact: true }).click();
+    await page
+      .locator('.app-menubar button.app-menu-trigger')
+      .getByText('View', { exact: true })
+      .click();
     const menuItem = page.getByRole('menuitem', { name: liveLabel, exact: true });
     await expect(menuItem).toBeVisible();
     await menuItem.click();
@@ -391,6 +394,8 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
     await expect(page.locator('.timeline-panel')).toBeVisible();
   } else if (liveLabel === 'Joy Code') {
     await expect(page.locator('.joy-code-panel')).toBeVisible();
+  } else if (liveLabel === '3D Scene') {
+    await expect(page.locator('.scene3d-panel')).toBeVisible();
   } else {
     // The shared shell keeps the panel name accessible while omitting the
     // redundant visible title row.

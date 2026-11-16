@@ -386,7 +386,7 @@ test.describe('WP-29 R5 batch C — captions', () => {
     await page.getByRole('button', { name: 'Generate English' }).click();
     await expect.poll(() => server.requests.length).toBe(2);
     await expect(page.locator('.captions-panel .joy-panel-note')).toContainText(
-      'Live transcription could not process the selected media. You can continue editing captions manually.',
+      'Live transcription could not process the selected media. The local Whisper server could not process the media. You can continue editing captions manually.',
     );
     await page.getByRole('tab', { name: 'Transcript' }).click();
     await expect(source).toHaveValue('Welcome to the JOY Media studio');

@@ -91,9 +91,9 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
     await expect(menu).toBeHidden();
 
     await page.getByRole('button', { name: 'Recent processes' }).click();
-    await expect(page.getByRole('region', { name: 'Recent processes' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Recent processes' })).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('region', { name: 'Recent processes' })).toBeHidden();
+    await expect(page.getByRole('dialog', { name: 'Recent processes' })).toBeHidden();
 
     await page.getByRole('button', { name: 'File' }).click();
     await page.getByRole('menuitem', { name: 'Projects Library…' }).click();
