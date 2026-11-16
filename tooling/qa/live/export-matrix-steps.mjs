@@ -333,6 +333,7 @@ export function burnInRegionDimensions(dimensions) {
 async function compareBurnInRegion(preview, frame, outputDir, tolerance) {
   const dimensions = await probeFrameDimensions(preview);
   const region = burnInRegionDimensions(dimensions);
+  mkdirSync(outputDir, { recursive: true });
   const previewRegion = join(outputDir, 'monitor-burn-in.png');
   const exportRegion = join(outputDir, 'export-burn-in.png');
   await extractFrameRegion(preview, previewRegion, region);
