@@ -29,7 +29,9 @@ export async function importThroughLeftPanel(page, filePath) {
     (await mediaTab.getAttribute('aria-selected').catch(() => null)) === 'true';
   if (!mediaOpen) {
     await openMenu(page, 'View');
-    await page.getByRole('menuitem', { name: 'Media', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Create', exact: true }).click();
+    await mediaTab.waitFor({ state: 'visible' });
+    await mediaTab.click();
   }
   await page.getByRole('button', { name: 'Import media', exact: true }).first().click();
   const dialog = page.getByRole('dialog', { name: 'Import media', exact: true });

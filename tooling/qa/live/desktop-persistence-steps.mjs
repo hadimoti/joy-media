@@ -47,7 +47,7 @@ async function openMissingMediaReview(page) {
   const importButton = page.getByRole('button', { name: 'Import media', exact: true }).first();
   if (!(await importButton.isVisible().catch(() => false))) {
     await openMenu(page, 'View');
-    await page.getByRole('menuitem', { name: 'Media', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Create', exact: true }).click();
   }
   await page
     .getByRole('region', { name: 'Missing media' })
