@@ -228,9 +228,6 @@ export function createIsolatedCompositionCapture(
       signal.throwIfAborted();
       const assetId = object.assetId;
       if (assetId === undefined) throw new Error('Image asset is unavailable');
-      const blob = await getBlob(assetId);
-      const decoded = await decodeImageSize(blob);
-      objectSizes[object.id] = { width: decoded.width, height: decoded.height };
       const asset = visualProject.assets[assetId];
       const bitmap = await stickerCache.syncObject({
         objectId: object.id,
@@ -257,8 +254,15 @@ export function createIsolatedCompositionCapture(
     signal: AbortSignal,
   ) {
     const bitmaps = new Map<string, BrowserVideoFrameBitmap>();
-    for (const [id, bitmap] of stickerCache.bitmaps(timeUs)) bitmaps.set(id, bitmap);
     const hidden = hiddenClipIds(timelineProject);
+    const activeObjectIds = new Set(
+      Object.values(visualProject.visualObjects)
+        .filter((object) => isBoundObjectActive(visualProject, object.id, timeUs, hidden))
+        .map((object) => object.id),
+    );
+    for (const [id, bitmap] of stickerCache.bitmaps(timeUs)) {
+      if (activeObjectIds.has(id)) bitmaps.set(id, bitmap);
+    }
     const scenes = Object.values(visualProject.visualObjects).filter(
       (object) =>
         object.kind === 'html-scene' &&
@@ -279,6 +283,9 @@ export function createIsolatedCompositionCapture(
 
   async function decodeFrameVideos(frame: RenderFrameIR, timeUs: number, signal: AbortSignal) {
     const nodes = [];
+    for (const clip of flattenRootTimelineVideoClips(timelineProject)) {
+      if (timeUs >= clip.startUs + clip.durationUs) closeVideoResource(videoResources, clip.id);
+    }
     const clips = activeVideoClips(timelineProject, visualProject, timeUs);
     const transition = activeTransition(visualProject, timelineProject, timeUs);
     const hidden = hiddenClipIds(timelineProject);
@@ -569,15 +576,6 @@ function requiredFonts(project: JoyProjectV1): string[] {
   ];
 }
 
-async function decodeImageSize(blob: Blob): Promise<{ width: number; height: number }> {
-  const bitmap = await createImageBitmap(blob);
-  try {
-    return { width: bitmap.width, height: bitmap.height };
-  } finally {
-    bitmap.close();
-  }
-}
-
 async function decodeBlobPixels(blob: Blob): Promise<ImageDataLike> {
   const bitmap = await createImageBitmap(blob);
   try {
@@ -594,7 +592,11 @@ async function decodeBlobPixels(blob: Blob): Promise<ImageDataLike> {
 }
 
 function copyPixels(bitmap: ImageDataLike): ImageDataLike {
-  return { ...bitmap, data: new Uint8ClampedArray(bitmap.data) };
+  return {
+    width: bitmap.width,
+    height: bitmap.height,
+    data: new Uint8ClampedArray(bitmap.data),
+  };
 }
 
 function cloneProject<T>(value: T): T {
