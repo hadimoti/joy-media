@@ -8,9 +8,10 @@
 
 ## Known limits
 
-- Only gaussian-blur, sepia and vignette are wired and proven (3 of 3 passed). The `--kind effects` smoke run reported a blank preview for brightness-contrast and no change for `contrast`; this may be a harness mismatch and is not yet resolved, so the effects kind is unproven.
+- Full filters and effects runs were completed on the current harness. The reports in the run output are the evidence; the current known reproducible export mismatches are drop-shadow and CRT.
 - The ms-per-frame numbers at 1080p come from software GL (SwiftShader) and a 1x1 readback. They will not match what a user sees on a GPU.
-- Pass thresholds are loose: export mean delta of at most 12 (vignette showed a max of 81), preview must differ from the Before frame by more than 0.1, and a keyframe passes if the middle frame differs from both ends by more than 0.01.
-- Reset is simulated with `setParam` commands, not with the app's Reset action.
-- `--face` and the full item lists have not been run.
+- Export comparison permits a mean absolute channel delta of at most 12 after MP4 encoding. A high maximum delta can come from a small number of codec-affected channels; the mean remains the acceptance metric.
+- Preview change and parameter change require a mean RGB delta greater than 1.0; keyframes require the middle frame to differ from both endpoints by more than 0.4. These floors are above the lowest passing measurements in the full current run (1.15 for a parameter and 0.47 for a keyframe).
+- The harness tests reset-to-default parameter values with history undo/redo, then removes the effect and checks that the rendered pixels return to Before within 0.5 mean delta. It exercises project commands, not the app's Reset button UI.
+- The full run uses the built-in four-quadrant chart, including a generated portrait. `--face` can substitute a portrait photo, but a supplied photo was not used in this run.
 - The committed accept report was made from a dirty tree; re-run it on the committed head.

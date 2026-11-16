@@ -27,7 +27,7 @@ import {
 import type { OfflineMp4Capability } from '../../../../apps/editor-web/src/offline-mp4-export.js';
 import { paintKnownTestChart } from './test-chart.mjs';
 import { computeRgbaDiffMetrics, computeRgbaSpread } from './pixel-metrics.mjs';
-import { previewAccepted } from './preview-rule.js';
+import { keyframeChangesMiddle, previewAccepted, visiblePixelChange } from './preview-rule.js';
 
 const PREVIEW_WIDTH = 960;
 const PREVIEW_HEIGHT = 540;
@@ -683,7 +683,7 @@ async function testItem(input: TestItemInput) {
       highVsDefaultMeanDiff: highVsDef.meanAbsDiff,
       highVsLowMeanDiff: highVsLow.meanAbsDiff,
       maxChangedPixels,
-      passed: maxChangedPixels > 0 && maxMeanDelta > 0,
+      passed: visiblePixelChange(maxMeanDelta, maxChangedPixels),
     });
   }
 
@@ -774,6 +774,33 @@ async function testItem(input: TestItemInput) {
     );
     const afterRedoVsDefault = computeRgbaDiffMetrics(afterRedoRgba, defaultPreviewRgba);
 
+    // Removing the effect is the harness equivalent of Reset to Before. Keep this
+    // separate from restoring parameter defaults: some defaults are intentionally
+    // non-neutral and should still differ from the unfiltered picture.
+    history.apply({
+      label: `Reset ${descriptor.label} to Before`,
+      commands: [
+        {
+          type: 'effect.remove',
+          payload: { objectId: OBJECT_ID, effectInstanceId: instanceId },
+        },
+      ],
+    });
+    const afterResetToBeforeRgba = renderProjectFrame(
+      history.present,
+      currentState.compId,
+      SAMPLE_TIME_US,
+      currentState.previewRenderer,
+      currentState.bitmaps540,
+      PREVIEW_WIDTH,
+      PREVIEW_HEIGHT,
+    );
+    const resetToBeforeDiff = computeRgbaDiffMetrics(
+      afterResetToBeforeRgba,
+      currentState.beforeRgba,
+    );
+    const resetToBeforeOk = resetToBeforeDiff.meanAbsDiff <= 0.5;
+
     const resetParamsOk = paramsRecordEqual(resetParams, defaultParams);
     const undoParamsOk = paramsRecordEqual(afterUndoParams, mutatedParams);
     const redoParamsOk = paramsRecordEqual(afterRedoParams, defaultParams);
@@ -787,6 +814,7 @@ async function testItem(input: TestItemInput) {
       resetParamsOk &&
       undoParamsOk &&
       redoParamsOk &&
+      resetToBeforeOk &&
       resetPixelsOk &&
       undoPixelsOk &&
       redoPixelsOk;
@@ -798,6 +826,9 @@ async function testItem(input: TestItemInput) {
         !resetParamsOk ? 'reset params mismatch' : null,
         !undoParamsOk ? 'undo params mismatch' : null,
         !redoParamsOk ? 'redo params mismatch' : null,
+        !resetToBeforeOk
+          ? `reset-to-Before pixel Δ=${resetToBeforeDiff.meanAbsDiff.toFixed(2)}`
+          : null,
         !resetPixelsOk ? `reset pixel Δ=${afterResetVsDefault.meanAbsDiff.toFixed(2)}` : null,
         !undoPixelsOk ? `undo pixel Δ=${afterUndoVsMutated.meanAbsDiff.toFixed(2)}` : null,
         !redoPixelsOk ? `redo pixel Δ=${afterRedoVsDefault.meanAbsDiff.toFixed(2)}` : null,
@@ -816,6 +847,8 @@ async function testItem(input: TestItemInput) {
       resetParamsOk,
       undoParamsOk,
       redoParamsOk,
+      resetToBeforeOk,
+      resetToBeforeMeanDiff: resetToBeforeDiff.meanAbsDiff,
       // Diagnostics: the exact param records that were compared.
       defaultParams,
       mutatedParams,
@@ -925,10 +958,12 @@ async function testItem(input: TestItemInput) {
     const animPresent = keyProjectHistory.present.propertyAnimations?.[animKey] !== undefined;
     const kfPassed =
       animPresent &&
-      midVsStart.changedPixels > 0 &&
-      midVsEnd.changedPixels > 0 &&
-      midVsStart.meanAbsDiff > 0.01 &&
-      midVsEnd.meanAbsDiff > 0.01;
+      keyframeChangesMiddle(
+        midVsStart.meanAbsDiff,
+        midVsStart.changedPixels,
+        midVsEnd.meanAbsDiff,
+        midVsEnd.changedPixels,
+      );
 
     keyframesResult = {
       skipped: false,

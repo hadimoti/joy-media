@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { previewAccepted } from './preview-rule.js';
+import { keyframeChangesMiddle, previewAccepted, visiblePixelChange } from './preview-rule.js';
 
 describe('harness preview rule', () => {
   it('passes a default that differs from Before', () => {
@@ -40,5 +40,23 @@ describe('harness preview rule', () => {
         adjustedVsDefaultMeanDiffs: [0, 19.7],
       }),
     ).toEqual({ accepted: true, neutralDefault: true });
+  });
+
+  it('requires measured preview and parameter changes to exceed the one-point floor', () => {
+    expect(
+      previewAccepted({
+        isBlankFrame: false,
+        defaultVsBeforeMeanDiff: 0.99,
+        adjustedVsDefaultMeanDiffs: [1],
+      }),
+    ).toEqual({ accepted: false, neutralDefault: false });
+    expect(visiblePixelChange(1, 10)).toBe(false);
+    expect(visiblePixelChange(1.01, 1)).toBe(true);
+  });
+
+  it('requires both keyframe comparisons to exceed the measured 0.4-point floor', () => {
+    expect(keyframeChangesMiddle(0.4, 1, 2, 1)).toBe(false);
+    expect(keyframeChangesMiddle(0.41, 1, 0.41, 1)).toBe(true);
+    expect(keyframeChangesMiddle(2, 0, 2, 1)).toBe(false);
   });
 });

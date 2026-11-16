@@ -53,8 +53,8 @@ export function buildLibraryMarkdownReport(report) {
     '',
     '## Results',
     '',
-    '| ID | Label | Preview vs Before | Export vs Preview | Params (L/D/H) | Reset / Undo / Redo | Keyframes | 1080p ms/frame | Errors | Status |',
-    '|---|---|---|---|---|---|---|---|---|---|',
+    '| ID | Label | Preview vs Before | Export vs Preview | Params (L/D/H) | Reset / Undo / Redo | Keyframes | 1080p ms/frame | Errors | Status | Failure reason |',
+    '|---|---|---|---|---|---|---|---|---|---|---|',
   ];
 
   for (const item of report.items) {
@@ -68,7 +68,7 @@ export function buildLibraryMarkdownReport(report) {
     const statusCell = item.passed ? 'PASS' : 'FAIL';
 
     lines.push(
-      `| \`${item.id}\` | ${escapeMd(item.label)} | ${previewCell} | ${formatExportCell(item)} | ${formatParamsCell(item)} | ${undoCell} | ${formatKeyframeCell(item)} | ${fmtNum(item.perf1080p.meanMsPerFrame)} ms | ${errorCount} | **${statusCell}** |`,
+      `| \`${item.id}\` | ${escapeMd(item.label)} | ${previewCell} | ${formatExportCell(item)} | ${formatParamsCell(item)} | ${undoCell} | ${formatKeyframeCell(item)} | ${fmtNum(item.perf1080p.meanMsPerFrame)} ms | ${errorCount} | **${statusCell}** | ${escapeMd(item.failureReasons.join('; ') || '—')} |`,
     );
   }
 
