@@ -268,9 +268,24 @@ export async function setAgentSlots(page, ctx) {
       timeoutMs: 15_000,
       message: `${label} model control to enable after choosing a profile`,
     });
+    // Choosing a profile reads its models, and the control may change from a text box to a list when
+    // the reading ends. Let the reading finish first.
+    await waitUntil(async () => (await card.getByText(/^Reading the models/u).count()) === 0, {
+      timeoutMs: 20_000,
+      message: `${label}: the model reading to finish`,
+    });
     const tag = await modelControl.evaluate((element) => element.tagName);
-    if (tag === 'SELECT') await modelControl.selectOption(ctx.model);
-    else await modelControl.fill(ctx.model);
+    if (tag === 'SELECT') {
+      const models = await modelControl.evaluate((node) =>
+        [...node.options].map((option) => option.value),
+      );
+      if (!models.includes(ctx.model)) {
+        throw new Error(
+          `the ${label} model list does not offer ${ctx.model}; it offers: ${models.join(' | ')}`,
+        );
+      }
+      await modelControl.selectOption(ctx.model);
+    } else await modelControl.fill(ctx.model);
     const refresh = card.getByRole('button', { name: 'Refresh models', exact: true });
     await refresh.click();
     await card.getByRole('button', { name: `Save ${label}`, exact: true }).click();
@@ -369,6 +384,20 @@ export function checkModeOutcome(modeId, outcome, snapshot, before) {
   return undefined;
 }
 
+/**
+ * A preview that stays staged blocks the next edit with "Review, apply, or reject the current JOY
+ * preview". Rejects it so the next run starts clean. True when one was there.
+ */
+export async function rejectLeftoverPreview(page) {
+  if ((await ui.reject(page).count()) === 0) return false;
+  await ui.reject(page).first().click();
+  await waitUntil(async () => (await ui.reject(page).count()) === 0, {
+    timeoutMs: 15_000,
+    message: 'the staged preview to be rejected',
+  });
+  return true;
+}
+
 export async function runInModes(page, ctx) {
   const timeoutMs = ctx.timeoutMs ?? 60_000;
   await closeSettings(page);
@@ -395,6 +424,8 @@ export async function runInModes(page, ctx) {
     const problem = checkModeOutcome(mode.id, outcome, staged, baseline.clips);
     if (problem) throw new Error(`${mode.name}: ${problem}`);
     const entry = { mode: mode.id, baselineClips: baseline.clips, staged: { outcome, ...staged } };
+    // A preview that stays staged (Suggest only offers nothing to approve) blocks the next edit.
+    if (outcome !== 'proposal') entry.rejectedLeftoverPreview = await rejectLeftoverPreview(page);
 
     if (outcome === 'proposal') {
       if (!staged.liveProposal && !staged.plan) {
@@ -427,6 +458,7 @@ export async function runInModes(page, ctx) {
 
 export async function cancelRun(page, ctx) {
   await closeSettings(page);
+  await rejectLeftoverPreview(page);
   await setExecutionMode(page, EXECUTION_MODES[1]);
   const baseline = await readJoyCodeSnapshot(page);
   await sendInstruction(page, 'STUB-SLOW wait for me');

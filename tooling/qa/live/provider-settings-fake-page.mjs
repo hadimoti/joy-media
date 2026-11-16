@@ -153,6 +153,8 @@ export function createFakeApp(options = {}) {
       return state.stage === 'applied' || state.stage === 'reverted' ? 1 : 0;
     if (tail.includes('Reverted.')) return state.stage === 'reverted' ? 1 : 0;
     if (tail.includes('is thinking')) return 0;
+    if (tail.includes('Reading the models')) return 0;
+    if (tail.includes('Reject')) return 0;
     if (tail.includes('.joy-code-message')) return state.messages;
     if (tail.includes('role=button[Stop current plan]'))
       return state.slow && !state.cancelled ? 1 : 0;
@@ -376,9 +378,13 @@ class FakeLocator {
     return null;
   }
 
-  async evaluate() {
-    // A slot's profile list offers the one saved connection; any other control is a plain SELECT.
-    return /combobox.* profile/u.test(this.desc) ? ['QA stub'] : 'SELECT';
+  async evaluate(read) {
+    // A control that reads its options: a slot's profile list offers the one saved connection and
+    // its model list the stub model. Anything else is asked for its tag name.
+    if (String(read ?? '').includes('.options')) {
+      return /combobox.* profile/u.test(this.desc) ? ['QA stub'] : ['joy-stub-model'];
+    }
+    return 'SELECT';
   }
 }
 
