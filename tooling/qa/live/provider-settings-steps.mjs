@@ -75,7 +75,8 @@ export const ui = {
   reject: (page) => page.getByRole('button', { name: /^Reject$/u }),
   undoRun: (page) => page.getByRole('button', { name: /Undo run/u }),
   // The send button turns into this while a run is busy (AgentPanel.tsx aria-label).
-  stop: (page) => page.getByRole('button', { name: 'Stop current plan', exact: true }),
+  // While the model works the header rail offers Stop agent; a staged plan offers Stop current plan.
+  stop: (page) => page.getByRole('button', { name: /^Stop (agent|current plan)$/u }),
   safeStop: (page) =>
     page.getByText('Joy Code could not finish this run safely.', { exact: false }),
   liveProposal: (page) => page.locator('[aria-label="JOY Agent live proposal"]'),

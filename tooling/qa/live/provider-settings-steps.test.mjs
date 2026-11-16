@@ -186,9 +186,9 @@ test('a run that is cancelled leaves the timeline as it was (D-090c)', async () 
   assert.equal(page.app.state.cancelled, true);
   assert.ok(
     page.app.calls.some(
-      ([kind, desc]) => kind === 'click' && desc.includes('role=button[Stop current plan]'),
+      ([kind, desc]) => kind === 'click' && desc.includes('Stop (agent|current plan)'),
     ),
-    'the composer Stop current plan action is clicked',
+    'the Stop action is clicked',
   );
 });
 
