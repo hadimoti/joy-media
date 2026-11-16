@@ -98,7 +98,7 @@ export async function runColourLifecycle(
   }
   if (!sameValue(baselineGrade, restoredGrade))
     throw new Error(
-      `Undo did not restore the colour grade: before ${JSON.stringify(baselineGrade).slice(0, 300)}, after ${JSON.stringify(restoredGrade).slice(0, 300)}`,
+      `Undo did not restore the colour grade: before hsl ${JSON.stringify(baselineGrade?.hsl)?.slice(0, 400)}, after ${JSON.stringify(restoredGrade).slice(0, 700)}`,
     );
 
   await redo(page);

@@ -115,6 +115,7 @@ function ffmpegRaw(input, args) {
   const result = spawnSync(tool, args, {
     input,
     encoding: null,
+    maxBuffer: 256 * 1024 * 1024,
     timeout: 60_000,
     windowsHide: true,
   });
