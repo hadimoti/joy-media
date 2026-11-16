@@ -90,6 +90,12 @@ test('model discovery and slot profile selection use their visible app container
       kind === 'click' && desc.includes('css[.joy-own-key]') && desc.includes('Find models'),
   );
   assert.ok(modelLookup, 'Find models is scoped to the own endpoint form');
+  assert.ok(
+    page.app.calls.some(
+      ([kind, desc]) => kind === 'click' && desc.includes('Models found on this service'),
+    ),
+    'the fetched model is read from the visible model drawer',
+  );
   const profileChoices = page.app.calls.filter(
     ([kind, desc]) => kind === 'selectOption' && desc.includes('profile'),
   );
@@ -180,12 +186,9 @@ test('a run that is cancelled leaves the timeline as it was (D-090c)', async () 
   assert.equal(page.app.state.cancelled, true);
   assert.ok(
     page.app.calls.some(
-      ([kind, desc]) =>
-        kind === 'click' &&
-        desc.includes('[role="status"][aria-live="polite"]') &&
-        desc.includes('role=button[Stop]'),
+      ([kind, desc]) => kind === 'click' && desc.includes('role=button[Stop current plan]'),
     ),
-    'the run status banner Stop action is clicked',
+    'the composer Stop current plan action is clicked',
   );
 });
 

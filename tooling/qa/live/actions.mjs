@@ -895,6 +895,13 @@ async function checkShortcut(page, ctx, rowId, row, chord) {
     }
   } else {
     await blurFocus(page);
+    // The Timeline tool keys (S, M, T, A, = and -, Shift+Z, Shift+F, Shift+R, Shift+Delete, Ctrl+I) work only while
+    // the pointer is over the timeline or focus is inside it (TimelinePanel key scope): rest the pointer on the ruler.
+    await page
+      .locator('.timeline-ruler')
+      .first()
+      .hover({ timeout: 5_000 })
+      .catch(() => undefined);
   }
   if (rule?.menuAction) {
     const check = ACTION_CHECKS[rule.menuAction];
@@ -916,9 +923,14 @@ async function checkShortcut(page, ctx, rowId, row, chord) {
     return 'Ctrl+I opened Import media and imported the fixture';
   }
   if (rule.field === 'timecode') {
-    const beforeTime = (await snapshot(page)).timecode ?? '';
-    if (/^(?:00:00|00:00:00)/u.test(beforeTime)) await page.keyboard.press('End');
-    else await page.keyboard.press('Home');
+    // Park the playhead in the middle of the ruler so both directions have room: from Home or End one of the
+    // two keys of a pair (Left / Right, Home / End) cannot move, and the row then saw "no change" (found live:
+    // End goes to the end of the whole timeline, a minute away).
+    const ruler = await page.locator('.timeline-ruler').first().boundingBox();
+    if (ruler !== null) {
+      await page.mouse.click(ruler.x + ruler.width * 0.3, ruler.y + ruler.height / 2);
+      await blurFocus(page);
+    }
   }
   if (rule.field === 'rangeSignature' && row.action === 'Clear in and out points') {
     await page.keyboard.press('i');

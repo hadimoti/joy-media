@@ -40,6 +40,7 @@ export function createFakeApp(options = {}) {
     consentTicked: false,
     notice: undefined,
     drawerNotice: undefined,
+    drawerOpen: false,
     connected: false,
     profiles: 0,
     modelsFound: false,
@@ -116,12 +117,13 @@ export function createFakeApp(options = {}) {
       return state.drawerNotice === 'discover-refusal';
     if (tail.includes('Choose a provider before discovering models'))
       return state.drawerNotice === 'choose-provider';
+    if (tail.includes('No models yet')) return state.drawerOpen && !state.modelsFound;
     if (tail.includes('I understand that custom endpoints')) return state.provider !== '';
     if (tail.includes('Ready to edit your project')) return state.connected;
     if (tail.includes('Saved connections \\(1\\)')) return state.profiles === 1;
     if (tail.includes('Saved connections')) return state.profiles > 0;
     if (tail.includes('1 models ready')) return state.modelsFound;
-    if (tail.includes('joy-settings-model-chip')) return state.modelsFound;
+    if (tail.includes('joy-settings-model-chip')) return state.drawerOpen && state.modelsFound;
     if (tail.includes('Media capability check complete')) return state.mediaChecked;
     if (tail.includes('Hello from the JOY QA stub.')) return state.hello;
     if (tail.includes('Reverted.')) return state.stage === 'reverted';
@@ -172,6 +174,8 @@ export function createFakeApp(options = {}) {
       state.settingsPage = /\[(AI models|Safety and limits)\]/u.exec(tail)[1];
     } else if (tail.includes('Connection and sign-in')) {
       state.endpointOpen = !state.endpointOpen;
+    } else if (tail.includes('/Models found on this service/')) {
+      state.drawerOpen = !state.drawerOpen;
     } else if (tail.startsWith('role=button[Connect model]')) {
       if (state.consentUrl !== state.url) state.notice = 'connect-refusal';
       else if (state.url.startsWith('http://127.0.0.1')) {
@@ -326,6 +330,9 @@ class FakeLocator {
       const index = this.app.slotIndex(this.desc);
       return !this.app.state.slotProfile[index];
     }
+    if (tail.includes('[aria-label="') && tail.includes(' model"]')) {
+      return !this.app.state.slotProfile[this.app.slotIndex(this.desc)];
+    }
     return false;
   }
 
@@ -348,6 +355,9 @@ class FakeLocator {
   }
 
   async getAttribute(name) {
+    if (name === 'aria-expanded' && this.desc.includes('Models found on this service')) {
+      return String(this.app.state.drawerOpen);
+    }
     if (name === 'aria-expanded' && this.desc.includes('Connection and sign-in')) {
       return String(this.app.state.endpointOpen);
     }
