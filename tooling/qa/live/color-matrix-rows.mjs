@@ -250,7 +250,11 @@ async function saveAndReopen(page, ctx, rowId, clipId) {
 
 async function compareExport(page, pixel, ctx, rowId) {
   const preview = await previewShot(page, ctx, rowId, 'colour-export-preview');
-  const exported = await exportAndProbe(page, ctx, rowId, { skipTrim: true, tag: 'colour' });
+  const exported = await exportAndProbe(page, ctx, rowId, {
+    skipTrim: true,
+    seconds: 3,
+    tag: 'colour',
+  });
   const framePath = join(ctx.outDir, rowId, 'colour-export-frame.png');
   await extractExportFrame(exported.path, 0, framePath);
   const probeTool = process.env.JOY_MEDIA_FFPROBE ?? 'ffprobe';
@@ -420,12 +424,14 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
       await selectClipById(page, base.clips[0].id);
       const first = await exportAndProbe(page, ctx, 'D-F23-01', {
         skipTrim: true,
+        seconds: 3,
         tag: 'first',
       });
       const firstPath = join(ctx.downloadDir, `D-F23-01-first-${Date.now()}.mp4`);
       renameSync(first.path, firstPath);
       const later = await exportAndProbe(page, ctx, 'D-F23-01', {
         skipTrim: true,
+        seconds: 3,
         tag: 'later',
       });
       const dir = join(ctx.outDir, 'D-F23-01');

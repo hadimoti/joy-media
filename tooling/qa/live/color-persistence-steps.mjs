@@ -97,7 +97,9 @@ export async function runColourLifecycle(
     throw new Error(`Undo left preview pixel ${JSON.stringify(restoredPixel)}`);
   }
   if (!sameValue(baselineGrade, restoredGrade))
-    throw new Error('Undo did not restore the colour grade');
+    throw new Error(
+      `Undo did not restore the colour grade: before ${JSON.stringify(baselineGrade).slice(0, 300)}, after ${JSON.stringify(restoredGrade).slice(0, 300)}`,
+    );
 
   await redo(page);
   const reappliedGrade = await readGrade(page);
