@@ -24,6 +24,7 @@
  */
 
 import { openColorPanel } from './color-panel-steps.mjs';
+import { blurFocus } from './ui-steps.mjs';
 
 const EYEDROPPER = '[data-hsl-eyedropper]';
 const OVERLAY = '[data-monitor-eyedropper]';
@@ -90,8 +91,10 @@ export async function pickGreenAndDesaturate(
   if (!isGrey(shown)) throw new Error(`the patch shows ${JSON.stringify(shown)}, not grey`);
 
   if (undo) {
-    await page.keyboard.press('Control+z');
-    await page.keyboard.press('Control+z');
+    await blurFocus(page);
+    await page.keyboard.press('Control+KeyZ');
+    await blurFocus(page);
+    await page.keyboard.press('Control+KeyZ');
     const undone = await readPreviewPixel(patch);
     if (!isGreen(undone)) throw new Error(`two undos left the patch ${JSON.stringify(undone)}`);
   }

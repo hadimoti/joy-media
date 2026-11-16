@@ -18,8 +18,16 @@ function lifecycleState() {
 }
 
 function lifecycle(state, page) {
+  const waits = [];
   return {
+    waits,
     readPreviewPixel: async () => ({ ...state.pixel }),
+    waitForPreviewPixel: async (_page, _pixel, predicate, description) => {
+      waits.push(description);
+      const sample = { ...state.pixel };
+      predicate(sample);
+      return sample;
+    },
     readGrade: async () => ({ ...state.grade }),
     edit: async () => {
       state.grade = { lut: 'monochrome' };
@@ -47,14 +55,32 @@ function lifecycle(state, page) {
 test('colour lifecycle checks preview, save/reopen, optional export compare, then Undo', async () => {
   const page = createFakePage();
   const state = lifecycleState();
-  const message = await runColourLifecycle(page, lifecycle(state, page));
+  const deps = lifecycle(state, page);
+  const message = await runColourLifecycle(page, deps);
 
   assert.match(message, /preview changed/u);
   assert.equal(state.reopened, true);
   assert.equal(state.exported, true);
   assert.equal(state.undone, true);
+  assert.deepEqual(deps.waits, [
+    'stable picture pixel',
+    'colour edit to reach the Monitor',
+    'Undo to restore the baseline Monitor pixel',
+  ]);
   assert.ok(page.calls.some((call) => call.includes('monochrome')));
   assert.ok(page.calls.some((call) => call.includes('Control+z')));
+});
+
+test('colour lifecycle can run with only fake readers and waits for the changed and restored pixels', async () => {
+  const page = createFakePage();
+  const state = lifecycleState();
+  const deps = lifecycle(state, page);
+
+  await runColourLifecycle(page, deps);
+
+  assert.equal(deps.waits.length, 3);
+  assert.equal(state.undone, true);
+  assert.ok(page.calls.includes('keyboard.press("Control+z")'));
 });
 
 test('colour lifecycle fails when an edit leaves the known preview frame unchanged', async () => {

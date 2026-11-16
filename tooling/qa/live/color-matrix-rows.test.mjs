@@ -7,6 +7,7 @@ import {
   monitorPicturePoint,
   monitorPictureRect,
   readColourGrade,
+  waitForMonitorPixel,
 } from './color-matrix-rows.mjs';
 import { createFakePage } from './fake-page.mjs';
 import { executeRow } from './matrix-core.mjs';
@@ -73,6 +74,47 @@ test('Monitor sample points use the framed picture bounds and view transform', (
   );
   assert.deepEqual(rect, { x: 120, y: 40, width: 768, height: 432 });
   assert.deepEqual(monitorPicturePoint(rect, 0.25, 0.2), { x: 312, y: 126.4 });
+});
+
+test('Monitor pixel polling waits for two stable canvas reads after the background', async () => {
+  const samples = [
+    { r: 12, g: 16, b: 28 },
+    { r: 0, g: 255, b: 0 },
+    { r: 1, g: 254, b: 0 },
+  ];
+  let reads = 0;
+  const page = createFakePage({
+    answers: ({ method, fn }) => {
+      if (method === 'evaluate' && fn === 'readMonitorCanvasPixel') {
+        const { r, g, b } = samples[reads++];
+        return { x: 1, y: 1, width: 10, height: 10, r, g, b };
+      }
+      return undefined;
+    },
+  });
+  const ctx = {
+    async readDocument() {
+      return {
+        document: {
+          compositions: { root: { width: 1920, height: 1080 } },
+          rootCompositionId: 'root',
+        },
+      };
+    },
+  };
+
+  const pixel = await waitForMonitorPixel(
+    page,
+    { x: 25, y: 20 },
+    ctx,
+    'D-K01',
+    (sample) => sample.g > 200,
+    'a stable green pixel',
+  );
+
+  assert.deepEqual(pixel, samples[2]);
+  assert.equal(reads, 3);
+  assert.equal(page.calls.filter((call) => call.includes('waitForTimeout(100)')).length, 2);
 });
 
 test('a fake registered row failure is reported as failed', async () => {

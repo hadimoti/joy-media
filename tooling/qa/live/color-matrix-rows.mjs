@@ -1,3 +1,4 @@
+/* global document */
 /** T-K07 runnable colour lifecycle rows. */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
@@ -9,7 +10,7 @@ import { applyEachBuiltInLook, runColourLifecycle } from './color-persistence-st
 import { dragWheelChangesGrade } from './color-wheels-steps.mjs';
 import { compareFrames, extractExportFrame } from '../compare.mjs';
 import { exportAndProbe } from './export-probe.mjs';
-import { ensureTimelineClip, previewShot, selectClipById } from './ui-steps.mjs';
+import { blurFocus, ensureTimelineClip, previewShot, selectClipById } from './ui-steps.mjs';
 import { readProjectIds, readLiveTimeline } from './matrix-core.mjs';
 import { blockedRow } from './rows.mjs';
 
@@ -134,40 +135,95 @@ function dimensions(png, rowId) {
 
 async function monitorPixel(page, point, ctx, rowId) {
   const picture = await monitorPicture(page, ctx);
-  const png = await page.screenshot({ clip: picture });
-  const size = dimensions(png, rowId);
-  const x = Math.max(
-    0,
-    Math.min(size.width - 1, Math.round(((point.x - picture.x) / picture.width) * size.width)),
-  );
-  const y = Math.max(
-    0,
-    Math.min(size.height - 1, Math.round(((point.y - picture.y) / picture.height) * size.height)),
-  );
-  const rgb = ffmpegRaw(png, [
-    '-v',
-    'error',
-    '-i',
-    'pipe:0',
-    '-frames:v',
-    '1',
-    '-f',
-    'rawvideo',
-    '-pix_fmt',
-    'rgb24',
-    'pipe:1',
-  ]);
-  const offset = (y * size.width + x) * 3;
-  if (offset + 2 >= rgb.length) throw new Error('the Monitor screenshot could not be decoded');
+  const xRatio = Math.max(0, Math.min(1, (point.x - picture.x) / picture.width));
+  const yRatio = Math.max(0, Math.min(1, (point.y - picture.y) / picture.height));
+  const sample = await page
+    .locator('.monitor-canvas')
+    .first()
+    .evaluate(
+      function readMonitorCanvasPixel(element, ratios) {
+        const source = element.querySelector('canvas');
+        if (!source || source.width === 0 || source.height === 0) return null;
+        const target = document.createElement('canvas');
+        target.width = source.width;
+        target.height = source.height;
+        const context = target.getContext('2d', { willReadFrequently: true });
+        if (!context) return null;
+        context.drawImage(source, 0, 0);
+        const x = Math.max(0, Math.min(source.width - 1, Math.floor(ratios.x * source.width)));
+        const y = Math.max(0, Math.min(source.height - 1, Math.floor(ratios.y * source.height)));
+        const data = context.getImageData(x, y, 1, 1).data;
+        return {
+          x,
+          y,
+          width: source.width,
+          height: source.height,
+          r: data[0],
+          g: data[1],
+          b: data[2],
+        };
+      },
+      { x: xRatio, y: yRatio },
+    );
+  if (!sample) throw blockedRow(rowId, 'the Monitor canvas pixel is unavailable');
   if (ctx.outDir) {
     const dir = join(ctx.outDir, rowId);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, 'preview-pixel.json'),
-      JSON.stringify({ x, y, r: rgb[offset], g: rgb[offset + 1], b: rgb[offset + 2] }, null, 2),
-    );
+    writeFileSync(join(dir, 'preview-pixel.json'), JSON.stringify(sample, null, 2));
   }
-  return { r: rgb[offset], g: rgb[offset + 1], b: rgb[offset + 2] };
+  return { r: sample.r, g: sample.g, b: sample.b };
+}
+
+const MONITOR_BACKGROUND = { r: 12, g: 16, b: 28 };
+const MONITOR_PIXEL_TOLERANCE = 4;
+
+function pixelDistance(left, right) {
+  return Math.max(
+    Math.abs(left.r - right.r),
+    Math.abs(left.g - right.g),
+    Math.abs(left.b - right.b),
+  );
+}
+
+export async function waitForMonitorPixel(page, point, ctx, rowId, predicate, description) {
+  let previous;
+  let stableReads = 0;
+  let last;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    last = await monitorPixel(page, point, ctx, rowId);
+    if (predicate(last)) {
+      stableReads =
+        previous && pixelDistance(previous, last) <= MONITOR_PIXEL_TOLERANCE ? stableReads + 1 : 1;
+      if (stableReads >= 2) return last;
+    } else {
+      stableReads = 0;
+    }
+    previous = last;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(
+    `${rowId}: timed out waiting for ${description}; last pixel ${JSON.stringify(last)}`,
+  );
+}
+
+async function waitForColourPixel(page, point, ctx, rowId, condition, baseline) {
+  return waitForMonitorPixel(
+    page,
+    point,
+    ctx,
+    rowId,
+    (pixel) => {
+      if (condition === 'baseline')
+        return pixelDistance(pixel, MONITOR_BACKGROUND) > MONITOR_PIXEL_TOLERANCE;
+      if (condition === 'changed') return pixelDistance(pixel, baseline) > MONITOR_PIXEL_TOLERANCE;
+      return pixelDistance(pixel, baseline) <= MONITOR_PIXEL_TOLERANCE;
+    },
+    condition === 'baseline'
+      ? 'a stable picture pixel'
+      : condition === 'changed'
+        ? 'the edited picture pixel'
+        : 'Undo to restore the baseline pixel',
+  );
 }
 
 async function saveAndReopen(page, ctx, rowId, clipId) {
@@ -271,26 +327,44 @@ async function runLifecycle(
   rowId,
   gesture,
   ctx,
-  { point, sampleRatios = [0.5, 0.5], includeExport = true } = {},
+  { point, sampleRatios = [0.25, 0.2], includeExport = true } = {},
 ) {
   const base = await ensureTimelineClip(ctx.page, ctx, rowId, { fresh: true });
   const clipId = base.clips[0].id;
   await selectClipById(ctx.page, clipId);
   const pixel = point ?? { x: 0, y: 0 };
+  let baselinePixel;
   const lifecycle = {
     clipId,
     pixel,
     readPreviewPixel: (page, p) => monitorPixel(page, p, ctx, rowId),
+    waitForPreviewPixel: (page, p, _predicate, description) => {
+      if (description === 'stable picture pixel') {
+        return waitForColourPixel(page, p, ctx, rowId, 'baseline').then((pixel) => {
+          baselinePixel = pixel;
+          return pixel;
+        });
+      }
+      if (description === 'colour edit to reach the Monitor')
+        return waitForColourPixel(page, p, ctx, rowId, 'changed', baselinePixel);
+      return waitForColourPixel(page, p, ctx, rowId, 'restored', baselinePixel);
+    },
     readGrade: () => readColourGrade(ctx, clipId),
     edit: (page) => gesture(page, ctx, lifecycle.pixel, clipId),
     saveAndReopen: (page) => saveAndReopen(page, ctx, rowId, clipId),
-    undo: async () => ctx.page.keyboard.press('Control+z'),
+    undo: async () => {
+      await blurFocus(ctx.page);
+      await ctx.page.keyboard.press('Control+KeyZ');
+    },
     ...(includeExport
       ? { compareExportFrame: (_page, p) => compareExport(ctx.page, p, ctx, rowId) }
       : {}),
   };
   const picture = await monitorPicture(ctx.page, ctx);
   lifecycle.pixel = point ?? monitorPicturePoint(picture, sampleRatios[0], sampleRatios[1]);
+  // Capture the baseline and every later read at the same opening frame.
+  await blurFocus(ctx.page);
+  await ctx.page.keyboard.press('Home');
   return await runColourLifecycle(ctx.page, lifecycle);
 }
 
@@ -395,7 +469,7 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
       let activePage = page;
       const results = await applyEachBuiltInLook(page, async () => {
         const picture = await monitorPicture(activePage, ctx);
-        const pixel = monitorPicturePoint(picture, 0.5, 0.5);
+        const pixel = monitorPicturePoint(picture, 0.25, 0.2);
         return {
           pixel,
           readPreviewPixel: (target, p) => monitorPixel(target, p, ctx, 'D-K04'),
@@ -406,7 +480,10 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
             activePage = ctx.page;
             return result;
           },
-          undo: () => ctx.page.keyboard.press('Control+z'),
+          undo: async () => {
+            await blurFocus(ctx.page);
+            await ctx.page.keyboard.press('Control+KeyZ');
+          },
           compareExportFrame: (_target, p) => compareExport(ctx.page, p, ctx, 'D-K04'),
           getPage: async () => {
             activePage = ctx.page;

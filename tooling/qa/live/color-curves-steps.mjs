@@ -19,6 +19,7 @@
  */
 
 import { openColorPanel } from './color-panel-steps.mjs';
+import { blurFocus } from './ui-steps.mjs';
 
 const GRAPH = '[data-curve-graph="rgb"]';
 const LINE = '[data-curve-line="rgb"]';
@@ -85,7 +86,8 @@ export async function addPointAndDrag(page, readCurve, { undo = true } = {}) {
     throw new Error('the drawn line did not change');
 
   if (undo) {
-    await page.keyboard.press('Control+z');
+    await blurFocus(page);
+    await page.keyboard.press('Control+KeyZ');
     const undone = await readCurve('rgb');
     if (!sameCurve(before, undone))
       throw new Error(`one undo left ${JSON.stringify(undone)}, not ${JSON.stringify(before)}`);
@@ -108,7 +110,8 @@ export async function keyboardEditsAPoint(page, readCurve) {
   await page.keyboard.press('ArrowUp');
   const nudged = await readCurve('rgb');
   if (sameCurve(nudged, withPoint)) throw new Error('ArrowUp changed nothing');
-  await page.keyboard.press('Control+z');
+  await blurFocus(page);
+  await page.keyboard.press('Control+KeyZ');
   if (!sameCurve(await readCurve('rgb'), withPoint))
     throw new Error('one undo did not undo one nudge');
 
@@ -118,8 +121,10 @@ export async function keyboardEditsAPoint(page, readCurve) {
   await page.keyboard.press('Delete');
   const deleted = await readCurve('rgb');
   if (deleted.length !== before.length) throw new Error('Delete did not remove the point');
-  await page.keyboard.press('Control+z');
-  await page.keyboard.press('Control+z');
+  await blurFocus(page);
+  await page.keyboard.press('Control+KeyZ');
+  await blurFocus(page);
+  await page.keyboard.press('Control+KeyZ');
   if (!sameCurve(await readCurve('rgb'), before))
     throw new Error('two undos did not put the curve back');
   return 'the arrow keys nudge a point and Delete removes it, one undo step each';
