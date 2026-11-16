@@ -533,38 +533,35 @@ export async function configureJoyAgent(
   await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Joy Code Settings' });
   await expect(dialog).toBeVisible();
-  // The dialog defaults to the Dual-Brain Studio preset; explicitly select Custom BYOK
-  // so this fixture configures one custom provider with deterministic values.
-  await dialog.getByRole('button', { name: /Custom BYOK/ }).click();
+  await dialog.getByRole('button', { name: /Connection and sign-in/ }).click();
+  await dialog.getByRole('combobox', { name: 'Provider' }).selectOption('openai-compatible');
   await dialog
-    .getByRole('combobox', { name: 'Provider Platform' })
-    .selectOption('openai-compatible');
-  await dialog.getByRole('textbox', { name: 'Base URL / Endpoint' }).fill(FAKE_PROVIDER_BASE_URL);
+    .getByRole('textbox', { name: 'Service address (base URL)' })
+    .fill(FAKE_PROVIDER_BASE_URL);
   await dialog
-    .getByRole('textbox', { name: /Model ID/ })
+    .getByRole('textbox', { name: 'Model ID' })
     .fill(options.modelId ?? FAKE_PROVIDER_MODEL);
   await dialog
     .getByRole('checkbox', {
       name: 'I understand that custom endpoints may log requests according to their own policy.',
     })
     .check();
-  await dialog.getByLabel('API Secret Key').fill(apiKey);
-  await dialog.getByRole('button', { name: /Connect model|Test & use/ }).click();
+  await dialog.getByLabel('Your API key').fill(apiKey);
+  await dialog.getByRole('button', { name: 'Connect model', exact: true }).click();
   const expectedConnectionNotice = options.allowFailure
     ? [
-        'Tool loop ready',
-        'Plan-only ready',
-        'authentication failed',
+        'Connected successfully',
+        'Provider authentication failed',
         'CORS or network error',
-        'response too large',
+        'Provider response too large',
         'Connection timed out',
       ]
-    : ['Tool loop ready', 'Plan-only ready'];
+    : ['Connected successfully'];
   await expect(dialog.getByText(new RegExp(expectedConnectionNotice.join('|')))).toBeVisible({
     timeout: options.noticeTimeoutMs ?? 20_000,
   });
   if (!options.allowFailure) await expect(dialog.getByText(/Connected successfully/)).toBeVisible();
-  await expect(dialog.getByLabel('API Secret Key')).toHaveValue('');
+  await expect(dialog.getByLabel('Your API key')).toHaveValue('');
   return dialog;
 }
 
