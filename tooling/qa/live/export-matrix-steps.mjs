@@ -473,20 +473,26 @@ async function runTenMinuteMemoryRow(page, ctx) {
   };
   take();
   const started = Date.now();
-  const exported = await exportAndProbe(
-    page,
-    ctx,
-    rowId,
-    {
-      seconds: 600,
-      skipTrim: true,
-      audio: 'any',
-      onPoll: () => {
-        if (Date.now() - (samples.at(-1)?.atMs ?? started) >= 2_000) take();
+  let exported;
+  let failure;
+  try {
+    exported = await exportAndProbe(
+      page,
+      ctx,
+      rowId,
+      {
+        seconds: 600,
+        skipTrim: true,
+        audio: 'any',
+        onPoll: () => {
+          if (Date.now() - (samples.at(-1)?.atMs ?? started) >= 2_000) take();
+        },
       },
-    },
-    { attempts: 3_000 },
-  );
+      { attempts: 3_000 },
+    );
+  } catch (error) {
+    failure = error;
+  }
   take();
   const peakBytes = Math.max(...samples.map((item) => item.workingSetBytes));
   const dir = rowEvidenceDir(ctx, rowId);
@@ -504,5 +510,10 @@ async function runTenMinuteMemoryRow(page, ctx) {
     `Peak process-tree working set: ${peakBytes} bytes\n`,
     'utf8',
   );
+  if (failure !== undefined) {
+    throw new Error(
+      `${failure instanceof Error ? failure.message : String(failure)} (after ${Math.round((Date.now() - started) / 1000)} s; peak ${(peakBytes / 1024 / 1024).toFixed(1)} MiB over ${samples.length} samples; memory.csv saved)`,
+    );
+  }
   return `ten-minute export took ${Math.round((Date.now() - started) / 1000)} s; sampled ${samples.length} points; peak ${(peakBytes / 1024 / 1024).toFixed(1)} MiB; ${exported.message}`;
 }
