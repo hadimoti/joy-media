@@ -491,7 +491,7 @@ describe('JOY Media 1.0 release gate', () => {
     const config = readFileSync(
       resolve(import.meta.dirname, '../../../deploy/joy-media.nginx.conf'),
       'utf8',
-    );
+    ).replace(/\r\n/g, '\n');
     const staticPrefixes =
       'location ~* ^/(?:assets|effects|fonts|images|media|transitions|workers?|worklets?)/ {';
     const staticExtensions = 'location ~* \\.(?:avif|bmp|css|gif|ico|jpe?g|js|json|mjs|map|';
