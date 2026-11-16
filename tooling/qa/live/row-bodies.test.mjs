@@ -211,6 +211,15 @@ function contextFor(page, injected) {
     shot: async () => null,
     windowState: { get: async () => 'normal', set: async () => {} },
     export: injected.export,
+    // The colour rows read the saved document (clip grades) through the matrix context.
+    readDocument: async () => ({
+      projectId: 'fake-project',
+      document: {
+        rootCompositionId: 'c',
+        compositions: { c: { width: 1920, height: 1080 } },
+        clipColorGrades: {},
+      },
+    }),
   };
 }
 
