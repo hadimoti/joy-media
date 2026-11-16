@@ -9,6 +9,7 @@ import {
 } from '@joy-media/project-schema';
 import { videoFrameNodeFromDecoded } from '@joy-media/playback-engine';
 import { createCompositionObserver } from './composition-observer.js';
+import { StickerImageCache } from '../sticker-image-cache.js';
 
 const mocks = vi.hoisted(() => ({
   createRenderer: vi.fn(),
@@ -439,12 +440,10 @@ describe('isolated composition capture', () => {
   });
 
   it('does not produce a frame when a still-clip decode fails', async () => {
-    vi.stubGlobal(
-      'createImageBitmap',
-      vi.fn(async () => {
-        throw new Error('decode failed');
-      }),
-    );
+    const decode = vi.fn(async () => {
+      throw new Error('decode failed');
+    });
+    vi.stubGlobal('createImageBitmap', decode);
     const renderer = fakeRenderer();
     const clip: VideoClip = {
       id: 'still-clip',
@@ -465,11 +464,41 @@ describe('isolated composition capture', () => {
     });
     try {
       await expect(createCompositionObserver().capture(requestFor(capture))).resolves.toMatchObject(
-        { status: 'failed' },
+        { status: 'failed', code: 'renderer-failed' },
       );
     } finally {
       capture.release();
     }
+    expect(decode).toHaveBeenCalledTimes(1);
+    expect(renderer.readPixels).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when an active sticker bitmap is missing from the cache', async () => {
+    stubImageDecode();
+    const renderer = fakeRenderer();
+    vi.spyOn(StickerImageCache.prototype, 'bitmaps').mockReturnValue(new Map());
+    const sticker: VisualObjectV1 = {
+      id: 'sticker',
+      kind: 'image',
+      assetId: 'sticker-asset',
+      transform: transform(),
+    };
+    const capture = createIsolatedCompositionCapture({
+      visualProject: {
+        ...visualProject({ sticker }),
+        assets: { 'sticker-asset': { id: 'sticker-asset', kind: 'image', displayName: 'Sticker' } },
+      } as JoyProjectV1,
+      timelineProject: timelineProject(),
+      loadProjectAssetBlob: async () => new Blob(['image']),
+    });
+    try {
+      await expect(createCompositionObserver().capture(requestFor(capture))).resolves.toMatchObject(
+        { status: 'failed', code: 'renderer-failed' },
+      );
+    } finally {
+      capture.release();
+    }
+    expect(renderer.render).not.toHaveBeenCalled();
     expect(renderer.readPixels).not.toHaveBeenCalled();
   });
 
@@ -517,6 +546,7 @@ describe('isolated composition capture', () => {
       const bitmaps = renderArgs?.[1] as Map<string, { width: number; height: number }>;
       expect(bitmaps.get('video-clip')).toMatchObject({ width: 4, height: 4 });
       expect(Object.hasOwn(imageDataWithPrototypeDimensions(), 'width')).toBe(false);
+      expect(frameAt).toHaveBeenCalledTimes(1);
       expect(renderer.render).toHaveBeenCalledTimes(1);
       expect(frame.nodes.find((node) => node.id === 'video-clip')?.colorGrade).toMatchObject({
         saturation: 0.4,
@@ -623,12 +653,22 @@ describe('isolated composition capture', () => {
     }
   });
 
-  it('reuses an active clip decoder and closes it after samples pass the clip end', async () => {
+  it('reuses a clip source through the one-second grace period before closing it', async () => {
     stubObjectUrls();
     fakeRenderer();
     const closeForward = vi.fn();
+    const frameAt = vi.fn(async (sourceTimeUs: number) => ({
+      assetId: 'video-asset',
+      sourceTimeUs,
+      token: sourceTimeUs,
+      bitmap: {
+        width: 4,
+        height: 4,
+        data: new Uint8ClampedArray(4 * 4 * 4).fill(90),
+      },
+    }));
     mocks.openExportFrameSource.mockResolvedValue({
-      frameAt: vi.fn(async () => undefined),
+      frameAt,
       size: () => ({ width: 4, height: 4 }),
       seekTiming: undefined,
       release: vi.fn(),
@@ -655,14 +695,13 @@ describe('isolated composition capture', () => {
       await expect(
         createCompositionObserver().capture({
           ...capture.composition,
-          outputTimesUs: [0, 50_000, 200_000],
+          outputTimesUs: [0, 50_000, 200_000, 1_200_001],
         }),
-      ).resolves.toMatchObject({ status: 'captured', frames: [{}, {}, {}] });
-      expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
-      expect(mocks.createDecoder).toHaveBeenCalledTimes(1);
-      expect(mocks.seekDetachedVideo).toHaveBeenCalledTimes(2);
+      ).resolves.toMatchObject({ status: 'captured', frames: [{}, {}, {}, {}] });
+      expect(mocks.openExportFrameSource).toHaveBeenCalledTimes(1);
+      expect(frameAt).toHaveBeenCalledTimes(2);
+      expect(mocks.seekDetachedVideo).not.toHaveBeenCalled();
       expect(closeForward).toHaveBeenCalledTimes(1);
-      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:capture-fixture');
     } finally {
       capture.release();
     }
@@ -703,7 +742,7 @@ describe('isolated composition capture', () => {
     }
   });
 
-  it('fails a reversed frame when its detached seek times out', async () => {
+  it('fails a reversed frame when its detached seek rejects', async () => {
     stubObjectUrls();
     const renderer = fakeRenderer();
     mocks.seekDetachedVideo.mockRejectedValueOnce(new Error('seeking video timed out'));

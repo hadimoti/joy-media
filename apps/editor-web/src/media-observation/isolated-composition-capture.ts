@@ -175,7 +175,12 @@ export function createIsolatedCompositionCapture(
           bitmaps,
           colorLutResolver.resolveColorLut,
         );
-        renderer.render(withVideoFrameNodes(frame, decodedVideos.nodes), bitmaps);
+        const renderFrame = withVideoFrameNodes(frame, decodedVideos.nodes);
+        for (const node of renderFrame.nodes) {
+          if (node.kind === 'video-frame' && !bitmaps.has(node.id))
+            throw new Error('Visible image frame could not be captured');
+        }
+        renderer.render(renderFrame, bitmaps);
         const pixels = renderer.readPixels(width, height);
         if (pixels === undefined || pixels.width !== width || pixels.height !== height)
           throw new Error('Capture readback is unavailable');
@@ -284,7 +289,8 @@ export function createIsolatedCompositionCapture(
   async function decodeFrameVideos(frame: RenderFrameIR, timeUs: number, signal: AbortSignal) {
     const nodes = [];
     for (const clip of flattenRootTimelineVideoClips(timelineProject)) {
-      if (timeUs >= clip.startUs + clip.durationUs) closeVideoResource(videoResources, clip.id);
+      if (timeUs > clip.startUs + clip.durationUs + 1_000_000)
+        closeVideoResource(videoResources, clip.id);
     }
     const clips = activeVideoClips(timelineProject, visualProject, timeUs);
     const transition = activeTransition(visualProject, timelineProject, timeUs);

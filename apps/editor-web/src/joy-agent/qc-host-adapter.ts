@@ -170,7 +170,9 @@ export interface QcHostAdapterDeps {
   readonly evidenceStore: EvidenceStore;
   readonly identity: () => QcHostIdentity | undefined;
   readonly timeline: () => QcTimelineSource | undefined | Promise<QcTimelineSource | undefined>;
-  readonly releaseComposition?: () => void | Promise<void>;
+  readonly releaseComposition?: (
+    composition: QcTimelineSource['composition'] | undefined,
+  ) => void | Promise<void>;
   readonly sampler?: {
     sample(request: TimelineQcSampleRequest): Promise<TimelineQcSampleResult>;
   };
@@ -310,8 +312,8 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
     const identity = deps.identity();
     if (identity === undefined)
       return failure('authority-unavailable', 'The project changed, so no check was started.');
+    let source: QcTimelineSource | undefined;
     try {
-      let source: QcTimelineSource | undefined;
       try {
         source = await deps.timeline();
       } catch {
@@ -433,7 +435,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       return { ok: true, reportId };
     } finally {
       try {
-        await deps.releaseComposition?.();
+        await deps.releaseComposition?.(source?.composition);
       } catch {
         // Capture cleanup is best-effort and must not alter the check result.
       }
@@ -685,7 +687,9 @@ export interface EditorQcAdapterInput {
   /** The host's composition request. Absent today; see the note at the top of this file. */
   readonly getComposition?: () =>
     QcTimelineSource['composition'] | Promise<QcTimelineSource['composition']>;
-  readonly releaseComposition?: () => void | Promise<void>;
+  readonly releaseComposition?: (
+    composition: QcTimelineSource['composition'] | undefined,
+  ) => void | Promise<void>;
   /**
    * The drawn title and caption boxes, normalized (see `projectTextLayoutBounds`). Absent today: no host
    * measures them yet, so QC runs without box checks until one does (T-B06).
@@ -720,11 +724,18 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
       } catch {
         composition = undefined;
       }
-      return qcTimelineSourceFromTimeline(
-        input.getTimeline(),
-        composition,
-        input.getTextBoxes?.() ?? [],
-      );
+      try {
+        const source = qcTimelineSourceFromTimeline(
+          input.getTimeline(),
+          composition,
+          input.getTextBoxes?.() ?? [],
+        );
+        if (source === undefined) await input.releaseComposition?.(composition);
+        return source;
+      } catch (error) {
+        await input.releaseComposition?.(composition);
+        throw error;
+      }
     },
     ...(input.releaseComposition === undefined
       ? {}

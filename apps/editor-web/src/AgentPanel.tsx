@@ -636,7 +636,7 @@ export function AgentPanel({
   readonly onSeek?: (timeUs: number) => void;
 }) {
   const createQcCompositionPorts = () => {
-    let capture: IsolatedCompositionCapture | undefined;
+    const captures = new Set<IsolatedCompositionCapture>();
     return {
       ...(loadProjectAssetBlob === undefined
         ? {}
@@ -645,16 +645,21 @@ export function AgentPanel({
               const { createIsolatedCompositionCapture } =
                 await import('./media-observation/isolated-composition-capture.js');
               const savedSession = latestSessionRef.current;
-              capture = createIsolatedCompositionCapture({
+              const capture = createIsolatedCompositionCapture({
                 visualProject: savedSession.visualProject,
                 timelineProject: savedSession.timelineProject,
                 loadProjectAssetBlob,
               });
+              captures.add(capture);
               return capture.composition;
             },
-            releaseComposition: () => {
-              capture?.release();
-              capture = undefined;
+            releaseComposition: (
+              composition: IsolatedCompositionCapture['composition'] | undefined,
+            ) => {
+              const capture = [...captures].find((item) => item.composition === composition);
+              if (capture === undefined) return;
+              captures.delete(capture);
+              capture.release();
             },
           }),
     };
