@@ -44,6 +44,7 @@ export async function runColourLifecycle(
     saveAndReopen,
     undo,
     compareExportFrame,
+    waitForPreviewPixel,
     pixel,
     pixelTolerance = 4,
   } = {},
@@ -58,11 +59,20 @@ export async function runColourLifecycle(
     requireFunction(name, value);
   if (pixel === undefined || pixel === null) throw new Error('give the known frame pixel');
 
-  const baselinePixel = await readPreviewPixel(page, pixel);
+  const baselinePixel = waitForPreviewPixel
+    ? await waitForPreviewPixel(page, pixel, () => true, 'stable picture pixel')
+    : await readPreviewPixel(page, pixel);
   const baselineGrade = await readGrade(page);
   await edit(page);
 
-  const changedPixel = await readPreviewPixel(page, pixel);
+  const changedPixel = waitForPreviewPixel
+    ? await waitForPreviewPixel(
+        page,
+        pixel,
+        (sample) => pixelDistance(baselinePixel, sample) > pixelTolerance,
+        'colour edit to reach the Monitor',
+      )
+    : await readPreviewPixel(page, pixel);
   const editedGrade = await readGrade(page);
   if (pixelDistance(baselinePixel, changedPixel) <= pixelTolerance) {
     throw new Error(
@@ -73,7 +83,14 @@ export async function runColourLifecycle(
     throw new Error('the colour edit did not change the grade');
 
   await undo(page);
-  const restoredPixel = await readPreviewPixel(page, pixel);
+  const restoredPixel = waitForPreviewPixel
+    ? await waitForPreviewPixel(
+        page,
+        pixel,
+        (sample) => pixelDistance(baselinePixel, sample) <= pixelTolerance,
+        'Undo to restore the baseline Monitor pixel',
+      )
+    : await readPreviewPixel(page, pixel);
   const restoredGrade = await readGrade(page);
   if (pixelDistance(baselinePixel, restoredPixel) > pixelTolerance) {
     throw new Error(`Undo left preview pixel ${JSON.stringify(restoredPixel)}`);

@@ -18,6 +18,7 @@
  */
 
 import { openColorPanel } from './color-panel-steps.mjs';
+import { blurFocus } from './ui-steps.mjs';
 
 const FACE = '[data-color-wheel="lift"]';
 const NUMBERS = '[data-color-wheel-numbers="lift"] output';
@@ -70,13 +71,14 @@ export async function dragWheelChangesGrade(page, readGrade, { undo = true } = {
       `the drag changed nothing: the Lift wheel is still ${JSON.stringify(rounded(after))}`,
     );
   const shown = await shownNumbers(page);
-  if (!sameNumbers(shown, rounded(after)))
+  if (!sameNumbers(shown.slice(0, 3), rounded(after)))
     throw new Error(
       `the panel shows ${JSON.stringify(shown)}, the document has ${JSON.stringify(rounded(after))}`,
     );
 
   if (undo) {
-    await page.keyboard.press('Control+z');
+    await blurFocus(page);
+    await page.keyboard.press('Control+KeyZ');
     const undone = await readGrade('lift');
     if (!sameNumbers(rounded(before), rounded(undone)))
       throw new Error(
@@ -99,15 +101,18 @@ export async function arrowKeysMoveThePuck(page, readGrade) {
   if (sameNumbers(rounded(before), rounded(afterOne)))
     throw new Error('ArrowRight changed nothing');
 
-  await page.keyboard.press('Control+z');
+  await blurFocus(page);
+  await page.keyboard.press('Control+KeyZ');
   const undone = await readGrade('lift');
   if (!sameNumbers(rounded(before), rounded(undone)))
     throw new Error('one undo did not put the wheel back');
 
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('Control+z');
-  await page.keyboard.press('Control+z');
+  await blurFocus(page);
+  await page.keyboard.press('Control+KeyZ');
+  await blurFocus(page);
+  await page.keyboard.press('Control+KeyZ');
   const undoneTwice = await readGrade('lift');
   if (!sameNumbers(rounded(before), rounded(undoneTwice)))
     throw new Error('two undos did not undo two nudges');
