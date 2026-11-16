@@ -68,7 +68,7 @@ export function workerProcessView(connection: DesktopWorkerConnection): WorkerPr
       return { label: 'checking', tone: 'queued', canRetry: false };
     case 'degraded':
     case 'offline':
-      return { label: 'stopped', tone: 'disconnected', canRetry: true };
+      return { label: 'Worker stopped', tone: 'disconnected', canRetry: true };
   }
 }
 

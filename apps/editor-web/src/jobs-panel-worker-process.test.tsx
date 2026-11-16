@@ -43,7 +43,7 @@ describe('JobsPanel: the desktop Worker process', () => {
     expect(panel.querySelector('.jobs-worker-process')).toBeNull();
   });
 
-  it('shows a plain message for a stopped local service and starts it again on Retry', async () => {
+  it('shows Worker stopped and starts it again on Restart', async () => {
     mockControlPlane();
     const log = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const invoke = vi.fn(async (channel: string) =>
@@ -59,7 +59,7 @@ describe('JobsPanel: the desktop Worker process', () => {
     const panel = await renderPanel();
 
     const row = panel.querySelector<HTMLElement>('.jobs-worker-process');
-    expect(row?.textContent).toContain('stopped');
+    expect(row?.textContent).toContain('Worker stopped');
     expect(row?.textContent).toContain('The background helper stopped. Try again.');
     expect(row?.textContent).not.toContain('Local service exited with code 137');
     expect(log).toHaveBeenCalledWith(
@@ -68,12 +68,12 @@ describe('JobsPanel: the desktop Worker process', () => {
     );
 
     await act(async () => {
-      panel.querySelector<HTMLButtonElement>('[aria-label="Retry local service"]')?.click();
+      panel.querySelector<HTMLButtonElement>('[aria-label="Restart local service"]')?.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(invoke).toHaveBeenCalledWith('desktop.worker-retry');
     expect(panel.querySelector('.jobs-worker-process')?.textContent).toContain('running');
-    expect(panel.querySelector('[aria-label="Retry local service"]')).toBeNull();
+    expect(panel.querySelector('[aria-label="Restart local service"]')).toBeNull();
   });
 });
