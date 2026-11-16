@@ -19,6 +19,7 @@ import {
   PROJECTS_IMPORT_ROWS,
   PROJECTS_IMPORT_ROWS_BY_ID,
 } from './desktop-projects-import-steps.mjs';
+import { PERSISTENCE_ROWS } from './desktop-persistence-steps.mjs';
 import {
   NOT_REACHABLE_COMMANDS,
   TIMELINE_ROWS,
@@ -26,7 +27,8 @@ import {
   countKeyframes,
   exerciseControls,
 } from './desktop-timeline-steps.mjs';
-import { MATRIX_IDS, MATRIX_ROWS } from './desktop-matrix-rows.mjs';
+import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
+import { createFakePage } from './fake-page.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
@@ -452,16 +454,30 @@ test('executeRow: pass writes no defect; fail writes defect text and a file; blo
   assert.ok(failed.ms >= 0 && typeof failed.screenshot === 'string');
 });
 
-test('row tables: unique ids in the T-A05 and T-A06 ranges, each with a title and a run function', () => {
-  const ids = [...PROJECTS_IMPORT_ROWS, ...TIMELINE_ROWS].map((row) => row.id);
+test('row tables: unique ids in the T-A05, T-A06 and T-A09 ranges, each with a title and run function', () => {
+  const ids = [...PROJECTS_IMPORT_ROWS, ...TIMELINE_ROWS, ...PERSISTENCE_ROWS].map((row) => row.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(MATRIX_IDS.toSorted(), ids.toSorted());
   for (const row of PROJECTS_IMPORT_ROWS) assert.match(row.id, /^D-A05-\d{2}$/u);
   for (const row of TIMELINE_ROWS) assert.match(row.id, /^D-A06-\d{2}$/u);
+  for (const row of PERSISTENCE_ROWS) assert.match(row.id, /^D-A09-\d{2}$/u);
   for (const row of Object.values(MATRIX_ROWS)) {
     assert.ok(row.title && typeof row.run === 'function', row.id);
     assert.ok(['blocker', 'major', 'minor'].includes(row.severity), row.id);
   }
+});
+
+test('createMatrixContext screenshots on its real page', async (t) => {
+  const page = createFakePage();
+  const outDir = scratch(t);
+  const ctx = createMatrixContext({
+    page,
+    outDir,
+    libraryDir: join(outDir, 'lib'),
+    runId: 'abcdef123456',
+  });
+  await ctx.shot('D-A05-01', 'probe');
+  assert.ok(page.calls.some((call) => call.startsWith('page.screenshot(')));
 });
 
 test('every command of commands.ts SpikeCommand has a cycle row or is listed as not reachable', () => {

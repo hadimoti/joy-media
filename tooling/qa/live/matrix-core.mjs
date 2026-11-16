@@ -183,7 +183,7 @@ export function createBridge(page, log) {
 
 /** The editor and bridge ids of the open project, read from the editor's own local storage. */
 export async function readProjectIds(page) {
-  return page.evaluate(() => {
+  return page.evaluate(function readIds() {
     const read = (key) => {
       try {
         return JSON.parse(localStorage.getItem(key) ?? 'null');
@@ -211,6 +211,44 @@ export async function readProjectIds(page) {
   });
 }
 
+/** Wait until an async package import has selected its new project and created its bridge binding. */
+export async function waitForImportedProject(page, previousProjectId) {
+  await page.waitForFunction(
+    (previousId) => {
+      const parse = (key) => {
+        try {
+          return JSON.parse(localStorage.getItem(key) ?? 'null');
+        } catch {
+          return null;
+        }
+      };
+      const active = parse('joy-media.active-project.v1')?.projectId ?? null;
+      if (active === null || active === previousId) return false;
+      const entry = parse('joy-media.project-catalog.v1')?.projects?.[active] ?? null;
+      const bindings = Object.values(
+        parse('joy-media.control-plane-project-bindings.v1')?.bindingsByOwner ?? {},
+      ).flatMap((owner) => Object.values(owner));
+      return bindings.some(
+        (binding) =>
+          binding.controlPlaneProjectId &&
+          (binding.editorProjectId === active ||
+            binding.editorProjectId === entry?.timelineProjectId ||
+            binding.editorProjectId === entry?.visualProjectId),
+      );
+    },
+    previousProjectId,
+    { timeout: 15_000, polling: 100 },
+  );
+  const ids = await readProjectIds(page);
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const live = await readLiveTimeline(page).catch(() => null);
+    if (live?.id === ids.active) return;
+    await page.waitForTimeout(100);
+  }
+  throw new Error('the imported project timeline did not become active in the editor');
+}
+
 /** The stored document of the open project through `desktop.media.project.document.get`. */
 /**
  * The editor's live timeline project (tracks and clips), read from the page's own session. Found live on the
@@ -219,7 +257,7 @@ export async function readProjectIds(page) {
  * so a row that counts clips must read them here. Returns null when no session is found.
  */
 export async function readLiveTimeline(page) {
-  const json = await page.evaluate(() => {
+  const json = await page.evaluate(function readTimeline() {
     const root = document.getElementById('root');
     const key = root && Object.keys(root).find((name) => name.startsWith('__reactContainer'));
     if (!key) return null;

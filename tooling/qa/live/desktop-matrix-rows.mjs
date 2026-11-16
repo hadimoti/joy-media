@@ -8,33 +8,55 @@
  */
 import { join } from 'node:path';
 import { screenshot } from './steps.mjs';
-import { createBridge, createBridgeLog, FIXTURE_ROOT } from './matrix-core.mjs';
+import { createBridge, createBridgeLog, FIXTURE_ROOT, readDocument } from './matrix-core.mjs';
 import { PROJECTS_IMPORT_ROWS_BY_ID } from './desktop-projects-import-steps.mjs';
+import { PERSISTENCE_ROWS_BY_ID } from './desktop-persistence-steps.mjs';
 import {
   TIMELINE_ROWS_BY_ID,
   redoThroughMenu,
   undoThroughMenu,
 } from './desktop-timeline-steps.mjs';
 
-export const MATRIX_ROWS = Object.freeze({ ...PROJECTS_IMPORT_ROWS_BY_ID, ...TIMELINE_ROWS_BY_ID });
+export const MATRIX_ROWS = Object.freeze({
+  ...PROJECTS_IMPORT_ROWS_BY_ID,
+  ...TIMELINE_ROWS_BY_ID,
+  ...PERSISTENCE_ROWS_BY_ID,
+});
 export const MATRIX_IDS = Object.freeze(Object.keys(MATRIX_ROWS));
 
 /** The context every row gets: scratch paths, the logged bridge, screenshots, undo and redo. */
-export function createMatrixContext({ page, outDir, libraryDir, runId, fixtures = FIXTURE_ROOT }) {
+export function createMatrixContext({
+  page,
+  outDir,
+  libraryDir,
+  downloadDir,
+  runId,
+  fixtures = FIXTURE_ROOT,
+  editDocument,
+  restartApp,
+}) {
   const bridgeLogPath = join(outDir, 'bridge-replies.jsonl');
   const bridge = createBridge(page, createBridgeLog(bridgeLogPath));
-  return {
+  const ctx = {
+    page,
     outDir,
     libraryDir,
+    downloadDir,
     altLibraryDir: `${libraryDir}-alt`,
     fixtures,
+    editDocument,
+    restartApp,
     runTag: runId.slice(0, 8),
     bridge,
     bridgeLogPath,
+    async readDocument(target = ctx.page) {
+      return readDocument(target, ctx.bridge);
+    },
     async shot(rowId, name) {
-      return screenshot(page, join(outDir, rowId, `${name}.png`));
+      return screenshot(ctx.page, join(outDir, rowId, `${name}.png`));
     },
     undo: undoThroughMenu,
     redo: redoThroughMenu,
   };
+  return ctx;
 }

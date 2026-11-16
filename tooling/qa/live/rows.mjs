@@ -223,7 +223,7 @@ export async function restartAppOnto(ctx, { close, relaunch }) {
   return session;
 }
 
-/** `D-0*` style prefixes expand to every row id that starts with the prefix. */
+/** Prefix selection is ID-agnostic, including the desktop-matrix `D-A09-*` rows. */
 export function selectRows(allRows, ids) {
   const picked = [];
   for (const id of ids) {
