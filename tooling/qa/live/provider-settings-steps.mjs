@@ -458,6 +458,17 @@ export async function runInModes(page, ctx) {
         `${mode.name}: the app reported "Joy Code could not finish this run safely. No edits were applied."`,
       );
     }
+    // The proposal card draws a moment after the model's closing message, so a plain reply is not final yet.
+    if (outcome === 'reply') {
+      await waitUntil(
+        async () => {
+          staged = await readJoyCodeSnapshot(page);
+          outcome = classifyOutcome(staged, baseline.messages);
+          return outcome !== 'reply';
+        },
+        { timeoutMs: 12_000, message: `${mode.name}: a proposal card after the reply` },
+      ).catch(() => undefined);
+    }
     const problem = checkModeOutcome(mode.id, outcome, staged, baseline.clips);
     if (problem) throw new Error(`${mode.name}: ${problem}`);
     const entry = { mode: mode.id, baselineClips: baseline.clips, staged: { outcome, ...staged } };

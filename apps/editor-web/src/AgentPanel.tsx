@@ -4228,19 +4228,22 @@ export function AgentPanel({
                   <p className="agent-error">{modelView.warnings.join(', ')}</p>
                 )}
                 <div className="joy-code-plan-actions">
-                  <button
-                    type="button"
-                    className="is-primary"
-                    onClick={applyModelDraft}
-                    disabled={!modelAwaitingApproval}
-                    title={
-                      modelAwaitingApproval
-                        ? undefined
-                        : 'Waiting for the live preview and approval state'
-                    }
-                  >
-                    <CheckIcon /> Approve &amp; apply
-                  </button>
+                  {/* Suggest only never applies an edit (the apply step refuses it), so it offers no Approve. */}
+                  {settings.executionMode !== 'suggest-only' && (
+                    <button
+                      type="button"
+                      className="is-primary"
+                      onClick={applyModelDraft}
+                      disabled={!modelAwaitingApproval}
+                      title={
+                        modelAwaitingApproval
+                          ? undefined
+                          : 'Waiting for the live preview and approval state'
+                      }
+                    >
+                      <CheckIcon /> Approve &amp; apply
+                    </button>
+                  )}
                   <button type="button" onClick={rejectModelDraft}>
                     <CloseIcon /> Reject
                   </button>

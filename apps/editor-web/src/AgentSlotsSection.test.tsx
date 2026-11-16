@@ -133,6 +133,49 @@ describe('AgentSlotsSection', () => {
     expect([...(picker?.options ?? [])].map((option) => option.value)).toContain('model-b');
   });
 
+  it('keeps a profile that is chosen but not saved yet when the saved profiles are read again', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'desktop.agent-slots.list') {
+        return [slot({}), slot({ id: 'creative', label: 'Creative Brain' })];
+      }
+      if (channel === 'desktop.provider.models') return [{ id: 'model-a' }];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.agent-slots.list', 'desktop.provider.models'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const props: AgentSlotsSectionProps = { profiles: [profile], onUseSlot: vi.fn() };
+    // Reading the models asks for the profiles again: the page answers with a fresh list of the same profiles.
+    const onProfilesChanged = () => {
+      setTimeout(() => {
+        void act(async () => {
+          root?.render(
+            createElement(
+              Fragment,
+              null,
+              createElement(AgentSlotsSection, { ...props, profiles: [{ ...profile }] }),
+              createElement(AppDialogHost),
+            ),
+          );
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+      }, 0);
+    };
+    const panel = await render({ ...props, onProfilesChanged });
+
+    await act(async () => {
+      typeInto(panel.querySelector('[aria-label="Workhorse profile"]'), 'profile-1');
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+
+    const chosen = panel.querySelector<HTMLSelectElement>('select[aria-label="Workhorse profile"]');
+    expect(chosen?.value).toBe('profile-1');
+    expect(
+      panel.querySelector<HTMLSelectElement>('select[aria-label="Workhorse model"]'),
+    ).not.toBeNull();
+  });
+
   it('lists both slots, and saves what the owner typed for one of them', async () => {
     const invoke = vi.fn(async (channel: string) => {
       if (channel === 'desktop.agent-slots.list') {

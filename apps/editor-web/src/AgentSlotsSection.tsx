@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { confirmDialog } from './app-dialogs.js';
 import {
   fetchDesktopProviderModels,
@@ -256,13 +256,24 @@ function AgentSlotCard({
   const [listingBusy, setListingBusy] = useState(false);
   const [typingModel, setTypingModel] = useState(false);
 
-  // A saved slot shows what the desktop stored, so the fields follow it after each save.
+  // A saved slot shows what the desktop stored, so the fields follow it after each save. The slots are read
+  // again whenever the profiles are (reading a profile's models does that), and that must not wipe a choice
+  // that is not saved yet: the fields follow the slot only when what is stored has changed.
+  const storedKey = JSON.stringify([
+    slot.profileId ?? '',
+    slot.model ?? '',
+    slot.instructions,
+    slot.settings ?? null,
+  ]);
+  const followedKey = useRef(storedKey);
   useEffect(() => {
+    if (followedKey.current === storedKey) return;
+    followedKey.current = storedKey;
     setProfileId(slot.profileId ?? '');
     setModel(slot.model ?? '');
     setInstructions(slot.instructions);
     setEffort(effortFromSettings(slot.settings));
-  }, [slot]);
+  }, [slot, storedKey]);
 
   const chosenProfile = profiles.find((item) => item.id === profileId);
   // The models the chosen profile offers: the list read for it, or the list the desktop kept with the profile.
