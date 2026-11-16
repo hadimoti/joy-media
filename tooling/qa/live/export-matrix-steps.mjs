@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { compareFrames, extractExportFrame, probeFrameDimensions } from '../compare.mjs';
 import { EXPORT_PRESETS } from './export-preset-spec.mjs';
 import { exportAndProbe } from './export-probe.mjs';
+import { blurFocus, ensureTimelineClip, selectClipById, waitForSnapshot } from './ui-steps.mjs';
 
 const FRAME_TOLERANCE = 1;
 const PRESET_ORDER = [
@@ -106,7 +107,17 @@ async function prepareSixSecondProject(page, ctx, rowId) {
   if (!ctx.downloadDir)
     throw new Error(`BLOCKED ${rowId}: driver test-download folder is unavailable`);
   if (!ctx.media) throw new Error(`BLOCKED ${rowId}: run with --media <stereo video fixture>`);
-  await ctx.editDocument(page);
+  // A fresh project with the fixture on the timeline. The fixture is 3 s long, so one duplicate (Ctrl+D) makes
+  // the 6-second timeline the rows check.
+  const state = await ensureTimelineClip(page, ctx, rowId, { fresh: true });
+  await selectClipById(page, state.clips[0].id);
+  await blurFocus(page);
+  await page.keyboard.press('Control+KeyD');
+  await waitForSnapshot(
+    page,
+    (shown) => shown.clips.length >= 2,
+    `${rowId}: Ctrl+D did not duplicate the clip`,
+  );
 }
 
 async function runPresetRow(page, ctx, presetId) {
