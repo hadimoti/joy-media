@@ -37,3 +37,9 @@ The owner asked Grok CLI to choose the approach, with the rule that the app must
 > Do not read bounds on the live monitor during playback, or inside the export frame loop. Do not add a caption-overlap finder in this pass. Nothing reports that fault today, and there is no repair command for it. Two lines of the same caption overlapping is normal.
 >
 > Do not return an empty box list with no note when measurement fails.
+
+## Result of the first build attempt (16 Nov 2026, Codex luna, nothing changed in the code)
+
+The helper stopped before writing code, on purpose. Reason: the quality check cannot run in the editor at all today, because nobody supplies the composition capture request (`getComposition`), so the check always refuses with `composition-unavailable`. A trusted text box needs a full frame at the check time, including the decoded video picture. Building that needs the saved-project evaluator and the media decoder, and the only code that assembles those frames is in `App.tsx` and `MonitorPanel.tsx`, which this decision keeps untouched. Wiring bounds to a capture that is still incomplete would show boxes as trusted when they are not.
+
+What this means: T-B06 steps 1, 2 and 4 of the design (projection, adapter input) stay done. Steps 0, 3 and 5 depend on a separate piece of work: the editor's composition capture for the quality check (frame at a time from the saved project, with media). That is a larger feature than T-B06 and needs its own decision before it starts. Until then, nothing changes for the owner: the quality check stays unavailable in the app and says so.
