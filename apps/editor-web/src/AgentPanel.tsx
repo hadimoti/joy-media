@@ -2289,8 +2289,11 @@ export function AgentPanel({
             });
             // The repair loop commits its own approved plans, so its re-checks follow the live revision.
             // It has its own adapter: the QC tools above never see this relaxed identity.
+            // The timeline check only ever runs through this adapter (the repair loop's check), so it is the one
+            // that needs the frame capture; each check releases its own capture.
             const repairQcAdapter = createEditorQcAdapter({
               ...qcAdapterInput,
+              ...createQcCompositionPorts(),
               getRevision: () => latestSessionRef.current.projectRevisionId,
               isCurrent: () =>
                 activeModelRunIdRef.current === runId &&
