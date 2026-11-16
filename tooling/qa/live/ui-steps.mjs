@@ -11,7 +11,7 @@
 import { mkdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { blockedRow } from './rows.mjs';
-import { addToTimelineThroughLeftPanel, importThroughLeftPanel } from './steps.mjs';
+import { addToTimelineThroughLeftPanel, importThroughLeftPanel, newProject } from './steps.mjs';
 
 export const SEL = Object.freeze({
   menuTrigger: 'button.app-menu-trigger',
@@ -333,7 +333,18 @@ export async function openCreateTool(page, toolId) {
  * The project must hold at least `minClips` timeline clips. When it does not, the `--media` fixture is
  * imported (unless its card is already there) and added to the timeline. Without the fixture the row is blocked.
  */
-export async function ensureTimelineClip(page, ctx, rowId, { minClips = 1 } = {}) {
+let freshProjectCount = 0;
+
+/**
+ * `fresh` opens a new empty project first: rows that run after each other otherwise find the clips, effects and
+ * text elements an earlier row left behind, and take the wrong "first clip" (found live: D-058 set the volume of
+ * an effect clip left by D-057).
+ */
+export async function ensureTimelineClip(page, ctx, rowId, { minClips = 1, fresh = false } = {}) {
+  if (fresh) {
+    freshProjectCount += 1;
+    await newProject(page, `${rowId} fresh ${freshProjectCount} ${ctx.runTag ?? ''}`.trim());
+  }
   let state = await snapshot(page);
   for (let added = 0; state.clips.length < minClips; added += 1) {
     if (!ctx.media) {
@@ -372,8 +383,37 @@ export function addedClipId(before, after) {
   return after.clips.find((clip) => !known.has(clip.id))?.id;
 }
 
+/**
+ * Clicks a timeline clip near its right side. A small clip right after a cut has a transition junction button
+ * over its left edge, and a click in the middle of a very short clip can hit it too (found live: the click
+ * timed out with "<button ... timeline-transition-junction> intercepts pointer events").
+ */
+export async function clickClipById(page, clipId) {
+  const clip = page.locator(`.timeline-clip[data-clip-id="${clipId}"]`).first();
+  const box = await clip.boundingBox();
+  if (box === null) {
+    await clip.click();
+    return;
+  }
+  await clip.click({
+    position: { x: Math.max(2, Math.min(box.width - 2, box.width * 0.8)), y: box.height / 2 },
+  });
+}
+
+/** Selects the first clip of an element kind ("audio", "video", ...): the Volume control belongs to the audio clip. */
+export async function selectFirstClipOfKind(page, kind) {
+  // The lane decides: an audio clip sits in an audio track whatever its element kind attribute says (found live).
+  const clip = page
+    .locator(`.timeline-track--${kind === 'audio' ? 'audio' : 'visual'} .timeline-clip`)
+    .first();
+  await clip.waitFor({ state: 'visible', timeout: 8_000 });
+  const box = await clip.boundingBox();
+  if (box === null) throw new Error(`no ${kind} clip is on screen`);
+  await clip.click({ position: { x: Math.max(2, box.width * 0.8), y: box.height / 2 } });
+}
+
 export async function selectClipById(page, clipId) {
-  await page.locator(`.timeline-clip[data-clip-id="${clipId}"]`).first().click();
+  await clickClipById(page, clipId);
 }
 
 /** A picture of the Monitor only, saved as `<out>/<row>/preview-<slug>.png`. Returns the path, or null without an out folder. */

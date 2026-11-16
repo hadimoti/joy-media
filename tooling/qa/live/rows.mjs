@@ -23,9 +23,13 @@ export function notReachable(id, why) {
 }
 
 export function firstLine(error, max = 400) {
-  return String(error?.message ?? error)
-    .split('\n')[0]
-    .slice(0, max);
+  const lines = String(error?.message ?? error).split('\n');
+  // A Playwright timeout names the locator it waited for on a later line ("waiting for locator(...)").
+  const waited = lines.find((line) => /waiting for (locator|getBy)/u.test(line));
+  const first = (lines[0] ?? '').trim();
+  const ansi = new RegExp(String.raw`\u001b\[[0-9;]*m`, 'gu');
+  const text = waited === undefined ? first : `${first} ${waited.replace(ansi, '').trim()}`;
+  return text.slice(0, max);
 }
 
 export function statusOfMessage(message) {
@@ -60,6 +64,8 @@ export async function runRow(row, ctx) {
   const startedAt = Date.now();
   let status = 'passed';
   let message = row.area;
+  // The whole error text (a Playwright timeout names the locator it waited for in the lines after the first).
+  let detail;
   let parts;
   try {
     const answer = await row.run(ctx.page, ctx);
@@ -70,6 +76,7 @@ export async function runRow(row, ctx) {
     }
   } catch (error) {
     message = firstLine(error);
+    detail = String(error?.message ?? error).slice(0, 1500);
     status = statusOfMessage(message);
     if (Array.isArray(error?.parts)) parts = error.parts;
   }
@@ -84,7 +91,7 @@ export async function runRow(row, ctx) {
     id: row.id,
     status,
     message,
-    detail: message,
+    detail: detail ?? message,
     screenshot,
     ms,
     durationMs: ms,
@@ -223,7 +230,7 @@ export async function restartAppOnto(ctx, { close, relaunch }) {
   return session;
 }
 
-/** `D-0*` style prefixes expand to every row id that starts with the prefix. */
+/** Prefix selection is ID-agnostic, including the desktop-matrix `D-A09-*` rows. */
 export function selectRows(allRows, ids) {
   const picked = [];
   for (const id of ids) {

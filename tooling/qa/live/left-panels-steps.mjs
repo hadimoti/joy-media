@@ -39,7 +39,8 @@ export const LEFT_SEL = Object.freeze({
   captionSeek: '[aria-label^="Seek to "]',
   audioChoices: '[aria-label="Audio workflow presets"] .audio-workflow-choice',
   audioError: '[data-audio-run-error]',
-  templateApply: 'button.template-card-apply',
+  // The card's own Add button (the Apply icon is hidden on this panel): "Add <name>", not "Add <name> to favorites".
+  templateApply: '.template-card button[aria-label^="Add "]:not([aria-label$="to favorites"])',
   confirmDialog: '[role="alertdialog"]',
 });
 
@@ -76,7 +77,7 @@ async function finishWithPreviewAndExport(page, ctx, rowId, slug, exportOptions 
 
 export async function textTemplates(page, ctx) {
   const rowId = 'D-065';
-  await ensureTimelineClip(page, ctx, rowId);
+  await ensureTimelineClip(page, ctx, rowId, { fresh: true });
   await openCreateTool(page, 'text');
   const categories = await page.locator(LEFT_SEL.textCategoryTabs).evaluateAll(readNodeTexts);
   if (categories.length === 0) throw new Error('the Text panel shows no template categories');
@@ -109,9 +110,19 @@ export async function textTemplates(page, ctx) {
   return { message: outcome.message, parts: outcome.parts };
 }
 
+/** The Text panel keeps its Templates sub-tab after a clip is selected: open its Edit sub-tab (found live). */
+async function showTextEditTab(page) {
+  const editor = page.locator(LEFT_SEL.textEditor).first();
+  if (await editor.isVisible().catch(() => false)) return;
+  await page
+    .locator('button[role="tab"][data-panel-tab-id="edit"]:not([disabled])')
+    .first()
+    .click({ timeout: 8_000 });
+}
+
 export async function editText(page, ctx) {
   const rowId = 'D-066';
-  const base = await ensureTimelineClip(page, ctx, rowId);
+  const base = await ensureTimelineClip(page, ctx, rowId, { fresh: true });
   await openCreateTool(page, 'text');
   const labels = await page.locator(LEFT_SEL.textAddButtons).evaluateAll(readNodeLabels);
   if (labels.length === 0) throw new Error('the Text panel lists no template to add');
@@ -126,6 +137,7 @@ export async function editText(page, ctx) {
   if (textClipId === undefined) throw new Error('could not tell which clip the template added');
   const editor = page.locator(LEFT_SEL.textEditor).first();
   if (!(await editor.isVisible().catch(() => false))) await selectClipById(page, textClipId);
+  await showTextEditTab(page);
   await editor.waitFor({ state: 'visible' });
   const field = page.locator(LEFT_SEL.textContent).first();
   await field.fill(TEXT_SAMPLE);
@@ -133,6 +145,7 @@ export async function editText(page, ctx) {
   // Away and back: the text must still be there, so it was stored and not only typed.
   await selectClipById(page, base.clips[0].id);
   await selectClipById(page, textClipId);
+  await showTextEditTab(page);
   await editor.waitFor({ state: 'visible' });
   const stored = await page.locator(LEFT_SEL.textContent).first().inputValue();
   if (stored !== TEXT_SAMPLE) {
@@ -146,7 +159,7 @@ export async function editText(page, ctx) {
 
 export async function captionByHand(page, ctx) {
   const rowId = 'D-067';
-  await ensureTimelineClip(page, ctx, rowId);
+  await ensureTimelineClip(page, ctx, rowId, { fresh: true });
   await openCreateTool(page, 'captions');
   const addTrack = page.locator(LEFT_SEL.addCaptionTrack).first();
   if (await addTrack.isVisible().catch(() => false)) await addTrack.click();
@@ -174,7 +187,7 @@ export async function captionByHand(page, ctx) {
 
 export async function audioPresets(page, ctx) {
   const rowId = 'D-068';
-  await ensureTimelineClip(page, ctx, rowId);
+  await ensureTimelineClip(page, ctx, rowId, { fresh: true });
   await openCreateTool(page, 'audio');
   const names = await page.locator(`${LEFT_SEL.audioChoices} strong`).evaluateAll(readNodeTexts);
   if (names.length === 0) throw new Error('the Audio panel lists no enhancement preset');
@@ -222,7 +235,7 @@ export async function audioPresets(page, ctx) {
 
 export async function templatesApply(page, ctx) {
   const rowId = 'D-069';
-  await ensureTimelineClip(page, ctx, rowId);
+  await ensureTimelineClip(page, ctx, rowId, { fresh: true });
   await openCreateTool(page, 'templates');
   const apply = page.locator(LEFT_SEL.templateApply).first();
   await apply.waitFor({ state: 'attached' });

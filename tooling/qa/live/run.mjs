@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { createLiveDriver, launchForRun } from './driver.mjs';
+import { createLiveDriver, launchForRun, launchOrClose } from './driver.mjs';
 import { labRoots } from './lab-roots.mjs';
 import {
   addToTimelineThroughLeftPanel,
@@ -22,7 +22,7 @@ import { LIVE_ROWS } from './matrix.mjs';
 import { abandonedRow, restartAppOnto, runRows } from './rows.mjs';
 
 import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
-import { executeRow } from './matrix-core.mjs';
+import { createBridge, createBridgeLog, executeRow } from './matrix-core.mjs';
 
 const LAB = labRoots();
 
@@ -134,8 +134,13 @@ export async function run(argv = process.argv.slice(2)) {
     return;
   }
   const runId = randomUUID();
-  const testMode = options.testIds.some((id) => LIVE_ROWS.some((row) => row.id === id));
-  const evidenceTask = testMode ? 'T-A07-A08' : 'T-A02';
+  const liveTest = options.testIds.some((id) => LIVE_ROWS.some((row) => row.id === id));
+  const testMode = liveTest || options.testIds.some((id) => id.startsWith('D-A09-'));
+  const evidenceTask = liveTest
+    ? 'T-A07-A08'
+    : options.testIds.some((id) => id.startsWith('D-A09-'))
+      ? 'T-A09'
+      : 'T-A02';
   const outDir = resolve(options.out ?? join(LAB.evidence, evidenceTask, runId));
   const scratchRoot = LAB.scratch;
   const profileDir = join(scratchRoot, 'profiles', runId);
@@ -211,7 +216,7 @@ export async function run(argv = process.argv.slice(2)) {
           close: () => driver.close(),
           relaunch: async () => {
             driver = makeDriver(true);
-            return driver.launch();
+            return launchOrClose(driver);
           },
         });
       },
@@ -229,13 +234,42 @@ export async function run(argv = process.argv.slice(2)) {
     }
     // T-A05 and T-A06 rows (desktop-matrix-rows.mjs) build their own result, evidence and defect text.
     const matrixContext = options.testIds.some((id) => id in MATRIX_ROWS)
-      ? createMatrixContext({ page: session.page, outDir, libraryDir, runId })
+      ? createMatrixContext({
+          page: session.page,
+          outDir,
+          libraryDir,
+          downloadDir: session.downloadDir,
+          runId,
+          editDocument: async (page) => {
+            const file = join(LAB.fixtures, 'h264-16x9-audio.mp4');
+            await newProject(page, `A09 persistence ${runId.slice(0, 8)}`);
+            await importThroughLeftPanel(page, file);
+            await addToTimelineThroughLeftPanel(page, file);
+          },
+          restartApp: async () => {
+            session = await restartAppOnto(matrixContext, {
+              close: () => driver.close(),
+              relaunch: async () => {
+                driver = makeDriver(true);
+                return launchOrClose(driver);
+              },
+            });
+            matrixContext.bridge = createBridge(
+              session.page,
+              createBridgeLog(join(outDir, 'bridge-replies.jsonl')),
+            );
+            // Relaunch replaces the UI window, so its bridge tap must be installed again.
+            await matrixContext.bridge.installTap().catch(() => false);
+            return session;
+          },
+        })
       : undefined;
     if (matrixContext && !setupProblem) await matrixContext.bridge.installTap().catch(() => false);
     for (const id of options.testIds) {
       if (LIVE_ROWS.some((row) => row.id === id)) continue;
-      if (taskContext.pageLost) {
-        results.push(abandonedRow(id, taskContext.pageLost).result);
+      const lostReason = taskContext.pageLost ?? matrixContext?.pageLost;
+      if (lostReason) {
+        results.push(abandonedRow(id, lostReason).result);
         continue;
       }
       if (id in MATRIX_ROWS) {

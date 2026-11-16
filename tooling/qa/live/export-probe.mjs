@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { blockedRow } from './rows.mjs';
-import { blurFocus, clickMenuItem, readTimelineBoxes } from './ui-steps.mjs';
+import { blurFocus, clickClipById, clickMenuItem, readTimelineBoxes } from './ui-steps.mjs';
 
 export const EXPORT_SECONDS = 2;
 
@@ -97,14 +97,14 @@ export async function trimTimelineToSeconds(page, seconds, rowId) {
       (clip) => clip.left < playheadX - edge && clip.right > playheadX + edge,
     );
     if (crossing !== undefined) {
-      await page.locator(`.timeline-clip[data-clip-id="${crossing.id}"]`).first().click();
+      await clickClipById(page, crossing.id);
       await page.keyboard.press('KeyS');
       await page.waitForTimeout(150);
       continue;
     }
     const tail = clips.find((clip) => clip.left >= playheadX - edge);
     if (tail !== undefined) {
-      await page.locator(`.timeline-clip[data-clip-id="${tail.id}"]`).first().click();
+      await clickClipById(page, tail.id);
       await clickMenuItem(page, 'Edit', 'Delete');
       await page.waitForTimeout(150);
       continue;

@@ -52,6 +52,13 @@ test('the live runner accepts the T-A07 and T-A08 matrix rows', () => {
   assert.deepEqual(options.testIds, ['D-057', 'D-065', 'D-071', 'D-080']);
 });
 
+test('the live runner accepts each T-A09 desktop row and its prefix', () => {
+  const one = parseArgs(['--tests', 'D-A09-01', '--app', 'C:\\jgp\\unpacked']);
+  assert.deepEqual(one.testIds, ['D-A09-01']);
+  const all = parseArgs(['--tests', 'D-A09-*', '--app', 'C:\\jgp\\unpacked']);
+  assert.deepEqual(all.testIds, ['D-A09-01', 'D-A09-02', 'D-A09-03', 'D-A09-04', 'D-A09-05']);
+});
+
 test('the D-07 prefix expands every T-A08 shortcut and workspace row', () => {
   const options = parseArgs(['--tests', 'D-07*', '--app', 'C:\\jgp\\unpacked']);
   assert.ok(options.testIds.includes('D-071'));
