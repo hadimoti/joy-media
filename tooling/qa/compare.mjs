@@ -221,6 +221,23 @@ export async function extractExportFrame(exportPath, timestamp, outputPath, dime
   return outputPath;
 }
 
+export async function extractFrameRegion(inputPath, outputPath, region) {
+  const args = [
+    '-y',
+    '-v',
+    'error',
+    '-i',
+    inputPath,
+    '-frames:v',
+    '1',
+    '-vf',
+    `crop=${region.width}:${region.height}:${region.x}:${region.y}`,
+    outputPath,
+  ];
+  await run(ffmpeg, args);
+  return outputPath;
+}
+
 export async function probeFrameDimensions(file) {
   const probe = JSON.parse(
     await run(
