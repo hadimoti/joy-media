@@ -91,6 +91,27 @@ const ANIMATABLE_VISUAL_PROPERTIES = new Set([
   'opacity',
 ]);
 
+const MOTION_PROPERTY_NAMES: Readonly<Record<string, string>> = {
+  x: 'Position X',
+  y: 'Position Y',
+  scaleX: 'Scale X',
+  scaleY: 'Scale Y',
+  rotationDeg: 'Rotation',
+  opacity: 'Opacity',
+  positionZ: 'Depth',
+};
+
+/** The name a person sees on the approval card (never the internal property id). */
+export function motionPropertyName(propertyId: string): string {
+  return MOTION_PROPERTY_NAMES[propertyId] ?? 'Property';
+}
+
+/** Microseconds as seconds with at most three decimals: 4800000 -> "4.8 s". */
+export function formatSecondsLabel(timeUs: number): string {
+  const seconds = Math.round(timeUs / 1000) / 1000;
+  return `${Number.isInteger(seconds) ? seconds.toFixed(0) : String(seconds)} s`;
+}
+
 function assertSupportedMotionBinding(document: JoyProjectV1, binding: PropertyBindingV2): void {
   if (binding.ownerKind !== 'visual-object')
     throw new RangeError(`motion owner kind "${binding.ownerKind}" is not implemented`);
@@ -277,7 +298,7 @@ export function compileJoyCodeCompoundDraft(
         groups.push({
           kind: 'motion',
           operationId: operation.id,
-          summary: `Set ${operation.binding.propertyId} keyframe at ${operation.key.timeUs}µs`,
+          summary: `Animate ${motionPropertyName(operation.binding.propertyId)} at ${formatSecondsLabel(operation.key.timeUs)}`,
           affectedIds: [binding.ownerId, binding.propertyId],
         });
       } catch (error) {
@@ -304,7 +325,7 @@ export function compileJoyCodeCompoundDraft(
         groups.push({
           kind: 'motion',
           operationId: operation.id,
-          summary: `Remove ${operation.binding.propertyId} keyframe at ${operation.timeUs}µs`,
+          summary: `Remove ${motionPropertyName(operation.binding.propertyId)} animation at ${formatSecondsLabel(operation.timeUs)}`,
           affectedIds: [binding.ownerId, binding.propertyId],
         });
       } catch (error) {

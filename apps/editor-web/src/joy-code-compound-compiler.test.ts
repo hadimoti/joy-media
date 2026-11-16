@@ -6,7 +6,22 @@ import {
   type LookInstancesDocument,
 } from '@joy-media/project-schema';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
-import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
+import {
+  compileJoyCodeCompoundDraft,
+  formatSecondsLabel,
+  motionPropertyName,
+} from './joy-code-compound-compiler.js';
+
+describe('approval card wording', () => {
+  it('names a property and a time in plain words, never an id or microseconds', () => {
+    expect(motionPropertyName('opacity')).toBe('Opacity');
+    expect(motionPropertyName('rotationDeg')).toBe('Rotation');
+    expect(motionPropertyName('somethingNew')).toBe('Property');
+    expect(formatSecondsLabel(4_800_000)).toBe('4.8 s');
+    expect(formatSecondsLabel(2_000_000)).toBe('2 s');
+    expect(formatSecondsLabel(1_234_567)).toBe('1.235 s');
+  });
+});
 
 describe('Joy Code compound compiler', () => {
   it('compiles mixed timeline, title, caption, and transition operations against one base', () => {
