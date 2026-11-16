@@ -98,7 +98,7 @@ async function addFixtureVideo(page: Parameters<typeof authenticate>[0]): Promis
 async function openProcesses(page: Parameters<typeof authenticate>[0]): Promise<void> {
   const trigger = page.getByRole('button', { name: 'Recent processes' });
   if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
-  await expect(page.getByRole('region', { name: 'Recent processes' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Recent processes' })).toBeVisible();
 }
 
 test.describe('WP-29 export recovery acceptance', () => {

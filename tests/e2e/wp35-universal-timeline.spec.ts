@@ -161,19 +161,24 @@ test.describe('WP-35 universal timeline closeout', () => {
     await page.setViewportSize({ width: 1613, height: 1066 });
     await openTimelineShowcaseWorkspace(page);
     const visualTracks = page.locator('.timeline-track[data-track-family="visual"]');
-    const visualNames = visualTracks.locator('.track-name');
-
-    await expect(visualNames.nth(0)).toHaveText('Adjust');
-    await expect(visualNames.nth(1)).toHaveText('Filters');
+    const initialTrackIds = await visualTracks.evaluateAll((tracks) =>
+      tracks.slice(0, 2).map((track) => track.getAttribute('data-track-id')),
+    );
+    expect(initialTrackIds).toEqual(['Adjust', 'Filters']);
     await visualTracks
       .nth(0)
       .locator('.timeline-track-header')
       .dragTo(visualTracks.nth(1).locator('.timeline-track-header'));
-    await expect(visualNames.nth(0)).toHaveText('Filters');
-    await expect(visualNames.nth(1)).toHaveText('Adjust');
+    await expect
+      .poll(() =>
+        visualTracks.evaluateAll((tracks) =>
+          tracks.slice(0, 2).map((track) => track.getAttribute('data-track-id')),
+        ),
+      )
+      .toEqual(['Filters', 'Adjust']);
   });
 
-  test('renders backend track titles, mixed elements, and Quarter preview controls', async ({
+  test('renders professional track codes, mixed elements, and Quarter preview controls', async ({
     page,
   }, testInfo) => {
     await page.setViewportSize({ width: 1613, height: 1066 });
@@ -185,7 +190,7 @@ test.describe('WP-35 universal timeline closeout', () => {
     await expect(visualTracks).toHaveCount(10);
     await expect(audioTracks).toHaveCount(1);
     await expect(page.locator('.timeline-track-header .track-code').first()).toHaveText('V1');
-    await expect(trackNames.first()).toHaveText('Adjust');
+    await expect(trackNames.first()).toHaveText('V1');
     await expect(audioTracks.locator('.track-code')).toHaveText('A1');
     await expect(audioTracks.locator('.track-name')).toHaveText('Audio');
     const lastVisualBox = await visualTracks.last().boundingBox();

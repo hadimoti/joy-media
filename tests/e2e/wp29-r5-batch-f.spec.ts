@@ -56,7 +56,7 @@ async function selectReferenceClip(page: Parameters<typeof openPanel>[0]): Promi
   // B-roll clips in the seeded timeline are intentionally media-only and do
   // not have a visual-object target. Motion/Spatial authoring needs the
   // object-backed Intro clip.
-  const introClip = page.locator('.timeline-clip').filter({ hasText: 'Intro' }).first();
+  const introClip = page.locator('.timeline-clip[data-clip-id="intro"]');
   await expect(introClip).toBeVisible();
   await introClip.click();
   await expect(introClip).toHaveAttribute('aria-pressed', 'true');
