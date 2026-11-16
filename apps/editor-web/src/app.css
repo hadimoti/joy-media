@@ -15757,6 +15757,8 @@ label {
 .asset-card-media video {
   object-fit: cover;
 }
+/* Actions stay hidden until hover or focus (T-D16, row 8): no opacity here, so the
+   base rule's opacity 0 and the hover rule's opacity 1 decide. */
 .asset-grid--large .asset-card-actions,
 .asset-grid--medium .asset-card-actions {
   top: 0.38rem;
@@ -15765,7 +15767,6 @@ label {
   z-index: 4;
   height: auto;
   padding: 0;
-  opacity: 1;
   pointer-events: none;
 }
 .asset-grid--large .asset-card-actions .icon-button,

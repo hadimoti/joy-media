@@ -657,9 +657,9 @@ export function InspectorPanel({
     () => mediaFitSelection(project, idle ? undefined : target, selectedClipId),
     [project, idle, target, selectedClipId],
   );
+  // Never a raw id (T-D16, row 7): the kind stands in when no clip name is known.
   const title =
-    selectedName ??
-    (object !== undefined ? target.id : selectedClipId !== undefined ? selectedClipId : '—');
+    selectedName ?? (selectedKind !== undefined && selectedKind !== '' ? selectedKind : 'Clip');
   const animatedProperties = Object.entries(target.animations ?? {}).flatMap(
     ([property, curve]) => {
       if (curve === undefined || curve.keyframes.length === 0) return [];

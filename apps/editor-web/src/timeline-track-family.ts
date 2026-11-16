@@ -91,6 +91,29 @@ export function professionalTrackName(
 }
 
 /**
+ * The human label of one row for the Inspector (T-D16, row 7): the row's own
+ * name, else its track code (V1, A1). Never the row id. The code uses the same
+ * display order and family count as the Timeline panel.
+ */
+export function professionalTrackLabel(
+  tracks: readonly Track[],
+  trackId: string,
+  elementKinds: TimelineElementKindMap = {},
+): string | undefined {
+  const counts: Record<ProfessionalTrackFamily, number> = { visual: 0, audio: 0 };
+  for (const track of sortTracksForTimelineDisplay(tracks, elementKinds)) {
+    const family = timelineTrackFamily(track, elementKinds);
+    counts[family] += 1;
+    if (track.id !== trackId) continue;
+    const name = track.name?.trim();
+    return name !== undefined && name.length > 0
+      ? name
+      : professionalTrackCode(family, counts[family]);
+  }
+  return undefined;
+}
+
+/**
  * Reorder one complete row within its family. The resulting composition-wide
  * order map is emitted as one batch command, so validation never observes
  * transient duplicate ranks and undo restores the whole deck in one step.

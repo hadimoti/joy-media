@@ -339,7 +339,7 @@ import {
 } from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
 import { calculateMediaFitTransform } from './media-fit-transform.js';
-import { nextProfessionalTrackId } from './timeline-track-family.js';
+import { nextProfessionalTrackId, professionalTrackLabel } from './timeline-track-family.js';
 import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
 import { findFirstPartyScene } from '@joy-media/html-scene-runtime/first-party';
 import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
@@ -6516,7 +6516,15 @@ function EditorWorkspace({
                       : selectedElementKind.charAt(0).toUpperCase() + selectedElementKind.slice(1),
                 })
           }
-          selectedTrackName={selectedTimelineEntry?.track.id}
+          selectedTrackName={
+            selectedTimelineEntry === undefined
+              ? undefined
+              : professionalTrackLabel(
+                  selectedTimelineEntry.composition.tracks,
+                  selectedTimelineEntry.track.id,
+                  timelineElementKinds,
+                )
+          }
           selectedSourceMissing={
             selectedTimelineVideo !== undefined &&
             missingAssetIds.has(selectedTimelineVideo.clip.assetId)
