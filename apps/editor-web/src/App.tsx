@@ -5723,11 +5723,34 @@ function EditorWorkspace({
     },
     [],
   );
+  /** Moves keyboard focus into a dock panel once its tab is showing (Window > Focus <panel>). */
+  const focusPanelContent = useCallback((panelId: string) => {
+    const dockPanelId = featureActivationRoute(panelId)?.dockPanelId ?? panelId;
+    const label = panelLabel(dockPanelId);
+    // A moment later, so a closing palette or menu has given focus back before this takes it.
+    window.setTimeout(() => {
+      const root = Array.from(
+        document.querySelectorAll<HTMLElement>('article.joy-panel-root'),
+      ).find((element) => element.getAttribute('aria-label') === label && element.offsetWidth > 0);
+      if (root === undefined) return;
+      const target =
+        root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ??
+        root.querySelector<HTMLElement>('button, input, select, textarea, [tabindex="0"]');
+      if (target !== null) {
+        target.focus({ preventScroll: true });
+        return;
+      }
+      root.tabIndex = -1;
+      root.focus({ preventScroll: true });
+    }, 80);
+  }, []);
   const runMenuAction = useCallback(
     (id: AppMenuActionId) => {
       const panelId = panelIdFromMenuAction(id);
       if (panelId !== undefined) {
         activatePanel(panelId);
+        // Window > Focus <panel> also puts the keyboard inside the panel, so its keys work at once.
+        if (id.startsWith('window.panel.')) focusPanelContent(panelId);
         return;
       }
       switch (id) {
@@ -5822,6 +5845,7 @@ function EditorWorkspace({
     },
     [
       activatePanel,
+      focusPanelContent,
       copySelectedClips,
       cutSelectedClips,
       exportEditableProject,

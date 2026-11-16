@@ -35,6 +35,7 @@ import { AgentRequestRegistry, cancelWhenPageGoes } from './agent-requests.js';
 import { registerJoyProtocol } from './protocol-registration.js';
 import type { IpcRequest } from '../ipc.js';
 import { isAllowedEditorOrigin, originOfPageUrl } from '../origin-policy.js';
+import { isPermissionGranted } from '../permission-policy.js';
 import {
   DEV_LOADING_BAR_MS,
   DEV_RENDERER_RETRY_MS,
@@ -591,8 +592,9 @@ if (!app.requestSingleInstanceLock()) {
 
     // Deny any permission the desktop shell has no product reason to grant (camera/mic
     // access, if ever needed for capture, is a deliberate future decision, not a default).
-    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
-      callback(false);
+    // The one grant is full screen, and only for the editor's own page (see permission-policy.ts).
+    session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+      callback(isPermissionGranted(permission, details.requestingUrl || wc.getURL()));
     });
 
     // Test mode only: a Save dialog writes straight into the disposable download folder.

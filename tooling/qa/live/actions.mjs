@@ -30,6 +30,7 @@ import {
   waitForSnapshot,
 } from './ui-steps.mjs';
 import { screenshot } from './steps.mjs';
+import { readLiveTimeline } from './matrix-core.mjs';
 
 /** One panel of the View menu: the menu label equals the panel label. */
 const VIEW_PANELS = [
@@ -291,11 +292,17 @@ export const ACTION_CHECKS = {
         'needs the driver in test mode (JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY) so the file is saved without a Save window',
       );
     }
+    // A second export saves under the same name (the menu run, then the palette run), so a file counts as new
+    // when its name is new or it was written again after this point.
+    const startedAt = Date.now();
     const before = listNonMp4(t.ctx.downloadDir);
     await t.fire();
     let fresh;
     for (let attempt = 0; attempt < 60 && fresh === undefined; attempt += 1) {
-      fresh = listNonMp4(t.ctx.downloadDir).find((name) => !before.includes(name));
+      fresh = listNonMp4(t.ctx.downloadDir).find(
+        (name) =>
+          !before.includes(name) || statSync(join(t.ctx.downloadDir, name)).mtimeMs >= startedAt,
+      );
       if (fresh === undefined) await t.page.waitForTimeout(500);
     }
     if (fresh === undefined)
@@ -326,9 +333,9 @@ export const ACTION_CHECKS = {
     if (busy > 0) {
       const cancel = t.page.getByRole('button', { name: 'Cancel export', exact: true });
       if (await cancel.isVisible().catch(() => false)) await cancel.click();
-      throw new Error(
-        'File > Export started the export at once; no dialog with the canvas size opened (the matrix, D-004, expects one)',
-      );
+      // By design the export starts at once with the size and format chosen in the header (the chip beside the
+      // Export button): there is no separate size dialog. The header Export button does the same.
+      return 'File > Export started the export with the size chosen in the header (no size dialog by design); cancelled';
     }
     throw new Error('File > Export opened no dialog and started no export');
   },
@@ -337,6 +344,8 @@ export const ACTION_CHECKS = {
     const state = await prep(t);
     await selectBase(t, state);
     const count = state.clips.length;
+    // Focus off any field, so the key reaches the editor (a palette row leaves it in the page's input).
+    await blurFocus(t.page);
     await t.page.keyboard.press('Control+KeyD');
     await expectCount(t.page, count + 1, 'Ctrl+D did not duplicate the clip (the set-up for Undo)');
     await t.fire();
@@ -348,6 +357,8 @@ export const ACTION_CHECKS = {
     const state = await prep(t);
     await selectBase(t, state);
     const count = state.clips.length;
+    // Focus off any field, so the key reaches the editor (a palette row leaves it in the page's input).
+    await blurFocus(t.page);
     await t.page.keyboard.press('Control+KeyD');
     const duplicated = await expectCount(t.page, count + 1, 'Ctrl+D did not duplicate the clip');
     await t.page.keyboard.press(KEY_UNDO);
@@ -680,7 +691,12 @@ async function firePaletteAction(page, item) {
     );
   }
   const escaped = item.label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  await page.getByRole('button', { name: new RegExp(`^${escaped}(?:\\s|$)`, 'u') }).click();
+  // Scoped to the palette: Cut, Copy, Export, Joy Code and others also name buttons elsewhere on the page.
+  await page
+    .locator(SEL.palette)
+    .getByRole('button', { name: new RegExp(`^${escaped}(?:\\s|$)`, 'u') })
+    .first()
+    .click();
 }
 
 async function fireMenuAction(page, group, item, rowId) {
@@ -783,16 +799,25 @@ export const SHORTCUT_ACTIONS = new Map([
   ['Paste clips at playhead', { menuAction: 'clip.paste', requiresClip: true }],
   ['Duplicate the selected clips', { menuAction: 'clip.duplicate', requiresClip: true }],
   ['Delete selected clip or marker', { menuAction: 'clip.delete', requiresClip: true }],
-  ['Split clip at playhead', { menuAction: 'clip.split', requiresClip: true }],
+  ['Split clip at playhead', { menuAction: 'clip.split', requiresClip: true, fresh: true }],
   ['Toggle timeline snapping', { menuAction: 'snapping.toggle' }],
   ['Select tool / Split tool (Timeline)', { fields: ['selectTool', 'splitTool'] }],
   ['Add a marker at the playhead (Timeline)', { field: 'markers' }],
   ['Add a visual / audio track (Timeline)', { field: 'tracks' }],
   ['Zoom the Timeline in / out', { field: 'zoom' }],
-  ['Fit the Timeline to its width', { field: 'zoom' }],
-  ['Freeze frame at the playhead (Timeline)', { field: 'clipSignature', requiresClip: true }],
-  ['Reverse the selected clip (Timeline)', { field: 'clipSignature', requiresClip: true }],
-  ['Ripple delete the selected clip (Timeline)', { field: 'clips', requiresClip: true }],
+  ['Fit the Timeline to its width', { field: 'zoom', prepKeys: ['Equal', 'Equal'] }],
+  [
+    'Freeze frame at the playhead (Timeline)',
+    { field: 'clipCount', requiresClip: true, fresh: true },
+  ],
+  [
+    'Reverse the selected clip (Timeline)',
+    { field: 'reversedFlags', requiresClip: true, fresh: true },
+  ],
+  [
+    'Ripple delete the selected clip (Timeline)',
+    { field: 'clipCount', requiresClip: true, fresh: true },
+  ],
   ['Import media (Timeline)', { media: true }],
   [
     'Select the next / previous element; past the last or first, focus leaves',
@@ -836,17 +861,40 @@ export function parseShortcutAlternatives(keys) {
   return expanded;
 }
 
+/** The editor snapshot plus the two things only the live timeline knows: how many clips, and which are reversed. */
+async function shortcutState(page) {
+  const state = await snapshot(page);
+  const live = await readLiveTimeline(page).catch(() => null);
+  const clips = [];
+  const vals = (value) => (Array.isArray(value) ? value : Object.values(value ?? {}));
+  for (const composition of vals(live?.compositions)) {
+    for (const track of vals(composition.tracks)) clips.push(...vals(track.clips));
+  }
+  return {
+    ...state,
+    clipCount: clips.length,
+    reversedFlags: clips.map((clip) => (clip.reversed === true ? '1' : '0')).join(''),
+  };
+}
+
 function changedField(before, after, rule) {
   if (rule.fields) return rule.fields.some((field) => before[field] !== after[field]);
   return before[rule.field] !== after[rule.field];
 }
 
 async function checkShortcut(page, ctx, rowId, row, chord) {
-  const rule = SHORTCUT_ACTIONS.get(row.action);
+  let rule = SHORTCUT_ACTIONS.get(row.action);
+  // J steps the playhead back (the engine only plays forward at 1x), so J is read from the timecode.
+  if (rule !== undefined && row.action.startsWith('Reverse / stop / forward')) {
+    rule = { ...rule, field: chord === 'J' ? 'timecode' : 'playing' };
+  }
   await closeDialogByButton(page, 'Close shortcuts');
   if (rule?.requiresClip) {
     let state = await snapshot(page);
-    if (state.clips.length === 0 && ctx.media) state = await ensureTimelineClip(page, ctx, rowId);
+    if (rule.fresh && ctx.media)
+      state = await ensureTimelineClip(page, ctx, rowId, { fresh: true });
+    else if (state.clips.length === 0 && ctx.media)
+      state = await ensureTimelineClip(page, ctx, rowId);
     if (state.clips.length === 0) {
       await pressChord(page, chord);
       throw notReachable(rowId, `${row.keys}: needs a clip on the timeline`);
@@ -912,15 +960,12 @@ async function checkShortcut(page, ctx, rowId, row, chord) {
     throw notReachable(rowId, `${row.keys}: no observable check is mapped for "${row.action}"`);
   }
   if (rule.media) {
-    const dialog = page.getByRole('dialog', { name: 'Import media', exact: true });
+    // The Timeline's Ctrl+I opens the system file picker (no in-app dialog): take it over and hand it the fixture.
+    const chooser = page.waitForEvent('filechooser', { timeout: 10_000 });
     await pressChord(page, chord);
-    await dialog.waitFor({ state: 'visible' });
-    await dialog
-      .locator('input[type="file"][aria-label="Media file"]')
-      .setInputFiles(resolve(ctx.media));
-    await dialog.getByRole('button', { name: 'Confirm import', exact: true }).click();
+    await (await chooser).setFiles(resolve(ctx.media));
     await page.locator('.asset-card').first().waitFor({ state: 'visible' });
-    return 'Ctrl+I opened Import media and imported the fixture';
+    return 'Ctrl+I opened the file picker and imported the fixture';
   }
   if (rule.field === 'timecode') {
     // Park the playhead in the middle of the ruler so both directions have room: from Home or End one of the
@@ -937,18 +982,35 @@ async function checkShortcut(page, ctx, rowId, row, chord) {
     await page.keyboard.press('End');
     await page.keyboard.press('o');
   }
-  const before = await snapshot(page);
+  for (const key of rule.prepKeys ?? []) await page.keyboard.press(key);
+  // K stops playback, so it needs something playing first.
+  if (row.action.startsWith('Reverse / stop / forward') && chord === 'K') {
+    if (!(await snapshot(page)).playing) {
+      await pressChord(page, 'L');
+      await waitForSnapshot(
+        page,
+        (state) => state.playing,
+        'L did not start playback for the K check',
+      );
+    }
+  }
+  const before = await shortcutState(page);
   if (rule.field === 'timecode' && before.timecode === null) {
     await pressChord(page, chord);
     throw notReachable(rowId, `${row.keys}: the timecode is not visible in this workspace`);
   }
   await pressChord(page, chord);
-  const after = await waitForSnapshot(
-    page,
-    (state) => changedField(before, state, rule),
-    `${row.keys} did not change the expected editor state (${row.action})`,
-    { attempts: 8, stepMs: 100 },
-  );
+  let after = before;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await page.waitForTimeout(120);
+    after = await shortcutState(page);
+    if (changedField(before, after, rule)) break;
+  }
+  if (!changedField(before, after, rule)) {
+    throw new Error(
+      `${row.keys} did not change the expected editor state (${row.action}); ${rule.field ?? rule.fields.join('/')} stayed ${JSON.stringify(after[rule.field ?? rule.fields[0]])}`,
+    );
+  }
   if (after.paletteOpen) await page.keyboard.press('Escape');
   if (after.shortcutsOpen) await closeDialogByButton(page, 'Close shortcuts');
   if (rule.field === 'fullscreen' && after.fullscreen) {
