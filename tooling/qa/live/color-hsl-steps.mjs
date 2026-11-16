@@ -52,7 +52,10 @@ function needs(name, value) {
 }
 
 /** D-K04-1: pick the green patch, the Green band opens, saturation down turns it grey, undo. */
-export async function pickGreenAndDesaturate(page, { patch, readPreviewPixel, readGrade } = {}) {
+export async function pickGreenAndDesaturate(
+  page,
+  { patch, readPreviewPixel, readGrade, undo = true } = {},
+) {
   needs('patch', patch);
   needs('readPreviewPixel', readPreviewPixel);
   needs('readGrade', readGrade);
@@ -85,10 +88,12 @@ export async function pickGreenAndDesaturate(page, { patch, readPreviewPixel, re
   const shown = await readPreviewPixel(patch);
   if (!isGrey(shown)) throw new Error(`the patch shows ${JSON.stringify(shown)}, not grey`);
 
-  await page.keyboard.press('Control+z');
-  await page.keyboard.press('Control+z');
-  const undone = await readPreviewPixel(patch);
-  if (!isGreen(undone)) throw new Error(`two undos left the patch ${JSON.stringify(undone)}`);
+  if (undo) {
+    await page.keyboard.press('Control+z');
+    await page.keyboard.press('Control+z');
+    const undone = await readPreviewPixel(patch);
+    if (!isGreen(undone)) throw new Error(`two undos left the patch ${JSON.stringify(undone)}`);
+  }
   return `picked hue 120°, the Green band opened; saturation -1 made the patch ${JSON.stringify(shown)}`;
 }
 

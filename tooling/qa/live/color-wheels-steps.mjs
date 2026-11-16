@@ -51,7 +51,7 @@ async function grabPoint(page) {
 }
 
 /** D-K02-1: drag the puck, check the document and the panel, undo once. */
-export async function dragWheelChangesGrade(page, readGrade) {
+export async function dragWheelChangesGrade(page, readGrade, { undo = true } = {}) {
   if (typeof readGrade !== 'function')
     throw new Error('give readGrade(wheelId) so the case can read the document');
   await openWheels(page);
@@ -74,12 +74,14 @@ export async function dragWheelChangesGrade(page, readGrade) {
       `the panel shows ${JSON.stringify(shown)}, the document has ${JSON.stringify(rounded(after))}`,
     );
 
-  await page.keyboard.press('Control+z');
-  const undone = await readGrade('lift');
-  if (!sameNumbers(rounded(before), rounded(undone)))
-    throw new Error(
-      `one undo left ${JSON.stringify(rounded(undone))}, not ${JSON.stringify(rounded(before))}`,
-    );
+  if (undo) {
+    await page.keyboard.press('Control+z');
+    const undone = await readGrade('lift');
+    if (!sameNumbers(rounded(before), rounded(undone)))
+      throw new Error(
+        `one undo left ${JSON.stringify(rounded(undone))}, not ${JSON.stringify(rounded(before))}`,
+      );
+  }
   return `dragged the Lift wheel to ${JSON.stringify(rounded(after))}, one undo put it back`;
 }
 

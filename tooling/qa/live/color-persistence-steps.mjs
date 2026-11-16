@@ -96,9 +96,13 @@ export async function runColourLifecycle(
 export async function applyEachBuiltInLook(page, lifecycleForLook) {
   requireFunction('lifecycleForLook(look)', lifecycleForLook);
   const results = [];
+  let activePage = page;
   for (const look of BUILT_IN_COLOUR_LOOKS) {
     if (look.id === 'none') {
-      await page.getByRole('button', { name: look.name, exact: true }).click();
+      await activePage
+        .locator('button.look-card')
+        .filter({ has: activePage.locator('.look-card-label', { hasText: look.name }) })
+        .click();
       results.push({ look: look.id, message: 'selected the identity Look' });
       continue;
     }
@@ -106,10 +110,14 @@ export async function applyEachBuiltInLook(page, lifecycleForLook) {
     const edit = deps.edit;
     requireFunction(`edit for ${look.id}`, edit);
     deps.edit = async (target) => {
-      await target.getByRole('button', { name: look.name, exact: true }).click();
+      await target
+        .locator('button.look-card')
+        .filter({ has: target.locator('.look-card-label', { hasText: look.name }) })
+        .click();
       await edit(target);
     };
-    results.push({ look: look.id, ...(await runColourLifecycle(page, deps)) });
+    results.push({ look: look.id, ...(await runColourLifecycle(activePage, deps)) });
+    activePage = (await deps.getPage?.()) ?? activePage;
   }
   return results;
 }
