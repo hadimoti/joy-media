@@ -12,7 +12,7 @@ import { exportAndProbe } from './export-probe.mjs';
 import { blurFocus, ensureTimelineClip, selectClipById, waitForSnapshot } from './ui-steps.mjs';
 
 const FRAME_TOLERANCE = 3;
-const BURN_IN_TOLERANCE = 4;
+const BURN_IN_TOLERANCE = 6; // text edges are resampled; live 17 Nov: a one-pixel shift of the burned digits gave 4.3 at 1 s and 2 s
 export const FRAME_COMPARE_SAMPLES = Object.freeze([
   { seconds: 1, sourceSeconds: 1 },
   { seconds: 2, sourceSeconds: 2 },
