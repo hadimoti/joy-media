@@ -319,23 +319,32 @@ export const ACTION_CHECKS = {
 
   'file.export': async (t) => {
     await prep(t);
+    const busyButton = t.page.locator('.header-export-btn[aria-busy="true"]');
+    const idle = async () => {
+      // A cancelled export winds down for a moment; a new one is refused until it has.
+      for (let attempt = 0; attempt < 120 && (await busyButton.count()) > 0; attempt += 1) {
+        await t.page.waitForTimeout(250);
+      }
+      await t.page.waitForTimeout(1_500);
+    };
+    await idle();
     await t.fire();
-    let texts = [];
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      texts = await t.page.evaluate(readDialogTexts);
+    // The export starts after a short check of the project, so give it time to show itself.
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const texts = await t.page.evaluate(readDialogTexts);
       if (texts.some((text) => /\d+\s*[×x]\s*\d+/u.test(text))) {
         await t.page.keyboard.press('Escape');
         return 'the export dialog opened and shows the canvas size';
       }
+      if ((await busyButton.count()) > 0) {
+        const cancel = t.page.getByRole('button', { name: 'Cancel export', exact: true });
+        if (await cancel.isVisible().catch(() => false)) await cancel.click();
+        await idle();
+        // By design the export starts at once with the size and format chosen in the header (the chip beside the
+        // Export button): there is no separate size dialog. The header Export button does the same.
+        return 'File > Export started the export with the size chosen in the header (no size dialog by design); cancelled';
+      }
       await t.page.waitForTimeout(250);
-    }
-    const busy = await t.page.locator('.header-export-btn[aria-busy="true"]').count();
-    if (busy > 0) {
-      const cancel = t.page.getByRole('button', { name: 'Cancel export', exact: true });
-      if (await cancel.isVisible().catch(() => false)) await cancel.click();
-      // By design the export starts at once with the size and format chosen in the header (the chip beside the
-      // Export button): there is no separate size dialog. The header Export button does the same.
-      return 'File > Export started the export with the size chosen in the header (no size dialog by design); cancelled';
     }
     throw new Error('File > Export opened no dialog and started no export');
   },
