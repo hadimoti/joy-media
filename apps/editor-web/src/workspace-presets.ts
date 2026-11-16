@@ -104,7 +104,8 @@ export function workspacePresetLayout(preset: WorkspacePresetId, mode: EditorVie
           }
         : {
             browser: 'media',
-            context: 'jobs',
+            // Automate is Joy Code, Workflows and Jobs: Workflows comes up first, Joy Code sits beside it.
+            context: 'workflows',
             'monitor-row': 'monitor',
             'monitor-col': 'monitor',
             'agent-col': 'agent',
@@ -120,6 +121,18 @@ export function workspacePresetLayout(preset: WorkspacePresetId, mode: EditorVie
     const data = record.data;
     if (data !== null && typeof data === 'object' && !Array.isArray(data)) {
       const group = data as Record<string, unknown>;
+      // The Automate workspace names Workflows, so it carries a Workflows tab next to Jobs (the default dock keeps
+      // it out, as an on-demand panel in the View menu).
+      if (
+        preset === 'automate' &&
+        group.id === 'context' &&
+        Array.isArray(group.views) &&
+        !group.views.includes('workflows')
+      ) {
+        const jobsIndex = group.views.indexOf('jobs');
+        const at = jobsIndex < 0 ? group.views.length : jobsIndex;
+        group.views = [...group.views.slice(0, at), 'workflows', ...group.views.slice(at)];
+      }
       if (typeof group.id === 'string' && activeByGroup[group.id] !== undefined) {
         const requested = activeByGroup[group.id];
         const views = Array.isArray(group.views) ? group.views : [];

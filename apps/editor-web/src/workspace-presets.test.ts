@@ -113,6 +113,22 @@ describe('workspace presets', () => {
     expect((layout as { grid: { root: unknown } }).grid.root).toBeDefined();
   });
 
+  it('the Automate workspace shows Joy Code, Workflows and Jobs, with Workflows up front', () => {
+    for (const mode of ['vertical', 'widescreen'] as const) {
+      const layout = workspacePresetLayout('automate', mode);
+      const views = leafViews(layout, 'context');
+      expect(views).toContain('workflows');
+      expect(views).toContain('jobs');
+      expect(views.indexOf('workflows')).toBeLessThan(views.indexOf('jobs'));
+      expect(leafActiveView(layout, 'context')).toBe('workflows');
+      expect(leafIds(layout)).toContain('agent-col');
+    }
+    // The other presets keep Workflows out of the dock (it opens from the View menu).
+    expect(leafViews(workspacePresetLayout('enhance', 'vertical'), 'context')).not.toContain(
+      'workflows',
+    );
+  });
+
   it('opens the Animate tool in the Enhance hub with Inspector selected', () => {
     const layout = workspacePresetLayout('enhance', 'vertical');
 
