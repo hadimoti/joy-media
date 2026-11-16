@@ -11,6 +11,7 @@ import {
 } from './color-matrix-rows.mjs';
 import { createFakePage } from './fake-page.mjs';
 import { executeRow } from './matrix-core.mjs';
+import { restoreColorRowUi } from './color-panel-steps.mjs';
 
 test('the live colour registry exposes T-F23 pixel equality and T-K07 rows in card order', () => {
   assert.deepEqual(
@@ -115,6 +116,50 @@ test('Monitor pixel polling waits for two stable canvas reads after the backgrou
   assert.deepEqual(pixel, samples[2]);
   assert.equal(reads, 3);
   assert.equal(page.calls.filter((call) => call.includes('waitForTimeout(100)')).length, 2);
+});
+
+test('Monitor pixel polling reports the last pixel and canvas dimensions on timeout', async () => {
+  const page = createFakePage({
+    answers: ({ method, fn }) => {
+      if (method === 'evaluate' && fn === 'readMonitorCanvasPixel') {
+        return { x: 3, y: 4, width: 320, height: 180, r: 12, g: 16, b: 28 };
+      }
+      return undefined;
+    },
+  });
+  const ctx = {
+    async readDocument() {
+      return {
+        document: {
+          compositions: { root: { width: 1920, height: 1080 } },
+          rootCompositionId: 'root',
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    waitForMonitorPixel(
+      page,
+      { x: 25, y: 20 },
+      ctx,
+      'D-K03',
+      (pixel) => pixel.r !== 12 || pixel.g !== 16 || pixel.b !== 28,
+      'a picture pixel',
+    ),
+    /last pixel \{"r":12,"g":16,"b":28\}; Monitor canvas \{"width":320,"height":180\}/u,
+  );
+  assert.equal(page.calls.filter((call) => call.includes('waitForTimeout(100)')).length, 80);
+});
+
+test('colour row cleanup closes transient UI, blurs focus and keeps Create available', async () => {
+  const page = createFakePage();
+
+  await restoreColorRowUi(page);
+
+  assert.equal(page.calls.filter((call) => call.includes('keyboard.press("Escape")')).length, 3);
+  assert.ok(page.calls.some((call) => call === 'page.evaluate()'));
+  assert.ok(page.calls.some((call) => call.includes('.panel-tab')));
 });
 
 test('a fake registered row failure is reported as failed', async () => {

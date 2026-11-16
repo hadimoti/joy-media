@@ -31,7 +31,7 @@ export const BUILT_IN_COLOUR_LOOKS = Object.freeze([
 
 /**
  * Checks one colour edit on a known preview frame, through persistence, and
- * back through Undo in the same app session, then reapplies the edit before
+ * back through Undo in the same app session, then redoes the edit before
  * `saveAndReopen`, which must return the persisted grade; an
  * optional `compareExportFrame` uses the caller's existing compare helper.
  */
@@ -43,6 +43,7 @@ export async function runColourLifecycle(
     edit,
     saveAndReopen,
     undo,
+    redo,
     compareExportFrame,
     waitForPreviewPixel,
     pixel,
@@ -98,13 +99,20 @@ export async function runColourLifecycle(
   if (!sameValue(baselineGrade, restoredGrade))
     throw new Error('Undo did not restore the colour grade');
 
-  await edit(page);
+  await redo(page);
   const reappliedGrade = await readGrade(page);
-  const reappliedPixel = await readPreviewPixel(page, pixel);
+  const reappliedPixel = waitForPreviewPixel
+    ? await waitForPreviewPixel(
+        page,
+        pixel,
+        (sample) => pixelDistance(changedPixel, sample) <= pixelTolerance,
+        'Redo to restore the edited Monitor pixel',
+      )
+    : await readPreviewPixel(page, pixel);
   if (!sameValue(editedGrade, reappliedGrade))
-    throw new Error('reapplying the colour edit did not restore its grade');
+    throw new Error('Redo did not restore the colour grade');
   if (pixelDistance(changedPixel, reappliedPixel) > pixelTolerance)
-    throw new Error('reapplying the colour edit did not restore its preview');
+    throw new Error('Redo did not restore its preview');
 
   const reopenedGrade = await saveAndReopen(page);
   if (!sameValue(reappliedGrade, reopenedGrade)) {
@@ -115,7 +123,7 @@ export async function runColourLifecycle(
     await compareExportFrame(page, pixel);
   }
 
-  return `preview changed by ${pixelDistance(baselinePixel, changedPixel)} levels; saved grade survived reopen; Undo restored the frame`;
+  return `preview changed by ${pixelDistance(baselinePixel, changedPixel)} levels; Undo restored the frame and Redo restored the edit; saved grade survived reopen`;
 }
 
 /** Applies every built-in Look through its existing button and checks its lifecycle. */
