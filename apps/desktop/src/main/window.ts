@@ -26,10 +26,10 @@ export const DEV_RENDERER_RETRY_MS = 1000;
 export const DEV_LOADING_BAR_MS = 2800;
 
 /**
- * A packaged start shows the JOY Media loading window at once, the same page a development window shows, and opens the
- * editor once its page has loaded and the loading bar is full (DEV_LOADING_BAR_MS). 0 = no wait before the loading window.
+ * A packaged start shows the JOY Media loading window after a short grace period and opens the editor once its page has
+ * loaded and the loading bar is full (DEV_LOADING_BAR_MS). Fast starts never display the loading window.
  */
-export const PACKAGED_LOADING_DELAY_MS = 0;
+export const PACKAGED_LOADING_DELAY_MS = 300;
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
