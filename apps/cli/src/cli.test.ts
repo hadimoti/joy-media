@@ -6,12 +6,16 @@ import { runCli } from './cli.js';
 import { CliJoyAgentToolBridge } from './agent/bridge.js';
 import { resolveByokConfig } from './agent/provider.js';
 import { loadAiProviders } from './utils/config.js';
+import { DPAPI_UNAVAILABLE_REASON } from './utils/test-dpapi-availability.js';
 import {
   createDefaultProject,
   listProjects,
   loadProject,
   saveProject,
 } from './utils/project-loader.js';
+
+const dpapiTest = DPAPI_UNAVAILABLE_REASON === undefined ? it : it.skip;
+const dpapiSkipNote = DPAPI_UNAVAILABLE_REASON ? ` (skipped: ${DPAPI_UNAVAILABLE_REASON})` : '';
 
 describe('JOY Media CLI (@joy-media/cli)', () => {
   let homeDir: string;
@@ -281,46 +285,50 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       vi.restoreAllMocks();
     });
 
-    it('supports adding, listing, selecting, and removing providers via CLI', async () => {
-      // 1. Add provider
-      const addCode = await runCli([
-        'agent',
-        'provider',
-        'add',
-        'gateway-test',
-        '--url',
-        'http://127.0.0.1:1234/v1',
-        '--api-key',
-        'gateway-test-key-999',
-        '--model',
-        'gateway/model-a',
-      ]);
-      expect(addCode).toBe(0);
-      expect(fetch).toHaveBeenCalledTimes(1);
+    dpapiTest(
+      `supports adding, listing, selecting, and removing providers via CLI${dpapiSkipNote}`,
+      async () => {
+        // 1. Add provider
+        const addCode = await runCli([
+          'agent',
+          'provider',
+          'add',
+          'gateway-test',
+          '--url',
+          'http://127.0.0.1:1234/v1',
+          '--api-key',
+          'gateway-test-key-999',
+          '--model',
+          'gateway/model-a',
+        ]);
+        expect(addCode).toBe(0);
+        expect(fetch).toHaveBeenCalledTimes(1);
 
-      // 2. List providers
-      const listCode = await runCli(['agent', 'provider', 'list']);
-      expect(listCode).toBe(0);
+        // 2. List providers
+        const listCode = await runCli(['agent', 'provider', 'list']);
+        expect(listCode).toBe(0);
 
-      // 3. Use provider
-      const useCode = await runCli(['agent', 'provider', 'use', 'gateway-test']);
-      expect(useCode).toBe(0);
+        // 3. Use provider
+        const useCode = await runCli(['agent', 'provider', 'use', 'gateway-test']);
+        expect(useCode).toBe(0);
 
-      // 4. Set default model
-      const modelSetCode = await runCli(['agent', 'model', 'set', 'gateway/model-b']);
-      expect(modelSetCode).toBe(0);
+        // 4. Set default model
+        const modelSetCode = await runCli(['agent', 'model', 'set', 'gateway/model-b']);
+        expect(modelSetCode).toBe(0);
 
-      // 5. Verify resolution with active provider
-      const resolved = resolveByokConfig();
-      expect(resolved.provider).toBe('custom');
-      expect(resolved.baseUrl).toBe('http://127.0.0.1:1234/v1');
-      expect(resolved.apiKey).toBe('gateway-test-key-999');
-      expect(resolved.modelId).toBe('gateway/model-b');
+        // 5. Verify resolution with active provider
+        const resolved = resolveByokConfig();
+        expect(resolved.provider).toBe('custom');
+        expect(resolved.baseUrl).toBe('http://127.0.0.1:1234/v1');
+        expect(resolved.apiKey).toBe('gateway-test-key-999');
+        expect(resolved.modelId).toBe('gateway/model-b');
 
-      // 6. Remove provider
-      const removeCode = await runCli(['agent', 'provider', 'remove', 'gateway-test']);
-      expect(removeCode).toBe(0);
-    }, 15000);
+        // 6. Remove provider
+        const removeCode = await runCli(['agent', 'provider', 'remove', 'gateway-test']);
+        expect(removeCode).toBe(0);
+      },
+      15000,
+    );
 
     it('refuses a public custom endpoint until S8 is confirmed, and saves nothing', async () => {
       const code = await runCli([
@@ -337,30 +345,33 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(loadAiProviders()['public-test']).toBeUndefined();
     });
 
-    it('saves a public custom endpoint only with the owner consent (S8)', async () => {
-      const args = [
-        'agent',
-        'provider',
-        'add',
-        'consented-test',
-        '--url',
-        'https://consent.example.test/v1',
-        '--api-key',
-        'consented-test-key-999',
-        '--model',
-        'consented/model',
-      ];
-      expect(await runCli(args)).toBe(1);
-      expect(await runCli([...args, '--accept-public-endpoint'])).toBe(0);
-      expect(
-        resolveByokConfig({ provider: 'consented-test', model: 'consented/model' }),
-      ).toMatchObject({
-        provider: 'custom',
-        baseUrl: 'https://consent.example.test/v1',
-        modelId: 'consented/model',
-      });
-      expect(await runCli(['agent', 'provider', 'remove', 'consented-test'])).toBe(0);
-    });
+    dpapiTest(
+      `saves a public custom endpoint only with the owner consent (S8)${dpapiSkipNote}`,
+      async () => {
+        const args = [
+          'agent',
+          'provider',
+          'add',
+          'consented-test',
+          '--url',
+          'https://consent.example.test/v1',
+          '--api-key',
+          'consented-test-key-999',
+          '--model',
+          'consented/model',
+        ];
+        expect(await runCli(args)).toBe(1);
+        expect(await runCli([...args, '--accept-public-endpoint'])).toBe(0);
+        expect(
+          resolveByokConfig({ provider: 'consented-test', model: 'consented/model' }),
+        ).toMatchObject({
+          provider: 'custom',
+          baseUrl: 'https://consent.example.test/v1',
+          modelId: 'consented/model',
+        });
+        expect(await runCli(['agent', 'provider', 'remove', 'consented-test'])).toBe(0);
+      },
+    );
 
     it('refuses the retired Kilo profile instead of routing requests to it', () => {
       expect(() => resolveByokConfig({ provider: 'kilo' })).toThrow('retired from JOY Media');

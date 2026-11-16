@@ -6,6 +6,7 @@
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { DPAPI_UNAVAILABLE_REASON } from '../utils/test-dpapi-availability.js';
 import {
   createAgentSandbox,
   createProject,
@@ -25,6 +26,8 @@ import {
 import { describeRun, type RunResult } from './harness.js';
 
 const KEY = fakeKey('secret');
+const dpapiTest = DPAPI_UNAVAILABLE_REASON === undefined ? it : it.skip;
+const dpapiSkipNote = DPAPI_UNAVAILABLE_REASON ? ` (skipped: ${DPAPI_UNAVAILABLE_REASON})` : '';
 
 describe('API keys at rest', () => {
   let mock: MockLlmServer;
@@ -157,7 +160,7 @@ describe('API keys never appear in output', () => {
     env.cleanup();
   });
 
-  it('on every success path (human, --json, JOY_CLI_DEBUG)', async () => {
+  dpapiTest(`on every success path (human, --json, JOY_CLI_DEBUG)${dpapiSkipNote}`, async () => {
     const debug = { JOY_CLI_DEBUG: '1' };
     expect(
       (await run(['agent', 'provider', 'add', 'p', '--url', mock.url, '--api-key', KEY])).code,
@@ -196,7 +199,7 @@ describe('API keys never appear in output', () => {
     expect(chat.code, describeRun(chat)).toBe(0);
   });
 
-  it('on every failure path (401, 500, malformed, debug mode)', async () => {
+  it('on every direct agent failure path (401, 500, malformed, debug mode)', async () => {
     const debug = { JOY_CLI_DEBUG: '1' };
     const provider = [
       '--provider',
@@ -221,10 +224,26 @@ describe('API keys never appear in output', () => {
     mock.fallback({ kind: 'malformed', body: `{"echo": "${KEY}"` });
     const malformed = await run(['agent', 'run', 'x', '--project', projectId, ...provider], debug);
     expect(malformed.code).toBe(1);
-    mock.models({ kind: 'http-error', status: 401, body: { error: `invalid key ${KEY}` } });
-    const discovery = await run(['agent', 'provider', 'add', 'q', ...provider], debug);
-    expect(discovery.code).toBe(0);
   });
+
+  dpapiTest(
+    `provider model discovery errors never expose the API key${dpapiSkipNote}`,
+    async () => {
+      mock.models({ kind: 'http-error', status: 401, body: { error: `invalid key ${KEY}` } });
+      const discovery = await run([
+        'agent',
+        'provider',
+        'add',
+        'q',
+        '--url',
+        mock.url,
+        '--api-key',
+        KEY,
+      ]);
+      expect(discovery.code, describeRun(discovery)).toBe(0);
+      expect(discovery.all).not.toContain(KEY);
+    },
+  );
 
   it('refuses an OpenRouter profile on a loopback URL without sending a request', async () => {
     const r = await run([
@@ -247,15 +266,18 @@ describe('API keys never appear in output', () => {
     expect(mock.requests).toHaveLength(0);
   });
 
-  it('a short key is fully masked in `provider list` (no first-4/last-4 reveal)', async () => {
-    const short = 'sk-short';
-    await run(['agent', 'provider', 'add', 's', '--url', mock.url, '--api-key', short]);
-    const list = await run(['agent', 'provider', 'list']);
-    expect(list.out).toMatch(/API Key: set \(hidden\)/);
-    expect(list.all).not.toContain(short);
-    // The old mask printed `${key.slice(0, 4)}...${key.slice(-4)}`, i.e. the whole key.
-    expect(list.all).not.toContain('sk-s...hort');
-  });
+  dpapiTest(
+    `a short key is fully masked in provider list (no first-4/last-4 reveal)${dpapiSkipNote}`,
+    async () => {
+      const short = 'sk-short';
+      await run(['agent', 'provider', 'add', 's', '--url', mock.url, '--api-key', short]);
+      const list = await run(['agent', 'provider', 'list']);
+      expect(list.out).toMatch(/API Key: set \(hidden\)/);
+      expect(list.all).not.toContain(short);
+      // The old mask printed `${key.slice(0, 4)}...${key.slice(-4)}`, i.e. the whole key.
+      expect(list.all).not.toContain('sk-s...hort');
+    },
+  );
 
   it('a URL carrying credentials or a query secret is refused without echoing it', async () => {
     for (const url of [
@@ -299,7 +321,7 @@ describe('--api-key - reads the key from stdin (keeps it out of argv / ps)', () 
     env.cleanup();
   });
 
-  it('provider add and agent run accept the key on stdin', async () => {
+  dpapiTest(`provider add accepts a key on stdin${dpapiSkipNote}`, async () => {
     const add = await env.run(
       ['agent', 'provider', 'add', 'p', '--url', mock.url, '--api-key', '-'],
       {
@@ -314,7 +336,9 @@ describe('--api-key - reads the key from stdin (keeps it out of argv / ps)', () 
       readJoyConfig<{ entries: Record<string, unknown> }>(env.sb, 'credentials.json').entries,
     ).toHaveProperty('p');
     expect(mock.modelRequests[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
+  });
 
+  it('agent run accepts a key on stdin without writing it to argv or disk', async () => {
     const projectId = await createProject(env.sb, 'Stdin');
     const other = fakeKey('other');
     mock.script(text('ok'));

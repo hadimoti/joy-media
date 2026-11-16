@@ -64,6 +64,7 @@ describe('resolveDroppedPath', () => {
       await expect(resolveDroppedPath!(link)).resolves.toEqual({
         path: await realpath(target),
         kind: 'file',
+        size: 5,
       });
       await expect(resolveDroppedPath!(link, 'folder-entry')).rejects.toThrow();
     } finally {
