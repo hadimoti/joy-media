@@ -3,6 +3,9 @@ import test from 'node:test';
 import {
   COLOR_MATRIX_ROWS,
   COLOR_MATRIX_ROWS_BY_ID,
+  clipColourGrade,
+  monitorPicturePoint,
+  monitorPictureRect,
   readColourGrade,
 } from './color-matrix-rows.mjs';
 import { createFakePage } from './fake-page.mjs';
@@ -29,20 +32,41 @@ test('a fake registered row passes through the matrix executor', async () => {
   assert.equal(result.message, 'fake colour pass');
 });
 
-test('colour grade reads use the document reader supplied by the matrix context', async () => {
+test('colour grade reads select the saved visual grade for the active timeline clip', async () => {
   const page = createFakePage();
-  const state = { document: { colorGrade: { lift: { r: 0.2, g: 0, b: 0 } } } };
+  const savedGrade = {
+    wheels: { lift: { r: 0.2, g: 0, b: 0 } },
+    curves: { rgb: [{ x: 0, y: 0 }] },
+  };
+  const state = {
+    document: { clips: [{ id: 'clip-1' }] },
+    storedDocument: { clipColorGrades: { 'clip-1': savedGrade } },
+  };
   let calls = 0;
-  const grade = await readColourGrade({
-    page,
-    async readDocument() {
-      calls += 1;
-      return state;
+  const grade = await readColourGrade(
+    {
+      page,
+      async readDocument() {
+        calls += 1;
+        return state;
+      },
     },
-  });
+    'clip-1',
+  );
 
   assert.equal(calls, 1);
-  assert.equal(grade['document.colorGrade'], state.document.colorGrade);
+  assert.equal(grade, savedGrade);
+  assert.equal(clipColourGrade({ document: {}, storedDocument: {} }, 'missing'), undefined);
+});
+
+test('Monitor sample points use the framed picture bounds and view transform', () => {
+  const rect = monitorPictureRect(
+    { x: 100, y: 50, width: 900, height: 700 },
+    { width: 1920, height: 1080 },
+    { zoom: 0.4, panX: 20, panY: -10 },
+  );
+  assert.deepEqual(rect, { x: 120, y: 40, width: 768, height: 432 });
+  assert.deepEqual(monitorPicturePoint(rect, 0.25, 0.2), { x: 312, y: 126.4 });
 });
 
 test('a fake registered row failure is reported as failed', async () => {
