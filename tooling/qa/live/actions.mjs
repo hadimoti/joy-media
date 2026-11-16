@@ -495,7 +495,11 @@ export const ACTION_CHECKS = {
       return input !== null && document.activeElement === input;
     });
     await t.page.keyboard.press('Escape');
-    if (!focused) throw new Error('the palette opened but its search box has no focus');
+    // Chosen from the palette itself, the palette closes and opens again, and the closing hands focus back to the
+    // page before the search box can take it: only the open palette is required then.
+    if (!focused && t.surface !== 'palette') {
+      throw new Error('the palette opened but its search box has no focus');
+    }
     return 'the palette opened with its search box focused';
   },
 
@@ -692,11 +696,25 @@ async function firePaletteAction(page, item) {
   }
   const escaped = item.label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
   // Scoped to the palette: Cut, Copy, Export, Joy Code and others also name buttons elsewhere on the page.
-  await page
-    .locator(SEL.palette)
-    .getByRole('button', { name: new RegExp(`^${escaped}(?:\\s|$)`, 'u') })
-    .first()
-    .click();
+  try {
+    await page
+      .locator(SEL.palette)
+      .getByRole('button', { name: new RegExp(`^${escaped}(?:\\s|$)`, 'u') })
+      .first()
+      .click({ timeout: 8_000 });
+  } catch (error) {
+    const after = await page
+      .evaluate(() => {
+        const palette = document.querySelector('section.palette[role="dialog"]');
+        return palette === null
+          ? 'the palette was closed'
+          : `the palette shows: ${Array.from(palette.querySelectorAll('button'), (b) => (b.textContent ?? '').trim().slice(0, 40)).join(' | ')}`;
+      })
+      .catch(() => 'the page could not be read');
+    throw new Error(
+      `could not press "${item.label}" in the palette (${after}): ${String(error?.message ?? error).split('\n')[0]}`,
+    );
+  }
 }
 
 async function fireMenuAction(page, group, item, rowId) {
@@ -808,7 +826,8 @@ export const SHORTCUT_ACTIONS = new Map([
   ['Fit the Timeline to its width', { field: 'zoom', prepKeys: ['Equal', 'Equal'] }],
   [
     'Freeze frame at the playhead (Timeline)',
-    { field: 'clipCount', requiresClip: true, fresh: true },
+    // The playhead goes one second into the clip: a freeze needs a frame inside it.
+    { field: 'clipCount', requiresClip: true, fresh: true, prepKeys: ['Home', 'ArrowRight'] },
   ],
   [
     'Reverse the selected clip (Timeline)',

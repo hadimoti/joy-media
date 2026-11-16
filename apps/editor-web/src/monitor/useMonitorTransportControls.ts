@@ -121,7 +121,8 @@ export function useMonitorTransportControls(
       position = Math.min(limit, Math.max(0, position + direction * speed * elapsedMs * 1000));
       const atEnd = direction < 0 ? position <= 0 : position >= limit;
       if (atEnd || now - lastSeek >= STEP_SEEK_INTERVAL_MS) {
-        latest.current.seek(position);
+        // The playhead takes whole microseconds only: a fraction made every reverse step throw.
+        latest.current.seek(Math.round(position));
         lastSeek = now;
       }
       if (atEnd) {
