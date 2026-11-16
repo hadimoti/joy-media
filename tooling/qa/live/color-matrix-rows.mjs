@@ -48,6 +48,17 @@ const AT_REST_GRADE = Object.freeze({
   hsl: Object.freeze([]),
 });
 
+/** A grade that was edited and undone keeps identity HSL bands while at rest has none: compare the acting bands. */
+function comparableGrade(grade) {
+  if (!Array.isArray(grade?.hsl)) return grade;
+  return {
+    ...grade,
+    hsl: grade.hsl.filter(
+      (band) => (band.hueShift ?? 0) !== 0 || band.saturation !== 0 || band.luminance !== 0,
+    ),
+  };
+}
+
 export async function readColourGrade(ctx, clipId) {
   const state = await ctx.readDocument();
   const grade = clipColourGrade(state, clipId);
@@ -59,11 +70,7 @@ async function readHslGrade(ctx, clipId) {
   const grade = await readColourGrade(ctx, clipId);
   if (!Array.isArray(grade?.hsl))
     throw new Error('the saved colour grade has no readable HSL bands');
-  // A grade that was edited and undone keeps identity bands; at rest has none: compare only the bands that act.
-  const acting = grade.hsl.filter(
-    (band) => (band.hueShift ?? 0) !== 0 || band.saturation !== 0 || band.luminance !== 0,
-  );
-  return { hsl: acting };
+  return grade;
 }
 
 async function readWheel(ctx, clipId) {
@@ -370,7 +377,7 @@ async function runLifecycle(
       }
       return waitForColourPixel(page, p, ctx, rowId, 'restored', baselinePixel);
     },
-    readGrade: () => readColourGrade(ctx, clipId),
+    readGrade: async () => comparableGrade(await readColourGrade(ctx, clipId)),
     edit: (page) => gesture(page, ctx, lifecycle.pixel, clipId),
     saveAndReopen: (page) => saveAndReopen(page, ctx, rowId, clipId),
     undo: async () => {
@@ -552,6 +559,8 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
             compareExportFrame: (_target, p) => compareExport(ctx.page, p, ctx, 'D-K04'),
             getPage: async () => {
               activePage = ctx.page;
+              // The reopened project has no selection: pick the clip again, or the Look grades the whole output.
+              await selectClipById(activePage, clipId);
               await openColorPanel(activePage, 'looks');
               return activePage;
             },
