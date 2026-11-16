@@ -52,7 +52,7 @@ async function graphPoint(page, input, output) {
 }
 
 /** D-K03-1: add a point on the line, drag it up, check line and document, undo once. */
-export async function addPointAndDrag(page, readCurve) {
+export async function addPointAndDrag(page, readCurve, { undo = true } = {}) {
   if (typeof readCurve !== 'function')
     throw new Error('give readCurve(channel) so the case can read the document');
   await openCurves(page);
@@ -83,10 +83,12 @@ export async function addPointAndDrag(page, readCurve) {
   if ((await page.locator(LINE).first().getAttribute('d')) === lineBefore)
     throw new Error('the drawn line did not change');
 
-  await page.keyboard.press('Control+z');
-  const undone = await readCurve('rgb');
-  if (!sameCurve(before, undone))
-    throw new Error(`one undo left ${JSON.stringify(undone)}, not ${JSON.stringify(before)}`);
+  if (undo) {
+    await page.keyboard.press('Control+z');
+    const undone = await readCurve('rgb');
+    if (!sameCurve(before, undone))
+      throw new Error(`one undo left ${JSON.stringify(undone)}, not ${JSON.stringify(before)}`);
+  }
   return `added a point at input 128, dragged it to output ${Math.round(added.y * 255)}, one undo put the curve back`;
 }
 
