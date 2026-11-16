@@ -263,7 +263,14 @@ export async function setAgentSlots(page, ctx) {
         `the ${label} profile list does not offer "${CONNECTION_NAME}"; it offers: ${offered.join(' | ')}`,
       );
     }
-    await profileSelect.selectOption({ label: CONNECTION_NAME });
+    try {
+      await profileSelect.selectOption({ label: CONNECTION_NAME }, { timeout: 8000 });
+    } catch (error) {
+      const why = String(error?.message ?? error).replace(/\s+/gu, ' ');
+      throw new Error(
+        `choosing "${CONNECTION_NAME}" in the ${label} profile list failed: ${why.slice(0, 700)}`,
+      );
+    }
     const modelControl = card.locator(`[aria-label="${label} model"]`);
     await expectVisible(modelControl, `${label} model control`);
     await waitUntil(async () => !(await modelControl.isDisabled()), {
@@ -298,7 +305,14 @@ export async function setAgentSlots(page, ctx) {
     } catch (error) {
       throw new Error(`${error.message}; the control showed ${seen}`);
     }
-    await modelControl.selectOption(ctx.model);
+    try {
+      await modelControl.selectOption(ctx.model, { timeout: 8000 });
+    } catch (error) {
+      const why = String(error?.message ?? error).replace(/\s+/gu, ' ');
+      throw new Error(
+        `choosing ${ctx.model} in the ${label} model list failed: ${why.slice(0, 700)}`,
+      );
+    }
     const refresh = card.getByRole('button', { name: 'Refresh models', exact: true });
     await refresh.click();
     await card.getByRole('button', { name: `Save ${label}`, exact: true }).click();
