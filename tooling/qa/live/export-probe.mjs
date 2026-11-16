@@ -167,6 +167,7 @@ export async function exportAndProbe(page, ctx, rowId, options = {}, deps = {}) 
       lastSize = current;
     }
     await page.waitForTimeout(1_000);
+    await options.onPoll?.(attempt);
   }
   if (name === undefined)
     throw new Error('no exported MP4 appeared in the scratch download folder');

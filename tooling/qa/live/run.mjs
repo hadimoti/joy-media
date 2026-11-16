@@ -111,6 +111,9 @@ export function parseArgs(argv) {
   if (options.testIds.includes('D-002') && !options.media) {
     throw new Error('D-002 requires --media <scratch-file>');
   }
+  if (options.testIds.some((id) => id.startsWith('D-A10-')) && !options.media) {
+    throw new Error('D-A10 rows require --media <stereo video fixture>');
+  }
   if (options.media) {
     const root = resolve(LAB.fixtures);
     const media = resolve(options.media);
@@ -135,12 +138,16 @@ export async function run(argv = process.argv.slice(2)) {
   }
   const runId = randomUUID();
   const liveTest = options.testIds.some((id) => LIVE_ROWS.some((row) => row.id === id));
-  const testMode = liveTest || options.testIds.some((id) => id.startsWith('D-A09-'));
+  const exportMatrix = options.testIds.some((id) => id.startsWith('D-A10-'));
+  const testMode =
+    liveTest || options.testIds.some((id) => id.startsWith('D-A09-')) || exportMatrix;
   const evidenceTask = liveTest
     ? 'T-A07-A08'
-    : options.testIds.some((id) => id.startsWith('D-A09-'))
-      ? 'T-A09'
-      : 'T-A02';
+    : exportMatrix
+      ? 'T-A10'
+      : options.testIds.some((id) => id.startsWith('D-A09-'))
+        ? 'T-A09'
+        : 'T-A02';
   const outDir = resolve(options.out ?? join(LAB.evidence, evidenceTask, runId));
   const scratchRoot = LAB.scratch;
   const profileDir = join(scratchRoot, 'profiles', runId);
@@ -239,9 +246,11 @@ export async function run(argv = process.argv.slice(2)) {
           outDir,
           libraryDir,
           downloadDir: session.downloadDir,
+          appPid: driver.appPid,
+          media: options.media,
           runId,
           editDocument: async (page) => {
-            const file = join(LAB.fixtures, 'h264-16x9-audio.mp4');
+            const file = options.media ?? join(LAB.fixtures, 'h264-16x9-audio.mp4');
             await newProject(page, `A09 persistence ${runId.slice(0, 8)}`);
             await importThroughLeftPanel(page, file);
             await addToTimelineThroughLeftPanel(page, file);
