@@ -141,7 +141,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - **Text from templates is placed by its top edge**, while the Inspector counts from the centre. Position Y 540 draws the text about half a height low.
 - **Text gradients use anchors.** There is no angle field and no "reset anchors" button.
 - **Smart guides, snapping while you move on the Monitor, text editing in place, crop handles and the right-click menu on the Monitor** are planned for v1.1.2.
-- **Joy Code cannot yet check a finished video frame by frame, and cannot yet make pictures or videos.** These tools are not connected.
+- **Joy Code can run a quality check on the open project** (it samples frames of the composition on this computer and reports findings; asked in words, for example "run a quality check and fix the problems"). It does not yet check where titles and captions sit (no text-box checks), and it cannot yet make pictures or videos.
 - **Joy Code cannot yet repair a failed quality check on its own.** The repair step is not connected in the app. The quality check card is not kept after a reload; only its summary line is.
 - **Glow** still blurs the whole picture. **Vibrance** is slightly different in the preview and in the command-line render. The Tone Geometry Angle slider does nothing until a shape other than Circle is chosen.
 - The HSL band names do not match their centre angles (Yellow shows 90 degrees, Green 135).
