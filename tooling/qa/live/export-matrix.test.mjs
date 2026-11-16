@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { compareRgbFrames } from '../compare.mjs';
 import {
   FRAME_COMPARE_SAMPLES,
   EXPORT_MATRIX_IDS,
   EXPORT_MATRIX_ROWS,
+  assertNoStagedLibraryEntries,
   burnInRegionDimensions,
   inspectPreset,
   monitorPictureRect,
@@ -42,6 +46,24 @@ test('preset validation checks dimensions, rate, frame count, one-frame duration
   assert.ok(inspectPreset(noAudio, 'youtube-1080').problems.includes('audio stream missing'));
   const short = { ...validProbe, format: { duration: '5.9' } };
   assert.equal(inspectPreset(short, 'youtube-1080').pass, false);
+});
+
+test('D-A10 export acceptance rejects leftover internal and .stage catalog entries', () => {
+  const libraryDir = mkdtempSync(path.join(os.tmpdir(), 'joy-a10-library-'));
+  const catalogPath = path.join(libraryDir, 'catalog.json');
+  const ctx = { libraryDir };
+  try {
+    writeFileSync(catalogPath, JSON.stringify({ assets: [{ displayName: 'user.mp4' }] }));
+    assert.doesNotThrow(() => assertNoStagedLibraryEntries(ctx, 'D-A10-01'));
+
+    writeFileSync(catalogPath, JSON.stringify({ assets: [{ internal: true }] }));
+    assert.throws(() => assertNoStagedLibraryEntries(ctx, 'D-A10-01'), /left 1 staged entry/u);
+
+    writeFileSync(catalogPath, JSON.stringify({ assets: [{ displayName: 'export.mp4.stage' }] }));
+    assert.throws(() => assertNoStagedLibraryEntries(ctx, 'D-A10-01'), /left 1 staged entry/u);
+  } finally {
+    rmSync(libraryDir, { recursive: true, force: true });
+  }
 });
 
 test('RGB compare uses the stated mean absolute per-channel threshold', () => {
