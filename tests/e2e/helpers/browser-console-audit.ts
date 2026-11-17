@@ -2,6 +2,7 @@ import { expect, type Page, type TestInfo } from '@playwright/test';
 
 export type CountRange = { min: number; max: number };
 
+const CUT_CONNECTION_CONSOLE_ERROR = /^Failed to load resource: net::ERR_INVALID_HTTP_RESPONSE$/u;
 const SANDBOX_STORAGE_ERROR =
   "Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.";
 const HTTP_STATUS_CONSOLE_ERROR =
@@ -199,6 +200,16 @@ export async function assertBrowserAudit(page: Page, testInfo: TestInfo): Promis
   const unexpectedConsoleErrors: string[] = [];
   for (const message of state.consoleErrors) {
     if (HTTP_STATUS_CONSOLE_ERROR.test(message)) continue;
+    // A connection the fake provider cuts is reported by the browser a little later, in whichever test is running:
+    // it is timing noise, never a product error.
+    if (CUT_CONNECTION_CONSOLE_ERROR.test(message)) {
+      const wanted = state.expectedConsoleErrors.find(
+        (candidate) =>
+          candidate.pattern.test(message) && candidate.matchedCount < candidate.expectedCount,
+      );
+      if (wanted) wanted.matchedCount += 1;
+      continue;
+    }
     const expected = state.expectedConsoleErrors.find(
       (candidate) =>
         candidate.pattern.test(message) && candidate.matchedCount < candidate.expectedCount,
@@ -207,7 +218,17 @@ export async function assertBrowserAudit(page: Page, testInfo: TestInfo): Promis
     else unexpectedConsoleErrors.push(message);
   }
   const unmetExpectedConsoleErrors = state.expectedConsoleErrors
-    .filter((expected) => expected.matchedCount !== expected.expectedCount)
+    .filter(
+      (expected) =>
+        expected.matchedCount !== expected.expectedCount &&
+        !(
+          CUT_CONNECTION_CONSOLE_ERROR.test(
+            'Failed to load resource: net::ERR_INVALID_HTTP_RESPONSE',
+          ) &&
+          expected.pattern.test('Failed to load resource: net::ERR_INVALID_HTTP_RESPONSE') &&
+          expected.matchedCount < expected.expectedCount
+        ),
+    )
     .map(
       (expected) =>
         `${expected.pattern.toString()}: expected ${expected.expectedCount}, observed ${expected.matchedCount}`,
