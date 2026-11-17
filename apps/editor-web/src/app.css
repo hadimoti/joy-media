@@ -8370,6 +8370,17 @@ label {
 .asset-library-storage-dialog {
   max-width: 640px;
 }
+/* The dialog also carries the Joy Code Settings frame class, which fixes a tall height for that dialog's tabs.
+   This dialog is short: it is as tall as its content (up to the window), so no empty space shows under the footer. */
+.agent-settings-dialog.joy-agent-settings-dialog.asset-library-storage-dialog {
+  height: auto;
+  max-height: min(820px, calc(100vh - 48px));
+  overflow: hidden;
+}
+.asset-library-storage-dialog.joy-agent-settings-dialog > .agent-settings-body {
+  flex: 0 1 auto;
+  min-height: 0;
+}
 .asset-library-storage-hint {
   margin-top: 0;
 }
