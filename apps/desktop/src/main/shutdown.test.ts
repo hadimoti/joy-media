@@ -187,4 +187,55 @@ describe('registerShutdownHooks', () => {
     expect(flush).toHaveBeenCalledTimes(1);
     expect(discardUploads).toHaveBeenCalledTimes(1);
   });
+
+  it('runs the final DOM-storage flush before a stuck worker stop can block it', () => {
+    vi.useFakeTimers();
+    try {
+      let beforeQuit: ((event?: { preventDefault(): void }) => void) | undefined;
+      const flushStorage = vi.fn();
+      registerShutdownHooks({
+        onAppEvent: (event, listener) => {
+          if (event === 'before-quit') beforeQuit = listener;
+        },
+        onProcessSignal: () => undefined,
+        stopWorker: () => new Promise<void>(() => undefined),
+        discardUploads: vi.fn(),
+        flush: vi.fn(),
+        flushStorage,
+        quit: vi.fn(),
+        platform: 'win32',
+      });
+
+      beforeQuit?.({ preventDefault: () => undefined });
+
+      expect(flushStorage).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still flushes DOM storage and the database when the storage flush throws', async () => {
+    const flush = vi.fn();
+    const onError = vi.fn();
+    let beforeQuit: ((event?: { preventDefault(): void }) => void) | undefined;
+    registerShutdownHooks({
+      onAppEvent: (event, listener) => {
+        if (event === 'before-quit') beforeQuit = listener;
+      },
+      onProcessSignal: () => undefined,
+      stopWorker: vi.fn(),
+      discardUploads: vi.fn(),
+      flush,
+      flushStorage: () => {
+        throw new Error('storage flush failed');
+      },
+      quit: vi.fn(),
+      onError,
+      platform: 'win32',
+    });
+
+    beforeQuit?.({ preventDefault: () => undefined });
+    await vi.waitFor(() => expect(flush).toHaveBeenCalledOnce());
+    expect(onError).toHaveBeenCalledOnce();
+  });
 });

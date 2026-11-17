@@ -403,7 +403,7 @@ import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { BrowserControlPlaneRequestError, type BrowserJob } from './control-plane-client.js';
 import { ProjectDocumentAutosync } from './project-document-autosync.js';
-import { createStorageFlushNotifier } from './storage-flush.js';
+import { createStorageFlushNotifier, type StorageFlushNotifier } from './storage-flush.js';
 import { importDroppedMediaFiles, importMediaFile } from './media-import.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
@@ -871,20 +871,22 @@ interface ProjectJoyAgentRunLifecycle {
   readonly store: JoyAgentRunStore;
 }
 
-function guardBrowserStorage(writer: ProjectWriterHandle): GuardedBrowserStorage {
+function guardBrowserStorage(
+  writer: ProjectWriterHandle,
+  flush: { readonly current: StorageFlushNotifier | undefined },
+): GuardedBrowserStorage {
   const guarded = writer.guardStorage(window.localStorage);
   if (guarded.removeItem === undefined)
     throw new Error('The browser writer storage boundary does not support removal.');
-  const flush = createStorageFlushNotifier(window.joyDesktop);
   return {
     getItem: (key) => guarded.getItem(key),
     setItem: (key, value) => {
       guarded.setItem(key, value);
-      flush.markDirty();
+      flush.current?.markDirty();
     },
     removeItem: (key) => {
       guarded.removeItem!(key);
-      flush.markDirty();
+      flush.current?.markDirty();
     },
     ...(guarded.length === undefined ? {} : { length: guarded.length }),
     ...(guarded.key === undefined ? {} : { key: (index: number) => guarded.key!(index) }),
@@ -915,7 +917,24 @@ export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
   // The root gate grants this capability before App mounts. Never hand raw
   // localStorage to a project service: after the origin lock is released the
   // wrapper rejects any attempted durable write.
-  const storage = useMemo(() => guardBrowserStorage(writer), [writer]);
+  // The notifier is one per App mount rather than per writer: a pending flush concerns the desktop's
+  // DOM storage, which a writer change does not invalidate. It is created in an effect so its timer
+  // is started and disposed with the mount, and StrictMode's remount creates a fresh one.
+  const storageFlushRef = useRef<StorageFlushNotifier | undefined>(undefined);
+  const storage = useMemo(() => guardBrowserStorage(writer, storageFlushRef), [writer]);
+  useEffect(() => {
+    const flush = createStorageFlushNotifier(window.joyDesktop);
+    storageFlushRef.current = flush;
+    // Best effort: sends the pending write while the page is still alive, so a close within the
+    // debounce window does not lose it. Without the desktop bridge this does nothing.
+    const flushOnPageHide = (): void => flush.flushNow();
+    window.addEventListener('pagehide', flushOnPageHide);
+    return () => {
+      window.removeEventListener('pagehide', flushOnPageHide);
+      storageFlushRef.current = undefined;
+      flush.dispose();
+    };
+  }, []);
   const [projectPackageNotice, setProjectPackageNotice] = useState<string | undefined>(undefined);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
     const id = loadActiveProjectId(storage);
