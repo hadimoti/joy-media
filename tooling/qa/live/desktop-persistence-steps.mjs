@@ -169,8 +169,40 @@ rows.push({
   severity: 'major',
   expected:
     'The process can be killed during an edit and the project reopens with a readable document',
-  async run() {
-    throw new Error('BLOCKED D-A09-02: the live QA harness has no process-kill control');
+  async run(page, ctx) {
+    if (typeof ctx.killApp !== 'function') {
+      throw new Error('BLOCKED D-A09-02: the live QA harness has no process-kill control');
+    }
+    await ctx.editDocument(page);
+    const before = await ctx.readDocument(page);
+    // Edits are written as they are made: let the last write settle, then pull the plug with no clean shutdown.
+    await page.waitForTimeout(1_000);
+    const session = await ctx.killApp();
+    const projectHeading = session.page.getByRole('heading', { name: 'Projects', exact: true });
+    if (await projectHeading.isVisible().catch(() => false)) {
+      const ids = await readProjectIds(session.page);
+      if (!ids.title) throw new Error('BLOCKED D-A09-02: the saved project title is unavailable');
+      await session.page.locator('.project-library-card', { hasText: ids.title }).first().click();
+    }
+    const deadline = Date.now() + 15_000;
+    let reopened = null;
+    while (Date.now() < deadline) {
+      const live = await readLiveTimeline(session.page).catch(() => null);
+      const ids = await readProjectIds(session.page);
+      if (live !== null && live.id === ids.active) {
+        reopened = live;
+        break;
+      }
+      await session.page.waitForTimeout(100);
+    }
+    if (reopened === null) throw new Error('the project did not reopen after the kill');
+    if (normalizeDocument(reopened) !== normalizeDocument(before.document)) {
+      throw new Error('the document after the kill differs from the document before it');
+    }
+    return {
+      message: `app killed hard after an edit; project ${before.projectId} reopened with the same document`,
+      evidence: [await ctx.shot('D-A09-02', 'reopened-after-kill')],
+    };
   },
 });
 

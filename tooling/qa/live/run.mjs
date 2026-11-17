@@ -232,6 +232,17 @@ export async function run(argv = process.argv.slice(2)) {
         });
         return session;
       },
+      // Kills the app the hard way (no clean shutdown), then starts it again on the same profile.
+      killApp: async () => {
+        session = await restartAppOnto(taskContext, {
+          close: () => driver.close({ force: true }),
+          relaunch: async () => {
+            driver = makeDriver(true);
+            return launchOrClose(driver);
+          },
+        });
+        return session;
+      },
     };
     if (taskRows.length > 0) {
       const runnableRows = setupProblem

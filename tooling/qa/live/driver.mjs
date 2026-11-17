@@ -447,7 +447,11 @@ export function createLiveDriver(config, options = {}) {
     };
   }
 
-  async function close() {
+  /**
+   * Stops the app. With `force` it is killed the hard way (the whole process tree of the app this driver started,
+   * through taskkill, no window close and no clean shutdown), which is what a crash or a power cut looks like.
+   */
+  async function close({ force = false } = {}) {
     if (closed) return;
     closed = true;
     if (lockFd === undefined) return;
@@ -455,10 +459,20 @@ export function createLiveDriver(config, options = {}) {
     let appStillRunning = false;
     try {
       if (!started) return;
-      await page
-        ?.evaluate(() => window.joyDesktop?.invoke?.('desktop.window-close', {}))
-        .catch(() => {});
-      await delay(1_000);
+      if (force) {
+        if (child?.pid !== undefined && child.exitCode === null) {
+          spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+            windowsHide: true,
+            timeout: 30_000,
+          });
+        }
+        await delay(1_000);
+      } else {
+        await page
+          ?.evaluate(() => window.joyDesktop?.invoke?.('desktop.window-close', {}))
+          .catch(() => {});
+        await delay(1_000);
+      }
       await browser?.close().catch(() => {});
       const afterHash = exportJoyHash(config.outDir);
       let afterProcesses = countJoyAndElectronProcesses(baseline.appDir);
