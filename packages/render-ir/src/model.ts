@@ -129,10 +129,10 @@ export interface TextNode extends RenderNodeBase {
   readonly kind: 'text';
   readonly text: string;
   readonly color: Rgba;
-  /** Resolved base direction; renderers must not re-detect it. Default 'ltr'. */
-  readonly direction?: 'ltr' | 'rtl';
+  /** Text direction. 'auto' resolves independently for each paragraph. Default 'ltr'. */
+  readonly direction?: 'ltr' | 'rtl' | 'auto';
   /** How the rendered run anchors to transform.translate. Default 'left'. */
-  readonly align?: 'left' | 'center' | 'right';
+  readonly align?: 'left' | 'center' | 'right' | 'start' | 'end';
   /** Layout constraint in viewport pixels; renderers wrap/shrink within it. */
   readonly maxWidth?: number;
   /** Evaluated glyph size in viewport pixels; renderer default when absent. */
@@ -367,16 +367,23 @@ function validateNodes(nodes: readonly RenderNode[], ids: Set<string>): void {
       }
     }
     if (node.kind === 'text') {
-      if (node.direction !== undefined && node.direction !== 'ltr' && node.direction !== 'rtl') {
-        throw new RangeError(`node "${node.id}" direction must be ltr or rtl`);
+      if (
+        node.direction !== undefined &&
+        node.direction !== 'ltr' &&
+        node.direction !== 'rtl' &&
+        node.direction !== 'auto'
+      ) {
+        throw new RangeError(`node "${node.id}" direction must be ltr, rtl, or auto`);
       }
       if (
         node.align !== undefined &&
         node.align !== 'left' &&
         node.align !== 'center' &&
-        node.align !== 'right'
+        node.align !== 'right' &&
+        node.align !== 'start' &&
+        node.align !== 'end'
       ) {
-        throw new RangeError(`node "${node.id}" align must be left, center, or right`);
+        throw new RangeError(`node "${node.id}" align must be left, center, right, start, or end`);
       }
       if (node.maxWidth !== undefined && (!Number.isFinite(node.maxWidth) || node.maxWidth <= 0)) {
         throw new RangeError(`node "${node.id}" maxWidth must be positive`);

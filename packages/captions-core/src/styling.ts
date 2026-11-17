@@ -13,7 +13,7 @@
 
 import type { Rgba, RenderNode, TextNode, TextSpan } from '@joy-media/render-ir';
 import type { CaptionCue } from './index.js';
-import { activeCaptionWord, resolveCaptionDirection, segmentDisplayText } from './index.js';
+import { activeCaptionWord, resolveCaptionTextDirection, segmentDisplayText } from './index.js';
 
 export interface CaptionTemplate {
   readonly id: string;
@@ -177,13 +177,8 @@ export function layoutTemplatedCaptionNodes(
       align: clipStyle?.align ?? baseTemplate.align,
       ...(plateColor === undefined ? {} : { plateColor }),
     };
-    const direction = resolveCaptionDirection(cue.document);
-    const align =
-      template.align === 'center'
-        ? 'center'
-        : (template.align === 'start') === (direction === 'ltr')
-          ? 'left'
-          : 'right';
+    const direction = cue.document.direction;
+    const align = template.align;
 
     const displayText = segmentDisplayText(cue.document, cue.segment);
     if (displayText.length === 0) continue;
@@ -207,13 +202,6 @@ export function layoutTemplatedCaptionNodes(
     const safeX = template.safeAreaPct.x * options.viewportWidth;
     const safeY = template.safeAreaPct.y * options.viewportHeight;
     const usableWidth = options.viewportWidth - 2 * safeX;
-    const anchorX =
-      align === 'left'
-        ? safeX
-        : align === 'right'
-          ? options.viewportWidth - safeX
-          : options.viewportWidth / 2;
-    const positionedAnchorX = anchorX + (clipStyle?.positionX ?? 0) * options.viewportWidth;
     const lineHeightPx = fontSizePx * template.lineHeightFactor;
 
     const activeWord =
@@ -223,6 +211,20 @@ export function layoutTemplatedCaptionNodes(
     const activeIndex = activeWord === undefined ? -1 : cue.segment.wordIds.indexOf(activeWord.id);
 
     for (const [lineIndex, line] of [...lines].reverse().entries()) {
+      const lineDirection = resolveCaptionTextDirection(line.text, direction);
+      const lineAlignment =
+        align === 'center'
+          ? 'center'
+          : (align === 'start') === (lineDirection === 'ltr')
+            ? 'left'
+            : 'right';
+      const anchorX =
+        lineAlignment === 'left'
+          ? safeX
+          : lineAlignment === 'right'
+            ? options.viewportWidth - safeX
+            : options.viewportWidth / 2;
+      const positionedAnchorX = anchorX + (clipStyle?.positionX ?? 0) * options.viewportWidth;
       const lineY =
         options.viewportHeight -
         safeY -

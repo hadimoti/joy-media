@@ -169,11 +169,11 @@ export function visualObjectToRenderNode(
       transform: renderTransform,
       text,
       color,
-      ...(style?.direction === 'ltr' || style?.direction === 'rtl'
+      ...(style?.direction === 'ltr' || style?.direction === 'rtl' || style?.direction === 'auto'
         ? { direction: style.direction }
         : {}),
       ...(style?.align === 'start' || style?.align === 'center' || style?.align === 'end'
-        ? { align: style.align === 'start' ? 'left' : style.align === 'end' ? 'right' : 'center' }
+        ? { align: style.align }
         : {}),
       ...(style?.fontFamily === undefined
         ? {}

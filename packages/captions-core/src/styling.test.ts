@@ -132,7 +132,7 @@ describe('templated layout', () => {
     expect(nodes.map((n) => n.text).join(' ')).toBe('JOY sings captions');
   });
 
-  it('resolves logical start alignment against the document direction (§33.4)', () => {
+  it('keeps logical start alignment for per-line auto direction (§33.4)', () => {
     const rtl = cue({
       styleRef: 'joy-rtl-classic',
       language: 'fa-IR',
@@ -140,12 +140,14 @@ describe('templated layout', () => {
       segments: [{ id: 'seg', startUs: 0, endUs: 2_000_000, wordIds: ['p1'] }],
     });
     const nodes = layoutTemplatedCaptionNodes([rtl], viewport) as readonly TextNode[];
-    expect(nodes[0]!.direction).toBe('rtl');
-    expect(nodes[0]!.align).toBe('right');
+    expect(nodes[0]!.direction).toBe('auto');
+    expect(nodes[0]!.align).toBe('start');
+    expect(nodes[0]!.transform.translateX).toBeGreaterThan(viewport.viewportWidth / 2);
 
     const ltr = cue({ styleRef: 'joy-rtl-classic' });
     const ltrNodes = layoutTemplatedCaptionNodes([ltr], viewport) as readonly TextNode[];
-    // Logical 'start' resolves to the left edge for LTR documents.
-    expect(ltrNodes[0]!.align).toBe('left');
+    expect(ltrNodes[0]!.direction).toBe('auto');
+    expect(ltrNodes[0]!.align).toBe('start');
+    expect(ltrNodes[0]!.transform.translateX).toBeLessThan(viewport.viewportWidth / 2);
   });
 });

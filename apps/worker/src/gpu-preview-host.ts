@@ -7,6 +7,28 @@ import {
 } from '@joy-media/job-protocol';
 
 const SOFTWARE_RENDERER = /swiftshader|software|llvmpipe|softpipe|mesa offscreen/i;
+const RTL_LETTER = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff\u{1ee00}-\u{1eeff}]/u;
+
+function resolveGpuTextDirection(
+  text: string,
+  requested: 'ltr' | 'rtl' | 'auto' = 'auto',
+): 'ltr' | 'rtl' {
+  if (requested !== 'auto') return requested;
+  for (const character of text) {
+    if (/\p{Letter}/u.test(character)) return RTL_LETTER.test(character) ? 'rtl' : 'ltr';
+  }
+  return 'ltr';
+}
+
+function resolveGpuTextAlign(
+  align: 'left' | 'center' | 'right' | 'start' | 'end',
+  direction: 'ltr' | 'rtl',
+): 'left' | 'center' | 'right' {
+  if (align === 'center') return 'center';
+  if (align === 'left' || align === 'right') return align;
+  if (align === 'start') return direction === 'rtl' ? 'right' : 'left';
+  return direction === 'rtl' ? 'left' : 'right';
+}
 
 export interface HardwareGpuIdentity {
   readonly renderer: string;
@@ -244,10 +266,12 @@ async function renderGpuFrame(input: {
     if (node.kind === 'text') {
       const fontSize = Math.max(1, (node.fontSizePx ?? 16) * scale);
       const family = node.fontFamily ?? 'Arial, sans-serif';
+      const direction = resolveGpuTextDirection(node.text, node.direction ?? 'ltr');
+      const align = resolveGpuTextAlign(node.align ?? 'left', direction);
       context.save();
       context.globalAlpha = node.opacity;
-      context.direction = node.direction ?? 'ltr';
-      context.textAlign = node.align ?? 'left';
+      context.direction = direction;
+      context.textAlign = align;
       context.textBaseline = 'top';
       context.font = `${node.italic ? 'italic ' : ''}${node.fontWeight ?? 400} ${fontSize}px ${family}`;
       const x = node.transform.translateX * scale;
@@ -256,11 +280,7 @@ async function renderGpuFrame(input: {
       if (node.background !== undefined) {
         const padding = Math.max(2, fontSize * 0.12);
         const plateX =
-          node.align === 'center'
-            ? x - metrics.width / 2
-            : node.align === 'right'
-              ? x - metrics.width
-              : x;
+          align === 'center' ? x - metrics.width / 2 : align === 'right' ? x - metrics.width : x;
         context.fillStyle = `rgba(${node.background.r},${node.background.g},${node.background.b},${node.background.a / 255})`;
         context.fillRect(
           plateX - padding,

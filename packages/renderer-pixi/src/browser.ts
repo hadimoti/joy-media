@@ -59,10 +59,45 @@ import {
 } from './effects-pixi.js';
 import { createGlTransitionFilter, type GlTransitionFilterHandle } from './gl-transition-filter.js';
 import { dualTextureBitmapsReady } from './transition-bitmaps.js';
+import { registerPixiTextDirection } from './pixi-text-direction.js';
+import {
+  canvasFontFamilyStack,
+  resolveCanvasTextAlign,
+  resolveParagraphDirections,
+  waitForCanvasTextFonts,
+  wrapTextByWords,
+} from './text-direction.js';
 
 export { dualTextureBitmapsReady } from './transition-bitmaps.js';
 
 export const BROWSER_PACKAGE_ENTRY = '@joy-media/renderer-pixi/browser' as const;
+
+function createTextMeasurement(
+  node: TextNode,
+  fontFamilies: readonly string[],
+): (candidate: string, direction: 'ltr' | 'rtl') => number {
+  const context =
+    typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
+  const fontSize = node.fontSizePx ?? 16;
+  const tracking = node.tracking ?? 0;
+  const fontStyle = node.italic ? 'italic' : 'normal';
+  const fontWeight = (node.fontWeight ?? 400) >= 700 ? 'bold' : 'normal';
+  const fontFamily = fontFamilies.map((family) => JSON.stringify(family)).join(', ');
+  if (context !== null) {
+    context.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
+  }
+
+  return (candidate, direction) => {
+    if (context === null) return [...candidate].length * fontSize * 0.6;
+    (context as CanvasRenderingContext2D & { direction: 'ltr' | 'rtl' }).direction = direction;
+    const measuredWidth = context.measureText(candidate).width;
+    const graphemeCount =
+      typeof Intl.Segmenter === 'function'
+        ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(candidate)].length
+        : [...candidate].length;
+    return measuredWidth + Math.max(0, graphemeCount - 1) * tracking;
+  };
+}
 
 export interface BrowserPixiRendererOptions {
   /** Element to append the Pixi canvas to. If omitted, the canvas is detached. */
@@ -221,6 +256,7 @@ export interface BrowserPixiRenderer {
 export async function createBrowserPixiRenderer(
   options: BrowserPixiRendererOptions = {},
 ): Promise<BrowserPixiRenderer> {
+  await waitForCanvasTextFonts();
   const app = new Application();
   await app.init({
     width: options.width ?? 320,
@@ -383,15 +419,31 @@ export async function createBrowserPixiRenderer(
     layer.visual.height = node.height;
   };
 
-  const applyTextAlignment = (text: Text, node: TextNode): void => {
-    const align = node.align ?? 'left';
+  const applyTextAlignment = (text: Text, node: TextNode, direction: 'ltr' | 'rtl'): void => {
+    const align = resolveCanvasTextAlign(node.align ?? 'left', direction);
     if (align === 'center') text.anchor.set(0.5, 0);
     else if (align === 'right') text.anchor.set(1, 0);
     else text.anchor.set(0, 0);
   };
 
   const updateTextVisual = (text: Text, node: TextNode): void => {
-    text.text = node.text;
+    const paragraphDirections = resolveParagraphDirections(node.text, node.direction ?? 'ltr');
+    const usesRtlRendering =
+      node.direction === 'rtl' || paragraphDirections.some((direction) => direction === 'rtl');
+    const wrapped =
+      usesRtlRendering && node.maxWidth !== undefined
+        ? wrapTextByWords(
+            node.text,
+            node.maxWidth,
+            createTextMeasurement(node, canvasFontFamilyStack(node.text, node.fontFamily)),
+            node.direction ?? 'auto',
+          )
+        : undefined;
+    const renderedText = wrapped?.text ?? node.text;
+    const lineDirections =
+      wrapped?.lineDirections ?? resolveParagraphDirections(renderedText, node.direction ?? 'ltr');
+    const baseDirection = lineDirections[0] ?? paragraphDirections[0] ?? 'ltr';
+    text.text = renderedText;
     const fill =
       node.fill?.kind === 'linear-gradient' && node.fill.stops.length > 1
         ? (() => {
@@ -437,7 +489,11 @@ export async function createBrowserPixiRenderer(
     text.style = {
       fill,
       fontSize: node.fontSizePx ?? 16,
-      ...(node.fontFamily === undefined ? {} : { fontFamily: node.fontFamily }),
+      ...(usesRtlRendering
+        ? { fontFamily: [...canvasFontFamilyStack(node.text, node.fontFamily)] }
+        : node.fontFamily === undefined
+          ? {}
+          : { fontFamily: node.fontFamily }),
       ...(node.fontWeight === undefined
         ? {}
         : { fontWeight: node.fontWeight >= 700 ? 'bold' : 'normal' }),
@@ -446,8 +502,12 @@ export async function createBrowserPixiRenderer(
         ? {}
         : { lineHeight: node.fontSizePx * node.lineHeight }),
       ...(node.tracking === undefined ? {} : { letterSpacing: node.tracking }),
-      align: node.align ?? 'left',
-      ...(node.maxWidth !== undefined ? { wordWrap: true, wordWrapWidth: node.maxWidth } : {}),
+      align: resolveCanvasTextAlign(node.align ?? 'left', baseDirection),
+      ...(node.maxWidth !== undefined && !usesRtlRendering
+        ? { wordWrap: true, wordWrapWidth: node.maxWidth }
+        : usesRtlRendering
+          ? { wordWrap: false }
+          : {}),
       ...(node.stroke === undefined
         ? {}
         : {
@@ -458,9 +518,18 @@ export async function createBrowserPixiRenderer(
           }),
       ...(dropShadow === undefined ? {} : { dropShadow }),
     };
+    if (usesRtlRendering) {
+      const style = text.style as unknown as { direction?: 'ltr' | 'rtl' };
+      style.direction = baseDirection;
+      registerPixiTextDirection(text.style, {
+        direction: node.direction ?? 'auto',
+        align: node.align ?? 'left',
+        lineDirections,
+      });
+    }
     text.blendMode = (node.blendMode ?? 'normal') as typeof text.blendMode;
     text.label = `text:${node.id}`;
-    applyTextAlignment(text, node);
+    applyTextAlignment(text, node, baseDirection);
   };
 
   const paintTextVisual = (node: TextNode): Text => {
@@ -487,7 +556,8 @@ export async function createBrowserPixiRenderer(
     }
     const text = layer.visual;
     const padding = textPlatePadding(node);
-    const bounds = textPlateBounds(text.width, text.height, node.align, padding);
+    const direction = resolveParagraphDirections(node.text, node.direction ?? 'ltr')[0] ?? 'ltr';
+    const bounds = textPlateBounds(text.width, text.height, node.align, padding, direction);
     const plate = layer.textBackground ?? new Graphics();
     plate
       .clear()
@@ -534,9 +604,10 @@ export async function createBrowserPixiRenderer(
     if (node.kind === 'text') {
       if (!(layer.visual instanceof Text)) return { x: 0, y: 0, width: 0, height: 0 };
       const text = layer.visual;
+      const direction = resolveParagraphDirections(node.text, node.direction ?? 'ltr')[0] ?? 'ltr';
       return node.background === undefined
-        ? textPlateBounds(text.width, text.height, node.align)
-        : textPlateBounds(text.width, text.height, node.align, textPlatePadding(node));
+        ? textPlateBounds(text.width, text.height, node.align, 0, direction)
+        : textPlateBounds(text.width, text.height, node.align, textPlatePadding(node), direction);
     }
     return { x: 0, y: 0, width: node.width, height: node.height };
   };
