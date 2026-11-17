@@ -1017,7 +1017,23 @@ async function checkShortcut(page, ctx, rowId, row, chord) {
   }
   if (rule?.menuAction) {
     const check = ACTION_CHECKS[rule.menuAction];
-    return check({ page, ctx, rowId, surface: 'shortcut', fire: () => pressChord(page, chord) });
+    return check({
+      page,
+      ctx,
+      rowId,
+      surface: 'shortcut',
+      // The check may open a fresh project and click a clip first: put focus back on the page and the pointer on the
+      // ruler (the timeline keys act only there) right before the key.
+      fire: async () => {
+        await blurFocus(page);
+        await page
+          .locator('.timeline-ruler')
+          .first()
+          .hover({ timeout: 5_000 })
+          .catch(() => undefined);
+        await pressChord(page, chord);
+      },
+    });
   }
   if (!rule) {
     await pressChord(page, chord);
