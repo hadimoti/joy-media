@@ -8,7 +8,7 @@ import {
   probeFrameDimensions,
 } from '../compare.mjs';
 import { EXPORT_PRESETS } from './export-preset-spec.mjs';
-import { exportAndProbe } from './export-probe.mjs';
+import { exportAndProbe, listMp4, readExportState } from './export-probe.mjs';
 import { blurFocus, ensureTimelineClip, selectClipById, waitForSnapshot } from './ui-steps.mjs';
 
 const FRAME_TOLERANCE = 3;
@@ -59,6 +59,20 @@ export const EXPORT_MATRIX_ROWS = Object.freeze([
     title: 'Process tree working set during the ten-minute export (T-F04 baseline)',
     severity: 'minor',
     run: runTenMinuteMemoryRow,
+  },
+  {
+    id: 'D-A10-13',
+    area: 'cancel an export of an H.264 source',
+    title: 'Cancel an H.264 export: nothing is left running and no file is kept',
+    severity: 'major',
+    run: (page, ctx) => runCancelRow(page, ctx, 'D-A10-13', TEN_MINUTE_FIXTURE),
+  },
+  {
+    id: 'D-A10-14',
+    area: 'cancel an export of a WebM source',
+    title: 'Cancel a WebM export: nothing is left running and no file is kept',
+    severity: 'major',
+    run: (page, ctx) => runCancelRow(page, ctx, 'D-A10-14', 'vp9-webm-audio.webm'),
   },
 ]);
 
@@ -516,4 +530,64 @@ async function runTenMinuteMemoryRow(page, ctx) {
     );
   }
   return `ten-minute export took ${Math.round((Date.now() - started) / 1000)} s; sampled ${samples.length} points; peak ${(peakBytes / 1024 / 1024).toFixed(1)} MiB; ${exported.message}`;
+}
+
+/** Names of every process below the app (the app itself included), for the "nothing left running" check. */
+export function processTreeNames(rootPid, { run = spawnSync } = {}) {
+  const script = `$root=${Number(rootPid)}; $all=Get-CimInstance Win32_Process; $ids=@($root); for($i=0;$i -lt $ids.Count;$i++){ $parent=$ids[$i]; $ids+=@($all | Where-Object { $_.ParentProcessId -eq $parent } | ForEach-Object { [int]$_.ProcessId }) }; $all | Where-Object { $ids -contains [int]$_.ProcessId } | ForEach-Object { $_.Name }`;
+  const result = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8',
+    timeout: 10_000,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0)
+    throw new Error(`process name sample failed: ${result.error?.message ?? result.stderr}`);
+  return String(result.stdout)
+    .split(/\r?\n/u)
+    .map((line) => line.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * T-A10 item 6: start an export, cancel it while it runs, and check that the app says so, the Export button is free
+ * again, no MP4 was kept in the download folder and no ffmpeg process is left below the app.
+ */
+async function runCancelRow(page, ctx, rowId, fixtureName) {
+  if (!ctx.downloadDir)
+    throw new Error(`BLOCKED ${rowId}: driver test-download folder is unavailable`);
+  if (!ctx.media) throw new Error(`BLOCKED ${rowId}: run with --media <fixture folder file>`);
+  const shortMedia = ctx.media;
+  ctx.media = join(dirname(resolve(shortMedia)), fixtureName);
+  try {
+    await ensureTimelineClip(page, ctx, rowId, { fresh: true });
+  } finally {
+    ctx.media = shortMedia;
+  }
+  await selectPreset(page, 'youtube-1080');
+  const before = listMp4(ctx.downloadDir);
+  await page.getByRole('button', { name: /^Export MP4/u }).click();
+  // Wait until the export is really running, then give it a moment so there is something to cancel.
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline && !(await page.evaluate(readExportState)).busy)
+    await page.waitForTimeout(250);
+  if (!(await page.evaluate(readExportState)).busy)
+    throw new Error(`${rowId}: the export never started (the Export button was never busy)`);
+  await page.waitForTimeout(4_000);
+  await page.getByRole('button', { name: 'Cancel export', exact: true }).click();
+  const settle = Date.now() + 60_000;
+  let state = await page.evaluate(readExportState);
+  while (Date.now() < settle && state.busy) {
+    await page.waitForTimeout(500);
+    state = await page.evaluate(readExportState);
+  }
+  if (state.busy) throw new Error(`${rowId}: the Export button stayed busy 60 s after Cancel`);
+  await page.waitForTimeout(3_000);
+  const kept = listMp4(ctx.downloadDir).filter((name) => !before.includes(name));
+  if (kept.length > 0)
+    throw new Error(`${rowId}: a file was kept after Cancel: ${kept.join(', ')}`);
+  const names = processTreeNames(ctx.appPid);
+  const leftovers = names.filter((name) => name.startsWith('ffmpeg') || name.startsWith('ffprobe'));
+  if (leftovers.length > 0)
+    throw new Error(`${rowId}: still running after Cancel: ${leftovers.join(', ')}`);
+  return `export started, cancelled after 4 s; Export button free again; toast: ${state.toast.split('\n')[0] || '(none)'}; no new MP4; no ffmpeg below the app`;
 }

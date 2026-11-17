@@ -35,9 +35,9 @@ const validProbe = {
 test('A10 has nine selectable preset rows, one four-frame compare, one memory row and the ten-minute memory row', () => {
   assert.deepEqual(
     EXPORT_MATRIX_IDS,
-    Array.from({ length: 12 }, (_, index) => `D-A10-${String(index + 1).padStart(2, '0')}`),
+    Array.from({ length: 14 }, (_, index) => `D-A10-${String(index + 1).padStart(2, '0')}`),
   );
-  assert.equal(EXPORT_MATRIX_ROWS.length, 12);
+  assert.equal(EXPORT_MATRIX_ROWS.length, 14);
 });
 
 test('preset validation checks dimensions, rate, frame count, one-frame duration and audio', () => {
