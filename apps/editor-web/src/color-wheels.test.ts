@@ -9,6 +9,7 @@ import {
   WHEEL_KEYBOARD_STEP_FINE,
   wheelColorAmount,
   wheelColorToPuck,
+  wheelFaceHueDegrees,
   wheelHueName,
   wheelHueVector,
   wheelPuckFromPointer,
@@ -120,5 +121,42 @@ describe('the colour wheels (T-K02)', () => {
     const top = wheelHueVector(-Math.PI / 2);
     expect(top.r).toBeCloseTo(1, 10);
     expect(top.g).toBeCloseTo(-0.5, 10);
+  });
+});
+
+describe('The wheel face shows the colour the puck pushes', () => {
+  it('turns each clock position into its hue in degrees: red at the top, then the clock', () => {
+    const hues: readonly (readonly [string, number])[] = [
+      ['red', 0],
+      ['yellow', 60],
+      ['green', 120],
+      ['cyan', 180],
+      ['blue', 240],
+      ['magenta', 300],
+    ];
+    for (const [name, puck] of CLOCK_HUES) {
+      const expected = hues.find(([hue]) => hue === name)?.[1];
+      const degrees = wheelFaceHueDegrees(Math.atan2(puck.y, puck.x));
+      expect(Math.round(degrees) % 360, name).toBe(expected);
+    }
+  });
+
+  it('keeps the degrees inside 0 to 360 for any angle', () => {
+    for (const angle of [-7, -Math.PI, -0.1, 0, 0.1, Math.PI, 7, 20]) {
+      const degrees = wheelFaceHueDegrees(angle);
+      expect(degrees).toBeGreaterThanOrEqual(0);
+      expect(degrees).toBeLessThan(360);
+    }
+  });
+
+  it('agrees with the push: the channel that the face hue names is the strongest one', () => {
+    // Hue 0, 120, 240 are pure red, green, blue: the pushed vector peaks on that channel.
+    const peak = (angle: number) => {
+      const vector = wheelHueVector(angle);
+      return vector.r > vector.g && vector.r > vector.b ? 'r' : vector.g > vector.b ? 'g' : 'b';
+    };
+    expect(peak(-Math.PI / 2)).toBe('r');
+    expect(peak(Math.PI / 6)).toBe('g');
+    expect(peak((5 * Math.PI) / 6)).toBe('b');
   });
 });

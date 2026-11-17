@@ -25,7 +25,7 @@
 }
 
 .cw-card.is-dragging {
-  border-color: #e4b42e;
+  border-color: var(--joy-accent);
 }
 
 .cw-heading {
@@ -35,7 +35,7 @@
 }
 
 .cw-title {
-  color: #e6e7ea;
+  color: var(--joy-text);
   font-size: var(--joy-type-xs);
   letter-spacing: 0.02em;
 }
@@ -59,7 +59,7 @@
 }
 
 .cw-face:focus-visible {
-  outline: 2px solid #e4b42e;
+  outline: 2px solid var(--joy-accent);
   outline-offset: 2px;
 }
 
@@ -73,7 +73,7 @@
 
 .cw-master {
   inline-size: 100%;
-  accent-color: #e4b42e;
+  accent-color: var(--joy-accent);
 }
 
 .cw-numbers {
@@ -100,7 +100,7 @@
 }
 
 .cw-numbers output {
-  color: #e4b42e;
+  color: var(--joy-accent);
   font-size: var(--joy-type-xs);
 }
 
@@ -114,4 +114,74 @@
   color: var(--joy-text-faint, #8f919a);
   font-size: var(--joy-type-xs);
   line-height: 1.35;
+}
+
+/* The wheel face (pro look): a smooth spectrum that fades to a neutral centre, a bezel, rim ticks, guides, and
+   a puck that shows the tint it pushes. Every colour but the spectrum itself comes from the theme tokens. */
+.cw-face {
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 55%));
+}
+
+.cw-core-stop {
+  stop-color: var(--joy-text-faint, #8f919a);
+}
+
+.cw-bezel {
+  fill: var(--joy-bg, #151619);
+  stroke: var(--joy-border-strong, #4a4b52);
+  stroke-width: 1.4;
+}
+
+.cw-rim {
+  fill: none;
+  stroke: rgb(0 0 0 / 45%);
+  stroke-width: 0.8;
+}
+
+.cw-guide {
+  fill: none;
+  stroke: var(--joy-text, #d4d5db);
+  stroke-opacity: 0.2;
+  stroke-width: 0.4;
+}
+
+.cw-guide-ring {
+  stroke-dasharray: 1.2 1.6;
+}
+
+.cw-tick {
+  stroke: var(--joy-text-faint, #8f919a);
+  stroke-width: 0.6;
+  stroke-linecap: round;
+}
+
+.cw-link {
+  stroke: var(--joy-text, #d4d5db);
+  stroke-opacity: 0.85;
+  stroke-width: 0.8;
+  stroke-linecap: round;
+}
+
+.cw-centre {
+  fill: var(--joy-text, #d4d5db);
+  fill-opacity: 0.8;
+}
+
+.cw-puck-shadow {
+  fill: none;
+  stroke: rgb(0 0 0 / 60%);
+  stroke-width: 1.1;
+}
+
+.cw-puck {
+  stroke: var(--joy-text, #d4d5db);
+  stroke-width: 1.7;
+}
+
+.cw-face:focus-visible .cw-puck {
+  stroke: var(--joy-accent);
+}
+
+.cw-card.is-dragging .cw-puck {
+  stroke: var(--joy-accent);
 }
