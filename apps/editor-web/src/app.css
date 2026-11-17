@@ -20231,6 +20231,14 @@ label {
 .dv-tab:focus-within .panel-tab-close {
   opacity: 1;
 }
+/* An inactive icon-only tab is a small square: keep its close control in the top-right corner, clear of the
+   middle, so a click in the middle of the tab always opens it and never closes it. */
+.dv-inactive-tab .panel-tab-close {
+  top: 0;
+  right: 0;
+  width: 0.75rem;
+  height: 0.75rem;
+}
 
 /* Motion rules (T-D16). The playhead, a clip being dragged and anything marked as
    dragging never animate, and reduced motion turns every animation and transition off. */
