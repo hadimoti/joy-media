@@ -1,10 +1,13 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Output } from 'mediabunny';
 import { validateVideoChunkMetadata } from '../node_modules/mediabunny/dist/modules/src/codec.js';
 import {
   createBlobSink,
+  createOpfsBlobSink,
   detectOfflineMp4Capability,
   exportOfflineMp4,
+  removeStaleOpfsExportStages,
   type OfflineAudioFeeder,
   type OfflineMp4Capability,
   type OfflineMp4ExportDeps,
@@ -167,6 +170,15 @@ const deps: Deps = {
 };
 
 const canvas = { width: 1920, height: 1080 } as unknown as HTMLCanvasElement;
+
+function readBlob(blob: Blob): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(reader.result as ArrayBuffer), { once: true });
+    reader.addEventListener('error', () => reject(reader.error), { once: true });
+    reader.readAsArrayBuffer(blob);
+  });
+}
 
 function baseSource(): OfflineMp4ExportSource {
   return {
@@ -632,9 +644,7 @@ describe('exportOfflineMp4', () => {
 
     expect(result.blob?.type).toBe('video/mp4');
     expect(result.totalBytes).toBe(6);
-    expect(Array.from(new Uint8Array(await result.blob!.arrayBuffer()))).toEqual([
-      1, 2, 3, 4, 5, 6,
-    ]);
+    expect(Array.from(new Uint8Array(await readBlob(result.blob!)))).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('reports an empty file instead of handing out an empty blob', async () => {
@@ -659,7 +669,7 @@ describe('createBlobSink', () => {
     const blob = sink.toBlob('video/mp4');
     expect(blob.size).toBe(6);
     expect(blob.type).toBe('video/mp4');
-    expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(Array.from(new Uint8Array(await readBlob(blob)))).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('does not keep a view on the chunk it was given', async () => {
@@ -671,7 +681,7 @@ describe('createBlobSink', () => {
     chunk.fill(0);
     writer.releaseLock();
 
-    expect(Array.from(new Uint8Array(await sink.toBlob('video/mp4').arrayBuffer()))).toEqual([
+    expect(Array.from(new Uint8Array(await readBlob(sink.toBlob('video/mp4'))))).toEqual([
       0, 7, 8, 9,
     ]);
   });
@@ -690,6 +700,133 @@ describe('createBlobSink', () => {
 
     expect(sink.size()).toBe(0);
     expect(sink.toBlob('video/mp4').size).toBe(0);
+  });
+});
+
+describe('createOpfsBlobSink', () => {
+  function fakeOpfs(writeError?: Error, failAfterFirstWrite = false) {
+    const files = new Map<string, Uint8Array[]>();
+    const removed: string[] = [];
+    const directory = {
+      async getDirectoryHandle(_name: string, _options?: { create?: boolean }) {
+        return this;
+      },
+      async getFileHandle(name: string, _options?: { create?: boolean }) {
+        const chunks: Uint8Array[] = [];
+        files.set(name, chunks);
+        return {
+          async createWritable() {
+            return {
+              async write(chunk: Uint8Array) {
+                if (writeError !== undefined && (!failAfterFirstWrite || chunks.length > 0))
+                  throw writeError;
+                chunks.push(new Uint8Array(chunk));
+              },
+              async close() {},
+              async abort() {},
+            };
+          },
+          async getFile() {
+            return new File(
+              chunks.map((chunk) => chunk.slice().buffer as ArrayBuffer),
+              name,
+              {
+                type: '',
+              },
+            );
+          },
+        };
+      },
+      async removeEntry(name: string) {
+        removed.push(name);
+        files.delete(name);
+      },
+      async *entries() {
+        for (const name of files.keys()) yield [name, {} as never] as [string, never];
+      },
+    };
+    const fakeFileHandleConstructor = function FakeFileHandle() {};
+    Object.assign(fakeFileHandleConstructor.prototype, { createWritable() {} });
+    vi.stubGlobal('FileSystemFileHandle', fakeFileHandleConstructor);
+    vi.stubGlobal('navigator', { storage: { getDirectory: async () => directory } });
+    return { directory, files, removed };
+  }
+
+  it('writes ordered chunks and returns a typed blob equal to the in-memory result', async () => {
+    fakeOpfs();
+    const sink = await createOpfsBlobSink();
+    const writer = sink.writable.getWriter();
+    await writer.write(new Uint8Array([1, 2]));
+    await writer.write(new Uint8Array([3, 4]));
+    await writer.close();
+    const blob = await sink.toBlob('video/mp4');
+
+    expect(blob.type).toBe('video/mp4');
+    expect(Array.from(new Uint8Array(await readBlob(blob)))).toEqual([1, 2, 3, 4]);
+    expect(blob.size).toBe(new Blob([new Uint8Array([1, 2, 3, 4])]).size);
+  });
+
+  it('removes the staged file on discard', async () => {
+    const opfs = fakeOpfs();
+    const sink = await createOpfsBlobSink();
+    const writer = sink.writable.getWriter();
+    await writer.write(new Uint8Array([9]));
+    await sink.discard();
+
+    expect(opfs.removed).toHaveLength(1);
+    expect(opfs.files.size).toBe(0);
+  });
+
+  it('falls back to the Blob sink when OPFS is unavailable', async () => {
+    vi.stubGlobal('navigator', {});
+    const sink = await createOpfsBlobSink();
+    const writer = sink.writable.getWriter();
+    await writer.write(new Uint8Array([4, 5]));
+    await writer.close();
+
+    expect(Array.from(new Uint8Array(await readBlob(await sink.toBlob('video/mp4'))))).toEqual([
+      4, 5,
+    ]);
+  });
+
+  it('falls back to the Blob sink when the first OPFS write fails', async () => {
+    fakeOpfs(new Error('disk unavailable'));
+    const sink = await createOpfsBlobSink();
+    const writer = sink.writable.getWriter();
+    await writer.write(new Uint8Array([1, 2]));
+    await writer.close();
+
+    expect(Array.from(new Uint8Array(await readBlob(await sink.toBlob('video/mp4'))))).toEqual([
+      1, 2,
+    ]);
+  });
+
+  it('rejects a mid-export write error and removes the staged file', async () => {
+    const opfs = fakeOpfs(new Error('disk write failed'), true);
+    const sink = await createOpfsBlobSink();
+    const writer = sink.writable.getWriter();
+    await writer.write(new Uint8Array([1]));
+    await expect(writer.write(new Uint8Array([2]))).rejects.toThrow('disk write failed');
+    await sink.discard();
+
+    expect(opfs.files.size).toBe(0);
+    expect(opfs.removed).toHaveLength(1);
+  });
+
+  it('removes stale staging entries at the next export start', async () => {
+    const opfs = fakeOpfs();
+    const stageDirectory = await opfs.directory.getDirectoryHandle('export-staging', {
+      create: true,
+    });
+    const stale = await stageDirectory.getFileHandle('export-staged-old.mp4.part', {
+      create: true,
+    });
+    expect(stale).toBeDefined();
+    await stageDirectory.getFileHandle('keep.mp4', { create: true });
+    await removeStaleOpfsExportStages(opfs.directory as never);
+
+    expect(opfs.removed).toEqual(['export-staged-old.mp4.part']);
+    expect(opfs.files.has('keep.mp4')).toBe(true);
   });
 });
 
