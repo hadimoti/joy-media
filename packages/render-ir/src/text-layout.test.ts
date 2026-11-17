@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { textPlateBounds } from './text-layout.js';
+import {
+  resolveTextWrapWidth,
+  TEXT_SAFE_AREA_MARGIN_FRACTION,
+  textPlateBounds,
+} from './text-layout.js';
+
+describe('resolveTextWrapWidth', () => {
+  it('uses the central 90 percent of the composition by default', () => {
+    expect(TEXT_SAFE_AREA_MARGIN_FRACTION).toBe(0.05);
+    expect(resolveTextWrapWidth(1920)).toBe(1728);
+    expect(resolveTextWrapWidth(1080)).toBe(972);
+  });
+
+  it('uses an explicit maxWidth when supplied', () => {
+    expect(resolveTextWrapWidth(1920, 640)).toBe(640);
+  });
+});
 
 describe('textPlateBounds', () => {
   it('places left, centered, and right-aligned plates around the same text run', () => {

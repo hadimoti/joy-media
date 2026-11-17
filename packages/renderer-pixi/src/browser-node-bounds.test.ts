@@ -47,12 +47,51 @@ vi.mock('pixi.js', async (importOriginal) => {
         this.y = y;
       },
     };
+    private get lines(): string[] {
+      const style = this.style as {
+        readonly wordWrap?: boolean;
+        readonly wordWrapWidth?: number;
+        readonly breakWords?: boolean;
+      };
+      if (style.wordWrap !== true || style.wordWrapWidth === undefined) {
+        return this.text.split(/\r\n|\n|\r/u);
+      }
+
+      const maxCharacters = Math.max(1, Math.floor(style.wordWrapWidth / CHAR_WIDTH));
+      const lines: string[] = [];
+      for (const paragraph of this.text.split(/\r\n|\n|\r/u)) {
+        let line = '';
+        for (const word of paragraph.split(/\s+/u).filter(Boolean)) {
+          if (
+            line.length > 0 &&
+            (line.length + 1 + word.length) * CHAR_WIDTH > style.wordWrapWidth
+          ) {
+            lines.push(line);
+            line = '';
+          }
+          if (style.breakWords === true && word.length > maxCharacters) {
+            let rest = word;
+            while (rest.length > maxCharacters) {
+              if (line.length > 0) lines.push(line);
+              lines.push(rest.slice(0, maxCharacters));
+              rest = rest.slice(maxCharacters);
+            }
+            line = rest;
+          } else {
+            line = line.length === 0 ? word : `${line} ${word}`;
+          }
+        }
+        lines.push(line);
+      }
+      return lines;
+    }
+
     override get width(): number {
-      return this.text.length * CHAR_WIDTH;
+      return Math.max(...this.lines.map((line) => line.length), 0) * CHAR_WIDTH;
     }
     override set width(_value: number) {}
     override get height(): number {
-      return LINE_HEIGHT;
+      return this.lines.length * LINE_HEIGHT;
     }
     override set height(_value: number) {}
   }
@@ -346,5 +385,53 @@ describe('nodeBounds and drawing with rotation', () => {
       });
     }
     renderer.destroy();
+  });
+
+  it('configures bounded text to wrap words and break oversized words at graphemes', async () => {
+    const renderer = await createBrowserPixiRenderer();
+    const node = { ...kinds.text, id: 'wrapped', text: 'a word wider than its box', maxWidth: 80 };
+    renderer.render(frame([node]));
+
+    const text = layerOf(node.id).getChildByLabel(`text:${node.id}`, true) as Pixi.Text;
+    expect(text.style).toMatchObject({
+      wordWrap: true,
+      wordWrapWidth: 80,
+      breakWords: true,
+    });
+    renderer.destroy();
+  });
+
+  it('reports the wrapped text extent used by Monitor selection bounds', async () => {
+    const renderer = await createBrowserPixiRenderer();
+    const node = {
+      ...kinds.text,
+      id: 'wrapped-size',
+      text: 'This title uses several words',
+      maxWidth: 80,
+    };
+    renderer.render(frame([node]));
+
+    const bounds = renderer.nodeBounds(node.id)!;
+    expect(bounds.width).toBeLessThanOrEqual(80);
+    expect(bounds.height).toBeGreaterThan(LINE_HEIGHT);
+    renderer.destroy();
+  });
+
+  it('uses the same wrapped bounds in Monitor and export renderer instances', async () => {
+    const node = {
+      ...kinds.text,
+      id: 'shared-wrapped-size',
+      text: 'This title uses several words',
+      maxWidth: 80,
+    };
+    const monitor = await createBrowserPixiRenderer({ width: 1080, height: 1920 });
+    const exporter = await createBrowserPixiRenderer({ width: 1080, height: 1920 });
+    const renderFrame = frame([node]);
+
+    monitor.render(renderFrame);
+    exporter.render(renderFrame);
+    expect(exporter.nodeBounds(node.id)).toEqual(monitor.nodeBounds(node.id));
+    monitor.destroy();
+    exporter.destroy();
   });
 });

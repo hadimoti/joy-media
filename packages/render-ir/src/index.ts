@@ -46,4 +46,8 @@ export {
   nodeRotationDeg,
   rotatePointAbout,
 } from './node-geometry.js';
-export { textPlateBounds } from './text-layout.js';
+export {
+  resolveTextWrapWidth,
+  TEXT_SAFE_AREA_MARGIN_FRACTION,
+  textPlateBounds,
+} from './text-layout.js';

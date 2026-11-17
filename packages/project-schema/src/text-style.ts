@@ -71,6 +71,8 @@ export interface TextGlowV1 {
 export interface TextStyleV1 {
   readonly fontFamily: string;
   readonly fontSizePx: number;
+  /** Optional wrap width in frame pixels. Omitted titles use the composition's safe width. */
+  readonly maxWidth?: number;
   readonly fontWeight: number;
   readonly italic: boolean;
   readonly lineHeight: number;

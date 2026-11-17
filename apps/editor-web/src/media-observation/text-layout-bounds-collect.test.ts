@@ -102,6 +102,25 @@ describe('collectTextLayoutBounds', () => {
     expect(result.boxes.map((box) => box.id)).toContain('caption:clip:cue:line1');
   });
 
+  it('projects the renderer-measured height of a wrapped title into the QC box', () => {
+    const wrapped = nodeBoundsFromBox(
+      'wrapped-title',
+      { translateX: 50, translateY: 50, scaleX: 1, scaleY: 1 },
+      { x: 0, y: 0, width: 90, height: 40 },
+    );
+    const result = collectTextLayoutBounds(
+      [candidate('wrapped-title')],
+      [
+        {
+          ...frame(['wrapped-title']),
+          nodes: [{ id: 'wrapped-title', bounds: wrapped, textColor: COLOR }],
+        },
+      ],
+    );
+
+    expect(result.boxes[0]).toMatchObject({ width: 0.9, height: 0.4 });
+  });
+
   it('caps large cue lists without throwing or treating overflow as a failed check', () => {
     const cues = Array.from({ length: 60 }, (_, index) =>
       candidate(`caption:c:s${index}:line0`, 'caption'),

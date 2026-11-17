@@ -4,6 +4,7 @@ import type { SpikeProject } from './model.js';
 import { canonicalBindingKey } from './property-animation.js';
 import { rational } from './time.js';
 import { validateJoyProjectV1 } from './v1.js';
+import { DEFAULT_TEXT_STYLE_V1 } from './text-style.js';
 
 function v0Fixture(): SpikeProject {
   return {
@@ -234,6 +235,35 @@ describe('v1 project schema and migration harness', () => {
       },
     };
     expect(validateJoyProjectV1(project)).toEqual([]);
+  });
+
+  it('accepts a positive explicit title maxWidth and rejects invalid widths', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const projectWithMaxWidth = (maxWidth: number) => ({
+      ...base,
+      visualObjects: {
+        title: {
+          id: 'title',
+          kind: 'text',
+          transform: {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: 1,
+            crop: { left: 0, top: 0, right: 0, bottom: 0 },
+          },
+          text: 'A title',
+          textStyle: { ...DEFAULT_TEXT_STYLE_V1, maxWidth },
+        },
+      },
+    });
+
+    expect(validateJoyProjectV1(projectWithMaxWidth(640))).toEqual([]);
+    expect(validateJoyProjectV1(projectWithMaxWidth(0))).toContainEqual(
+      expect.objectContaining({ code: 'PROJECT_SCHEMA_V1_TEXT' }),
+    );
   });
 
   it('rejects malformed text, caption style, and transition references', () => {

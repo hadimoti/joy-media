@@ -12,7 +12,7 @@ import {
 } from './index.js';
 import type { ResolvedObject } from './index.js';
 import type { JoyProjectV1, TransitionV1, VisualObjectV1 } from '@joy-media/project-schema';
-import { canonicalBindingKey } from '@joy-media/project-schema';
+import { DEFAULT_TEXT_STYLE_V1, canonicalBindingKey } from '@joy-media/project-schema';
 import { validateRenderFrameIR } from '@joy-media/render-ir';
 
 function makeObject(
@@ -135,6 +135,34 @@ describe('transformToRenderTransform', () => {
 });
 
 describe('buildRenderFrameIR', () => {
+  it.each([
+    { width: 1920, height: 1080, expectedMaxWidth: 1728 },
+    { width: 1080, height: 1920, expectedMaxWidth: 972 },
+  ])(
+    'sets the default text width inside the safe area for $width×$height',
+    ({ width, height, expectedMaxWidth }) => {
+      const title = makeObject({ id: 'title', kind: 'text', text: 'A long title' });
+      const frame = buildRenderFrameIR('root', 0, width, height, [resolved(title)]);
+
+      expect(frame.nodes[0]).toMatchObject({ kind: 'text', maxWidth: expectedMaxWidth });
+    },
+  );
+
+  it('uses an explicit text maxWidth in place of the default safe width', () => {
+    const title = makeObject({
+      id: 'title',
+      kind: 'text',
+      text: 'A long title',
+      textStyle: {
+        ...DEFAULT_TEXT_STYLE_V1,
+        maxWidth: 640,
+      } as unknown as NonNullable<VisualObjectV1['textStyle']>,
+    });
+    const frame = buildRenderFrameIR('root', 0, 1920, 1080, [resolved(title)]);
+
+    expect(frame.nodes[0]).toMatchObject({ kind: 'text', maxWidth: 640 });
+  });
+
   it('uses the universal project transform resolver for the shared preview/export IR', () => {
     const object = makeObject({ id: 'v2-position', kind: 'shape', shape: 'rectangle' });
     const binding = {
