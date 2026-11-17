@@ -324,12 +324,16 @@ if (!app.requestSingleInstanceLock()) {
     waitMs: CALLBACK_TIMEOUT_MS,
     openExternal: (url) => shell.openExternal(url),
   });
-  const storageFlush = createStorageFlushController(() =>
-    session.defaultSession.flushStorageData(),
+  const storageFlush = createStorageFlushController(
+    () => session.defaultSession.flushStorageData(),
+    (error) => console.error('[joy-desktop] storage flush failed', error),
   );
   const storageFlushInterval = setInterval(() => storageFlush.flushIfDirty(), 3000);
   storageFlushInterval.unref?.();
-  app.on('before-quit', () => clearInterval(storageFlushInterval));
+  app.on('before-quit', () => {
+    clearInterval(storageFlushInterval);
+    storageFlush.flushNow();
+  });
   const ipcHandlers = createIpcHandlers({
     agentRequests,
     fileRegistry,
@@ -404,6 +408,8 @@ if (!app.requestSingleInstanceLock()) {
           else win.maximize();
           return win.isMaximized();
         case 'close':
+          // Write the renderer's DOM storage out before the window is destroyed.
+          storageFlush.flushNow();
           win.close();
           return true;
         case 'is-maximized':
@@ -471,6 +477,7 @@ if (!app.requestSingleInstanceLock()) {
       await workerSupervisor.stopAndWait();
     },
     discardUploads: () => originals.abortAllOriginalUploads(),
+    flushStorage: () => storageFlush.flushNow(),
     flush: async () => {
       await localJobApi?.close().catch(() => undefined);
       localDatabase.close();
@@ -630,6 +637,8 @@ if (!app.requestSingleInstanceLock()) {
       },
     });
     mainWindow = win;
+    // Alt+F4 and the taskbar close button skip the window control, so every close flushes too.
+    win.on('close', () => storageFlush.flushNow());
     cancelWhenPageGoes(agentRequests, win);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
