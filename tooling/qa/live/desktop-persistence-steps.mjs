@@ -206,6 +206,7 @@ rows.push({
         .locator('.project-library-card', { hasText: beforeIds.title })
         .first();
       await libraryCard.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined);
+      await ctx.shot('D-A09-02', 'library-after-kill').catch(() => undefined);
       if ((await libraryCard.count()) === 0)
         throw new Error(
           `the project "${beforeIds.title}" is not in the Projects Library after the kill: its work is lost`,
