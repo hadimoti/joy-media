@@ -365,7 +365,7 @@ async function compareBurnInRegion(preview, frame, outputDir, tolerance) {
 export function processTreeWorkingSet(rootPid, { run = spawnSync } = {}) {
   if (!Number.isInteger(Number(rootPid)) || Number(rootPid) <= 0)
     throw new Error('a launched app pid is required');
-  const script = `$root=${Number(rootPid)}; $all=Get-CimInstance Win32_Process; $ids=@($root); for($i=0;$i -lt $ids.Count;$i++){ $parent=$ids[$i]; $ids+=@($all | Where-Object { $_.ParentProcessId -eq $parent } | ForEach-Object { [int]$_.ProcessId }) }; $all | Where-Object { $ids -contains [int]$_.ProcessId } | Select-Object ProcessId,Name,WorkingSetSize | ConvertTo-Json -Compress`;
+  const script = `$root=${Number(rootPid)}; $all=Get-CimInstance Win32_Process; $ids=@($root); for($i=0;$i -lt $ids.Count;$i++){ $parent=$ids[$i]; $ids+=@($all | Where-Object { $_.ParentProcessId -eq $parent } | ForEach-Object { [int]$_.ProcessId }) }; $all | Where-Object { $ids -contains [int]$_.ProcessId } | Select-Object ProcessId,Name,WorkingSetSize,CommandLine | ConvertTo-Json -Compress`;
   const result = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
     encoding: 'utf8',
     timeout: 10_000,
@@ -403,7 +403,7 @@ export function describePeak(samples) {
     .sort((a, b) => b.workingSetBytes - a.workingSetBytes)
     .map(
       (proc) =>
-        `${proc.name || 'process'} (pid ${proc.pid}): ${(proc.workingSetBytes / 1024 / 1024).toFixed(0)} MiB`,
+        `${proc.name || 'process'} ${proc.role ?? 'main'} (pid ${proc.pid}): ${(proc.workingSetBytes / 1024 / 1024).toFixed(0)} MiB`,
     )
     .join('\n');
 }
@@ -419,6 +419,9 @@ export function parseProcessTreeWorkingSet(stdout) {
   const rows = processes.map((item) => ({
     pid: Number(item.ProcessId),
     ...(item.Name ? { name: String(item.Name) } : {}),
+    ...(typeof item.CommandLine === 'string' && /--type=([a-z-]+)/u.test(item.CommandLine)
+      ? { role: /--type=([a-z-]+)/u.exec(item.CommandLine)[1] }
+      : {}),
     workingSetBytes: Number(item.WorkingSetSize),
   }));
   if (
