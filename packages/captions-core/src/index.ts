@@ -25,7 +25,12 @@ import {
   type NormalizedPropertyAnimationsV2,
 } from '@joy-media/project-schema';
 import { sampleAnimationValue } from '@joy-media/motion-core';
-import type { Rgba, RenderNode, TextNode } from '@joy-media/render-ir';
+import {
+  resolveTextDirection,
+  type Rgba,
+  type RenderNode,
+  type TextNode,
+} from '@joy-media/render-ir';
 
 export const PACKAGE_NAME = '@joy-media/captions-core' as const;
 
@@ -70,12 +75,6 @@ export {
 } from './styling.js';
 export { RTL_STRESS_DOCUMENTS, rtlStressCues } from './rtl-fixtures.js';
 
-/** Strong RTL ranges: Hebrew, Arabic (+supplements/extended), presentation forms. */
-const RTL_CHAR = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u;
-/** Strong LTR: basic + extended Latin, Greek, Cyrillic, Armenian. */
-const LTR_CHAR = /[A-Za-z\u00C0-\u024F\u0370-\u058F]/u;
-const LETTER_CHAR = /\p{Letter}/u;
-
 /**
  * Resolves the document's base direction. 'auto' scans display text for the
  * first strong directional character (per-character, cheap approximation of
@@ -84,7 +83,7 @@ const LETTER_CHAR = /\p{Letter}/u;
 export function resolveCaptionDirection(document: CaptionDocumentV1): 'ltr' | 'rtl' {
   if (document.direction !== 'auto') return document.direction;
   const text = document.segments.map((segment) => segmentDisplayText(document, segment)).join('\n');
-  return LETTER_CHAR.test(text) ? resolveCaptionTextDirection(text) : 'ltr';
+  return resolveTextDirection(text, 'auto');
 }
 
 /** Resolves one caption paragraph with the same first-strong rule used by Canvas text. */
@@ -92,12 +91,7 @@ export function resolveCaptionTextDirection(
   text: string,
   requested: 'ltr' | 'rtl' | 'auto' = 'auto',
 ): 'ltr' | 'rtl' {
-  if (requested !== 'auto') return requested;
-  for (const char of text) {
-    if (LETTER_CHAR.test(char) && RTL_CHAR.test(char)) return 'rtl';
-    if (LTR_CHAR.test(char) || (LETTER_CHAR.test(char) && !RTL_CHAR.test(char))) return 'ltr';
-  }
-  return 'ltr';
+  return resolveTextDirection(text, requested);
 }
 
 /** Joined source tokens in `wordIds` order. Unknown ids are skipped, never invented. */

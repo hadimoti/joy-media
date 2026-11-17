@@ -16,17 +16,62 @@ export const CANVAS_TEXT_FONT_FAMILIES = [
   'Noto Naskh Arabic',
 ] as const;
 
+const CANVAS_TEXT_FONT_SAMPLES = [
+  { family: 'Inter Variable', text: 'JOY 123' },
+  { family: 'Vazirmatn Variable', text: 'سلام ۱۲۳' },
+  { family: 'Noto Sans Arabic', text: 'مرحبا' },
+  { family: 'Noto Naskh Arabic', text: 'مرحبا' },
+] as const;
+
 export async function waitForCanvasTextFonts(): Promise<void> {
   if (typeof document === 'undefined' || document.fonts === undefined) return;
   await Promise.all(
-    CANVAS_TEXT_FONT_FAMILIES.map((family) =>
-      document.fonts.load(`16px ${JSON.stringify(family)}`),
+    CANVAS_TEXT_FONT_SAMPLES.map(({ family, text }) =>
+      document.fonts.load(`16px ${JSON.stringify(family)}`, text),
     ),
   );
 }
 
 const RTL_STRONG = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff\u{1ee00}-\u{1eeff}]/u;
-const PERSIAN_SPECIFIC = /[\u067e\u0686\u0698\u06a9\u06af\u06cc\u06f0-\u06f9]/u;
+const PERSIAN_SPECIFIC = /[\u067e\u0686\u0698\u06a9\u06af\u06cc\u06f0-\u06f9\u200c]/u;
+const segmenterCache = new Map<string, Intl.Segmenter>();
+
+function getSegmenter(
+  locale: string | undefined,
+  granularity: 'grapheme' | 'word',
+): Intl.Segmenter | undefined {
+  if (typeof Intl.Segmenter !== 'function') return undefined;
+  const key = `${locale ?? ''}:${granularity}`;
+  let segmenter = segmenterCache.get(key);
+  if (segmenter === undefined) {
+    segmenter = new Intl.Segmenter(locale, { granularity });
+    segmenterCache.set(key, segmenter);
+  }
+  return segmenter;
+}
+
+function fallbackGraphemes(text: string): string[] {
+  const graphemes: string[] = [];
+  for (const character of text) {
+    const previous = graphemes.length - 1;
+    const extendsPrevious =
+      previous >= 0 &&
+      (/^\p{Mark}$/u.test(character) ||
+        character === '\u200c' ||
+        character === '\u200d' ||
+        graphemes[previous]!.endsWith('\u200d'));
+    if (extendsPrevious) graphemes[previous] += character;
+    else graphemes.push(character);
+  }
+  return graphemes;
+}
+
+export function countTextGraphemes(text: string): number {
+  const segmenter = getSegmenter(undefined, 'grapheme');
+  return segmenter === undefined
+    ? fallbackGraphemes(text).length
+    : [...segmenter.segment(text)].length;
+}
 
 export function resolveParagraphDirection(
   text: string,
@@ -85,29 +130,38 @@ export function wrapTextByWords(
     const tokens = segmentWords(paragraph, locale);
     let line = '';
     for (const token of tokens) {
-      if (token.wordLike) {
-        const candidate = line + token.text;
-        if (line.trim().length > 0 && measure(candidate.trimEnd(), paragraphDirection) > maxWidth) {
+      if (/^\s+$/u.test(token)) {
+        if (line.trim().length === 0) continue;
+        if (measure(line + token, paragraphDirection) > maxWidth) {
           pushLine(line.trimEnd(), paragraphDirection, outputLines, outputDirections);
-          line = token.text.trimStart();
-        } else if (
-          line.trim().length === 0 &&
-          measure(token.text.trim(), paragraphDirection) > maxWidth
-        ) {
-          if (resolveParagraphDirection(token.text) === 'rtl') {
-            line = token.text;
-          } else {
-            const chunks = breakLongToken(token.text.trim(), maxWidth, measure, paragraphDirection);
-            for (let index = 0; index < chunks.length - 1; index += 1) {
-              pushLine(chunks[index]!, paragraphDirection, outputLines, outputDirections);
-            }
-            line = chunks.at(-1) ?? '';
-          }
+          line = '';
+        } else {
+          line += token;
+        }
+        continue;
+      }
+
+      const content = token.trimStart();
+      if (content.length === 0) continue;
+      if (line.trim().length > 0) {
+        const candidate = line + content;
+        if (measure(candidate.trimEnd(), paragraphDirection) > maxWidth) {
+          pushLine(line.trimEnd(), paragraphDirection, outputLines, outputDirections);
+          line = '';
         } else {
           line = candidate;
+          continue;
         }
+      }
+
+      if (measure(content, paragraphDirection) > maxWidth) {
+        const chunks = breakLongToken(content, maxWidth, measure, paragraphDirection);
+        for (let index = 0; index < chunks.length - 1; index += 1) {
+          pushLine(chunks[index]!, paragraphDirection, outputLines, outputDirections);
+        }
+        line = chunks.at(-1) ?? '';
       } else {
-        line += token.text;
+        line = content;
       }
     }
     pushLine(line.trimEnd(), paragraphDirection, outputLines, outputDirections);
@@ -129,21 +183,12 @@ function resolveTextLocale(text: string, direction: 'ltr' | 'rtl'): string {
   return 'en';
 }
 
-function segmentWords(
-  text: string,
-  locale: string,
-): { readonly text: string; readonly wordLike: boolean }[] {
-  if (typeof Intl.Segmenter === 'function') {
-    const segmenter = new Intl.Segmenter(locale, { granularity: 'word' });
-    return [...segmenter.segment(text)].map(({ segment, isWordLike }) => ({
-      text: segment,
-      wordLike: isWordLike === true,
-    }));
+function segmentWords(text: string, locale: string): string[] {
+  const segmenter = getSegmenter(locale, 'word');
+  if (segmenter !== undefined) {
+    return [...segmenter.segment(text)].map(({ segment }) => segment);
   }
-  return (text.match(/\s+|[^\s]+/gu) ?? []).map((segment) => ({
-    text: segment,
-    wordLike: !/^\s+$/u.test(segment),
-  }));
+  return text.match(/\s+|[^\s]+/gu) ?? [];
 }
 
 function breakLongToken(
@@ -152,12 +197,11 @@ function breakLongToken(
   measure: (candidate: string, direction: 'ltr' | 'rtl') => number,
   direction: 'ltr' | 'rtl',
 ): string[] {
+  const segmenter = getSegmenter(undefined, 'grapheme');
   const graphemes =
-    typeof Intl.Segmenter === 'function'
-      ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(token)].map(
-          ({ segment }) => segment,
-        )
-      : [...token];
+    segmenter === undefined
+      ? fallbackGraphemes(token)
+      : [...segmenter.segment(token)].map(({ segment }) => segment);
   const chunks: string[] = [];
   let chunk = '';
   for (const grapheme of graphemes) {

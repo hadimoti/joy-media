@@ -5,6 +5,7 @@ import { registerPixiTextDirection } from './pixi-text-direction.js';
 interface TestCanvasContext {
   direction: 'ltr' | 'rtl' | 'inherit';
   textAlign: 'left' | 'right' | 'center' | 'start' | 'end';
+  letterSpacing: string;
   fillText: (text: string, x: number, y: number) => void;
   strokeText: (text: string, x: number, y: number) => void;
 }
@@ -18,6 +19,7 @@ interface CanvasGeneratorProbe {
 interface CanvasMetricsProbe {
   measureText: (...args: unknown[]) => unknown;
   _measureText: (...args: unknown[]) => number;
+  experimentalLetterSpacing: boolean | undefined;
 }
 
 const generator = CanvasTextGenerator as unknown as CanvasGeneratorProbe;
@@ -30,6 +32,7 @@ const originalGeneratorMethods = {
 const originalMetricsMethods = {
   measureText: metrics.measureText,
   measureLine: metrics._measureText,
+  experimentalLetterSpacing: metrics.experimentalLetterSpacing,
 };
 
 afterEach(() => {
@@ -38,6 +41,7 @@ afterEach(() => {
   generator._getAlignmentOffset = originalGeneratorMethods.getAlignmentOffset;
   metrics.measureText = originalMetricsMethods.measureText;
   metrics._measureText = originalMetricsMethods.measureLine;
+  metrics.experimentalLetterSpacing = originalMetricsMethods.experimentalLetterSpacing;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -47,18 +51,21 @@ describe('Pixi Canvas text direction adapter', () => {
     const offsets: number[] = [];
     const measureDirections: string[] = [];
     const measureAlignments: string[] = [];
+    const measuredWidths: number[] = [];
     const canvasDrawCalls: Array<{
       text: string;
       x: number;
       y: number;
       direction: string;
       textAlign: string;
+      letterSpacing: string;
     }> = [];
     const style = { align: 'right', letterSpacing: 1, _fill: {} };
     const englishTitleStyle = { align: 'center', _fill: {} };
     const context: TestCanvasContext = {
       direction: 'inherit',
       textAlign: 'start',
+      letterSpacing: 'normal',
       fillText: (text, x, y) =>
         canvasDrawCalls.push({
           text,
@@ -66,12 +73,14 @@ describe('Pixi Canvas text direction adapter', () => {
           y,
           direction: context.direction,
           textAlign: context.textAlign,
+          letterSpacing: context.letterSpacing,
         }),
       strokeText: () => undefined,
     };
     vi.stubGlobal('document', {
       createElement: () => ({ getContext: () => context }),
     });
+    metrics.experimentalLetterSpacing = true;
     metrics.measureText = (): undefined => {
       metrics._measureText('سلام', 0, context);
       metrics._measureText('JOY', 0, context);
@@ -79,9 +88,12 @@ describe('Pixi Canvas text direction adapter', () => {
     };
     metrics._measureText = (...args): number => {
       const measureContext = args[2] as TestCanvasContext;
+      const text = String(args[0]);
       measureDirections.push(measureContext.direction);
       measureAlignments.push(measureContext.textAlign);
-      return 0;
+      const width = [...text].length * (measureContext.direction === 'rtl' ? 12 : 10);
+      measuredWidths.push(width);
+      return width;
     };
     generator._renderTextToCanvas = (...args): void => {
       const renderStyle = args[0] as object;
@@ -96,7 +108,11 @@ describe('Pixi Canvas text direction adapter', () => {
     };
     generator._drawLetterSpacing = (...args): void => {
       const drawContext = (args[2] as { context: TestCanvasContext }).context;
-      drawContext.fillText(String(args[0]), Number(args[3]), Number(args[4]));
+      const text = String(args[0]);
+      const spacing = Number((args[1] as { letterSpacing?: number }).letterSpacing ?? 0);
+      [...text].forEach((character, index) =>
+        drawContext.fillText(character, Number(args[3]) + index * (spacing + 10), Number(args[4])),
+      );
     };
     generator._getAlignmentOffset = () => 0;
 
@@ -127,16 +143,22 @@ describe('Pixi Canvas text direction adapter', () => {
     expect(offsets).toEqual([100, 0]);
     expect(measureDirections).toEqual(['rtl', 'ltr']);
     expect(measureAlignments).toEqual(['start', 'start']);
+    expect(measuredWidths).toEqual([48, 30]);
+    const trackedCalls = canvasDrawCalls.slice(textCallsStart);
     expect(
-      canvasDrawCalls.slice(textCallsStart).map(({ text, direction, textAlign }) => ({
-        text,
-        direction,
-        textAlign,
-      })),
-    ).toEqual([
-      { text: 'سلام', direction: 'rtl', textAlign: 'start' },
-      { text: 'JOY', direction: 'ltr', textAlign: 'start' },
-    ]);
+      trackedCalls
+        .filter(({ direction }) => direction === 'rtl')
+        .map(({ text, letterSpacing }) => ({ text, letterSpacing })),
+    ).toEqual([{ text: 'سلام', letterSpacing: '0px' }]);
+    expect(
+      trackedCalls.filter(({ direction }) => direction === 'ltr').map(({ text }) => text),
+    ).toEqual(['J', 'O', 'Y']);
+    expect(
+      trackedCalls
+        .filter(({ direction }) => direction === 'ltr')
+        .every(({ letterSpacing }) => letterSpacing === 'normal'),
+    ).toBe(true);
+    expect(trackedCalls.every(({ textAlign }) => textAlign === 'start')).toBe(true);
     expect(context).toMatchObject({ direction: 'inherit', textAlign: 'start' });
   });
 });

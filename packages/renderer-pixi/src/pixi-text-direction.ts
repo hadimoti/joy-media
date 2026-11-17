@@ -15,6 +15,8 @@ export interface PixiTextDirectionOptions {
 interface CanvasTextContext {
   direction: 'ltr' | 'rtl' | 'inherit';
   textAlign: 'left' | 'right' | 'center' | 'start' | 'end';
+  letterSpacing?: string;
+  textLetterSpacing?: string;
   fillText: (text: string, x: number, y: number) => void;
   strokeText: (text: string, x: number, y: number) => void;
 }
@@ -178,6 +180,8 @@ function installCanvasTextDirectionAdapter(): void {
     const context = canvasAndContext.context;
     const previousDirection = context.direction;
     const previousTextAlign = context.textAlign;
+    const previousLetterSpacing = context.letterSpacing;
+    const previousTextLetterSpacing = context.textLetterSpacing;
     const lineCount = Math.max(1, active.options.lineDirections.length);
     const textStyle = active.style as {
       readonly _fill?: unknown;
@@ -198,14 +202,12 @@ function installCanvasTextDirectionAdapter(): void {
     context.direction = direction;
     context.textAlign = canvasTextAlign(active.options.align);
     try {
-      const hasNativeLetterSpacing =
-        metrics.experimentalLetterSpacing === true &&
-        ('letterSpacing' in context || 'textLetterSpacing' in context);
       if (
         direction === 'rtl' &&
-        (wordSpacing !== 0 ||
-          (Number(textStyle.letterSpacing ?? 0) !== 0 && !hasNativeLetterSpacing))
+        (wordSpacing !== 0 || Number(textStyle.letterSpacing ?? 0) !== 0)
       ) {
+        if ('letterSpacing' in context) context.letterSpacing = '0px';
+        if ('textLetterSpacing' in context) context.textLetterSpacing = '0px';
         const x = Number(args[3]);
         const y = Number(args[4]);
         if (args[5] === true) context.strokeText(text, x, y);
@@ -216,6 +218,9 @@ function installCanvasTextDirectionAdapter(): void {
     } finally {
       context.direction = previousDirection;
       context.textAlign = previousTextAlign;
+      if (previousLetterSpacing !== undefined) context.letterSpacing = previousLetterSpacing;
+      if (previousTextLetterSpacing !== undefined)
+        context.textLetterSpacing = previousTextLetterSpacing;
     }
   };
 }

@@ -142,7 +142,9 @@ beforeEach(() => {
   harness.fontsAtInit.length = 0;
   vi.stubGlobal('document', {
     createElement: () => ({ getContext: () => null }),
-    fonts: { load: async (font: string) => (harness.fontLoads.push(font), []) },
+    fonts: Object.assign(new EventTarget(), {
+      load: async (font: string) => (harness.fontLoads.push(font), []),
+    }),
   });
 });
 
@@ -302,7 +304,7 @@ describe('browser text direction', () => {
       .find((node) => node.kind === 'text');
     expect(burnInNode?.kind).toBe('text');
     if (burnInNode?.kind !== 'text') throw new Error('expected a burned-in caption');
-    expect(burnInNode).toMatchObject({ direction: 'auto', text: 'سلام دنیا' });
+    expect(burnInNode).toMatchObject({ direction: 'rtl', text: 'سلام دنیا' });
     expect(renderedText(burnInNode.id).style.direction).toBe('rtl');
     renderer.destroy();
   });

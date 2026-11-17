@@ -440,6 +440,9 @@ export async function previewShot(page, ctx, rowId, slug) {
   if (!ctx.outDir) return null;
   const path = join(ctx.outDir, rowId, `preview-${slug}.png`);
   mkdirSync(dirname(path), { recursive: true });
+  // JOY_QA_PREVIEW_WAIT_MS: a probe run can ask for a pause so late work (a font that loads, a redraw) is on screen.
+  const wait = Number(process.env.JOY_QA_PREVIEW_WAIT_MS ?? 0);
+  if (wait > 0) await page.waitForTimeout(wait);
   await page.locator('.monitor-canvas-wrap').first().screenshot({ path });
   return path;
 }

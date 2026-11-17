@@ -62,6 +62,7 @@ import { dualTextureBitmapsReady } from './transition-bitmaps.js';
 import { registerPixiTextDirection } from './pixi-text-direction.js';
 import {
   canvasFontFamilyStack,
+  countTextGraphemes,
   resolveCanvasTextAlign,
   resolveParagraphDirections,
   waitForCanvasTextFonts,
@@ -72,29 +73,36 @@ export { dualTextureBitmapsReady } from './transition-bitmaps.js';
 
 export const BROWSER_PACKAGE_ENTRY = '@joy-media/renderer-pixi/browser' as const;
 
+const textMeasurementContexts = new WeakMap<Document, CanvasRenderingContext2D | null>();
+
 function createTextMeasurement(
   node: TextNode,
   fontFamilies: readonly string[],
 ): (candidate: string, direction: 'ltr' | 'rtl') => number {
-  const context =
-    typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
+  const ownerDocument = typeof document === 'undefined' ? undefined : document;
+  let context: CanvasRenderingContext2D | null = null;
+  if (ownerDocument !== undefined) {
+    if (!textMeasurementContexts.has(ownerDocument)) {
+      textMeasurementContexts.set(
+        ownerDocument,
+        ownerDocument.createElement('canvas').getContext('2d'),
+      );
+    }
+    context = textMeasurementContexts.get(ownerDocument) ?? null;
+  }
   const fontSize = node.fontSizePx ?? 16;
   const tracking = node.tracking ?? 0;
   const fontStyle = node.italic ? 'italic' : 'normal';
   const fontWeight = (node.fontWeight ?? 400) >= 700 ? 'bold' : 'normal';
   const fontFamily = fontFamilies.map((family) => JSON.stringify(family)).join(', ');
-  if (context !== null) {
-    context.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
-  }
+  const font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
 
   return (candidate, direction) => {
     if (context === null) return [...candidate].length * fontSize * 0.6;
+    context.font = font;
     (context as CanvasRenderingContext2D & { direction: 'ltr' | 'rtl' }).direction = direction;
     const measuredWidth = context.measureText(candidate).width;
-    const graphemeCount =
-      typeof Intl.Segmenter === 'function'
-        ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(candidate)].length
-        : [...candidate].length;
+    const graphemeCount = countTextGraphemes(candidate);
     return measuredWidth + Math.max(0, graphemeCount - 1) * tracking;
   };
 }
@@ -293,6 +301,7 @@ export async function createBrowserPixiRenderer(
   layers.sortableChildren = true;
 
   const spriteMap = new Map<string, LayerContainer>();
+  const canvasFonts = typeof document === 'undefined' ? undefined : document.fonts;
   let frameWidth = options.width ?? 320;
   let frameHeight = options.height ?? 180;
   let frameResolution = options.resolution ?? 1;
@@ -365,6 +374,19 @@ export async function createBrowserPixiRenderer(
     layout();
     if (options.autoStart !== true) app.renderer.render(app.stage);
   };
+
+  const refreshTextForLoadedFonts = (): void => {
+    let refreshed = false;
+    for (const layer of spriteMap.values()) {
+      if (layer.visual instanceof Text && layer.node?.kind === 'text') {
+        updateTextVisual(layer.visual, layer.node);
+        syncTextBackground(layer, layer.node);
+        refreshed = true;
+      }
+    }
+    if (refreshed) redraw();
+  };
+  canvasFonts?.addEventListener('loadingdone', refreshTextForLoadedFonts);
 
   const updateRectVisual = (
     graphic: Graphics,
@@ -989,6 +1011,7 @@ export async function createBrowserPixiRenderer(
     destroy(): void {
       if (disposed) return;
       disposed = true;
+      canvasFonts?.removeEventListener('loadingdone', refreshTextForLoadedFonts);
       disposePixiColorGradeFilter(masterGradeFilter);
       for (const layer of spriteMap.values()) disposePixiColorGradeFilter(layer.colorGradeFilter);
       spriteMap.clear();

@@ -7,16 +7,19 @@ export interface TextPlateBounds {
 
 const RTL_LETTER = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff\u{1ee00}-\u{1eeff}]/u;
 const UNICODE_LETTER = /\p{Letter}/u;
+const RTL_DIGIT = /[\u0660-\u0669\u06f0-\u06f9]/u;
 
 export function resolveTextDirection(
   text: string,
   requested: 'ltr' | 'rtl' | 'auto' = 'auto',
 ): 'ltr' | 'rtl' {
   if (requested !== 'auto') return requested;
+  let hasRtlDigit = false;
   for (const character of text) {
     if (UNICODE_LETTER.test(character)) return RTL_LETTER.test(character) ? 'rtl' : 'ltr';
+    if (RTL_DIGIT.test(character)) hasRtlDigit = true;
   }
-  return 'ltr';
+  return hasRtlDigit ? 'rtl' : 'ltr';
 }
 
 export function resolveLogicalTextAlign(

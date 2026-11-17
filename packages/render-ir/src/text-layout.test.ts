@@ -23,12 +23,21 @@ describe('textPlateBounds', () => {
   });
 
   it('resolves auto direction and logical alignment without changing physical alignment', () => {
-    expect(resolveTextDirection('123 ٤٥٦', 'auto')).toBe('ltr');
+    expect(resolveTextDirection('123 456', 'auto')).toBe('ltr');
     expect(resolveTextDirection('سلام', 'auto')).toBe('rtl');
     expect(resolveTextDirection('JOY Media', 'auto')).toBe('ltr');
     expect(resolveLogicalTextAlign('start', 'rtl')).toBe('right');
     expect(resolveLogicalTextAlign('end', 'rtl')).toBe('left');
     expect(textPlateBounds(100, 20, 'start', 4, 'rtl').x).toBe(-104);
     expect(textPlateBounds(100, 20, 'start', 4, 'ltr').x).toBe(-4);
+  });
+
+  it('resolves RTL direction from Persian and Arabic-Indic digits unless a strong letter decides first', () => {
+    expect(resolveTextDirection('\u06F1\u06F4\u06F0\u06F2/\u06F0\u06F8/\u06F2\u06F5', 'auto')).toBe(
+      'rtl',
+    );
+    expect(resolveTextDirection('\u0661\u0662\u0663', 'auto')).toBe('rtl');
+    expect(resolveTextDirection('123 456', 'auto')).toBe('ltr');
+    expect(resolveTextDirection('\u06F1\u06F2\u06F3 JOY', 'auto')).toBe('ltr');
   });
 });

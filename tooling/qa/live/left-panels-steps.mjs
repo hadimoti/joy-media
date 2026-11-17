@@ -44,8 +44,9 @@ export const LEFT_SEL = Object.freeze({
   confirmDialog: '[role="alertdialog"]',
 });
 
-export const TEXT_SAMPLE = 'T-A07 text one';
-export const CAPTION_SAMPLE = 'T-A07 caption one';
+/** Text typed by D-066 and D-067. JOY_QA_TEXT_SAMPLE and JOY_QA_CAPTION_SAMPLE replace it for a probe run (for example Persian text for T-A18). */
+export const TEXT_SAMPLE = process.env.JOY_QA_TEXT_SAMPLE ?? 'T-A07 text one';
+export const CAPTION_SAMPLE = process.env.JOY_QA_CAPTION_SAMPLE ?? 'T-A07 caption one';
 
 /** Page-side: the text of each node, trimmed. */
 export function readNodeTexts(nodes) {

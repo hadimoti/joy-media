@@ -11,7 +11,13 @@
  * with a stale style (§20.5 fallback spirit).
  */
 
-import type { Rgba, RenderNode, TextNode, TextSpan } from '@joy-media/render-ir';
+import {
+  resolveLogicalTextAlign,
+  type Rgba,
+  type RenderNode,
+  type TextNode,
+  type TextSpan,
+} from '@joy-media/render-ir';
 import type { CaptionCue } from './index.js';
 import { activeCaptionWord, resolveCaptionTextDirection, segmentDisplayText } from './index.js';
 
@@ -177,7 +183,6 @@ export function layoutTemplatedCaptionNodes(
       align: clipStyle?.align ?? baseTemplate.align,
       ...(plateColor === undefined ? {} : { plateColor }),
     };
-    const direction = cue.document.direction;
     const align = template.align;
 
     const displayText = segmentDisplayText(cue.document, cue.segment);
@@ -211,13 +216,8 @@ export function layoutTemplatedCaptionNodes(
     const activeIndex = activeWord === undefined ? -1 : cue.segment.wordIds.indexOf(activeWord.id);
 
     for (const [lineIndex, line] of [...lines].reverse().entries()) {
-      const lineDirection = resolveCaptionTextDirection(line.text, direction);
-      const lineAlignment =
-        align === 'center'
-          ? 'center'
-          : (align === 'start') === (lineDirection === 'ltr')
-            ? 'left'
-            : 'right';
+      const lineDirection = resolveCaptionTextDirection(line.text, 'auto');
+      const lineAlignment = resolveLogicalTextAlign(align, lineDirection);
       const anchorX =
         lineAlignment === 'left'
           ? safeX
@@ -245,7 +245,7 @@ export function layoutTemplatedCaptionNodes(
         },
         text: line.text,
         color: template.textColor,
-        direction,
+        direction: lineDirection,
         align,
         maxWidth: usableWidth,
         fontSizePx,
