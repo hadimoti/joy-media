@@ -632,6 +632,37 @@ export async function runQualityCheckWithTitle(page, ctx) {
   return { ...result, message: `with a title on the cut: ${result.message}` };
 }
 
+/**
+ * D-094: a planted fault. The title from the Text tab is pushed past the bottom edge of the safe area (Position Y),
+ * then the quality check must report a finding (the text boxes are measured on the check-only renderer).
+ */
+export async function runQualityCheckWithPlantedTitle(page, ctx) {
+  await closeSettings(page);
+  await openMenu(page, 'View');
+  await page.getByRole('menuitem', { name: 'Create', exact: true }).click();
+  const textTab = page.locator('[role="tab"][data-feature-tool="text"]').first();
+  await textTab.waitFor({ state: 'visible', timeout: 10_000 });
+  await textTab.click();
+  await page
+    .locator('section[aria-label="Text templates"] button[aria-label^="Add "]')
+    .first()
+    .click();
+  const titleClip = page.locator('.timeline-clip[data-clip-id]').nth(1);
+  await titleClip.waitFor({ state: 'attached' });
+  await titleClip.click();
+  const y = page.getByRole('spinbutton', { name: 'Position Y', exact: true }).first();
+  await y.waitFor({ state: 'visible', timeout: 10_000 });
+  await y.fill('520');
+  await y.press('Enter');
+  const result = await runQualityCheck(page, ctx);
+  if (/No findings in the sampled frames/iu.test(result.message)) {
+    throw new Error(
+      `the planted title was not found by the check: ${result.message.slice(0, 700)}`,
+    );
+  }
+  return { ...result, message: `planted title outside the safe area: ${result.message}` };
+}
+
 // ----- D-091: public endpoint consent ---------------------------------------------------------
 
 export async function publicEndpointConsent(page) {
@@ -758,6 +789,7 @@ export const PROVIDER_SETTINGS_CASES = {
   'D-090c': cancelRun,
   'D-092': runQualityCheck,
   'D-093': runQualityCheckWithTitle,
+  'D-094': runQualityCheckWithPlantedTitle,
   'D-091': publicEndpointConsent,
   'D-087r': removeStubProfile,
 };
@@ -767,5 +799,7 @@ export const PROVIDER_SETTINGS_CASES = {
  * timeline and a real GPU) is live only: name it with --tests after D-088 and D-090.
  */
 export const PROVIDER_SETTINGS_ORDER = Object.freeze(
-  Object.keys(PROVIDER_SETTINGS_CASES).filter((id) => id !== 'D-092' && id !== 'D-093'),
+  Object.keys(PROVIDER_SETTINGS_CASES).filter(
+    (id) => id !== 'D-092' && id !== 'D-093' && id !== 'D-094',
+  ),
 );
