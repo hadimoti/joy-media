@@ -1,4 +1,6 @@
 import {
+  UrlSource,
+  type Source,
   ALL_FORMATS,
   BlobSource,
   EncodedPacketSink,
@@ -69,12 +71,60 @@ interface DecodedSample extends CursorFrame {
 const decodeTimedOut = Symbol('decode timed out');
 
 /**
+ * Use a ranged URL source when the server proves it supports byte ranges. URLs without that
+ * guarantee keep the existing Blob path, including blob: and data: URLs.
+ */
+export async function openExportSourceFromUrl(
+  sourceUrl: string,
+  signal: AbortSignal,
+): Promise<Source | undefined> {
+  if (signal.aborted) abortIfCancelled(signal);
+  let source: Source | undefined;
+  if (/^(joy-asset|https?):/i.test(sourceUrl)) {
+    try {
+      const probe = await fetch(sourceUrl, {
+        headers: { Range: 'bytes=0-0' },
+        signal,
+      });
+      const supportsRanges = probe.status === 206 && probe.headers.get('Content-Range') !== null;
+      try {
+        await probe.body?.cancel();
+      } catch {
+        // The probe body is intentionally discarded; cancel errors do not change source choice.
+      }
+      abortIfCancelled(signal);
+      if (supportsRanges) {
+        source = new UrlSource(sourceUrl, { requestInit: {}, maxCacheSize: SOURCE_CACHE_BYTES });
+      }
+    } catch (error) {
+      abortIfCancelled(signal);
+      if (error instanceof DOMException && error.name === 'AbortError') throw error;
+      // A failed probe keeps the previous full-response path.
+    }
+  }
+  if (source !== undefined) return source;
+
+  try {
+    const response = await fetch(sourceUrl, { signal });
+    if (!response.ok) {
+      abortIfCancelled(signal);
+      return undefined;
+    }
+    return new BlobSource(await response.blob(), { maxCacheSize: SOURCE_CACHE_BYTES });
+  } catch (error) {
+    abortIfCancelled(signal);
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    return undefined;
+  }
+}
+
+/**
  * Opens `blob` for forward decoding, or resolves `undefined` when it cannot: no video track, a
  * codec this browser cannot decode, or any failure while opening. The export then keeps using
  * the seeking path, so a clip that worked before still works.
  */
 export async function openExportFrameSource(
-  blob: Blob,
+  blobOrSource: Blob | Source,
   assetId: string,
   options: OpenExportFrameSourceOptions = {},
 ): Promise<ExportFrameSource | undefined> {
@@ -85,7 +135,10 @@ export async function openExportFrameSource(
   const decodeTimeoutMs = options.decodeTimeoutMs ?? DEFAULT_DECODE_TIMEOUT_MS;
   const input = new Input({
     formats: ALL_FORMATS,
-    source: new BlobSource(blob, { maxCacheSize: SOURCE_CACHE_BYTES }),
+    source:
+      blobOrSource instanceof Blob
+        ? new BlobSource(blobOrSource, { maxCacheSize: SOURCE_CACHE_BYTES })
+        : blobOrSource,
   });
   try {
     const track = signal

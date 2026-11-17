@@ -1,4 +1,4 @@
-import { ALL_FORMATS, BlobSource, EncodedPacketSink, Input } from 'mediabunny';
+import { ALL_FORMATS, EncodedPacketSink, Input } from 'mediabunny';
 import {
   abortable,
   abortIfCancelled,
@@ -7,6 +7,7 @@ import {
   timestampToleranceUs,
   type SeekFrameTiming,
 } from './export-seek-target.js';
+import { openExportSourceFromUrl } from './export-frame-source.js';
 
 /**
  * Frame length, timestamp tolerance and stored frame times of the first video track in
@@ -19,21 +20,9 @@ export async function readSourceFrameTiming(
   sourceUrl: string,
   signal: AbortSignal,
 ): Promise<SeekFrameTiming | undefined> {
-  let blob: Blob;
-  try {
-    const response = await fetch(sourceUrl, { signal });
-    if (!response.ok) {
-      abortIfCancelled(signal);
-      return undefined;
-    }
-    blob = await response.blob();
-  } catch (error) {
-    // A cancelled export stops here; any other failure keeps the exact-time seeks.
-    abortIfCancelled(signal);
-    if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    return undefined;
-  }
-  const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
+  const source = await openExportSourceFromUrl(sourceUrl, signal);
+  if (source === undefined) return undefined;
+  const input = new Input({ formats: ALL_FORMATS, source });
   try {
     const track = await abortable(input.getPrimaryVideoTrack(), signal);
     if (track === null) return undefined;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openExportFrameSource } from './export-frame-source.js';
+import { openExportFrameSource, openExportSourceFromUrl } from './export-frame-source.js';
 
 interface FakeSample {
   readonly timestamp: number;
@@ -24,12 +24,26 @@ const fake = vi.hoisted(() => ({
   onResolutionRead: undefined as (() => void) | undefined,
   samples: undefined as ((startSec: number) => AsyncIterator<unknown>) | undefined,
   inputDisposed: 0,
+  sourceDisposed: 0,
+  urlSourceCreated: 0,
   log: [] as string[],
 }));
 
 vi.mock('mediabunny', () => ({
   ALL_FORMATS: [],
-  BlobSource: class {},
+  Source: class {
+    dispose() {
+      fake.sourceDisposed += 1;
+    }
+  },
+  BlobSource: class {
+    constructor(readonly blob: Blob) {}
+  },
+  UrlSource: class {
+    constructor(readonly url: string) {
+      fake.urlSourceCreated += 1;
+    }
+  },
   Input: class {
     async getPrimaryVideoTrack() {
       return fake.track;
@@ -105,6 +119,8 @@ beforeEach(() => {
   fake.timeResolution = 15_360;
   fake.samples = framesFrom([0, 41_667, 83_333, 125_000]);
   fake.inputDisposed = 0;
+  fake.sourceDisposed = 0;
+  fake.urlSourceCreated = 0;
   fake.log = [];
   canvas.width = 0;
   canvas.height = 0;
@@ -118,6 +134,88 @@ afterEach(() => {
 });
 
 describe('openExportFrameSource', () => {
+  it('uses UrlSource after a successful range probe without reading a Blob', async () => {
+    const blob = vi.fn(async () => new Blob([]));
+    const cancel = vi.fn(async () => undefined);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 206,
+        ok: true,
+        headers: { get: () => 'bytes 0-0/42' },
+        body: { cancel },
+        blob,
+      })),
+    );
+
+    const source = await openExportSourceFromUrl(
+      'joy-asset://asset-a',
+      new AbortController().signal,
+    );
+
+    expect(source).toBeInstanceOf((await import('mediabunny')).UrlSource);
+    expect(fetch).toHaveBeenCalledWith('joy-asset://asset-a', {
+      headers: { Range: 'bytes=0-0' },
+      signal: expect.any(AbortSignal),
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(blob).not.toHaveBeenCalled();
+  });
+
+  it('uses the existing Blob path when the range probe is not supported', async () => {
+    const blob = vi.fn(async () => new Blob(['video']));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        headers: { get: () => null },
+        body: { cancel: async () => undefined },
+      })
+      .mockResolvedValueOnce({ ok: true, blob });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const source = await openExportSourceFromUrl(
+      'https://example.test/video.mp4',
+      new AbortController().signal,
+    );
+
+    expect(source).toBeInstanceOf((await import('mediabunny')).BlobSource);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual({ signal: expect.any(AbortSignal) });
+    expect(blob).toHaveBeenCalledOnce();
+  });
+
+  it('rejects with AbortError when cancelled during the range probe', async () => {
+    const controller = new AbortController();
+    const blob = vi.fn(async () => new Blob([]));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'));
+            });
+          }),
+      ),
+    );
+    const pending = openExportSourceFromUrl('joy-asset://asset-a', controller.signal);
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(blob).not.toHaveBeenCalled();
+    expect(fake.urlSourceCreated).toBe(0);
+    expect(fake.inputDisposed).toBe(0);
+  });
+
+  it('continues to accept a ready Source object', async () => {
+    const source = new (await import('mediabunny')).UrlSource('https://example.test/video.mp4');
+    const opened = await openExportFrameSource(source, 'asset-a');
+    expect(opened).toBeDefined();
+    opened?.close();
+  });
+
   it('shows a WebM frame at its millisecond-rounded time, but an MP4 frame only at its exact time', async () => {
     // Frame times as the containers store them: WebM rounds to whole milliseconds (the third
     // frame at 30 fps is at 66.67 ms, stored as 67 ms); MP4 keeps the truncated microsecond time.
