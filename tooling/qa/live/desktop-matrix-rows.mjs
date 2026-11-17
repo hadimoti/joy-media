@@ -39,6 +39,7 @@ export function createMatrixContext({
   fixtures = FIXTURE_ROOT,
   editDocument,
   restartApp,
+  killApp,
 }) {
   const bridgeLogPath = join(outDir, 'bridge-replies.jsonl');
   const bridge = createBridge(page, createBridgeLog(bridgeLogPath));
@@ -53,6 +54,7 @@ export function createMatrixContext({
     fixtures,
     editDocument,
     restartApp,
+    killApp,
     runTag: runId.slice(0, 8),
     bridge,
     bridgeLogPath,

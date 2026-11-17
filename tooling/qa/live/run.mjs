@@ -287,6 +287,21 @@ export async function run(argv = process.argv.slice(2)) {
             await matrixContext.bridge.installTap().catch(() => false);
             return session;
           },
+          killApp: async () => {
+            session = await restartAppOnto(matrixContext, {
+              close: () => driver.close({ force: true }),
+              relaunch: async () => {
+                driver = makeDriver(true);
+                return launchOrClose(driver);
+              },
+            });
+            matrixContext.bridge = createBridge(
+              session.page,
+              createBridgeLog(join(outDir, 'bridge-replies.jsonl')),
+            );
+            await matrixContext.bridge.installTap().catch(() => false);
+            return session;
+          },
         })
       : undefined;
     if (matrixContext && !setupProblem) await matrixContext.bridge.installTap().catch(() => false);
