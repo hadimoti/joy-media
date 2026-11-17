@@ -377,6 +377,8 @@ export function remuxBrowserMp4(
       probeBrowserVideoColor(inputPath),
     );
     const result = spawnSync('ffmpeg', args, { shell: false, encoding: 'utf8' });
+    if (result.error !== undefined)
+      throw new Error(`ffmpeg remux failed: ${result.error.message}`, { cause: result.error });
     if (result.status !== 0) throw new Error(`ffmpeg remux failed: ${result.stderr}`);
     renameSync(temporaryPath, outputPath);
     return verifyExport(outputPath);
@@ -450,7 +452,9 @@ export async function remuxBrowserMp4Async(
     try {
       const outcome = await closed;
       if (abort || options.signal?.aborted || options.cancelled?.()) throw new Error('canceled');
-      if (outcome.error !== undefined) throw new Error(`ffmpeg remux failed: ${stderr}`);
+      // A child that never started (missing binary, denied execute permission, bad path) has no stderr.
+      if (outcome.error !== undefined)
+        throw new Error(`ffmpeg remux failed: ${outcome.error.message}`, { cause: outcome.error });
       if (outcome.code !== 0) throw new Error(`ffmpeg remux failed: ${stderr}`);
     } finally {
       clearInterval(cancellationTimer);
