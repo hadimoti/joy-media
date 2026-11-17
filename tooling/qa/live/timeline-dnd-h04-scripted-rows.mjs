@@ -236,7 +236,11 @@ export const TIMELINE_DND_H04_ROWS = [
       });
       await dropFiles(page, '.timeline-empty-state', files, 2_000_000);
       await page.waitForTimeout(4_000);
-      const shown = (await page.locator('.asset-card-name').allInnerTexts()).map((s) => s.trim());
+      const shown = (
+        await page
+          .locator('.asset-card-name')
+          .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ''))
+      ).map((s) => s.trim());
       const missing = names.filter(
         (name) => !shown.some((card) => card.startsWith(name.split('.')[0])),
       );

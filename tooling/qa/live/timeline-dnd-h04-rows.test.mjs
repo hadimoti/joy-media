@@ -60,6 +60,8 @@ function makeH04Fake(t, id) {
   const page = createFakePage({
     answers: ({ method, path, fn }) => {
       if (method === 'inputValue' && path.includes('Timeline zoom')) return '1';
+      if (method === 'evaluateAll' && path.includes('asset-card-name'))
+        return ['ویدیو-تست.wav', 'فيديو-اختبار.jpg'];
       if (method === 'getAttribute' && path.includes('Lock ')) {
         return locked ? 'true' : null;
       }
@@ -145,7 +147,7 @@ test('each implemented T-H04 row body runs against a fake page', async (t) => {
     }
     if (id === 'D-H08') {
       const droppedPaths = drops.flatMap((payload) => payload.data.files);
-      assert.ok(droppedPaths.some((path) => path.includes('ویدیو-تست.mp4')));
+      assert.ok(droppedPaths.some((path) => path.includes('ویدیو-تست.wav')));
       assert.ok(droppedPaths.some((path) => path.includes('فيديو-اختبار.jpg')));
       assert.ok(page.calls.some((call) => call.includes('.asset-card-name')));
     }
