@@ -79,8 +79,17 @@ export const WHEEL_FACE_HUES: readonly WheelHueStop[] = [
   { name: 'green', hex: '#55b06a', angle: Math.PI / 6 },
   { name: 'cyan', hex: '#4fb0b6', angle: Math.PI / 2 },
   { name: 'blue', hex: '#4f74c4', angle: (5 * Math.PI) / 6 },
-  { name: 'magenta', hex: '#a65b0', angle: (7 * Math.PI) / 6 },
+  { name: 'magenta', hex: '#a65bc0', angle: (7 * Math.PI) / 6 },
 ];
+
+/**
+ * The hue, in degrees, that the puck pushes at a screen angle (radians, y grows down). Red sits at the top
+ * and the hues follow the clock (yellow at 2, green at 4, cyan at 6, blue at 8, magenta at 10), the same
+ * layout `WHEEL_FACE_HUES` and `wheelHueVector` use, so the face shows the colour the puck really pushes.
+ */
+export function wheelFaceHueDegrees(angle: number): number {
+  return ((((angle * 180) / Math.PI + 90) % 360) + 360) % 360;
+}
 
 /** Keeps a puck inside the unit disc. */
 export function clampWheelPuck(puck: WheelPuck): WheelPuck {
