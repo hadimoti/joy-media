@@ -93,6 +93,11 @@ export function createCanvasExportVideoFrame(
   } as VideoFrameInit);
 }
 
+function requireEvenI420Dimensions(width: number, height: number): void {
+  if (width % 2 !== 0 || height % 2 !== 0)
+    throw new RangeError('BT.709 I420 export frames need an even width and height.');
+}
+
 /** Materializes canvas pixels as limited-range BT.709 YUV before MediaRecorder sees them. */
 export async function createBt709YuvExportVideoFrame(
   source: CanvasImageSource,
@@ -107,6 +112,7 @@ export async function createBt709YuvExportVideoFrame(
         options?: { readonly format?: VideoPixelFormat },
       ) => Promise<PlaneLayout[]>;
     };
+    requireEvenI420Dimensions(sourceFrame.codedWidth, sourceFrame.codedHeight);
     if (copyableFrame.allocationSize === undefined || copyableFrame.copyTo === undefined)
       throw new Error('This browser cannot produce color-tagged BT.709 video frames.');
 
@@ -485,6 +491,7 @@ export async function downloadBrowserMp4(
     throw new RangeError('manifest.width must be a positive integer');
   if (!Number.isSafeInteger(height) || height < 1)
     throw new RangeError('manifest.height must be a positive integer');
+  requireEvenI420Dimensions(width, height);
   if (!Number.isFinite(frameRate) || frameRate <= 0)
     throw new RangeError('manifest.frameRate must be a positive finite number');
   if (source.paintFrame === undefined && source.renderFrame === undefined)

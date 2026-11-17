@@ -580,6 +580,7 @@ import type { ExportFrameSource } from './export-frame-source.js';
 import {
   EXPORT_AUDIO_DECODE_TIMEOUT_MS,
   EXPORT_PRELOAD_TIMEOUT_MS,
+  createExportClipSourcePreflight,
   formatExportClipAssetFailure,
   loadDetachedVideo,
   preflightExportClipSources,
@@ -663,7 +664,8 @@ import { monitorFps } from './monitor/monitor-timecode.js';
 import { MONITOR_FULLSCREEN_EVENT } from './monitor/monitor-transport-model.js';
 import {
   exportLacksVisualSource,
-  missingExportClipIds,
+  missingExportAudioClipIds,
+  missingExportVisualClipIds,
   missingExportClips,
   transitionsWithoutMissingClips,
   type MissingExportClip,
@@ -4501,7 +4503,8 @@ function EditorWorkspace({
       try {
         missingClips = missingExportClips(
           exportTimelineProject,
-          await missingMediaHostFor(session).list(),
+          await missingMediaHostFor(session).list(exportAudioState.clips),
+          exportAudioState.clips,
         );
       } catch (error) {
         exportInFlightRef.current = false;
@@ -4525,14 +4528,15 @@ function EditorWorkspace({
         });
         return;
       }
-      const missingExportIds = missingExportClipIds(missingClips);
+      const missingVisualIds = missingExportVisualClipIds(missingClips);
+      const missingAudioIds = missingExportAudioClipIds(missingClips);
       // T-R04: a transition with a missing side is dropped, so the present clip plays as a cut.
-      if (missingExportIds.size > 0 && exportVisualProject.transitions !== undefined) {
+      if (missingVisualIds.size > 0 && exportVisualProject.transitions !== undefined) {
         exportVisualProject = {
           ...exportVisualProject,
           transitions: transitionsWithoutMissingClips(
             exportVisualProject.transitions,
-            missingExportIds,
+            missingVisualIds,
           ),
         };
       }
@@ -4605,9 +4609,9 @@ function EditorWorkspace({
         const compositionTimeline =
           exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
         const allTimelineClips = flattenRootTimelineVideoClips(exportTimelineProject);
-        // Missing clips keep their place in the duration (they render black) but have no source.
+        // Missing visuals keep their place in the duration (they render black) but have no source.
         const sourcedTimelineClips = allTimelineClips.filter(
-          (clip) => !missingExportIds.has(clip.id),
+          (clip) => !missingVisualIds.has(clip.id),
         );
         const exportElementKinds = readTimelineElementKindMap(exportVisualProject);
         const playableTimelineClips = sourcedTimelineClips.filter((clip) => {
@@ -4699,18 +4703,18 @@ function EditorWorkspace({
         const exportClips = [...clipsByBoundary, ...transitionPartnerClips].filter(
           (clip, index, clips) =>
             clips.findIndex((candidate) => candidate.id === clip.id) === index &&
-            !missingExportIds.has(clip.id),
+            !missingVisualIds.has(clip.id),
         );
         const hasHtmlScenes = Object.values(exportVisualProject.visualObjects).some(
           (object) => object.kind === 'html-scene',
         );
-        // All used clips missing and accepted ("Export anyway") is valid: black and silent.
-        if (exportLacksVisualSource(exportClips.length, hasHtmlScenes, missingExportIds.size))
+        // All used visuals missing and accepted is valid: the export is a background-only video.
+        if (exportLacksVisualSource(exportClips.length, hasHtmlScenes, missingVisualIds.size))
           throw new Error('No playable visual clips are available for export');
         // Audio lanes use video leaves in the timeline model, but have no visual
         // boundary. Keep their mix inputs independent of visual preparation.
         const audioMixClips = selectExportAudioClips(
-          sourcedTimelineClips,
+          sourcedTimelineClips.filter((clip) => !missingAudioIds.has(clip.id)),
           exportVisualProject.assets,
           exportAudioState.clips,
         );
@@ -4747,18 +4751,22 @@ function EditorWorkspace({
         };
         const exportClipPreflight = preparationClips.map((clip) => {
           const clipAudioConfig = exportAudioState.clips[clip.id] ?? defaultClipAudioConfig;
-          const audioAssetId = clipAudioConfig.sourceAssetId ?? clip.assetId;
           const visualAssetId = visualClipIds.has(clip.id)
             ? playbackAssetId(exportVisualProject, clip)
-            : audioAssetId;
-          return {
+            : (clipAudioConfig.sourceAssetId ?? clip.assetId);
+          // If the user accepted a missing alternate audio source, this clip is omitted from the
+          // audio mix. Preflight only its visual source so it can still be drawn normally.
+          const audioAssetId = missingAudioIds.has(clip.id)
+            ? visualAssetId
+            : (clipAudioConfig.sourceAssetId ?? clip.assetId);
+          return createExportClipSourcePreflight({
             clipId: clip.id,
+            clipName: 'name' in clip && typeof clip.name === 'string' ? clip.name : undefined,
             visualAssetId,
-            visualAssetLabel:
-              exportVisualProject.assets[visualAssetId]?.displayName ?? visualAssetId,
+            visualAssetDisplayName: exportVisualProject.assets[visualAssetId]?.displayName,
             audioAssetId,
-            audioAssetLabel: exportVisualProject.assets[audioAssetId]?.displayName ?? audioAssetId,
-          };
+            audioAssetDisplayName: exportVisualProject.assets[audioAssetId]?.displayName,
+          });
         });
         const exportClipPreflightById = new Map(
           exportClipPreflight.map((clip) => [clip.clipId, clip] as const),
@@ -7449,6 +7457,9 @@ function EditorWorkspace({
             revision: session.projectRevisionId,
             onChanged: () => {
               resyncTimelineMedia();
+              setAudioStateRaw(
+                loadAudioStateFromProject(storage, projectId, session.visualProject),
+              );
               setRevision((current) => current + 1);
               setMissingMediaTick((current) => current + 1);
             },

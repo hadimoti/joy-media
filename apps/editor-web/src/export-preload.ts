@@ -20,6 +20,15 @@ export interface ExportClipSourcePreflight {
   readonly audioAssetLabel?: string;
 }
 
+export interface ExportClipSourcePreflightInput {
+  readonly clipId: string;
+  readonly clipName?: string | undefined;
+  readonly visualAssetId: string;
+  readonly visualAssetDisplayName?: string | undefined;
+  readonly audioAssetId?: string | undefined;
+  readonly audioAssetDisplayName?: string | undefined;
+}
+
 export interface ExportClipPreflightSources<T> {
   readonly visualSource: T;
   readonly audioSource: T;
@@ -52,11 +61,46 @@ export function formatExportClipAssetFailure(
   return `${clipReference} cannot ${phase} ${role} asset "${assetLabel}" (${assetId}). ${recovery} ${detail}`;
 }
 
-/** The name the export shows for a clip: its label when it has one, else its id. */
+/** Build a readable export label from the source asset names and optional authored clip name. */
+export function createExportClipSourcePreflight(
+  input: ExportClipSourcePreflightInput,
+): ExportClipSourcePreflight {
+  const visualDisplayName = input.visualAssetDisplayName?.trim() || undefined;
+  const audioDisplayName = input.audioAssetDisplayName?.trim() || undefined;
+  const clipName = input.clipName?.trim() || undefined;
+  const visualAssetLabel = visualDisplayName ?? input.visualAssetId;
+  const audioAssetId = input.audioAssetId;
+  const audioAssetLabel =
+    audioAssetId === undefined ? undefined : (audioDisplayName ?? audioAssetId);
+  const clipLabel = visualDisplayName ?? clipName ?? input.clipId;
+  return {
+    clipId: input.clipId,
+    clipLabel,
+    visualAssetId: input.visualAssetId,
+    visualAssetLabel,
+    ...(audioAssetId === undefined ? {} : { audioAssetId }),
+    ...(audioAssetLabel === undefined ? {} : { audioAssetLabel }),
+  };
+}
+
+/** The name the export shows for a clip: authored label, source labels, then its id. */
 function exportClipName(clip: ExportClipSourcePreflight): string {
-  return clip.clipLabel !== undefined && clip.clipLabel.trim().length > 0
-    ? clip.clipLabel
-    : clip.clipId;
+  for (const [label, assetId] of [
+    [clip.clipLabel, undefined],
+    [clip.visualAssetLabel, clip.visualAssetId],
+    [clip.audioAssetLabel, clip.audioAssetId],
+  ] as const) {
+    if (
+      label !== undefined &&
+      label.trim().length > 0 &&
+      label !== clip.clipId &&
+      label !== clip.visualAssetId &&
+      label !== clip.audioAssetId &&
+      label !== assetId
+    )
+      return label;
+  }
+  return clip.clipId;
 }
 
 /**

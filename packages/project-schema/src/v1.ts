@@ -375,6 +375,9 @@ export interface AssetRecordV1 {
   readonly generationProvenance?: GenerationProvenanceV1;
 }
 
+/** Asset kinds that describe metadata or color controls rather than source files. */
+export const NON_FILE_ASSET_KINDS: ReadonlySet<AssetRecordV1['kind']> = new Set(['lut', 'other']);
+
 export interface AssetDescriptorV1 {
   readonly mimeType: string;
   readonly durationUs?: number;

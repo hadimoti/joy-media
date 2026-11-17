@@ -95,6 +95,7 @@ export type {
   EffectParamValue,
   EffectInstanceV1,
 } from './v1.js';
+export { NON_FILE_ASSET_KINDS } from './v1.js';
 export type { CaptionClipStyleV2, CaptionClipStylePropertyId } from './caption-style.js';
 export {
   IDENTITY_CAPTION_CLIP_STYLE,

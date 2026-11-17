@@ -20,6 +20,7 @@ const DRIVE_TYPES: Readonly<Record<number, AssetLibraryDriveType>> = {
 };
 
 const cached = new Map<string, AssetLibraryDriveType>();
+const inFlight = new Map<string, Promise<AssetLibraryDriveType>>();
 const DRIVE_ROOT_PATTERN = /^[A-Za-z]:\\?$/;
 
 interface DriveTypeProbeRuntime {
@@ -61,15 +62,23 @@ export async function driveTypeOfRoot(
   const deviceId = root.slice(0, 2).toUpperCase();
   const known = cached.get(deviceId);
   if (known !== undefined) return known;
-  let type: AssetLibraryDriveType;
   if ((runtime.platform ?? process.platform) !== 'win32') {
     // No removable drives and no network shares to tell apart from here.
-    type = 'unknown';
-  } else {
-    type = await queryWindowsDriveType(deviceId, runtime.execFile ?? execFile);
+    return 'unknown';
   }
-  cached.set(deviceId, type);
-  return type;
+  const pending = inFlight.get(deviceId);
+  if (pending !== undefined) return pending;
+
+  const probe = queryWindowsDriveType(deviceId, runtime.execFile ?? execFile);
+  inFlight.set(deviceId, probe);
+  try {
+    const type = await probe;
+    // An unknown result often means PowerShell timed out. Let the next settings open retry it.
+    if (type !== 'unknown') cached.set(deviceId, type);
+    return type;
+  } finally {
+    inFlight.delete(deviceId);
+  }
 }
 
 /**

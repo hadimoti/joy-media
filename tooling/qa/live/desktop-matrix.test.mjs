@@ -29,6 +29,7 @@ import {
 } from './desktop-timeline-steps.mjs';
 import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
 import { EXPORT_MATRIX_ROWS } from './export-matrix-steps.mjs';
+import { EXPORT_MISSING_ROWS } from './export-missing-steps.mjs';
 import { TIMELINE_DND_H04_ROWS } from './timeline-dnd-h04-scripted-rows.mjs';
 import { createFakePage } from './fake-page.mjs';
 
@@ -463,6 +464,7 @@ test('row tables: unique ids in the T-A05, T-A06, T-A09 and T-H04 ranges, each w
     ...TIMELINE_ROWS,
     ...PERSISTENCE_ROWS,
     ...EXPORT_MATRIX_ROWS,
+    ...EXPORT_MISSING_ROWS,
     ...TIMELINE_DND_H04_ROWS,
   ].map((row) => row.id);
   assert.equal(new Set(ids).size, ids.length);
@@ -471,6 +473,10 @@ test('row tables: unique ids in the T-A05, T-A06, T-A09 and T-H04 ranges, each w
   for (const row of TIMELINE_ROWS) assert.match(row.id, /^D-A06-\d{2}$/u);
   for (const row of PERSISTENCE_ROWS) assert.match(row.id, /^D-A09-\d{2}$/u);
   for (const row of EXPORT_MATRIX_ROWS) assert.match(row.id, /^D-A10-\d{2}$/u);
+  assert.deepEqual(
+    EXPORT_MISSING_ROWS.map((row) => row.id),
+    ['D-R04-1', 'D-R04-2', 'D-R04-3'],
+  );
   for (const row of TIMELINE_DND_H04_ROWS) assert.match(row.id, /^D-H(?:01|02|06|07|08|10)$/u);
   for (const row of Object.values(MATRIX_ROWS)) {
     assert.ok(row.title && typeof row.run === 'function', row.id);

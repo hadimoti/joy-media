@@ -1,4 +1,9 @@
-import type { AssetRecordV1, Clip, SpikeProject } from '@joy-media/project-schema';
+import {
+  NON_FILE_ASSET_KINDS,
+  type AssetRecordV1,
+  type Clip,
+  type SpikeProject,
+} from '@joy-media/project-schema';
 import { verifyReplacementMedia, type RelinkCache } from './media-relink.js';
 import { flattenRootTimelineVideoClips } from './timeline-nested-playback.js';
 
@@ -28,7 +33,7 @@ export interface BatchMatchResult {
  * caption, motion, effect, filter, adjustment layer, overlay or HTML scene is recorded as
  * an `other` asset with no original; a LUT is a grade, not a media original.
  */
-export const NON_FILE_ASSET_KINDS: ReadonlySet<AssetRecordV1['kind']> = new Set(['lut', 'other']);
+export { NON_FILE_ASSET_KINDS };
 
 /**
  * Derives the project's missing media from its asset records and the local

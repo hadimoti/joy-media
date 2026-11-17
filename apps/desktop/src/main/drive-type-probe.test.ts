@@ -52,6 +52,21 @@ describe('driveTypeOfRoot production probe', () => {
     expect(mockedExecFile).toHaveBeenCalledTimes(1);
   });
 
+  it('shares one in-flight Windows query between concurrent callers', async () => {
+    let reply: ExecCallback | undefined;
+    mockedExecFile.mockImplementation((_file, _args, _options, callback) => {
+      reply = callback as unknown as ExecCallback;
+      return undefined as never;
+    });
+
+    const first = driveTypeOfRoot('V:\\', { platform: 'win32', execFile: injectedExecFile });
+    const second = driveTypeOfRoot('V:\\', { platform: 'win32', execFile: injectedExecFile });
+    expect(mockedExecFile).toHaveBeenCalledTimes(1);
+
+    reply!(null, '4', '');
+    await expect(Promise.all([first, second])).resolves.toEqual(['network', 'network']);
+  });
+
   it('returns unknown when the Windows probe times out', async () => {
     const timeout = Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' });
     respond(timeout);
@@ -61,6 +76,20 @@ describe('driveTypeOfRoot production probe', () => {
     ).resolves.toBe('unknown');
 
     expect(mockedExecFile.mock.calls[0]?.[2]).toMatchObject({ timeout: 5000 });
+  });
+
+  it('retries after a timed-out unknown result instead of caching it permanently', async () => {
+    const timeout = Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' });
+    respond(timeout);
+    await expect(
+      driveTypeOfRoot('W:\\', { platform: 'win32', execFile: injectedExecFile }),
+    ).resolves.toBe('unknown');
+
+    respond(null, '3');
+    await expect(
+      driveTypeOfRoot('W:\\', { platform: 'win32', execFile: injectedExecFile }),
+    ).resolves.toBe('fixed');
+    expect(mockedExecFile).toHaveBeenCalledTimes(2);
   });
 
   it('returns unknown when the Windows probe fails', async () => {
