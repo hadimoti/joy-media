@@ -599,9 +599,10 @@ export async function runQualityCheck(page, ctx) {
     .innerText()
     .catch(() => '');
   const joined = `${texts.join(' | ')} || ${panel.replace(/\s+/gu, ' ').slice(-600)}`;
+  // Only the chat messages say whether the check refused to run; the report card may use the same words in a finding.
   const refused =
     /cannot capture|composition-unavailable|could not finish this run safely|No quality check|could not run|unavailable/iu.test(
-      joined,
+      texts.join(' | '),
     );
   const ran = /repair plan|no problems|nothing to fix|finding|report/iu.test(joined);
   const summary = `${joined.slice(0, 900)} || console: ${consoleLines.slice(0, 4).join(' ; ')}`;
