@@ -323,7 +323,9 @@ test.describe('WP-32 real-project workflow acceptance', () => {
         await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
         await openPanel(page, 'Audio');
         await page.getByRole('tab', { name: 'Mix' }).click();
-        await expect(page.getByRole('slider', { name: /^Gain voice-/ })).toHaveValue('1.25');
+        await expect(
+          page.getByRole('slider', { name: `Gain ${clipNameWithoutExtension(names.audio)}` }),
+        ).toHaveValue('1.25');
         const processes = page.getByRole('button', { name: 'Recent processes' });
         if ((await processes.getAttribute('aria-expanded')) !== 'true') await processes.click();
         await expect(page.getByRole('dialog', { name: 'Recent processes' })).toBeVisible();
