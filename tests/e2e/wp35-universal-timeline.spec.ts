@@ -207,14 +207,16 @@ test.describe('WP-35 universal timeline closeout', () => {
     expect(firstAudioBox!.y).toBeGreaterThan(lastVisualBox!.y);
     await page.getByLabel('Preview quality').selectOption('quarter');
     await expect(page.getByLabel('Preview quality')).toHaveValue('quarter');
-    await expect(page.getByLabel('Monitor preview renderer')).toHaveValue('auto');
+    // The Monitor preview renderer select was removed on purpose (CanvasFormatMenu.focus.test.tsx).
+    await expect(page.getByLabel('Monitor preview renderer')).toHaveCount(0);
     const rulerBackground = await page.locator('.timeline-scrub-row').evaluate((element) => {
       const computed = getComputedStyle(element);
       return { color: computed.backgroundColor, image: computed.backgroundImage };
     });
     expect(rulerBackground.color).not.toBe('rgba(0, 0, 0, 0)');
     expect(rulerBackground.image).toBe('none');
-    await expect(page.locator('.timeline-scrub-gutter')).toHaveCSS(
+    // The gutter next to the ruler now paints the panel colour (a solid background, no seam).
+    await expect(page.locator('.timeline-scrub-gutter')).not.toHaveCSS(
       'background-color',
       'rgba(0, 0, 0, 0)',
     );
