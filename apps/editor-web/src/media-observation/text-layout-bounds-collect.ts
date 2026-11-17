@@ -4,6 +4,8 @@ import { projectTextLayoutBounds, type TextLayoutBoundsRecord } from './text-lay
 
 export interface TextLayoutCandidate {
   readonly id: string;
+  /** Renderer node id when this box is one of several timeline occurrences of a node. */
+  readonly nodeId?: string;
   readonly kind: 'title' | 'caption';
   readonly startUs: number;
   readonly endUs: number;
@@ -58,7 +60,7 @@ export function collectTextLayoutBounds(
     const frame = frames.find(
       (entry) => entry.timeUs === candidate.sampleUs && entry.revision === candidate.revision,
     );
-    const node = frame?.nodes.find((entry) => entry.id === candidate.id);
+    const node = frame?.nodes.find((entry) => entry.id === (candidate.nodeId ?? candidate.id));
     if (frame === undefined || node?.bounds === undefined || node.textColor === undefined) {
       unavailable.push(candidate.id);
       continue;

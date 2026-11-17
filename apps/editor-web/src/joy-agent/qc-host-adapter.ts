@@ -171,7 +171,10 @@ export interface QcHostAdapterDeps {
   readonly sharedState?: QcHostAdapterSharedState;
   readonly identity: () => QcHostIdentity | undefined;
   readonly timeline: () => QcTimelineSource | undefined | Promise<QcTimelineSource | undefined>;
-  readonly collectTextBoxes?: (composition: QcTimelineSource['composition']) => Promise<{
+  readonly collectTextBoxes?: (
+    composition: QcTimelineSource['composition'],
+    signal: AbortSignal,
+  ) => Promise<{
     readonly boxes: readonly TimelineQcTextBox[];
     readonly notMeasured: boolean;
   }>;
@@ -405,13 +408,14 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         identityIsCurrent()
       ) {
         try {
-          const measured = await deps.collectTextBoxes(compositionRequest);
+          const measured = await deps.collectTextBoxes(compositionRequest, signal);
           if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
           if (!identityIsCurrent())
             return failure('authority-unavailable', 'The project changed, so no check was stored.');
           source = { ...source, textBoxes: measured.boxes };
           if (measured.notMeasured) textMeasurementNote = 'Some text was not measured.';
         } catch {
+          if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
           source = { ...source, textBoxes: [] };
           textMeasurementNote = 'Text was not measured.';
         }
