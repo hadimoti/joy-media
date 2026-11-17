@@ -16110,6 +16110,39 @@ label {
     transform: none;
   }
 }
+/* The list columns follow the width of the media panel itself, not the window: the panel is often much
+   narrower than the window, and a list wider than the panel pushed the thumbnail and name out of sight.
+   Hide what does not fit: the Collection column first, then Size. */
+@container (max-width: 38rem) {
+  .asset-list-header,
+  .asset-grid--list .asset-card {
+    grid-template-columns: 1.25rem 2.65rem minmax(0, 1fr) 4.5rem 5.35rem;
+  }
+  .asset-list-header-collection,
+  .asset-grid--list .asset-card-collection {
+    display: none;
+  }
+}
+@container (max-width: 31rem) {
+  .asset-list-header,
+  .asset-grid--list .asset-card {
+    grid-template-columns: 1.15rem 2.4rem minmax(0, 1fr) 4.25rem;
+  }
+  .asset-list-header-size,
+  .asset-grid--list .asset-card-meta {
+    display: none;
+  }
+  .asset-list-header-thumb,
+  .asset-grid--list .asset-card-media-wrap,
+  .asset-grid--list .asset-card-media {
+    width: 2.4rem;
+  }
+  .asset-grid--list .asset-card-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+}
 .workspace.dockview-theme-dark,
 #root .workspace {
   flex: 1;
