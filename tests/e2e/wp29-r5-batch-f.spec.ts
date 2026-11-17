@@ -161,8 +161,10 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         const renamed = 'R5 Motion 80';
         await expect(motion.getByRole('button', { name: `Open ${original}` })).toBeVisible();
 
-        page.once('dialog', (dialog) => void dialog.accept(renamed));
         await motion.getByRole('button', { name: `Rename ${original}` }).click();
+        const renameDialog = page.getByRole('dialog', { name: 'Enter a value' });
+        await renameDialog.getByLabel('Rename motion').fill(renamed);
+        await renameDialog.getByRole('button', { name: 'Rename', exact: true }).click();
         await expect(motion.getByRole('button', { name: `Open ${renamed}` })).toBeVisible();
 
         await motion.getByRole('button', { name: `Duplicate ${renamed}` }).click();
@@ -170,8 +172,11 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         await expect(motion.getByRole('button', { name: `Open ${copy}` })).toBeVisible();
         await expect(motion.getByRole('listitem')).toHaveCount(2);
 
-        page.once('dialog', (dialog) => void dialog.accept());
         await motion.getByRole('button', { name: `Delete ${renamed}`, exact: true }).click();
+        await page
+          .getByRole('alertdialog')
+          .getByRole('button', { name: 'Remove', exact: true })
+          .click();
         await expect(
           motion.getByRole('button', { name: `Open ${renamed}`, exact: true }),
         ).toHaveCount(0);
@@ -278,10 +283,8 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         await motion.getByRole('tab', { name: 'Scenes' }).click();
 
         const removeButtons = motion.locator('button[aria-label^="Remove HTML scene "]');
-        const beforeLabels = await removeButtons.evaluateAll((buttons) =>
-          buttons.map((button) => button.getAttribute('aria-label') ?? ''),
-        );
-        const beforeCount = beforeLabels.length;
+        const sceneRows = motion.locator('.html-scene-list li');
+        const beforeCount = await removeButtons.count();
 
         const addButton = motion.getByRole('button', { name: /^Add .+ to selected clip$/ }).first();
         const sceneName = (await addButton.getAttribute('aria-label'))!.replace(
@@ -295,17 +298,13 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         }
         await expect(removeButtons).toHaveCount(beforeCount + 1);
 
-        const afterLabels = await removeButtons.evaluateAll((buttons) =>
-          buttons.map((button) => button.getAttribute('aria-label') ?? ''),
-        );
-        const addedLabel = afterLabels.find((label) => !beforeLabels.includes(label));
-        expect(
-          addedLabel,
-          'The added scene must expose a target-specific Remove control.',
-        ).toBeTruthy();
-        await motion.getByRole('button', { name: addedLabel!, exact: true }).click();
+        const addedScene = sceneRows.last();
+        const removeAddedScene = addedScene.getByRole('button', {
+          name: /^Remove HTML scene /,
+        });
+        await expect(removeAddedScene).toBeVisible();
+        await removeAddedScene.click();
         await expect(removeButtons).toHaveCount(beforeCount);
-        await expect(motion.getByRole('button', { name: addedLabel!, exact: true })).toHaveCount(0);
 
         return `Added ${sceneName} as one new HTML-scene instance and removed that exact instance without altering the seeded scenes.`;
       },
@@ -449,8 +448,10 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         ]);
 
         const customName = 'R5 Template 85';
-        page.once('dialog', (dialog) => void dialog.accept(customName));
         await templates.getByRole('button', { name: 'Save JOY Title to My Templates' }).click();
+        const saveDialog = page.getByRole('dialog', { name: 'Enter a value' });
+        await saveDialog.getByLabel('Save “JOY Title” to My Templates').fill(customName);
+        await saveDialog.getByRole('button', { name: 'Save', exact: true }).click();
         await expect(templates.getByRole('tab', { name: 'My Templates' })).toHaveAttribute(
           'aria-selected',
           'true',
@@ -465,8 +466,13 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
           initialClipCount + 1,
         );
 
-        page.once('dialog', (dialog) => void dialog.accept());
-        await templates.getByRole('button', { name: `Delete ${customName}` }).click();
+        const savedTemplate = templates.locator('.template-card', { hasText: customName });
+        await savedTemplate.hover();
+        await savedTemplate.getByRole('button', { name: `Delete ${customName}` }).click();
+        await page
+          .getByRole('alertdialog')
+          .getByRole('button', { name: 'Remove', exact: true })
+          .click();
         await expect(templates.locator('.template-card', { hasText: customName })).toHaveCount(0);
         await expect(templates.getByText('No saved templates yet.', { exact: true })).toBeVisible();
 

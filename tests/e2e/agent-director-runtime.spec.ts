@@ -127,6 +127,11 @@ test.describe('JOY Live Director runtime boundary', () => {
     await dialog.getByRole('button', { name: 'Done' }).click();
 
     const canonicalClipCount = await page.locator('.timeline-clip').count();
+    // Clearing the connection aborts the in-flight fixture request; Chromium reports
+    // that expected cancellation as an invalid HTTP response.
+    allowExpectedConsoleError(page, {
+      pattern: /^Failed to load resource: net::ERR_INVALID_HTTP_RESPONSE$/,
+    });
     const composer = page.getByLabel('Message Joy Code');
     await composer.fill('Start an edit, then stop it.');
     await composer.press('Enter');

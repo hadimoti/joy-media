@@ -393,7 +393,10 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
       .locator('.app-menubar button.app-menu-trigger')
       .getByText('View', { exact: true })
       .click();
-    const menuItem = page.getByRole('menuitem', { name: liveLabel, exact: true });
+    const menuItem = page.getByRole('menuitem', {
+      name: liveLabel === '3D Scene' ? 'Open 3D Scene' : liveLabel,
+      exact: true,
+    });
     await expect(menuItem).toBeVisible();
     await menuItem.click();
     tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();

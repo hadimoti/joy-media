@@ -54,7 +54,7 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
       .textContent())!.trim();
     const parameter = rows.nth(0).locator('input[type="range"]').first();
     if (await parameter.isVisible()) await parameter.press('ArrowRight');
-    await rows.nth(0).getByRole('button', { name: 'On' }).click();
+    await rows.nth(0).getByRole('button', { name: 'On', exact: true }).click();
     await expect(rows.nth(0).getByRole('button', { name: 'Off' })).toBeVisible();
     await page.getByRole('button', { name: `Move ${firstLabel} down` }).click();
     await expect(rows.nth(1)).toHaveAttribute('data-effect-instance-id', firstId!);
@@ -112,6 +112,7 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     const second = cards.nth(1);
     const favoriteType = await first.getAttribute('data-library-id');
     const favoriteButton = first.locator('.library-card-favorite');
+    await first.hover();
     await favoriteButton.click();
     await expect(favoriteButton).toHaveAttribute('aria-pressed', 'true');
     await first.locator('.library-card-add').click();
@@ -180,11 +181,12 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     await page.getByRole('tab', { name: 'HSL' }).click();
     await page.getByText('Red', { exact: true }).click();
     for (const property of [
-      'Red Hue',
-      'Red Range',
-      'Red Softness',
+      'Red Hue shift',
+      'Red Width',
       'Red Saturation',
       'Red Luminance',
+      'Red Hue',
+      'Red Softness',
     ]) {
       await expect(page.getByRole('slider', { name: property, exact: true })).toBeVisible();
       await expect(
