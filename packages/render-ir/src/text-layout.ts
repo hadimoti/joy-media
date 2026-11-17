@@ -5,6 +5,14 @@ export interface TextPlateBounds {
   readonly height: number;
 }
 
+/** Each edge of the shared text safe area keeps five percent of the frame clear. */
+export const TEXT_SAFE_AREA_MARGIN_FRACTION = 0.05;
+
+/** Default text wrap width: the same central 90 percent that QC treats as safe. */
+export function resolveTextWrapWidth(compositionWidth: number, maxWidth?: number): number {
+  return maxWidth ?? compositionWidth * (1 - TEXT_SAFE_AREA_MARGIN_FRACTION * 2);
+}
+
 /** Shared text-plate geometry so browser and headless renderers anchor identically. */
 export function textPlateBounds(
   textWidth: number,

@@ -448,7 +448,9 @@ export async function createBrowserPixiRenderer(
         : { lineHeight: node.fontSizePx * node.lineHeight }),
       ...(node.tracking === undefined ? {} : { letterSpacing: node.tracking }),
       align: node.align ?? 'left',
-      ...(node.maxWidth !== undefined ? { wordWrap: true, wordWrapWidth: node.maxWidth } : {}),
+      ...(node.maxWidth !== undefined
+        ? { wordWrap: true, wordWrapWidth: node.maxWidth, breakWords: true }
+        : {}),
       ...(node.stroke === undefined
         ? {}
         : {

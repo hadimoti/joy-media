@@ -10,6 +10,7 @@ import type {
 } from './composition-observer.js';
 import { createCompositionObserver } from './composition-observer.js';
 import type { EvidenceFrameArtifactCoverage } from './evidence-store.js';
+import { TEXT_SAFE_AREA_MARGIN_FRACTION } from '@joy-media/render-ir';
 
 export const MAX_TIMELINE_QC_FRAMES = 64;
 export const DEFAULT_TIMELINE_QC_FRAME_WIDTH = 480;
@@ -650,8 +651,13 @@ function analyzeTextBoxOnFrame(
   frame:
     Pick<CapturedCompositionEvidence, 'outputTimeUs' | 'width' | 'height' | 'rgba'> | undefined,
 ): TimelineQcTextAnalysis {
+  const safeMin = TEXT_SAFE_AREA_MARGIN_FRACTION;
+  const safeMax = 1 - TEXT_SAFE_AREA_MARGIN_FRACTION;
   const inside90Percent =
-    box.x >= 0.05 && box.y >= 0.05 && box.x + box.width <= 0.95 && box.y + box.height <= 0.95;
+    box.x >= safeMin &&
+    box.y >= safeMin &&
+    box.x + box.width <= safeMax &&
+    box.y + box.height <= safeMax;
   if (frame === undefined) {
     return Object.freeze({
       id: box.id,
