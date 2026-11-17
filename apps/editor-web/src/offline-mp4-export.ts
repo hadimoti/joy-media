@@ -301,6 +301,156 @@ export interface BlobSink {
   readonly discard: () => void;
 }
 
+interface AsyncBlobSink {
+  readonly writable: WritableStream<Uint8Array>;
+  readonly size: () => number;
+  readonly toBlob: (type: string) => Promise<Blob>;
+  readonly discard: () => Promise<void>;
+}
+
+interface OpfsDirectory {
+  getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<OpfsDirectory>;
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<OpfsFile>;
+  removeEntry(name: string): Promise<void>;
+  entries?: () => AsyncIterableIterator<[string, OpfsFile]>;
+}
+
+interface OpfsFile {
+  createWritable(): Promise<{
+    write(data: FileSystemWriteChunkType): Promise<void>;
+    close(): Promise<void>;
+    abort?(): Promise<void>;
+  }>;
+  getFile(): Promise<File>;
+}
+
+/** Removes abandoned staging entries before a new export starts. */
+export async function removeStaleOpfsExportStages(root?: OpfsDirectory): Promise<void> {
+  const opfsRoot = root ?? (await getOpfsRoot());
+  if (opfsRoot === undefined) return;
+  try {
+    const directory = await opfsRoot.getDirectoryHandle('export-staging', { create: true });
+    if (directory.entries === undefined) return;
+    for await (const [name] of directory.entries()) {
+      if (name.startsWith('export-staged-') && name.endsWith('.mp4.part')) {
+        await directory.removeEntry(name).catch(() => undefined);
+      }
+    }
+  } catch {
+    // Staging cleanup is best-effort; it must not make exports unavailable.
+  }
+}
+
+export async function createOpfsBlobSink(): Promise<AsyncBlobSink> {
+  const fallback = (): AsyncBlobSink => {
+    const sink = createBlobSink();
+    return {
+      writable: sink.writable,
+      size: sink.size,
+      toBlob: async (type) => sink.toBlob(type),
+      discard: async () => sink.discard(),
+    };
+  };
+  const root = await getOpfsRoot();
+  const fileHandleConstructor = (
+    globalThis as typeof globalThis & {
+      FileSystemFileHandle?: { prototype?: { createWritable?: unknown } };
+    }
+  ).FileSystemFileHandle;
+  if (root === undefined || typeof fileHandleConstructor?.prototype?.createWritable !== 'function')
+    return fallback();
+
+  let directory: OpfsDirectory | undefined;
+  let fileName = '';
+  let file: OpfsFile | undefined;
+  let fileWritable: Awaited<ReturnType<OpfsFile['createWritable']>> | undefined;
+  try {
+    directory = await root.getDirectoryHandle('export-staging', { create: true });
+    fileName = `export-staged-${crypto.randomUUID()}.mp4.part`;
+    file = await directory.getFileHandle(fileName, { create: true });
+    fileWritable = await file.createWritable();
+  } catch {
+    if (directory !== undefined && fileName !== '')
+      await directory.removeEntry(fileName).catch(() => undefined);
+    return fallback();
+  }
+
+  let size = 0;
+  let closed: Promise<void> | undefined;
+  let discarded = false;
+  let removed = false;
+  let fallbackParts: Blob[] | undefined;
+  const writable = new WritableStream<Uint8Array>({
+    async write(chunk) {
+      if (discarded) return;
+      if (fallbackParts !== undefined) {
+        fallbackParts.push(new Blob([chunk as Uint8Array<ArrayBuffer>]));
+        size += chunk.byteLength;
+        return;
+      }
+      try {
+        await fileWritable!.write(chunk as Uint8Array<ArrayBuffer>);
+      } catch (error) {
+        if (size !== 0) throw error;
+        await fileWritable!.abort?.().catch(() => undefined);
+        await directory!.removeEntry(fileName).catch(() => undefined);
+        removed = true;
+        fallbackParts = [new Blob([chunk as Uint8Array<ArrayBuffer>])];
+        size += chunk.byteLength;
+        return;
+      }
+      size += chunk.byteLength;
+    },
+    async close() {
+      if (fallbackParts === undefined) {
+        closed = fileWritable!.close();
+        await closed;
+      }
+    },
+    async abort() {
+      discarded = true;
+      await fileWritable!.abort?.();
+      await directory!.removeEntry(fileName).catch(() => undefined);
+      removed = true;
+    },
+  });
+  return {
+    writable,
+    size: () => size,
+    toBlob: async (type) => {
+      if (fallbackParts !== undefined) return new Blob(fallbackParts, { type });
+      await closed;
+      const blob = await file!.getFile();
+      return blob.type === type ? blob : new Blob([blob], { type });
+    },
+    discard: async () => {
+      if (removed) return;
+      discarded = true;
+      if (fallbackParts !== undefined) {
+        fallbackParts = [];
+        size = 0;
+        removed = true;
+        return;
+      }
+      await fileWritable!.abort?.().catch(() => undefined);
+      await directory!.removeEntry(fileName).catch(() => undefined);
+      removed = true;
+      size = 0;
+    },
+  };
+}
+
+async function getOpfsRoot(): Promise<OpfsDirectory | undefined> {
+  const storage = globalThis.navigator?.storage as
+    (StorageManager & { getDirectory?: () => Promise<OpfsDirectory> }) | undefined;
+  if (typeof storage?.getDirectory !== 'function') return undefined;
+  try {
+    return await storage.getDirectory();
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Collects what the muxer writes as Blob parts. Wrapping each fragment in a Blob as it arrives
  * moves its bytes out of the script heap into the browser's blob storage, which can page out to
@@ -381,10 +531,11 @@ export async function exportOfflineMp4(
   };
   signal?.addEventListener('abort', onAbort, { once: true });
 
+  await removeStaleOpfsExportStages();
   // A fragmented MP4 is written strictly front to back, one fragment at a time, so each fragment
-  // can go straight into blob storage and the muxer never holds more than the current fragment.
+  // can go straight into the staging file and the muxer never holds more than the current fragment.
   // It is the same container layout the real-time recorder produces (moov, moof fragments, mfra).
-  const sink = createBlobSink();
+  const sink = await createOpfsBlobSink();
   const target = new AppendOnlyStreamTargetCtor(sink.writable);
   let output: Output | undefined;
   let videoSource: CanvasSource | undefined;
@@ -450,14 +601,17 @@ export async function exportOfflineMp4(
       deps.cancelGraceMs ?? CANCEL_GRACE_MS,
     );
     // Drop what was written so far; anything the muxer still writes after this is ignored.
-    sink.discard();
+    await sink.discard();
     throw error;
   } finally {
     signal?.removeEventListener('abort', onAbort);
   }
 
-  const blob = sink.toBlob('video/mp4');
-  if (blob.size === 0) throw new Error('the offline MP4 export produced an empty file');
+  const blob = await sink.toBlob('video/mp4');
+  if (blob.size === 0) {
+    await sink.discard();
+    throw new Error('the offline MP4 export produced an empty file');
+  }
   return {
     frameCount,
     totalBytes: blob.size,

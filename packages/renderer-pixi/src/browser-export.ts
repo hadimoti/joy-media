@@ -78,6 +78,129 @@ export const BROWSER_MP4_MIME_CANDIDATES = [
 export type BrowserMp4MimeType = (typeof BROWSER_MP4_MIME_CANDIDATES)[number];
 export type BrowserMp4MimeSupport = (mimeType: BrowserMp4MimeType) => boolean;
 
+interface BrowserMp4Sink {
+  append(chunk: Blob): void;
+  finish(type: string): Promise<Blob>;
+  discard(): Promise<void>;
+}
+
+interface BrowserOpfsDirectory {
+  getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<BrowserOpfsDirectory>;
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<BrowserOpfsFile>;
+  removeEntry(name: string): Promise<void>;
+  entries?: () => AsyncIterableIterator<[string, BrowserOpfsFile]>;
+}
+
+interface BrowserOpfsFile {
+  createWritable(): Promise<{
+    write(data: Blob): Promise<void>;
+    close(): Promise<void>;
+    abort?(): Promise<void>;
+  }>;
+  getFile(): Promise<File>;
+}
+
+async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
+  const parts: Blob[] = [];
+  let discarded = false;
+  const fallback: BrowserMp4Sink = {
+    append: (chunk) => {
+      if (!discarded) parts.push(chunk);
+    },
+    finish: async (type) => new Blob(parts, { type }),
+    discard: async () => {
+      discarded = true;
+      parts.length = 0;
+    },
+  };
+  const storage = globalThis.navigator?.storage as
+    (StorageManager & { getDirectory?: () => Promise<BrowserOpfsDirectory> }) | undefined;
+  const fileHandleConstructor = (
+    globalThis as typeof globalThis & {
+      FileSystemFileHandle?: { prototype?: { createWritable?: unknown } };
+    }
+  ).FileSystemFileHandle;
+  if (
+    typeof storage?.getDirectory !== 'function' ||
+    typeof fileHandleConstructor?.prototype?.createWritable !== 'function'
+  )
+    return fallback;
+
+  let root: BrowserOpfsDirectory;
+  let directory: BrowserOpfsDirectory | undefined;
+  let name = '';
+  let file: BrowserOpfsFile;
+  let writable: Awaited<ReturnType<BrowserOpfsFile['createWritable']>>;
+  try {
+    root = await storage.getDirectory();
+    directory = await root.getDirectoryHandle('export-staging', { create: true });
+    if (directory.entries !== undefined) {
+      for await (const [staleName] of directory.entries()) {
+        if (staleName.startsWith('export-staged-') && staleName.endsWith('.mp4.part'))
+          await directory.removeEntry(staleName).catch(() => undefined);
+      }
+    }
+    name = `export-staged-${crypto.randomUUID()}.mp4.part`;
+    file = await directory.getFileHandle(name, { create: true });
+    writable = await file.createWritable();
+  } catch {
+    if (directory !== undefined && name !== '')
+      await directory.removeEntry(name).catch(() => undefined);
+    return fallback;
+  }
+
+  let queue = Promise.resolve();
+  let failure: unknown;
+  let size = 0;
+  let fallbackMode = false;
+  let closed = false;
+  let removed = false;
+  return {
+    append(chunk) {
+      if (discarded || failure !== undefined) return;
+      queue = queue
+        .then(async () => {
+          if (discarded || failure !== undefined) return;
+          if (fallbackMode) {
+            parts.push(chunk);
+            return;
+          }
+          try {
+            await writable.write(chunk);
+            size += chunk.size;
+          } catch (error) {
+            if (size !== 0) throw error;
+            await writable.abort?.().catch(() => undefined);
+            await directory!.removeEntry(name).catch(() => undefined);
+            removed = true;
+            fallbackMode = true;
+            parts.push(chunk);
+          }
+        })
+        .catch((error: unknown) => {
+          failure = error;
+        });
+    },
+    async finish(type) {
+      await queue;
+      if (failure !== undefined) throw failure;
+      if (fallbackMode) return new Blob(parts, { type });
+      await writable.close();
+      closed = true;
+      const blob = await file.getFile();
+      return blob.type === type ? blob : new Blob([blob], { type });
+    },
+    async discard() {
+      if (discarded) return;
+      discarded = true;
+      if (fallbackMode) parts.length = 0;
+      else if (!closed) await writable.abort?.().catch(() => undefined);
+      if (!removed) await directory!.removeEntry(name).catch(() => undefined);
+      removed = true;
+    },
+  };
+}
+
 /** Actionable capability failure raised before browser capture is mutated. */
 export class UnsupportedBrowserMp4Error extends Error {
   readonly candidates = BROWSER_MP4_MIME_CANDIDATES;
@@ -180,6 +303,7 @@ export async function downloadBrowserMp4(
   let oscillatorStarted = false;
   let recorder: MediaRecorder | undefined;
   let stopped: Promise<void> | undefined;
+  let sink: BrowserMp4Sink | undefined;
   const bytesPerFrame = width * height * 4;
   const frameDurationMs = 1_000 / frameRate;
   try {
@@ -228,7 +352,7 @@ export async function downloadBrowserMp4(
       throw new Error('audio capture did not produce an AAC source track');
     stream.addTrack(audioTrack);
 
-    const chunks: BlobPart[] = [];
+    sink = await createBrowserMp4Sink();
     recorder = new MediaRecorder(stream, {
       mimeType: selectedMimeType,
       videoBitsPerSecond: manifest.videoBitrate ?? Math.max(2_000_000, width * height * frameRate),
@@ -241,7 +365,9 @@ export async function downloadBrowserMp4(
       );
     }
     stopped = new Promise<void>((resolve, reject) => {
-      recorder!.addEventListener('dataavailable', (event) => chunks.push(event.data));
+      recorder!.addEventListener('dataavailable', (event) => {
+        if (event.data.size > 0) sink!.append(event.data);
+      });
       recorder!.addEventListener('stop', () => resolve(), { once: true });
       recorder!.addEventListener(
         'error',
@@ -308,7 +434,7 @@ export async function downloadBrowserMp4(
     recorder.stop();
     await stopped;
 
-    const blob = new Blob(chunks, { type: recorderMimeType });
+    const blob = await sink.finish(recorderMimeType);
     if (blob.size === 0)
       throw new Error(`browser MP4 recorder produced an empty file (${recorderMimeType})`);
     const filename = source.filename ?? `joy-media-export-${Date.now()}.mp4`;
@@ -326,6 +452,7 @@ export async function downloadBrowserMp4(
       recorder.stop();
       await stopped?.catch(() => undefined);
     }
+    await sink?.discard();
     throw error;
   } finally {
     if (oscillatorStarted && oscillator !== undefined && oscillator.context.state !== 'closed') {

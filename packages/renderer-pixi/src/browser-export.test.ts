@@ -110,6 +110,54 @@ describe('browser export contracts', () => {
     expect(harness.removeTrack).toHaveBeenCalledWith(harness.audioTrack);
   });
 
+  it('writes recorder data events to OPFS in order and returns the staged MP4 blob', async () => {
+    const harness = installRecorderHarness('video/mp4');
+    const written: Blob[] = [];
+    const directory = {
+      async getDirectoryHandle() {
+        return this;
+      },
+      async getFileHandle(name: string) {
+        return {
+          async createWritable() {
+            return {
+              async write(chunk: Blob) {
+                written.push(chunk);
+              },
+              async close() {},
+              async abort() {},
+            };
+          },
+          async getFile() {
+            return new File(written, name, { type: 'video/mp4' });
+          },
+        };
+      },
+      async removeEntry() {},
+      async *entries() {
+        // No stale staging files.
+      },
+    };
+    const fileHandleConstructor = function FakeFileHandle() {};
+    Object.assign(fileHandleConstructor.prototype, { createWritable() {} });
+    vi.stubGlobal('FileSystemFileHandle', fileHandleConstructor);
+    vi.stubGlobal('navigator', { storage: { getDirectory: async () => directory } });
+
+    const result = await downloadBrowserMp4({
+      manifest,
+      frameCount: 1,
+      canvas: harness.canvas,
+      audioTrack: harness.audioTrack,
+      mimeType: 'video/mp4',
+      paintFrame: () => {},
+      autoDownload: false,
+    });
+
+    expect(written).toHaveLength(1);
+    expect(result.blob?.type).toBe('video/mp4');
+    expect(result.blob?.size).toBe(written[0]?.size);
+  });
+
   it('uses the preset video and audio bitrates supplied by the export manifest', async () => {
     const harness = installRecorderHarness('video/mp4');
     await downloadBrowserMp4({

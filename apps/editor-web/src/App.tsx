@@ -688,6 +688,9 @@ function missingMediaHostFor(session: EditorSession): MissingMediaHost {
   return host;
 }
 const exportCachePromise = openOpfsExportCache();
+void import('./offline-mp4-export.js')
+  .then(({ removeStaleOpfsExportStages }) => removeStaleOpfsExportStages())
+  .catch(() => undefined);
 /**
  * WP-11.2: resolves a timeline clip's assetId to a real, browser-fetchable
  * URL for HTMLVideoElement decode. The reference intro/product/outro clips
