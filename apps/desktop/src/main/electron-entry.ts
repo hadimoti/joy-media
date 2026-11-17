@@ -31,6 +31,7 @@ import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
 import { installGpuEncodeFallback } from './gpu-encode-fallback.js';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
+import { createStorageFlushController } from './storage-flush.js';
 import { AgentRequestRegistry, cancelWhenPageGoes } from './agent-requests.js';
 import { registerJoyProtocol } from './protocol-registration.js';
 import type { IpcRequest } from '../ipc.js';
@@ -323,12 +324,19 @@ if (!app.requestSingleInstanceLock()) {
     waitMs: CALLBACK_TIMEOUT_MS,
     openExternal: (url) => shell.openExternal(url),
   });
+  const storageFlush = createStorageFlushController(() =>
+    session.defaultSession.flushStorageData(),
+  );
+  const storageFlushInterval = setInterval(() => storageFlush.flushIfDirty(), 3000);
+  storageFlushInterval.unref?.();
+  app.on('before-quit', () => clearInterval(storageFlushInterval));
   const ipcHandlers = createIpcHandlers({
     agentRequests,
     fileRegistry,
     workerSupervisor,
     localDatabase,
     generationJobs,
+    flushStorageData: storageFlush.markDirty,
     mediaChannel: createMediaChannelHandlers({
       orchestrator: jobOrchestrator,
       jobStore: localDatabase.jobDispatch,

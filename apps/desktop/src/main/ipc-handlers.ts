@@ -110,6 +110,8 @@ export interface IpcHandlerDeps {
   readonly handleWindowControl?: (
     action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
   ) => Promise<boolean | void> | boolean | void;
+  /** Flushes Electron's DOM storage after the renderer has written localStorage. */
+  readonly flushStorageData?: () => void;
   readonly now?: () => string;
   readonly newId?: () => string;
 }
@@ -155,6 +157,12 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
 
   const handlers: Record<IpcChannel, IpcHandler> = {
     ...mediaChannelTable(deps.mediaChannel),
+    'desktop.storage.flush': (): IpcResult => {
+      if (deps.flushStorageData === undefined)
+        return { ok: false, error: 'Storage flush is not available in this build' };
+      deps.flushStorageData();
+      return { ok: true, data: undefined };
+    },
     'desktop.provider-profile.sign-in': async (payload): Promise<IpcResult> => {
       const request = asSignInRequest(payload);
       if (request === undefined) return { ok: false, error: 'Invalid sign-in request' };

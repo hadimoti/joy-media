@@ -49,6 +49,10 @@ function loadPreloadForTest() {
 }
 
 describe('preload channel allow-list', () => {
+  it('allows the renderer to request a DOM storage flush', () => {
+    expect(IPC_CHANNELS).toContain('desktop.storage.flush');
+  });
+
   it('exposes the generation job lifecycle through the shared channel list', () => {
     expect(IPC_CHANNELS).toEqual(
       expect.arrayContaining([

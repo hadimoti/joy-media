@@ -37,6 +37,7 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.window-maximize',
   'desktop.window-close',
   'desktop.window-is-maximized',
+  'desktop.storage.flush',
   'desktop.asset-library.get-settings',
   'desktop.asset-library.set-directory',
   'desktop.asset-library.select-directory',

@@ -403,6 +403,7 @@ import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { BrowserControlPlaneRequestError, type BrowserJob } from './control-plane-client.js';
 import { ProjectDocumentAutosync } from './project-document-autosync.js';
+import { createStorageFlushNotifier } from './storage-flush.js';
 import { importDroppedMediaFiles, importMediaFile } from './media-import.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
@@ -867,10 +868,23 @@ interface ProjectJoyAgentRunLifecycle {
 }
 
 function guardBrowserStorage(writer: ProjectWriterHandle): GuardedBrowserStorage {
-  const storage = writer.guardStorage(window.localStorage);
-  if (storage.removeItem === undefined)
+  const guarded = writer.guardStorage(window.localStorage);
+  if (guarded.removeItem === undefined)
     throw new Error('The browser writer storage boundary does not support removal.');
-  return storage as GuardedBrowserStorage;
+  const flush = createStorageFlushNotifier(window.joyDesktop);
+  return {
+    getItem: (key) => guarded.getItem(key),
+    setItem: (key, value) => {
+      guarded.setItem(key, value);
+      flush.markDirty();
+    },
+    removeItem: (key) => {
+      guarded.removeItem!(key);
+      flush.markDirty();
+    },
+    ...(guarded.length === undefined ? {} : { length: guarded.length }),
+    ...(guarded.key === undefined ? {} : { key: (index: number) => guarded.key!(index) }),
+  };
 }
 
 function createProjectJoyAgentRunLifecycle(
