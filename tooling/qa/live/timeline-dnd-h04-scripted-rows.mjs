@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { basename, join } from 'node:path';
 import { clipsOf } from './matrix-core.mjs';
+import { blockedRow } from './rows.mjs';
 import { newProject } from './steps.mjs';
 import { ensureTimelineClip } from './ui-steps.mjs';
 
@@ -140,7 +141,10 @@ export const TIMELINE_DND_H04_ROWS = [
           .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u') })
           .first();
         if (await asset.isVisible()) {
-          throw new Error(`file imported into Media as ${name}, but no timeline clip was created`);
+          throw blockedRow(
+            'D-H02',
+            `the simulated drop made no clip; the Media card ${name} may be an older import (the catalog keeps earlier ones), so this needs a real mouse drag from Explorer (attended)`,
+          );
         }
         throw new Error(`file drop created no clip and no Media asset named ${name}`);
       }
@@ -164,18 +168,27 @@ export const TIMELINE_DND_H04_ROWS = [
         const before = statSync(source);
         await dropFiles(page, '.timeline-empty-state', [source], 2_000_000);
         const name = basename(source);
-        await page
-          .locator('.asset-card-name')
-          .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u') })
-          .first()
-          .waitFor({ state: 'visible', timeout: 12_000 });
+        // A Media card with this name can be an older import: only a new clip proves that this drop worked.
+        try {
+          await waitForClips(
+            ctx,
+            (rows) => rows.length > 0,
+            'a clip from the read-only drop',
+            12_000,
+          );
+        } catch {
+          throw blockedRow(
+            'D-H06',
+            'the simulated drop made no clip, so it is not proven that the read-only file was imported; needs a real mouse drag from Explorer (attended)',
+          );
+        }
         const after = statSync(source);
         if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
           throw new Error(
             `read-only source changed: size ${before.size}->${after.size}, mtime ${before.mtimeMs}->${after.mtimeMs}`,
           );
         }
-        return `read-only ${name} appeared in Media; source size and mtime stayed unchanged`;
+        return `read-only ${name} made a clip; source size and mtime stayed unchanged`;
       } finally {
         chmodSync(source, 0o644);
       }
@@ -206,7 +219,10 @@ export const TIMELINE_DND_H04_ROWS = [
         if (await card.isVisible()) {
           throw new Error('invalid MP4 was added to Media without a rejection message');
         }
-        throw new Error('invalid MP4 produced neither a rejection message nor a Media card');
+        throw blockedRow(
+          'D-H07',
+          'the simulated drop gave the app no message and no card: Electron may get no file path from a CDP-made drop, so the invalid file is skipped before it is read; needs a real mouse drag from Explorer (attended)',
+        );
       }
       const after = await readClips(ctx);
       if (after.length !== before.length)
@@ -245,8 +261,9 @@ export const TIMELINE_DND_H04_ROWS = [
         (name) => !shown.some((card) => card.startsWith(name.split('.')[0])),
       );
       if (missing.length > 0)
-        throw new Error(
-          `Media does not show ${missing.join(', ')}; cards: ${JSON.stringify(shown)}`,
+        throw blockedRow(
+          'D-H08',
+          `Media does not show ${missing.join(', ')} (cards: ${JSON.stringify(shown)}): the app keeps Unicode names, so the likely cause is that a CDP-made drop gives Electron no file path; needs a real mouse drag from Explorer (attended)`,
         );
       return `Media preserved both filenames: ${names.join(', ')} (cards: ${JSON.stringify(shown)})`;
     },

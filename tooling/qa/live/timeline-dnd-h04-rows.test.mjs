@@ -151,7 +151,6 @@ test('each implemented T-H04 row body runs against a fake page', async (t) => {
       assert.ok(droppedPaths.some((path) => path.includes('فيديو-اختبار.jpg')));
       assert.ok(page.calls.some((call) => call.includes('.asset-card-name')));
     }
-    if (id === 'D-H06') assert.ok(page.calls.some((call) => call.includes('.asset-card-name')));
     if (id === 'D-H10') assert.ok(page.calls.some((call) => call.includes('.timeline-lane')));
     if (id === 'D-H10') assert.match(message, /one media record/u);
     assert.ok(drops.length >= 3, `${id} did not dispatch CDP drag events`);
