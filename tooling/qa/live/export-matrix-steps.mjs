@@ -365,7 +365,7 @@ async function compareBurnInRegion(preview, frame, outputDir, tolerance) {
 export function processTreeWorkingSet(rootPid, { run = spawnSync } = {}) {
   if (!Number.isInteger(Number(rootPid)) || Number(rootPid) <= 0)
     throw new Error('a launched app pid is required');
-  const script = `$root=${Number(rootPid)}; $all=Get-CimInstance Win32_Process; $ids=@($root); for($i=0;$i -lt $ids.Count;$i++){ $parent=$ids[$i]; $ids+=@($all | Where-Object { $_.ParentProcessId -eq $parent } | ForEach-Object { [int]$_.ProcessId }) }; $all | Where-Object { $ids -contains [int]$_.ProcessId } | Select-Object ProcessId,WorkingSetSize | ConvertTo-Json -Compress`;
+  const script = `$root=${Number(rootPid)}; $all=Get-CimInstance Win32_Process; $ids=@($root); for($i=0;$i -lt $ids.Count;$i++){ $parent=$ids[$i]; $ids+=@($all | Where-Object { $_.ParentProcessId -eq $parent } | ForEach-Object { [int]$_.ProcessId }) }; $all | Where-Object { $ids -contains [int]$_.ProcessId } | Select-Object ProcessId,Name,WorkingSetSize | ConvertTo-Json -Compress`;
   const result = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
     encoding: 'utf8',
     timeout: 10_000,
@@ -392,6 +392,22 @@ export function processTreeWorkingSet(rootPid, { run = spawnSync } = {}) {
   return parsed;
 }
 
+/** The processes of the peak sample, biggest first: where the memory is. */
+export function describePeak(samples) {
+  const peak = samples.reduce(
+    (best, item) => (item.workingSetBytes > best.workingSetBytes ? item : best),
+    samples[0],
+  );
+  return peak.processes
+    .slice()
+    .sort((a, b) => b.workingSetBytes - a.workingSetBytes)
+    .map(
+      (proc) =>
+        `${proc.name || 'process'} (pid ${proc.pid}): ${(proc.workingSetBytes / 1024 / 1024).toFixed(0)} MiB`,
+    )
+    .join('\n');
+}
+
 export function parseProcessTreeWorkingSet(stdout) {
   let parsed;
   try {
@@ -402,6 +418,7 @@ export function parseProcessTreeWorkingSet(stdout) {
   const processes = Array.isArray(parsed) ? parsed : [parsed];
   const rows = processes.map((item) => ({
     pid: Number(item.ProcessId),
+    ...(item.Name ? { name: String(item.Name) } : {}),
     workingSetBytes: Number(item.WorkingSetSize),
   }));
   if (
@@ -452,7 +469,7 @@ async function runMemoryRow(page, ctx) {
   );
   writeFileSync(
     join(dir, 'memory-peak.txt'),
-    `Peak process-tree working set: ${peakBytes} bytes\n`,
+    `Peak process-tree working set: ${peakBytes} bytes\n${describePeak(samples)}\n`,
     'utf8',
   );
   return `sampled ${samples.length} process-tree points during six-second export; peak ${(peakBytes / 1024 / 1024).toFixed(1)} MiB; ${exported.message}`;
@@ -521,7 +538,7 @@ async function runTenMinuteMemoryRow(page, ctx) {
   );
   writeFileSync(
     join(dir, 'memory-peak.txt'),
-    `Peak process-tree working set: ${peakBytes} bytes\n`,
+    `Peak process-tree working set: ${peakBytes} bytes\n${describePeak(samples)}\n`,
     'utf8',
   );
   if (failure !== undefined) {
