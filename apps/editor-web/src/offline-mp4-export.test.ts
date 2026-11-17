@@ -828,6 +828,31 @@ describe('createOpfsBlobSink', () => {
     expect(opfs.removed).toEqual(['export-staged-old.mp4.part']);
     expect(opfs.files.has('keep.mp4')).toBe(true);
   });
+
+  it('keeps a staging file that is younger than two hours (another window may be using it)', async () => {
+    const removed: string[] = [];
+    const now = Date.now();
+    const directory = {
+      async getDirectoryHandle() {
+        return this;
+      },
+      async removeEntry(name: string) {
+        removed.push(name);
+      },
+      async *entries() {
+        yield [
+          'export-staged-recent.mp4.part',
+          { getFile: async () => ({ lastModified: now - 60_000 }) },
+        ];
+        yield [
+          'export-staged-old.mp4.part',
+          { getFile: async () => ({ lastModified: now - 3 * 3_600_000 }) },
+        ];
+      },
+    };
+    await removeStaleOpfsExportStages(directory as never);
+    expect(removed).toEqual(['export-staged-old.mp4.part']);
+  });
 });
 
 describe('detectOfflineMp4Capability', () => {

@@ -324,6 +324,9 @@ interface OpfsFile {
   getFile(): Promise<File>;
 }
 
+/** A staging file younger than this may belong to another window's running export. */
+const STALE_STAGE_AGE_MS = 2 * 60 * 60 * 1000;
+
 /** Removes abandoned staging entries before a new export starts. */
 export async function removeStaleOpfsExportStages(root?: OpfsDirectory): Promise<void> {
   const opfsRoot = root ?? (await getOpfsRoot());
@@ -331,8 +334,14 @@ export async function removeStaleOpfsExportStages(root?: OpfsDirectory): Promise
   try {
     const directory = await opfsRoot.getDirectoryHandle('export-staging', { create: true });
     if (directory.entries === undefined) return;
-    for await (const [name] of directory.entries()) {
+    for await (const [name, handle] of directory.entries()) {
       if (name.startsWith('export-staged-') && name.endsWith('.mp4.part')) {
+        // A file another window is still writing or uploading is recent: only remove abandoned ones.
+        const modified = await Promise.resolve()
+          .then(() => handle.getFile())
+          .then((file) => file.lastModified)
+          .catch(() => undefined);
+        if (typeof modified === 'number' && Date.now() - modified < STALE_STAGE_AGE_MS) continue;
         await directory.removeEntry(name).catch(() => undefined);
       }
     }

@@ -135,9 +135,18 @@ async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
     root = await storage.getDirectory();
     directory = await root.getDirectoryHandle('export-staging', { create: true });
     if (directory.entries !== undefined) {
-      for await (const [staleName] of directory.entries()) {
-        if (staleName.startsWith('export-staged-') && staleName.endsWith('.mp4.part'))
+      for await (const [staleName, staleHandle] of directory.entries()) {
+        if (staleName.startsWith('export-staged-') && staleName.endsWith('.mp4.part')) {
+          // A file younger than two hours may belong to another window's running export.
+          const modified = await Promise.resolve()
+            .then(() =>
+              (staleHandle as { getFile?: () => Promise<{ lastModified?: number }> }).getFile?.(),
+            )
+            .then((staleFile) => staleFile?.lastModified)
+            .catch(() => undefined);
+          if (typeof modified === 'number' && Date.now() - modified < 2 * 60 * 60 * 1000) continue;
           await directory.removeEntry(staleName).catch(() => undefined);
+        }
       }
     }
     name = `export-staged-${crypto.randomUUID()}.mp4.part`;
