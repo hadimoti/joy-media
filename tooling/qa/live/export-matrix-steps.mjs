@@ -8,8 +8,23 @@ import {
   probeFrameDimensions,
 } from '../compare.mjs';
 import { EXPORT_PRESETS } from './export-preset-spec.mjs';
-import { exportAndProbe, listMp4, readExportState } from './export-probe.mjs';
-import { blurFocus, ensureTimelineClip, selectClipById, waitForSnapshot } from './ui-steps.mjs';
+import { blockedRow } from './rows.mjs';
+import {
+  exportAndProbe,
+  ffprobeJson,
+  listMp4,
+  newFiles,
+  readExportState,
+} from './export-probe.mjs';
+import {
+  blurFocus,
+  clickClipById,
+  ensureTimelineClip,
+  readTimelineBoxes,
+  selectClipById,
+  snapshot,
+  waitForSnapshot,
+} from './ui-steps.mjs';
 
 const FRAME_TOLERANCE = 3;
 const BURN_IN_TOLERANCE = 6; // text edges are resampled; live 17 Nov: a one-pixel shift of the burned digits gave 4.3 at 1 s and 2 s
@@ -86,15 +101,38 @@ function expectedSize(presetId) {
   return preset.size ?? { width: 1920, height: 1080 };
 }
 
+const CLICK_TIMEOUT_MS = 10_000;
+
+/**
+ * Clicks a locator with a short timeout. A timeout is rethrown with the name of what was clicked, so the row says
+ * which control it could not reach (a bare "locator.click: Timeout" needs a screenshot to read).
+ */
+export async function clickNamed(locator, what, { timeout = CLICK_TIMEOUT_MS } = {}) {
+  try {
+    await locator.click({ timeout });
+  } catch (error) {
+    throw new Error(
+      `could not click ${what} within ${timeout} ms: ${String(error?.message ?? error).split('\n')[0]}`,
+    );
+  }
+}
+
 async function selectPreset(page, presetId) {
-  await page.getByRole('button', { name: /^Format:/u }).click();
-  await page
-    .getByRole('menuitemradio', { name: EXPORT_PRESETS[presetId].label, exact: true })
-    .click();
+  await clickNamed(
+    page.getByRole('button', { name: /^Format:/u }),
+    'button /^Format:/ (the format menu)',
+  );
+  await clickNamed(
+    page.getByRole('menuitemradio', { name: EXPORT_PRESETS[presetId].label, exact: true }),
+    `menuitemradio "${EXPORT_PRESETS[presetId].label}"`,
+  );
   const reframe = page.getByRole('dialog', { name: 'Reframe clips for the new canvas?' });
   if (await reframe.isVisible().catch(() => false)) {
     await reframe.locator('input[name="canvas-reframe-mode"][value="fit"]').check();
-    await reframe.getByRole('button', { name: 'Apply', exact: true }).click();
+    await clickNamed(
+      reframe.getByRole('button', { name: 'Apply', exact: true }),
+      'button "Apply" in the Reframe dialog',
+    );
   }
 }
 
@@ -231,10 +269,13 @@ async function captureMonitorFrame(page, seconds, path, frameDimensions) {
   // The Fit chip lives in the zoom drawer: open it when it is closed.
   const fit = page.getByRole('button', { name: 'Zoom Fit', exact: true });
   if (!(await fit.isVisible().catch(() => false))) {
-    await page.locator('[aria-controls="monitor-zoom-drawer"]').first().click();
+    await clickNamed(
+      page.locator('[aria-controls="monitor-zoom-drawer"]').first(),
+      'the zoom drawer toggle [aria-controls="monitor-zoom-drawer"]',
+    );
     await fit.waitFor({ state: 'visible', timeout: 5_000 });
   }
-  await fit.click();
+  await clickNamed(fit, 'button "Zoom Fit"');
   const wrap = page.locator('.monitor-canvas-wrap').first();
   const rect = await wrap.evaluate((element) => {
     const box = element.getBoundingClientRect();
@@ -581,42 +622,164 @@ export function processTreeNames(rootPid, { run = spawnSync } = {}) {
  * T-A10 item 6: start an export, cancel it while it runs, and check that the app says so, the Export button is free
  * again, no MP4 was kept in the download folder and no ffmpeg process is left below the app.
  */
-async function runCancelRow(page, ctx, rowId, fixtureName) {
+/** The timeline must run at least this long before the cancel rows export it (a short export ends before the click). */
+export const CANCEL_MIN_TIMELINE_SECONDS = 30;
+/**
+ * The Cancel button is clicked as soon as it shows, once the export has been busy this long. The minimum is kept
+ * because the check for ffmpeg below the app passes for nothing when the encoder has not started yet.
+ */
+export const CANCEL_MIN_BUSY_MS = 1_000;
+export const CANCEL_POLL_MS = 150;
+const EXPORT_START_TIMEOUT_MS = 30_000;
+const FINISHED_BEFORE_CANCEL =
+  'the export finished before it could be cancelled (fixture too short on this machine)';
+
+/** Pure: the timeline length in seconds, from the clip boxes on the page; `clipSeconds` is the length of one copy. */
+export function timelineSecondsFromBoxes(clips, clipSeconds) {
+  if (!Array.isArray(clips) || clips.length === 0) return 0;
+  const first = clips.reduce((best, clip) => (clip.left < best.left ? clip : best));
+  const width = first.right - first.left;
+  if (!(width > 0)) throw new Error('the first timeline clip has no width on the page');
+  const left = Math.min(...clips.map((clip) => clip.left));
+  const right = Math.max(...clips.map((clip) => clip.right));
+  // Measured in the width of one copy, so the answer does not depend on the zoom.
+  return ((right - left) / width) * clipSeconds;
+}
+
+/**
+ * Duplicates the rightmost clip (Ctrl+D clones it after itself) until the timeline, read from the clip boxes on the
+ * page, is at least `minSeconds` long. Each step waits for the clip count to grow. Returns the length reached.
+ */
+export async function lengthenTimeline(
+  page,
+  rowId,
+  { clipSeconds, minSeconds = CANCEL_MIN_TIMELINE_SECONDS },
+) {
+  const lengthOf = async () =>
+    timelineSecondsFromBoxes((await page.evaluate(readTimelineBoxes)).clips, clipSeconds);
+  let length = await lengthOf();
+  for (let step = 0; step < 40 && length < minSeconds; step += 1) {
+    const { clips } = await page.evaluate(readTimelineBoxes);
+    const last = clips.reduce((best, clip) => (clip.right > best.right ? clip : best));
+    await clickClipById(page, last.id);
+    await blurFocus(page);
+    const count = (await snapshot(page)).clips.length;
+    await page.keyboard.press('Control+KeyD');
+    await waitForSnapshot(
+      page,
+      (shown) => shown.clips.length > count,
+      `${rowId}: Ctrl+D did not duplicate the clip while the timeline was lengthened`,
+    );
+    length = await lengthOf();
+  }
+  if (length < minSeconds)
+    throw new Error(
+      `${rowId}: the timeline is ${length.toFixed(1)} s after 40 duplicates, expected at least ${minSeconds} s`,
+    );
+  return length;
+}
+
+function defaultEnsureClip(page, ctx, rowId) {
+  return ensureTimelineClip(page, ctx, rowId, { fresh: true });
+}
+
+function fixtureDurationSeconds(file) {
+  const seconds = Number(ffprobeJson(file).format?.duration);
+  if (!(seconds > 0)) throw new Error(`ffprobe gave no duration for ${file}`);
+  return seconds;
+}
+
+/**
+ * T-A10 item 6 (D-A10-13, D-A10-14): start an export, cancel it while it runs, and check that the Export button is
+ * free again, no MP4 was kept in the download folder and no ffmpeg process is left below the app. The cancel is
+ * clicked as soon as the Cancel button shows (polled, no fixed sleep). A WebM source shorter than the minimum is
+ * first lengthened on the timeline. When the export ends before the click, the row is BLOCKED, not failed.
+ * `deps` replaces the page-free helpers and the clock in the unit tests.
+ */
+export async function runCancelRow(page, ctx, rowId, fixtureName, deps = {}) {
   if (!ctx.downloadDir)
     throw new Error(`BLOCKED ${rowId}: driver test-download folder is unavailable`);
   if (!ctx.media) throw new Error(`BLOCKED ${rowId}: run with --media <fixture folder file>`);
+  const ensureClip = deps.ensureClip ?? defaultEnsureClip;
+  const fixtureSeconds = deps.fixtureSeconds ?? fixtureDurationSeconds;
+  const lengthen = deps.lengthen ?? lengthenTimeline;
+  const listFiles = deps.listMp4 ?? listMp4;
+  const processNames = deps.processNames ?? processTreeNames;
+  const now = deps.now ?? Date.now;
+  const wait = deps.wait ?? ((ms) => page.waitForTimeout(ms));
   const shortMedia = ctx.media;
-  ctx.media = join(dirname(resolve(shortMedia)), fixtureName);
+  const fixture = join(dirname(resolve(shortMedia)), fixtureName);
+  ctx.media = fixture;
   try {
-    await ensureTimelineClip(page, ctx, rowId, { fresh: true });
+    await ensureClip(page, ctx, rowId);
   } finally {
     ctx.media = shortMedia;
   }
   await selectPreset(page, 'youtube-1080');
-  const before = listMp4(ctx.downloadDir);
-  await page.getByRole('button', { name: /^Export MP4/u }).click();
-  // Wait until the export is really running, then give it a moment so there is something to cancel.
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline && !(await page.evaluate(readExportState)).busy)
-    await page.waitForTimeout(250);
-  if (!(await page.evaluate(readExportState)).busy)
-    throw new Error(`${rowId}: the export never started (the Export button was never busy)`);
-  await page.waitForTimeout(4_000);
-  await page.getByRole('button', { name: 'Cancel export', exact: true }).click();
-  const settle = Date.now() + 60_000;
+  const clipSeconds = fixtureSeconds(fixture);
+  // A fixture of 10 minutes is already long enough; the 3-second WebM is copied until the timeline is long enough.
+  const timeline =
+    clipSeconds < CANCEL_MIN_TIMELINE_SECONDS
+      ? await lengthen(page, rowId, { clipSeconds, minSeconds: CANCEL_MIN_TIMELINE_SECONDS })
+      : undefined;
+  const before = listFiles(ctx.downloadDir);
+  await clickNamed(
+    page.getByRole('button', { name: /^Export MP4/u }),
+    'button /^Export MP4/ (the header export button)',
+  );
+  const cancel = page.getByRole('button', { name: 'Cancel export', exact: true });
+  const startedAt = now();
+  let busySince;
+  let cancelledAt;
+  for (;;) {
+    const state = await page.evaluate(readExportState);
+    if (state.busy && busySince === undefined) busySince = now();
+    if (busySince !== undefined && !state.busy) throw blockedRow(rowId, FINISHED_BEFORE_CANCEL);
+    if (
+      busySince !== undefined &&
+      now() - busySince >= CANCEL_MIN_BUSY_MS &&
+      (await cancel.isVisible().catch(() => false))
+    ) {
+      try {
+        await clickNamed(cancel, 'button "Cancel export"', { timeout: 5_000 });
+      } catch (error) {
+        if ((await page.evaluate(readExportState)).busy) throw error;
+        throw blockedRow(rowId, FINISHED_BEFORE_CANCEL);
+      }
+      cancelledAt = now();
+      break;
+    }
+    if (now() - startedAt >= EXPORT_START_TIMEOUT_MS) {
+      if (busySince === undefined) {
+        if (newFiles(before, listFiles(ctx.downloadDir)).length > 0)
+          throw blockedRow(rowId, FINISHED_BEFORE_CANCEL);
+        throw new Error(`${rowId}: the export never started (the Export button was never busy)`);
+      }
+      throw new Error(
+        `${rowId}: the export was busy but no "Cancel export" button showed within ${EXPORT_START_TIMEOUT_MS / 1000} s`,
+      );
+    }
+    await wait(CANCEL_POLL_MS);
+  }
+  const settle = now() + 60_000;
   let state = await page.evaluate(readExportState);
-  while (Date.now() < settle && state.busy) {
-    await page.waitForTimeout(500);
+  while (now() < settle && state.busy) {
+    await wait(500);
     state = await page.evaluate(readExportState);
   }
   if (state.busy) throw new Error(`${rowId}: the Export button stayed busy 60 s after Cancel`);
-  await page.waitForTimeout(3_000);
-  const kept = listMp4(ctx.downloadDir).filter((name) => !before.includes(name));
+  await wait(3_000);
+  const kept = listFiles(ctx.downloadDir).filter((name) => !before.includes(name));
   if (kept.length > 0)
     throw new Error(`${rowId}: a file was kept after Cancel: ${kept.join(', ')}`);
-  const names = processTreeNames(ctx.appPid);
+  const names = processNames(ctx.appPid);
   const leftovers = names.filter((name) => name.startsWith('ffmpeg') || name.startsWith('ffprobe'));
   if (leftovers.length > 0)
     throw new Error(`${rowId}: still running after Cancel: ${leftovers.join(', ')}`);
-  return `export started, cancelled after 4 s; Export button free again; toast: ${state.toast.split('\n')[0] || '(none)'}; no new MP4; no ffmpeg below the app`;
+  const cut = ((cancelledAt - busySince) / 1000).toFixed(1);
+  const length =
+    timeline === undefined
+      ? `${clipSeconds.toFixed(1)} s source, not lengthened`
+      : `timeline lengthened to ${timeline.toFixed(1)} s`;
+  return `export started, cancelled ${cut} s after it went busy; ${length}; Export button free again; toast: ${state.toast.split('\n')[0] || '(none)'}; no new MP4; no ffmpeg below the app`;
 }
