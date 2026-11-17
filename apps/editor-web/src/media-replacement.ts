@@ -1,11 +1,9 @@
 import type { AssetRecordV1, SpikeProject } from '@joy-media/project-schema';
 import type { CommandTransaction, SpikeCommand } from '@joy-media/commands';
+import { sha256OfBlob } from './blob-sha256.js';
+import { assetMediaMimeType } from './asset-mime-type.js';
 
-/** Lower-case hex SHA-256 of a blob's bytes. */
-export async function sha256OfBlob(blob: Blob): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
+export { sha256OfBlob };
 
 /**
  * Builds the record for a replacement asset. It carries its own checksum and
@@ -24,7 +22,7 @@ export async function buildReplacementAsset(
     bytes: file.size,
     descriptor: {
       ...(original.descriptor ?? {}),
-      mimeType: file.type || original.descriptor?.mimeType || 'application/octet-stream',
+      mimeType: assetMediaMimeType(original.kind, [file.type, original.descriptor?.mimeType]),
     },
   };
 }

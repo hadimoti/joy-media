@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
 import type { AssetRecordV1 } from '@joy-media/project-schema';
 import { validateSpikeProject } from '@joy-media/project-schema';
 import { applyTransaction } from '@joy-media/commands';
@@ -32,6 +33,36 @@ describe('buildReplacementAsset', () => {
     expect(replacement.sha256).not.toBe(originalRecord.sha256);
     expect(replacement.displayName).toBe('clip-a.mp4 (replacement)');
     expect(originalRecord).toEqual(before);
+  });
+
+  it('hashes the replacement without reading the whole Blob into one buffer', async () => {
+    const bytes = new TextEncoder().encode('new clip!');
+    const file = new Blob([bytes], { type: 'video/mp4' });
+    const wholeFileRead = vi
+      .spyOn(file, 'arrayBuffer')
+      .mockRejectedValue(new Error('whole-file read'));
+
+    try {
+      const replacement = await buildReplacementAsset(originalRecord, 'asset-replacement-1', file);
+      expect(replacement.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
+      expect(wholeFileRead).not.toHaveBeenCalled();
+    } finally {
+      wholeFileRead.mockRestore();
+    }
+  });
+
+  it('uses the asset kind when neither MIME source describes a supported media type', async () => {
+    const original: AssetRecordV1 = {
+      ...originalRecord,
+      descriptor: { mimeType: 'application/octet-stream' },
+    };
+    const replacement = await buildReplacementAsset(
+      original,
+      'asset-replacement-1',
+      new Blob([new TextEncoder().encode('new clip!')]),
+    );
+
+    expect(replacement.descriptor?.mimeType).toBe('video/octet-stream');
   });
 });
 

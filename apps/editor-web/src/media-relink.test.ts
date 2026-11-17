@@ -74,6 +74,50 @@ describe('media relink verification', () => {
   });
 });
 
+describe('media relink recorded checksum', () => {
+  it('accepts a record whose checksum is written in uppercase hex', async () => {
+    const lower = await recordFor(original);
+    const record = { ...lower, sha256: lower.sha256!.toUpperCase() };
+    expect(await verifyReplacementMedia(record, new Blob([original]))).toEqual({ ok: true });
+  });
+
+  it('writes an uppercase-recorded original through the cache with a lowercase checksum', async () => {
+    const lower = await recordFor(original);
+    const record = { ...lower, sha256: lower.sha256!.toUpperCase() };
+    const cache = memoryCache();
+    expect(await relinkMissingMedia(cache, record, new Blob([original]))).toEqual({ ok: true });
+    expect(cache.writes[0]!.descriptor.sha256).toBe(lower.sha256);
+  });
+
+  it('still refuses different bytes under an uppercase record', async () => {
+    const lower = await recordFor(original);
+    const record = { ...lower, sha256: lower.sha256!.toUpperCase() };
+    expect(await verifyReplacementMedia(record, new Blob([replacementSameSize]))).toEqual({
+      ok: false,
+      reason: 'hash-mismatch',
+    });
+  });
+
+  it('says the checksum cannot be used when the record holds a value that is not a SHA-256', async () => {
+    const record: AssetRecordV1 = { ...(await recordFor(original)), sha256: 'not-a-checksum' };
+    const cache = memoryCache();
+    const verdict = await relinkMissingMedia(cache, record, new Blob([original]));
+    expect(verdict).toEqual({ ok: false, reason: 'missing-integrity' });
+    expect(cache.writes).toHaveLength(0);
+  });
+
+  it('reports media as not missing when the cache cannot be read', async () => {
+    const cache: RelinkCache = {
+      isAvailable: () => false,
+      async get() {
+        return undefined;
+      },
+      async put() {},
+    };
+    expect(await isMediaMissing(cache, 'asset-clip')).toBe(false);
+  });
+});
+
 describe('media relink write path', () => {
   it('writes a verified replacement through the cache with the record identity', async () => {
     const record = await recordFor(original);
@@ -95,6 +139,17 @@ describe('media relink write path', () => {
     const verdict = await relinkMissingMedia(cache, record, new Blob([replacementSameSize]));
     expect(verdict).toEqual({ ok: false, reason: 'hash-mismatch' });
     expect(cache.writes).toHaveLength(0);
+  });
+
+  it('uses the asset kind as a supported MIME fallback when both MIME sources are unknown', async () => {
+    const record: AssetRecordV1 = {
+      ...(await recordFor(original)),
+      descriptor: { mimeType: 'application/octet-stream' },
+    };
+    const cache = memoryCache();
+
+    expect(await relinkMissingMedia(cache, record, new Blob([original]))).toEqual({ ok: true });
+    expect(cache.writes[0]?.descriptor.mimeType).toBe('video/octet-stream');
   });
 
   it('reports media as missing until a verified original is cached', async () => {

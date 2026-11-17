@@ -1,5 +1,6 @@
 import type { AssetRecordV1, Clip, SpikeProject } from '@joy-media/project-schema';
-import { verifyReplacementMedia, type RelinkCache } from './media-relink.js';
+import { sha256OfBlob } from './blob-sha256.js';
+import { isCacheReadable, recordedIntegrity, type RelinkCache } from './media-relink.js';
 import { flattenRootTimelineVideoClips } from './timeline-nested-playback.js';
 
 /** A project asset whose original is not in this browser profile's cache. */
@@ -11,6 +12,8 @@ export interface MissingMediaEntry {
 /** A candidate file matched to a missing asset by SHA-256 and byte length. */
 export interface MediaFileMatch {
   readonly assetId: string;
+  /** The current missing entry that supplied the integrity record for this match. */
+  readonly entry: MissingMediaEntry;
   readonly file: Blob;
   readonly fileName: string;
 }
@@ -35,17 +38,21 @@ export const NON_FILE_ASSET_KINDS: ReadonlySet<AssetRecordV1['kind']> = new Set(
  * original cache. The control-plane catalog is deliberately not consulted: a
  * package-imported asset exists only in the project and this profile's cache.
  * Only the asset's kind decides which records are skipped; saved projects are not changed.
+ * A cache that cannot be read at all (no OPFS) says nothing about any file, so it lists nothing
+ * rather than the whole project. The reads run together; the result keeps the order of the assets.
  */
 export async function deriveMissingMedia(
   assets: Readonly<Record<string, AssetRecordV1>>,
   cache: RelinkCache,
 ): Promise<readonly MissingMediaEntry[]> {
-  const missing: MissingMediaEntry[] = [];
-  for (const [assetId, record] of Object.entries(assets)) {
-    if (NON_FILE_ASSET_KINDS.has(record.kind)) continue;
-    if ((await cache.get(assetId)) === undefined) missing.push({ assetId, record });
-  }
-  return missing;
+  if (!isCacheReadable(cache)) return [];
+  const candidates = Object.entries(assets).filter(
+    ([, record]) => !NON_FILE_ASSET_KINDS.has(record.kind),
+  );
+  const cached = await Promise.all(candidates.map(([assetId]) => cache.get(assetId)));
+  return candidates.flatMap(([assetId, record], index) =>
+    cached[index] === undefined ? [{ assetId, record }] : [],
+  );
 }
 
 /**
@@ -86,7 +93,8 @@ export function createMissingClipLookup(
 /**
  * Matches chosen files to missing assets by content. A file is assigned to the
  * first missing asset whose recorded hash and size it satisfies, and each asset
- * takes at most one file. Nothing is written here.
+ * takes at most one file. Nothing is written here. Each file is hashed at most once, in slices,
+ * and only when its size equals the recorded size of a remaining asset.
  */
 export async function matchReplacementFiles(
   missing: readonly MissingMediaEntry[],
@@ -97,19 +105,35 @@ export async function matchReplacementFiles(
   const unmatchedFileNames: string[] = [];
   for (const candidate of files) {
     let matchedIndex = -1;
+    let digest: string | undefined;
+    let unreadable = false;
     for (let index = 0; index < remaining.length; index++) {
-      const verdict = await verifyReplacementMedia(remaining[index]!.record, candidate.file);
-      if (verdict.ok) {
+      const recorded = recordedIntegrity(remaining[index]!.record);
+      if (recorded === undefined || recorded.bytes !== candidate.file.size) continue;
+      if (digest === undefined) {
+        try {
+          digest = await sha256OfBlob(candidate.file);
+        } catch {
+          unreadable = true;
+          break;
+        }
+      }
+      if (digest === recorded.sha256) {
         matchedIndex = index;
         break;
       }
     }
-    if (matchedIndex === -1) {
+    if (unreadable || matchedIndex === -1) {
       unmatchedFileNames.push(candidate.fileName);
       continue;
     }
     const [entry] = remaining.splice(matchedIndex, 1);
-    matches.push({ assetId: entry!.assetId, file: candidate.file, fileName: candidate.fileName });
+    matches.push({
+      assetId: entry!.assetId,
+      entry: entry!,
+      file: candidate.file,
+      fileName: candidate.fileName,
+    });
   }
   return {
     matches,

@@ -9,6 +9,8 @@ import {
   missingAssetIdSet,
 } from './missing-media.js';
 import type { RelinkCache } from './media-relink.js';
+import { sha256OfBlob } from './blob-sha256.js';
+import type * as BlobSha256 from './blob-sha256.js';
 import type { OriginalAssetDescriptor } from './opfs-original-asset-cache.js';
 import { flattenRootTimelineVideoClips } from './timeline-nested-playback.js';
 import type * as NestedPlayback from './timeline-nested-playback.js';
@@ -17,6 +19,12 @@ import type * as NestedPlayback from './timeline-nested-playback.js';
 vi.mock('./timeline-nested-playback.js', async (importOriginal) => {
   const actual = await importOriginal<typeof NestedPlayback>();
   return { ...actual, flattenRootTimelineVideoClips: vi.fn(actual.flattenRootTimelineVideoClips) };
+});
+
+// The chunked hash is wrapped, not replaced, so the test can count how many files are hashed.
+vi.mock('./blob-sha256.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof BlobSha256>();
+  return { ...actual, sha256OfBlob: vi.fn(actual.sha256OfBlob) };
 });
 
 async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
@@ -95,6 +103,47 @@ describe('deriveMissingMedia', () => {
     expect(await deriveMissingMedia(virtual, cacheWith([]))).toEqual([]);
   });
 
+  it('reads the cache for every asset at once, and keeps the order of the project assets', async () => {
+    const ids = ['asset-a', 'asset-b', 'asset-c', 'asset-d'];
+    const assets = Object.fromEntries(
+      await Promise.all(ids.map(async (id) => [id, await recordOf(id, encode(id))] as const)),
+    );
+    let inFlight = 0;
+    let peak = 0;
+    const cache: RelinkCache = {
+      async get(assetId) {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        // The first asset answers last, so a result built in answer order would be reordered.
+        await new Promise((resolve) => setTimeout(resolve, assetId === 'asset-a' ? 20 : 1));
+        inFlight -= 1;
+        return undefined;
+      },
+      async put() {},
+    };
+    const missing = await deriveMissingMedia(assets, cache);
+    expect(peak).toBe(ids.length);
+    expect(missing.map((entry) => entry.assetId)).toEqual(ids);
+  });
+
+  it('lists nothing when the cache cannot be read, instead of every asset (OPFS unavailable)', async () => {
+    const assets = {
+      'asset-a': await recordOf('asset-a', encode('a')),
+      'asset-b': await recordOf('asset-b', encode('b')),
+    };
+    const unreadable: RelinkCache = {
+      isAvailable: () => false,
+      async get() {
+        return undefined;
+      },
+      async put() {},
+    };
+    expect(await deriveMissingMedia(assets, unreadable)).toEqual([]);
+    // A cache that is readable and empty still lists the assets.
+    const readable: RelinkCache = { ...unreadable, isAvailable: () => true };
+    expect(await deriveMissingMedia(assets, readable)).toHaveLength(2);
+  });
+
   it('still flags a real file that is not cached, next to the virtual ones', async () => {
     const assets = {
       'asset-intro': await recordOf('asset-intro', encode('intro'), 'video'),
@@ -135,6 +184,107 @@ describe('matchReplacementFiles', () => {
     );
     expect(result.matches).toEqual([]);
     expect(result.unmatchedFileNames).toEqual(['wrong.mp4']);
+    expect(result.unresolvedAssetIds).toEqual(['asset-1']);
+  });
+
+  it('keeps unreadable candidates unmatched and continues matching later files', async () => {
+    const record = await recordOf('asset-1', encode('first clip'));
+    const unreadable = new Blob([encode('first clip')]);
+    const readable = new Blob([encode('first clip')]);
+    vi.mocked(sha256OfBlob).mockClear();
+    vi.mocked(sha256OfBlob).mockRejectedValueOnce(
+      new DOMException('The file cannot be read', 'NotReadableError'),
+    );
+
+    const result = await matchReplacementFiles(
+      [{ assetId: 'asset-1', record }],
+      [
+        { file: unreadable, fileName: 'locked.mp4' },
+        { file: readable, fileName: 'readable.mp4' },
+      ],
+    );
+
+    expect(result.unmatchedFileNames).toEqual(['locked.mp4']);
+    expect(result.matches.map((match) => match.fileName)).toEqual(['readable.mp4']);
+    expect(result.unresolvedAssetIds).toEqual([]);
+  });
+
+  it('returns the matched missing entry with the file match', async () => {
+    const record = await recordOf('asset-1', encode('first clip'));
+    const entry = { assetId: 'asset-1', record };
+    const result = await matchReplacementFiles(
+      [entry],
+      [{ file: new Blob([encode('first clip')]), fileName: 'first.mp4' }],
+    );
+
+    expect(result.matches[0]?.entry).toBe(entry);
+  });
+
+  it('hashes each chosen file once, whatever the number of missing assets, and never as one whole buffer', async () => {
+    // Same-length contents, so every pair passes the size check and used to be hashed again.
+    const wanted = ['aaaa', 'bbbb', 'cccc', 'dddd'];
+    const missing = await Promise.all(
+      wanted.map(async (text, index) => ({
+        assetId: `asset-${index}`,
+        record: await recordOf(`asset-${index}`, encode(text)),
+      })),
+    );
+    const chosen = ['dddd', 'x111', 'aaaa', 'x222', 'x333', 'x444'].map((text, index) => ({
+      file: new Blob([encode(text)]),
+      fileName: `file-${index}.mp4`,
+    }));
+    vi.mocked(sha256OfBlob).mockClear();
+    const wholeBuffer = vi.spyOn(crypto.subtle, 'digest');
+    try {
+      const result = await matchReplacementFiles(missing, chosen);
+      expect(sha256OfBlob).toHaveBeenCalledTimes(chosen.length);
+      expect(wholeBuffer).not.toHaveBeenCalled();
+      expect(result.matches.map((match) => [match.assetId, match.fileName])).toEqual([
+        ['asset-3', 'file-0.mp4'],
+        ['asset-0', 'file-2.mp4'],
+      ]);
+      expect(result.unmatchedFileNames).toEqual([
+        'file-1.mp4',
+        'file-3.mp4',
+        'file-4.mp4',
+        'file-5.mp4',
+      ]);
+      expect(result.unresolvedAssetIds).toEqual(['asset-1', 'asset-2']);
+    } finally {
+      wholeBuffer.mockRestore();
+    }
+  });
+
+  it('does not hash a file whose size matches no missing asset', async () => {
+    const one = await recordOf('asset-1', encode('first clip'));
+    vi.mocked(sha256OfBlob).mockClear();
+    const result = await matchReplacementFiles(
+      [{ assetId: 'asset-1', record: one }],
+      [{ file: new Blob([encode('a much longer file than the record')]), fileName: 'long.mp4' }],
+    );
+    expect(sha256OfBlob).not.toHaveBeenCalled();
+    expect(result.unmatchedFileNames).toEqual(['long.mp4']);
+  });
+
+  it('matches a record whose recorded hash is written in uppercase hex', async () => {
+    const bytes = encode('first clip');
+    const lower = await recordOf('asset-1', bytes);
+    const record = { ...lower, sha256: lower.sha256!.toUpperCase() };
+    const result = await matchReplacementFiles(
+      [{ assetId: 'asset-1', record }],
+      [{ file: new Blob([bytes]), fileName: 'a.mp4' }],
+    );
+    expect(result.matches.map((match) => match.assetId)).toEqual(['asset-1']);
+  });
+
+  it('never matches a record without a recorded checksum', async () => {
+    const bytes = encode('first clip');
+    const record: AssetRecordV1 = { id: 'asset-1', kind: 'video', displayName: 'a.mp4' };
+    const result = await matchReplacementFiles(
+      [{ assetId: 'asset-1', record }],
+      [{ file: new Blob([bytes]), fileName: 'a.mp4' }],
+    );
+    expect(result.matches).toEqual([]);
     expect(result.unresolvedAssetIds).toEqual(['asset-1']);
   });
 
