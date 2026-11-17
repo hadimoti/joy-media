@@ -175,8 +175,8 @@ rows.push({
     }
     await ctx.editDocument(page);
     const before = await ctx.readDocument(page);
-    // Edits are written as they are made: let the last write settle, then pull the plug with no clean shutdown.
-    await page.waitForTimeout(1_000);
+    // Let the last write settle (JOY_QA_KILL_WAIT_MS, default 6 s), then pull the plug with no clean shutdown.
+    await page.waitForTimeout(Number(process.env.JOY_QA_KILL_WAIT_MS ?? 6_000));
     const session = await ctx.killApp();
     const projectHeading = session.page.getByRole('heading', { name: 'Projects', exact: true });
     if (await projectHeading.isVisible().catch(() => false)) {
@@ -197,7 +197,9 @@ rows.push({
     }
     if (reopened === null) throw new Error('the project did not reopen after the kill');
     if (normalizeDocument(reopened) !== normalizeDocument(before.document)) {
-      throw new Error('the document after the kill differs from the document before it');
+      throw new Error(
+        `the document after the kill differs from the document before it (clips before ${JSON.stringify(before.document).match(/"clips":\[/g)?.length ?? 0}, text sizes ${JSON.stringify(before.document).length} against ${JSON.stringify(reopened).length})`,
+      );
     }
     return {
       message: `app killed hard after an edit; project ${before.projectId} reopened with the same document`,
