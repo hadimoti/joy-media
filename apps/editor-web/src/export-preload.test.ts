@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createExportClipSourcePreflight,
   ExportMissingMediaError,
   formatMissingExportMediaMessage,
   loadDetachedVideo,
@@ -34,6 +35,37 @@ class FakeVideo extends EventTarget {
 afterEach(() => vi.useRealTimers());
 
 describe('export preload stages', () => {
+  it('prefers asset display names, then clip names, then clip ids for preflight labels', () => {
+    expect(
+      createExportClipSourcePreflight({
+        clipId: 'clip-uuid',
+        clipName: 'Clip name',
+        visualAssetId: 'visual-id',
+        visualAssetDisplayName: 'Main take',
+        audioAssetId: 'audio-id',
+        audioAssetDisplayName: 'Voiceover',
+      }),
+    ).toEqual({
+      clipId: 'clip-uuid',
+      clipLabel: 'Main take',
+      visualAssetId: 'visual-id',
+      visualAssetLabel: 'Main take',
+      audioAssetId: 'audio-id',
+      audioAssetLabel: 'Voiceover',
+    });
+    expect(
+      createExportClipSourcePreflight({
+        clipId: 'clip-uuid',
+        clipName: 'Clip name',
+        visualAssetId: 'visual-id',
+      }).clipLabel,
+    ).toBe('Clip name');
+    expect(
+      createExportClipSourcePreflight({ clipId: 'clip-uuid', visualAssetId: 'visual-id' })
+        .clipLabel,
+    ).toBe('clip-uuid');
+  });
+
   it('preflights clip sources in timeline order and reports the first offending clip with recovery', async () => {
     const resolve = vi.fn(async (assetId: string) => {
       if (assetId === 'asset-intro')

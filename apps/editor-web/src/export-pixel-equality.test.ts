@@ -112,6 +112,8 @@ describe('recorder export canvas setup', () => {
     class FakeVideoFrame {
       readonly width: number;
       readonly height: number;
+      readonly codedWidth: number;
+      readonly codedHeight: number;
 
       constructor(
         source: unknown,
@@ -126,6 +128,8 @@ describe('recorder export canvas setup', () => {
         const sourceSize = source as { readonly width?: number; readonly height?: number };
         this.width = init.codedWidth ?? sourceSize.width ?? width;
         this.height = init.codedHeight ?? sourceSize.height ?? height;
+        this.codedWidth = this.width;
+        this.codedHeight = this.height;
       }
 
       allocationSize(): number {

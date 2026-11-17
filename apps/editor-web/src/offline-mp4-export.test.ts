@@ -476,6 +476,12 @@ describe('exportOfflineMp4', () => {
         deps,
       ),
     ).rejects.toBeInstanceOf(RangeError);
+    await expect(
+      exportOfflineMp4(
+        { ...baseSource(), manifest: { width: 1921, height: 1080, frameRate: 30, durationUs: 1 } },
+        deps,
+      ),
+    ).rejects.toThrow(/even width and height/u);
     expect(state.outputCreated).toBe(0);
   });
 

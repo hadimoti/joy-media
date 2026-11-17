@@ -13,6 +13,8 @@ const clips: readonly MissingExportClip[] = [
     clipId: 'clip-1',
     assetId: 'asset-1',
     name: 'intro.mp4',
+    missingVisualSource: true,
+    missingAudioSource: true,
     startUs: 0,
     endUs: 2 * SECOND_US,
   },
@@ -20,6 +22,8 @@ const clips: readonly MissingExportClip[] = [
     clipId: 'clip-2',
     assetId: 'asset-1',
     name: 'intro.mp4',
+    missingVisualSource: true,
+    missingAudioSource: true,
     startUs: 5 * SECOND_US,
     endUs: 6 * SECOND_US,
   },
@@ -35,16 +39,19 @@ afterEach(async () => {
   container = undefined;
 });
 
-async function renderDialog(handlers: {
-  readonly onRelink: () => void;
-  readonly onExportAnyway: () => void;
-  readonly onCancel: () => void;
-}): Promise<void> {
+async function renderDialog(
+  handlers: {
+    readonly onRelink: () => void;
+    readonly onExportAnyway: () => void;
+    readonly onCancel: () => void;
+  },
+  dialogClips: readonly MissingExportClip[] = clips,
+): Promise<void> {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root?.render(<MissingExportDialog clips={clips} fps={30} {...handlers} />);
+    root?.render(<MissingExportDialog clips={dialogClips} fps={30} {...handlers} />);
   });
 }
 
@@ -82,6 +89,20 @@ describe('MissingExportDialog (T-R04 three choices)', () => {
     expect(text).toContain('black and silent');
     expect(text).toContain('intro.mp4 at 00:00:00:00 - 00:00:02:00');
     expect(text).toContain('intro.mp4 at 00:00:05:00 - 00:00:06:00');
+  });
+
+  it('keeps a clip visible when only its configured audio source is missing', async () => {
+    const audioOnly: MissingExportClip[] = [
+      { ...clips[0]!, missingVisualSource: false, missingAudioSource: true },
+    ];
+    await renderDialog(
+      { onRelink: vi.fn(), onExportAnyway: vi.fn(), onCancel: vi.fn() },
+      audioOnly,
+    );
+
+    const text = document.querySelector('[role="alertdialog"]')?.textContent ?? '';
+    expect(text).toContain('only its configured audio missing stays visible and silent');
+    expect(text).not.toContain('Clips with missing video stay black');
   });
 
   it('Relink… calls only the relink handler', async () => {

@@ -520,6 +520,8 @@ export async function exportOfflineMp4(
     throw new RangeError('manifest.width must be a positive integer');
   if (!Number.isSafeInteger(height) || height < 1)
     throw new RangeError('manifest.height must be a positive integer');
+  const dimensions = validateH264ExportDimensions(width, height);
+  if (!dimensions.ok) throw new RangeError(dimensions.reason);
   if (!Number.isFinite(frameRate) || frameRate <= 0)
     throw new RangeError('manifest.frameRate must be a positive finite number');
   if (source.signal?.aborted) throw createAbortError();

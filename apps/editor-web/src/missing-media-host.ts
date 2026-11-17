@@ -8,6 +8,8 @@ import {
 } from './missing-media.js';
 import { relinkMissingMedia, type RelinkCache, type ReplacementVerdict } from './media-relink.js';
 import { buildReplacementAsset, repointClipsTransaction } from './media-replacement.js';
+import { flattenRootTimelineVideoClips } from './timeline-nested-playback.js';
+import type { ExportAudioClipSources } from './export-missing-media.js';
 
 /** The editor session surface that missing-media operations need. */
 export interface MissingMediaSession {
@@ -25,7 +27,7 @@ export type UseDifferentFileOutcome =
 
 export interface MissingMediaHost {
   /** Missing assets that a timeline clip still references. */
-  list(): Promise<readonly MissingMediaEntry[]>;
+  list(audioClipSources?: ExportAudioClipSources): Promise<readonly MissingMediaEntry[]>;
   /** Exact-match relink: the file must match the recorded hash and length. */
   relink(entry: MissingMediaEntry, file: Blob): Promise<ReplacementVerdict>;
   /**
@@ -41,12 +43,17 @@ export interface MissingMediaHost {
   ): Promise<BatchMatchResult>;
 }
 
-/** Asset ids that at least one video clip, in any composition or track, references. */
-export function referencedAssetIds(project: SpikeProject): ReadonlySet<string> {
+/** Asset ids used by enabled clips reachable from the root timeline, including configured audio. */
+export function referencedAssetIds(
+  project: SpikeProject,
+  audioClipSources: Readonly<Record<string, { readonly sourceAssetId?: string } | undefined>> = {},
+): ReadonlySet<string> {
   const ids = new Set<string>();
-  for (const composition of Object.values(project.compositions))
-    for (const track of composition.tracks)
-      for (const clip of track.clips) if (clip.kind === 'video') ids.add(clip.assetId);
+  for (const clip of flattenRootTimelineVideoClips(project)) {
+    ids.add(clip.assetId);
+    const audioAssetId = audioClipSources[clip.id]?.sourceAssetId;
+    if (audioAssetId !== undefined) ids.add(audioAssetId);
+  }
   return ids;
 }
 
@@ -62,9 +69,14 @@ export function createMissingMediaHost(
   /** Settles when the session's sample media copy has finished (T-R01); the list waits for it. */
   sampleMediaCopy?: Promise<unknown>,
 ): MissingMediaHost {
-  const list = async (): Promise<readonly MissingMediaEntry[]> => {
+  const list = async (
+    audioClipSources?: ExportAudioClipSources,
+  ): Promise<readonly MissingMediaEntry[]> => {
     await sampleMediaCopy;
-    const referenced = referencedAssetIds(session.timelineProject);
+    const referenced = referencedAssetIds(
+      session.timelineProject,
+      audioClipSources ?? session.visualProject.audio?.clips,
+    );
     const assets = Object.fromEntries(
       Object.entries(session.visualProject.assets).filter(([assetId]) => referenced.has(assetId)),
     ) as Readonly<Record<string, AssetRecordV1>>;
@@ -97,15 +109,38 @@ export function createMissingMediaHost(
         replacementId,
         `Use different file for ${entry.record.displayName}`,
       );
+      const affectedClipIds = new Set<string>();
+      for (const composition of Object.values(session.timelineProject.compositions))
+        for (const track of composition.tracks)
+          for (const clip of track.clips)
+            if (clip.kind === 'video' && clip.assetId === entry.assetId)
+              affectedClipIds.add(clip.id);
+      for (const [clipId, config] of Object.entries(session.visualProject.audio?.clips ?? {}))
+        if (config.sourceAssetId === entry.assetId) affectedClipIds.add(clipId);
       const document: JoyProjectV1 = {
         ...session.visualProject,
         assets: { ...session.visualProject.assets, [replacementId]: record },
+        ...(session.visualProject.audio === undefined
+          ? {}
+          : {
+              audio: {
+                ...session.visualProject.audio,
+                clips: Object.fromEntries(
+                  Object.entries(session.visualProject.audio.clips).map(([clipId, config]) => [
+                    clipId,
+                    config.sourceAssetId === entry.assetId
+                      ? { ...config, sourceAssetId: replacementId }
+                      : config,
+                  ]),
+                ),
+              },
+            }),
       };
       session.dispatchCompound(timeline.label, {
         document,
         ...(timeline.commands.length === 0 ? {} : { timeline }),
       });
-      return { ok: true, replacementId, clipCount: timeline.commands.length };
+      return { ok: true, replacementId, clipCount: affectedClipIds.size };
     },
 
     async matchFiles(files) {

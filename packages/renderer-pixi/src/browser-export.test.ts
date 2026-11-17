@@ -20,7 +20,7 @@ type ExplicitVideoFrameInit = VideoFrameInit & {
   readonly codedHeight?: number;
 };
 
-const manifest = { width: 1, height: 1, frameRate: 1_000, durationUs: 1_000 };
+const manifest = { width: 2, height: 2, frameRate: 1_000, durationUs: 1_000 };
 
 afterEach(() => {
   vi.useRealTimers();
@@ -376,6 +376,21 @@ describe('browser export contracts', () => {
       }),
     ).rejects.toThrow('provide either paintFrame or renderFrame, not both');
   });
+
+  it('rejects odd I420 dimensions before creating a generated video track', async () => {
+    const harness = installRecorderHarness('video/mp4');
+    await expect(
+      downloadBrowserMp4({
+        manifest: { ...manifest, width: 3 },
+        frameCount: 1,
+        canvas: harness.canvas,
+        audioTrack: harness.audioTrack,
+        mimeType: 'video/mp4',
+        paintFrame: () => {},
+      }),
+    ).rejects.toThrow(/even width and height/u);
+    expect(harness.generatorCreated).not.toHaveBeenCalled();
+  });
 });
 
 describe('browser export staging files', () => {
@@ -522,7 +537,7 @@ function installRecorderHarness(reportedMimeType: string) {
   const audioTrack = { kind: 'audio', stop: vi.fn() };
   const addTrack = vi.fn();
   const removeTrack = vi.fn();
-  const canvas = { width: 1, height: 1 };
+  const canvas = { width: 2, height: 2 };
   const recorderState = {
     starts: 0,
     stops: 0,
@@ -562,6 +577,8 @@ function installRecorderHarness(reportedMimeType: string) {
   class FakeVideoFrame {
     readonly width: number;
     readonly height: number;
+    readonly codedWidth: number;
+    readonly codedHeight: number;
 
     constructor(
       source: unknown,
@@ -571,6 +588,8 @@ function installRecorderHarness(reportedMimeType: string) {
       const sourceSize = source as { readonly width?: number; readonly height?: number };
       this.width = init.codedWidth ?? sourceSize.width ?? 1;
       this.height = init.codedHeight ?? sourceSize.height ?? 1;
+      this.codedWidth = this.width;
+      this.codedHeight = this.height;
     }
 
     allocationSize(): number {

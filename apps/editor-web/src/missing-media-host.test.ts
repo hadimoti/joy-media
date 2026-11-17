@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetRecordV1, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { applyTransaction, type CommandTransaction } from '@joy-media/commands';
-import { emptySpikeProject, makeVideoClip, SECOND_US, withClips } from '@joy-media/test-fixtures';
+import {
+  emptySpikeProject,
+  makeCompositionClip,
+  makeVideoClip,
+  SECOND_US,
+  withClips,
+} from '@joy-media/test-fixtures';
 import { createMissingMediaHost, type MissingMediaSession } from './missing-media-host.js';
 import type { RelinkCache } from './media-relink.js';
 import type { OriginalAssetDescriptor } from './opfs-original-asset-cache.js';
@@ -85,6 +91,82 @@ describe('missing media host', () => {
     });
     const host = createMissingMediaHost(session, async () => memoryCache(['asset-cached']));
     expect((await host.list()).map((entry) => entry.assetId)).toEqual(['asset-used']);
+  });
+
+  it('lists only enabled, root-reachable clips, including nested compositions and configured audio sources', async () => {
+    const nested = await recordFor('asset-nested', encode('nested'));
+    const disabled = await recordFor('asset-disabled', encode('disabled'));
+    const orphan = await recordFor('asset-orphan', encode('orphan'));
+    const audio = await recordFor('asset-audio', encode('audio'));
+    const childBase = emptySpikeProject({ durationUs: 4 * SECOND_US, trackCount: 1 });
+    const childProject = {
+      ...childBase,
+      id: 'child-project',
+      rootCompositionId: 'child',
+      compositions: { child: { ...childBase.compositions.root!, id: 'child' } },
+    };
+    const child = withClips(childProject, 'track-0', [
+      makeVideoClip('nested-clip', 0, 4 * SECOND_US, { assetId: 'asset-nested' }),
+    ]).compositions.child!;
+    const orphanProject = {
+      ...childProject,
+      id: 'orphan-project',
+      rootCompositionId: 'orphan',
+      compositions: { orphan: { ...childBase.compositions.root!, id: 'orphan' } },
+    };
+    const orphanComposition = withClips(orphanProject, 'track-0', [
+      makeVideoClip('orphan-clip', 0, SECOND_US, { assetId: 'asset-orphan' }),
+    ]).compositions.orphan!;
+    const base = emptySpikeProject({ durationUs: 10 * SECOND_US, trackCount: 2 });
+    const withCompound = withClips(base, 'track-0', [
+      makeCompositionClip('compound', 0, 4 * SECOND_US, 'child'),
+    ]);
+    const withDisabledClip = withClips(withCompound, 'track-1', [
+      makeVideoClip('disabled-clip', 0, SECOND_US, { assetId: 'asset-disabled' }),
+    ]);
+    const root = withDisabledClip.compositions[withDisabledClip.rootCompositionId]!;
+    const timeline = {
+      ...withDisabledClip,
+      compositions: {
+        ...withDisabledClip.compositions,
+        [root.id]: {
+          ...root,
+          tracks: root.tracks.map((track) =>
+            track.id === 'track-1' ? { ...track, enabled: false } : track,
+          ),
+        },
+        child,
+        orphan: orphanComposition,
+      },
+    };
+    const session = fakeSession(timeline, {
+      'asset-nested': nested,
+      'asset-disabled': disabled,
+      'asset-orphan': orphan,
+      'asset-audio': audio,
+    });
+    session.state.visual = {
+      ...session.state.visual,
+      audio: {
+        clips: {
+          'nested-clip': {
+            sourceAssetId: 'asset-audio',
+            gain: 1,
+            pan: 0,
+            mute: false,
+            solo: false,
+          },
+        },
+        buses: [],
+        effects: [],
+      },
+    };
+    const host = createMissingMediaHost(session, async () => memoryCache([]));
+
+    expect((await host.list()).map((entry) => entry.assetId).sort()).toEqual([
+      'asset-audio',
+      'asset-nested',
+    ]);
   });
 
   it('waits for the sample media copy: a sample asset is never listed as missing, even briefly (T-R01)', async () => {
@@ -184,6 +266,47 @@ describe('missing media host', () => {
     expect(cache.stored.has(replacementId)).toBe(true);
     expect(cache.stored.has('asset-1')).toBe(false);
     // Nothing references the original now, so it leaves the missing list.
+    expect(await host.list()).toEqual([]);
+  });
+
+  it('use-different-file replaces a missing configured audio source', async () => {
+    const video = await recordFor('asset-video', encode('video'));
+    const audioBase = await recordFor('asset-audio', encode('original voiceover'));
+    const audio: AssetRecordV1 = {
+      ...audioBase,
+      kind: 'audio',
+      displayName: 'voiceover.wav',
+      descriptor: { mimeType: 'audio/wav' },
+    };
+    const timeline = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-1', 0, SECOND_US, { assetId: 'asset-video' }),
+    ]);
+    const session = fakeSession(timeline, { 'asset-video': video, 'asset-audio': audio });
+    session.state.visual = {
+      ...session.state.visual,
+      audio: {
+        clips: {
+          'clip-1': {
+            sourceAssetId: 'asset-audio',
+            gain: 1,
+            pan: 0,
+            mute: false,
+            solo: false,
+          },
+        },
+        buses: [],
+        effects: [],
+      },
+    };
+    const cache = memoryCache(['asset-video']);
+    const host = createMissingMediaHost(session, async () => cache);
+    const [missingAudio] = await host.list();
+    expect(missingAudio?.assetId).toBe('asset-audio');
+
+    const outcome = await host.useDifferentFile(missingAudio!, new Blob([encode('new voiceover')]));
+    expect(outcome).toMatchObject({ ok: true, clipCount: 1 });
+    const replacementId = (outcome as { replacementId: string }).replacementId;
+    expect(session.state.visual.audio?.clips['clip-1']?.sourceAssetId).toBe(replacementId);
     expect(await host.list()).toEqual([]);
   });
 
