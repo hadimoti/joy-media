@@ -27,6 +27,9 @@ describe('Asset Library Storage dialog height', () => {
     );
     expect(rule).toContain('flex: 0 1 auto;');
     expect(rule).toContain('min-height: 0;');
+    // the sections are not squeezed in a short window: the body scrolls instead
+    expect(rule).toContain('grid-auto-rows: max-content;');
+    expect(rule).toContain('overflow: auto;');
   });
 
   it('uses a selector at least as specific as the fixed-height rule it overrides', () => {
