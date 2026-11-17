@@ -32,6 +32,7 @@ import { extractPendingChanges } from './agent-plan-visualizer.js';
 import { saveWorkflow } from './workflow-recorder.js';
 import type { EditorSession } from './editor-session.js';
 import type { IsolatedCompositionCapture } from './media-observation/isolated-composition-capture.js';
+import type { TimelineQcTextBox } from './media-observation/qc-sampler.js';
 import type { ProjectWriterStorage } from './project-writer.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import {
@@ -641,7 +642,9 @@ export function AgentPanel({
 }) {
   const createQcCompositionPorts = () => {
     const captures = new Set<IsolatedCompositionCapture>();
+    let latestTextBoxes: readonly TimelineQcTextBox[] = [];
     return {
+      getTextBoxes: () => latestTextBoxes,
       ...(loadProjectAssetBlob === undefined
         ? {}
         : {
@@ -670,8 +673,13 @@ export function AgentPanel({
               signal: AbortSignal,
             ) => {
               const capture = [...captures].find((item) => item.composition === composition);
-              if (capture === undefined) return { boxes: [], notMeasured: true };
-              return capture.collectTextBoxes(signal);
+              if (capture === undefined) {
+                latestTextBoxes = [];
+                return { boxes: [], notMeasured: true };
+              }
+              const measured = await capture.collectTextBoxes(signal);
+              latestTextBoxes = measured.boxes;
+              return measured;
             },
           }),
     };
@@ -2305,9 +2313,10 @@ export function AgentPanel({
             // It has its own adapter: the QC tools above never see this relaxed identity.
             // The timeline check only ever runs through this adapter (the repair loop's check), so it is the one
             // that needs the frame capture; each check releases its own capture.
+            const repairCompositionPorts = createQcCompositionPorts();
             const repairQcAdapter = createEditorQcAdapter({
               ...qcAdapterInput,
-              ...createQcCompositionPorts(),
+              ...repairCompositionPorts,
               getRevision: () => latestSessionRef.current.projectRevisionId,
               isCurrent: () =>
                 activeModelRunIdRef.current === runId &&
@@ -2326,7 +2335,7 @@ export function AgentPanel({
               checks: [timelineQcCheckPort(repairQcAdapter)],
               getAudio: () => audioStateFromProject(latestSessionRef.current.visualProject),
               onAudioApplied: (audio) => onQcAudioApplied?.(audio),
-              textBoxes: () => [],
+              textBoxes: repairCompositionPorts.getTextBoxes,
               maxRounds: latestSettingsRef.current.qualityCheck.fixRounds,
               onApplied: () => onProjectRevision?.(),
               approve: (plan, round, signal) =>
