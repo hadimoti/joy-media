@@ -84,7 +84,7 @@ export interface IsolatedCompositionCaptureInput {
 
 export interface IsolatedCompositionCapture {
   readonly composition: Omit<CompositionObservationRequest, 'outputTimesUs'>;
-  readonly collectTextBoxes: () => Promise<{
+  readonly collectTextBoxes: (signal?: AbortSignal) => Promise<{
     readonly boxes: readonly TimelineQcTextBox[];
     readonly notMeasured: boolean;
   }>;
@@ -671,7 +671,7 @@ export function createIsolatedCompositionCapture(
 
   return {
     composition,
-    async collectTextBoxes() {
+    async collectTextBoxes(signal = new AbortController().signal) {
       if (textBoxesCache !== undefined) return textBoxesCache;
       const root = visualProject.compositions[visualProject.rootCompositionId];
       if (root === undefined) return (textBoxesCache = { boxes: [], notMeasured: true });
@@ -682,26 +682,33 @@ export function createIsolatedCompositionCapture(
       const timelineClips = timelineRoot?.tracks.flatMap((track) => track.clips) ?? [];
       const titleCandidates: TextLayoutCandidate[] = Object.values(visualProject.visualObjects)
         .filter((object) => object.kind === 'text')
-        .map((object) => {
+        .flatMap((object) => {
           const bindings = Object.entries(bindingsByClip)
             .filter(([, ids]) => ids.includes(object.id))
             .map(([clipId]) => clipId);
           const clips = timelineClips.filter((clip) => bindings.includes(clip.id));
-          const clip = clips[0];
-          const startUs = clip?.startUs ?? 0;
-          const endUs = clip === undefined ? root.durationUs : clip.startUs + clip.durationUs;
-          return {
-            id: object.id,
-            kind: 'title' as const,
-            startUs,
-            endUs,
-            sampleUs: Math.floor(startUs + (endUs - startUs) / 2),
-            revision,
-            ...(clips.some((item) => hidden.has(item.id)) ||
-            (bindings.length > 0 && clip === undefined)
-              ? { hidden: true }
-              : {}),
-          };
+          if (bindings.length === 0)
+            return [
+              {
+                id: object.id,
+                kind: 'title' as const,
+                startUs: 0,
+                endUs: root.durationUs,
+                sampleUs: Math.floor(root.durationUs / 2),
+                revision,
+              },
+            ];
+          return clips
+            .filter((clip) => !hidden.has(clip.id))
+            .map((clip) => ({
+              id: `title-occurrence:${object.id.length}:${object.id}:${clip.id}`,
+              nodeId: object.id,
+              kind: 'title' as const,
+              startUs: clip.startUs,
+              endUs: clip.startUs + clip.durationUs,
+              sampleUs: Math.floor(clip.startUs + clip.durationUs / 2),
+              revision,
+            }));
         });
       const captionCandidates: TextLayoutCandidate[] = [];
       for (const track of root.tracks) {
@@ -749,7 +756,6 @@ export function createIsolatedCompositionCapture(
       ]
         .sort((a, b) => a - b)
         .slice(0, boxCap);
-      const signal = new AbortController().signal;
       let readiness;
       try {
         readiness = await composition.readiness.check(composition.snapshot, signal);

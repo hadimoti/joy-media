@@ -4,6 +4,7 @@ import {
   createTimelineQcSampler,
   type TimelineQcCanvasFactory,
   type TimelineQcSampleResult,
+  type TimelineQcSamplingPlan,
   type TimelineQcTextBox,
 } from '../media-observation/qc-sampler.js';
 import type { HostRpcHandlerContext } from './host-rpc.js';
@@ -298,6 +299,86 @@ describe('QC host adapter: timeline check and report', () => {
       'safe-area',
     );
     expect(planHasBox).toHaveBeenCalledWith(true);
+  });
+
+  it('records unavailable text measurement and continues when the collector throws', async () => {
+    let report: Readonly<Record<string, unknown>> | undefined;
+    const sample = vi.fn(async ({ plan }: { plan: TimelineQcSamplingPlan }) => ({
+      status: 'captured' as const,
+      frameIds: plan.frameIds,
+      coverage: plan.coverage,
+      textChecks: [],
+    }));
+    const adapter = createQcHostAdapter({
+      evidenceStore: createEvidenceStore(),
+      identity: () => IDENTITY,
+      timeline: () => ({
+        durationUs: 1_000_000,
+        cutTimesUs: [],
+        textBoxes: [],
+        composition: fakeComposition(),
+      }),
+      collectTextBoxes: async () => {
+        throw new Error('renderer unavailable');
+      },
+      sampler: { sample },
+      isCachedImageSupported: () => false,
+      isPrivacyModeAllowed: () => false,
+      onReport: (next) => {
+        report = next;
+      },
+      digest: async () => 'c'.repeat(64),
+    });
+    await expect(adapter.runTimelineCheck(new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(sample).toHaveBeenCalledOnce();
+    expect(report?.['notes']).toEqual([{ text: 'Text was not measured.' }]);
+  });
+
+  it('cancels text collection and releases its composition once', async () => {
+    const composition = fakeComposition();
+    const rendered: number[] = [];
+    let markFirstRender!: () => void;
+    const firstRender = new Promise<void>((resolve) => (markFirstRender = resolve));
+    let observedSignal!: AbortSignal;
+    const releaseComposition = vi.fn();
+    const adapter = createQcHostAdapter({
+      evidenceStore: createEvidenceStore(),
+      identity: () => IDENTITY,
+      timeline: () => ({
+        durationUs: 1_000_000,
+        cutTimesUs: [],
+        textBoxes: [],
+        composition,
+      }),
+      collectTextBoxes: async (_composition, signal) => {
+        observedSignal = signal;
+        for (const timeUs of [250_000, 750_000]) {
+          signal.throwIfAborted();
+          rendered.push(timeUs);
+          if (rendered.length === 1) markFirstRender();
+          await Promise.resolve();
+        }
+        return { boxes: [], notMeasured: false };
+      },
+      releaseComposition,
+      sampler: {
+        sample: async () => ({ status: 'cancelled' as const, sampledFrameCount: 0 }),
+      },
+      isCachedImageSupported: () => false,
+      isPrivacyModeAllowed: () => false,
+    });
+    const controller = new AbortController();
+    const check = adapter.runTimelineCheck(controller.signal);
+    await firstRender;
+    controller.abort();
+
+    await expect(check).resolves.toMatchObject({ ok: false, code: 'cancelled' });
+    await vi.waitFor(() => expect(releaseComposition).toHaveBeenCalledOnce());
+    expect(observedSignal.aborted).toBe(true);
+    expect(rendered).toEqual([250_000]);
+    expect(releaseComposition).toHaveBeenCalledWith(composition);
   });
 
   it('reuses one report for repeated latest reads and omits findings on request', async () => {

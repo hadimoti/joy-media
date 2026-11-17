@@ -326,6 +326,225 @@ afterEach(() => {
 });
 
 describe('isolated composition capture', () => {
+  it('collects every visible occurrence of a title bound to multiple clips', async () => {
+    const renderer = fakeRenderer();
+    renderer.nodeBounds.mockImplementation((id: string) =>
+      id === 'title'
+        ? nodeBoundsFromBox(
+            id,
+            { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+            { x: 0, y: 0, width: 2, height: 1 },
+          )
+        : undefined,
+    );
+    const title: VisualObjectV1 = {
+      id: 'title',
+      kind: 'text',
+      text: 'Title',
+      transform: transform(),
+    };
+    const project = {
+      ...visualProject({ title }),
+      compositions: {
+        root: {
+          ...visualProject().compositions.root,
+          durationUs: 4_000_000,
+          tracks: [
+            {
+              clips: [
+                { id: 'clip-a', startUs: 0, durationUs: 1_000_000 },
+                { id: 'clip-b', startUs: 2_000_000, durationUs: 1_000_000 },
+              ],
+            },
+          ],
+        },
+      },
+      pluginData: {
+        ...visualProject().pluginData,
+        'joy.clipObjects': { 'clip-a': 'title', 'clip-b': 'title' },
+      },
+    } as unknown as JoyProjectV1;
+    const makeTimeline = (hideFirst: boolean): SpikeProject =>
+      ({
+        rootCompositionId: 'root',
+        compositions: {
+          root: {
+            durationUs: 4_000_000,
+            tracks: [
+              {
+                id: 'track-a',
+                kind: 'video',
+                name: 'A',
+                order: 0,
+                enabled: !hideFirst,
+                locked: false,
+                clips: [
+                  {
+                    id: 'clip-a',
+                    kind: 'audio',
+                    assetId: 'asset-a',
+                    sourceInUs: 0,
+                    startUs: 0,
+                    durationUs: 1_000_000,
+                  },
+                ],
+              },
+              {
+                id: 'track-b',
+                kind: 'audio',
+                name: 'B',
+                order: 1,
+                enabled: true,
+                locked: false,
+                clips: [
+                  {
+                    id: 'clip-b',
+                    kind: 'audio',
+                    assetId: 'asset-b',
+                    sourceInUs: 0,
+                    startUs: 2_000_000,
+                    durationUs: 1_000_000,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      }) as unknown as SpikeProject;
+    const capture = createIsolatedCompositionCapture({
+      visualProject: project,
+      timelineProject: makeTimeline(false),
+      loadProjectAssetBlob: async () => undefined,
+    });
+    try {
+      const measured = await capture.collectTextBoxes();
+      expect(measured.boxes.map(({ startUs, endUs }) => [startUs, endUs])).toEqual([
+        [0, 1_000_000],
+        [2_000_000, 3_000_000],
+      ]);
+      expect(new Set(measured.boxes.map((box) => box.id)).size).toBe(2);
+    } finally {
+      capture.release();
+    }
+
+    fakeRenderer().nodeBounds.mockImplementation((id: string) =>
+      id === 'title'
+        ? nodeBoundsFromBox(
+            id,
+            { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+            { x: 0, y: 0, width: 2, height: 1 },
+          )
+        : undefined,
+    );
+    const partiallyHidden = createIsolatedCompositionCapture({
+      visualProject: project,
+      timelineProject: makeTimeline(true),
+      loadProjectAssetBlob: async () => undefined,
+    });
+    try {
+      await expect(partiallyHidden.collectTextBoxes()).resolves.toMatchObject({
+        boxes: [{ startUs: 2_000_000, endUs: 3_000_000 }],
+        notMeasured: false,
+      });
+    } finally {
+      partiallyHidden.release();
+    }
+  });
+
+  it('stops text rendering between frames when collection is aborted', async () => {
+    const renderer = fakeRenderer();
+    renderer.nodeBounds.mockImplementation((id: string) =>
+      id === 'title'
+        ? nodeBoundsFromBox(
+            id,
+            { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+            { x: 0, y: 0, width: 2, height: 1 },
+          )
+        : undefined,
+    );
+    const title: VisualObjectV1 = {
+      id: 'title',
+      kind: 'text',
+      text: 'Title',
+      transform: transform(),
+    };
+    const project = {
+      ...visualProject({ title }),
+      compositions: {
+        root: {
+          ...visualProject().compositions.root,
+          durationUs: 4_000_000,
+          tracks: [
+            {
+              clips: [
+                { id: 'clip-a', startUs: 0, durationUs: 1_000_000 },
+                { id: 'clip-b', startUs: 2_000_000, durationUs: 1_000_000 },
+              ],
+            },
+          ],
+        },
+      },
+      pluginData: {
+        ...visualProject().pluginData,
+        'joy.clipObjects': { 'clip-a': 'title', 'clip-b': 'title' },
+      },
+    } as unknown as JoyProjectV1;
+    const timeline = {
+      rootCompositionId: 'root',
+      compositions: {
+        root: {
+          durationUs: 4_000_000,
+          tracks: [
+            {
+              id: 'track',
+              kind: 'audio',
+              name: 'Clips',
+              order: 0,
+              enabled: true,
+              locked: false,
+              clips: [
+                {
+                  id: 'clip-a',
+                  kind: 'audio',
+                  assetId: 'a',
+                  sourceInUs: 0,
+                  startUs: 0,
+                  durationUs: 1_000_000,
+                },
+                {
+                  id: 'clip-b',
+                  kind: 'audio',
+                  assetId: 'b',
+                  sourceInUs: 0,
+                  startUs: 2_000_000,
+                  durationUs: 1_000_000,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    } as unknown as SpikeProject;
+    const capture = createIsolatedCompositionCapture({
+      visualProject: project,
+      timelineProject: timeline,
+      loadProjectAssetBlob: async () => undefined,
+    });
+    const controller = new AbortController();
+    renderer.render.mockImplementationOnce(() => {
+      controller.abort();
+      return { width: 4, height: 4, drawCalls: 1, created: 1, reused: 0 };
+    });
+    try {
+      await expect(capture.collectTextBoxes(controller.signal)).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+      expect(renderer.render).toHaveBeenCalledOnce();
+    } finally {
+      capture.release();
+    }
+  });
+
   it('collects renderer title bounds and leaves missing-font text unmeasured', async () => {
     const renderer = fakeRenderer();
     renderer.nodeBounds.mockImplementation((id: string) =>

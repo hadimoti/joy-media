@@ -667,10 +667,11 @@ export function AgentPanel({
             },
             collectTextBoxes: async (
               composition: IsolatedCompositionCapture['composition'] | undefined,
+              signal: AbortSignal,
             ) => {
               const capture = [...captures].find((item) => item.composition === composition);
               if (capture === undefined) return { boxes: [], notMeasured: true };
-              return capture.collectTextBoxes();
+              return capture.collectTextBoxes(signal);
             },
           }),
     };
