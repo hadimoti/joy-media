@@ -89,10 +89,10 @@ export const TIMELINE_DND_H04_ROWS = [
     async run(page, ctx) {
       await fresh(page, ctx, 'D-H01');
       const seeded = await ensureTimelineClip(page, ctx, 'D-H01');
-      const track = page
-        .locator(`.timeline-track[data-track-id="${seeded.clips[0].trackId}"]`)
-        .first();
-      const lock = track.locator('button[aria-label^="Lock "]').first();
+      const lock = page.getByRole('button', { name: /^Lock /u }).first();
+      await lock
+        .locator('xpath=ancestor::*[contains(@class,"timeline-track-header")][1]')
+        .hover({ timeout: 8_000 });
       if ((await lock.getAttribute('aria-pressed')) !== 'true') await lock.click();
       if ((await lock.getAttribute('aria-pressed')) !== 'true')
         throw new Error('track did not lock');
@@ -121,12 +121,23 @@ export const TIMELINE_DND_H04_ROWS = [
       await fresh(page, ctx, 'D-H02');
       const path = fixture(ctx);
       const targetUs = 2_000_000;
-      const result = await fileDropRow(page, ctx, {
-        filePaths: [path],
-        selector: '.timeline-empty-state',
-        targetUs,
-      });
-      const clip = result.clips[0];
+      await dropFiles(page, '.timeline-empty-state', [path], targetUs);
+      let clips;
+      try {
+        clips = await waitForClips(ctx, (rows) => rows.length > 0, 'a dropped clip');
+      } catch {
+        const name = basename(path);
+        const asset = page
+          .locator('.asset-card-name')
+          .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u') })
+          .first();
+        if (await asset.isVisible()) {
+          throw new Error(`file imported into Media as ${name}, but no timeline clip was created`);
+        }
+        throw new Error(`file drop created no clip and no Media asset named ${name}`);
+      }
+      const clip = clips[0];
+      if (clip === undefined) throw new Error('the timeline drop created no clip');
       assertNear(clip.startUs, targetUs, 100_000, 'dropped clip start');
       return `clip ${clip.id} started at ${clip.startUs} us (requested ${targetUs} us)`;
     },
@@ -143,18 +154,20 @@ export const TIMELINE_DND_H04_ROWS = [
       try {
         chmodSync(source, 0o444);
         const before = statSync(source);
-        const result = await fileDropRow(page, ctx, {
-          filePaths: [source],
-          selector: '.timeline-empty-state',
-          targetUs: 2_000_000,
-        });
+        await dropFiles(page, '.timeline-empty-state', [source], 2_000_000);
+        const name = basename(source);
+        await page
+          .locator('.asset-card-name')
+          .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u') })
+          .first()
+          .waitFor({ state: 'visible', timeout: 12_000 });
         const after = statSync(source);
         if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
           throw new Error(
             `read-only source changed: size ${before.size}->${after.size}, mtime ${before.mtimeMs}->${after.mtimeMs}`,
           );
         }
-        return `read-only ${basename(source)} imported as clip ${result.clips[0].id}; source size and mtime stayed unchanged`;
+        return `read-only ${name} appeared in Media; source size and mtime stayed unchanged`;
       } finally {
         chmodSync(source, 0o644);
       }
@@ -175,7 +188,18 @@ export const TIMELINE_DND_H04_ROWS = [
         .locator('.toast-message')
         .filter({ hasText: /failed|unsupported|invalid|could not|must be/iu })
         .first();
-      await message.waitFor({ state: 'visible', timeout: 10_000 });
+      try {
+        await message.waitFor({ state: 'visible', timeout: 10_000 });
+      } catch {
+        const card = page
+          .locator('.asset-card-name')
+          .filter({ hasText: /^not-a-video\.mp4$/u })
+          .first();
+        if (await card.isVisible()) {
+          throw new Error('invalid MP4 was added to Media without a rejection message');
+        }
+        throw new Error('invalid MP4 produced neither a rejection message nor a Media card');
+      }
       const after = await readClips(ctx);
       if (after.length !== before.length)
         throw new Error(`invalid MP4 added ${after.length - before.length} clip(s)`);
@@ -198,7 +222,6 @@ export const TIMELINE_DND_H04_ROWS = [
         return path;
       });
       await dropFiles(page, '.timeline-empty-state', files, 2_000_000);
-      await waitForClips(ctx, (clips) => clips.length >= names.length, 'two Unicode-named clips');
       for (const name of names) {
         await page
           .locator('.asset-card-name')
@@ -222,7 +245,7 @@ export const TIMELINE_DND_H04_ROWS = [
         selector: '.timeline-empty-state',
         targetUs: 1_000_000,
       });
-      await dropFiles(page, '.timeline-track', [path], 4_000_000);
+      await dropFiles(page, '.timeline-lane', [path], 4_000_000);
       const clips = await waitForClips(
         ctx,
         (rows) => rows.length >= first.clips.length + 1,
