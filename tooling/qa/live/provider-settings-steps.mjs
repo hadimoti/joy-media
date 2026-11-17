@@ -604,7 +604,9 @@ export async function runQualityCheck(page, ctx) {
     /cannot capture|composition-unavailable|could not finish this run safely|No quality check|could not run|unavailable/iu.test(
       texts.join(' | '),
     );
-  const ran = /repair plan|no problems|nothing to fix|finding|report/iu.test(joined);
+  const ran = /repair plan|no problems|nothing to fix|finding|report|quality check ran/iu.test(
+    joined,
+  );
   const summary = `${joined.slice(0, 900)} || console: ${consoleLines.slice(0, 4).join(' ; ')}`;
   if (refused || !ran) throw new Error(`the quality check did not run: ${summary}`);
   return { message: `a quality check ran: ${summary}`, results: [] };
