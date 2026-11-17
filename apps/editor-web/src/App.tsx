@@ -841,10 +841,11 @@ async function openForwardExportFrameSource(
       (stageSignal) => {
         opening = (async () => {
           // Loaded on demand: the decoder library is a separate chunk, as for media observation.
-          const { openExportFrameSource } = await import('./export-frame-source.js');
-          const response = await fetch(sourceUrl, { signal: stageSignal });
-          if (!response.ok) return undefined;
-          return openExportFrameSource(await response.blob(), assetId, { signal: stageSignal });
+          const { openExportFrameSource, openExportSourceFromUrl } =
+            await import('./export-frame-source.js');
+          const source = await openExportSourceFromUrl(sourceUrl, stageSignal);
+          if (source === undefined) return undefined;
+          return openExportFrameSource(source, assetId, { signal: stageSignal });
         })();
         return opening;
       },
