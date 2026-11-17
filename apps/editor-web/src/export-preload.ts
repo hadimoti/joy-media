@@ -1,3 +1,5 @@
+import { MediaUnavailableError } from './media-unavailable-error.js';
+
 export const EXPORT_PRELOAD_TIMEOUT_MS = 15_000;
 /** Decoding one clip's audio window can take longer than the seeks the other stages wait for. */
 export const EXPORT_AUDIO_DECODE_TIMEOUT_MS = 60_000;
@@ -50,16 +52,63 @@ export function formatExportClipAssetFailure(
   return `${clipReference} cannot ${phase} ${role} asset "${assetLabel}" (${assetId}). ${recovery} ${detail}`;
 }
 
+/** The name the export shows for a clip: its label when it has one, else its id. */
+function exportClipName(clip: ExportClipSourcePreflight): string {
+  return clip.clipLabel !== undefined && clip.clipLabel.trim().length > 0
+    ? clip.clipLabel
+    : clip.clipId;
+}
+
+/**
+ * The export's refusal when clips have no media in this profile (T-R04): plain words, the clip names and
+ * what to do. The internal asset ids stay out of it.
+ */
+export function formatMissingExportMediaMessage(clipNames: readonly string[]): string {
+  return clipNames.length === 1
+    ? `Missing media in this export: ${clipNames[0]}. Relink or replace the clip.`
+    : `Missing media in this export: ${clipNames.join(', ')}. Relink or replace the clips.`;
+}
+
+/** Refused before any frame is drawn, because the listed clips have no media in this profile. */
+export class ExportMissingMediaError extends Error {
+  readonly clipNames: readonly string[];
+
+  constructor(clipNames: readonly string[]) {
+    super(formatMissingExportMediaMessage(clipNames));
+    this.name = 'ExportMissingMediaError';
+    this.clipNames = clipNames;
+  }
+}
+
+/**
+ * True when the failure is a media file that is not in this profile. A preload stage wraps the resolver's
+ * error, so the cause chain is searched too.
+ */
+function isMissingMediaFailure(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current !== undefined; depth++) {
+    if (current instanceof MediaUnavailableError) return true;
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return false;
+}
+
 export async function preflightExportClipSources<T>(
   clips: readonly ExportClipSourcePreflight[],
   resolveSource: (assetId: string) => Promise<T>,
 ): Promise<ReadonlyMap<string, ExportClipPreflightSources<T>>> {
   const prepared = new Map<string, ExportClipPreflightSources<T>>();
+  // Every clip whose media is missing is listed, so the owner sees all of them at once.
+  const missingClips: ExportClipSourcePreflight[] = [];
   for (const clip of clips) {
     let visualSource: T;
     try {
       visualSource = await resolveSource(clip.visualAssetId);
     } catch (error) {
+      if (isMissingMediaFailure(error)) {
+        missingClips.push(clip);
+        continue;
+      }
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(formatExportClipAssetFailure(clip, 'visual', 'resolve', detail), {
         cause: error,
@@ -74,12 +123,18 @@ export async function preflightExportClipSources<T>(
       const audioSource = await resolveSource(audioAssetId);
       prepared.set(clip.clipId, { visualSource, audioSource });
     } catch (error) {
+      if (isMissingMediaFailure(error)) {
+        missingClips.push(clip);
+        continue;
+      }
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(formatExportClipAssetFailure(clip, 'audio', 'resolve', detail), {
         cause: error,
       });
     }
   }
+  if (missingClips.length > 0)
+    throw new ExportMissingMediaError(missingClips.map((clip) => exportClipName(clip)));
   return prepared;
 }
 

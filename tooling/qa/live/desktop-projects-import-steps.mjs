@@ -435,7 +435,7 @@ rows.push({
   area: 'Export',
   title: `Export the sample project "${EDITOR_PROJECT}"`,
   severity: 'major',
-  expected: `Export MP4 on "${EDITOR_PROJECT}" finishes without "cannot resolve visual asset"`,
+  expected: `Export MP4 on "${EDITOR_PROJECT}" finishes with no "Missing media" refusal and no "cannot resolve visual asset" text (every clip of the sample ships its media)`,
   async run(page, ctx) {
     await goToProjects(page);
     await projectCard(page, EDITOR_PROJECT).click();
@@ -467,6 +467,9 @@ rows.push({
     const shot = await ctx.shot('D-A05-60', 'export');
     if (/cannot resolve visual asset/iu.test(toast)) {
       throw new Error(`known failure still present: ${first}`);
+    }
+    if (/missing media in this export/iu.test(toast)) {
+      throw new Error(`the sample ships without a clip's media: ${first}`);
     }
     if (/failed|error/iu.test(toast)) throw new Error(`export ended with: ${first}`);
     return {
