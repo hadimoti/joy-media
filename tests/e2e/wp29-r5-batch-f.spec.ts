@@ -458,7 +458,12 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         );
         await expect(templates.locator('.template-card', { hasText: customName })).toBeVisible();
 
-        await templates.getByRole('button', { name: `Apply ${customName}` }).click();
+        await templates.getByRole('button', { name: `Add ${customName}`, exact: true }).click();
+        // Adding a template to the timeline now asks first.
+        await page
+          .getByRole('alertdialog', { name: 'Confirm' })
+          .getByRole('button', { name: 'Add', exact: true })
+          .click();
         await expect(
           page.getByText(`Template "${customName}" applied`, { exact: true }),
         ).toBeVisible();
@@ -471,7 +476,7 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         await savedTemplate.getByRole('button', { name: `Delete ${customName}` }).click();
         await page
           .getByRole('alertdialog')
-          .getByRole('button', { name: 'Remove', exact: true })
+          .getByRole('button', { name: 'Delete', exact: true })
           .click();
         await expect(templates.locator('.template-card', { hasText: customName })).toHaveCount(0);
         await expect(templates.getByText('No saved templates yet.', { exact: true })).toBeVisible();
