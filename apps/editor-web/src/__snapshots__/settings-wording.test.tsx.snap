@@ -73,7 +73,6 @@ exports[`the Joy Code Settings wording (T-P07) > keeps a snapshot of every strin
     "categoriesNavLabel": "Settings categories",
     "closeLabel": "Close settings",
     "doneLabel": "Done",
-    "subtitle": "Settings for Joy Code",
     "title": "Joy Code Settings",
   },
   "framePrivacyNotice": {

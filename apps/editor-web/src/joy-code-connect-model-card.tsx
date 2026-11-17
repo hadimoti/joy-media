@@ -1,13 +1,10 @@
 /**
  * Joy Code's one calm "not connected" card.
  *
- * Joy Code is optional: the card says so, names the single action and stops.
- * There is no technical wording here, and the chat never repeats it — the card
- * is the one message (T-D06, owner item OB-13c).
+ * The card names the connection state and the single action.
  */
 
-export const JOY_CODE_CONNECT_MODEL_MESSAGE =
-  'Joy Code is optional. Connect your own AI model to edit by describing what you want.';
+export const JOY_CODE_CONNECT_MODEL_MESSAGE = 'No model connected';
 
 export const JOY_CODE_CONNECT_MODEL_ACTION = 'Connect a model';
 
@@ -20,7 +17,7 @@ export interface JoyCodeConnectModelCardProps {
   readonly action?: string | undefined;
 }
 
-/** The card itself: one sentence, one gold action, nothing else. */
+/** The card itself: one name, one gold action. */
 export function JoyCodeConnectModelCard({
   onConnect,
   ariaLabel,
@@ -28,7 +25,7 @@ export function JoyCodeConnectModelCard({
 }: JoyCodeConnectModelCardProps) {
   return (
     <div className="joy-code-connect-card" role="status" aria-label={ariaLabel}>
-      <p className="joy-code-connect-card-message">{JOY_CODE_CONNECT_MODEL_MESSAGE}</p>
+      <h3 className="joy-code-connect-card-message">{JOY_CODE_CONNECT_MODEL_MESSAGE}</h3>
       {onConnect !== undefined && (
         <button
           type="button"

@@ -1070,7 +1070,7 @@ export function JoyAgentSettingsDialog({
         aria-labelledby="joy-agent-settings-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        {/* Header — the shared dialog frame: title, one-line description, close. */}
+        {/* Header — the shared dialog frame: title and close. */}
         <header className="agent-settings-header joy-agent-settings-header">
           <div className="joy-agent-settings-header-title">
             <span className="joy-settings-logo-mark">
@@ -1078,9 +1078,6 @@ export function JoyAgentSettingsDialog({
             </span>
             <div>
               <h2 id="joy-agent-settings-title">{SETTINGS_DIALOG.title}</h2>
-              <span className="agent-settings-hint joy-settings-header-sub">
-                {SETTINGS_DIALOG.subtitle}
-              </span>
             </div>
           </div>
           <button

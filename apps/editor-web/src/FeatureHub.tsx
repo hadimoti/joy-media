@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   AudioIcon,
   AutoCaptionIcon,
@@ -82,6 +82,32 @@ export function FeatureHub({
   const contentId = `feature-hub-${hub}-content`;
   const hasActiveTool = definition.tools.some((tool) => tool.id === activeTool);
   const panelPresence = useAgentPanelPresence(hub === 'create' ? 'media' : 'effects');
+  const navRef = useRef<HTMLElement | null>(null);
+  const [compactTabs, setCompactTabs] = useState(false);
+
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (nav === null) return;
+    let expandedWidth = 0;
+
+    const updateTabLayout = () => {
+      const tabs = Array.from(nav.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+      if (!nav.classList.contains('is-compact')) {
+        expandedWidth = Math.max(
+          expandedWidth,
+          tabs.reduce((total, tab) => total + tab.scrollWidth, 0) + 2 * tabs.length,
+        );
+      }
+      const availableWidth = nav.clientWidth;
+      if (availableWidth > 0) setCompactTabs(availableWidth < expandedWidth);
+    };
+
+    updateTabLayout();
+    const observer = new ResizeObserver(updateTabLayout);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [definition.tools]);
+
   return (
     <section
       className={`feature-hub feature-hub--${hub}${panelPresence.active ? ' is-agent-active' : ''}`}
@@ -89,7 +115,12 @@ export function FeatureHub({
       data-agent-active={panelPresence.active ? 'true' : undefined}
       data-agent-phase={panelPresence.active ? panelPresence.phase : undefined}
     >
-      <nav className="feature-hub-nav" role="tablist" aria-label={`${definition.label} tools`}>
+      <nav
+        ref={navRef}
+        className={`feature-hub-nav${compactTabs ? ' is-compact' : ''}`}
+        role="tablist"
+        aria-label={`${definition.label} tools`}
+      >
         {definition.tools.map((tool, index) => (
           <button
             key={tool.id}
@@ -127,7 +158,7 @@ export function FeatureHub({
             <span className="feature-hub-icon" aria-hidden="true">
               <FeatureGlyph id={tool.id} />
             </span>
-            <span>{tool.shortLabel}</span>
+            <span className="feature-hub-label">{tool.shortLabel}</span>
             <FeatureToolPresence hub={hub} toolId={tool.id} />
           </button>
         ))}

@@ -70,10 +70,9 @@ export const SETTINGS_PAGES: Readonly<Record<SettingsPageId, SettingsPageWording
   },
 };
 
-/** The dialog itself: its title, the line under it, and its frame. */
+/** The dialog itself: its title and frame. */
 export const SETTINGS_DIALOG = {
   title: 'Joy Code Settings',
-  subtitle: 'Settings for Joy Code',
   categoriesLabel: 'Categories',
   categoriesNavLabel: 'Settings categories',
   closeLabel: 'Close settings',
