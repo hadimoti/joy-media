@@ -198,7 +198,7 @@ rows.push({
     if (reopened === null) throw new Error('the project did not reopen after the kill');
     if (normalizeDocument(reopened) !== normalizeDocument(before.document)) {
       throw new Error(
-        `the document after the kill differs from the document before it (clips before ${JSON.stringify(before.document).match(/"clips":\[/g)?.length ?? 0}, text sizes ${JSON.stringify(before.document).length} against ${JSON.stringify(reopened).length})`,
+        `the document after the kill differs from the document before it: before ${normalizeDocument(before.document).slice(0, 700)} || after ${normalizeDocument(reopened).slice(0, 700)}`,
       );
     }
     return {
