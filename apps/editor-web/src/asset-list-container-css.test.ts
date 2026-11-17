@@ -17,8 +17,8 @@ function containerBlock(width: string): string {
 // CSS-text checks: they prove the rules exist and follow the panel width, not how the list looks (the live
 // look is confirmed in the browser pane and with the desktop driver).
 describe('Media list view in a narrow panel', () => {
-  it('drops the Collection column when the media panel is narrower than 38rem', () => {
-    const block = containerBlock('38rem');
+  it('drops the Collection column when the media panel is narrower than 42rem', () => {
+    const block = containerBlock('42rem');
     expect(block).toContain(
       'grid-template-columns: 1.25rem 2.65rem minmax(0, 1fr) 4.5rem 5.35rem;',
     );
@@ -37,7 +37,7 @@ describe('Media list view in a narrow panel', () => {
   });
 
   it('gives the name column no fixed minimum, so the row never exceeds the panel', () => {
-    for (const width of ['38rem', '31rem']) {
+    for (const width of ['42rem', '31rem']) {
       expect(containerBlock(width)).toContain('minmax(0, 1fr)');
     }
   });
