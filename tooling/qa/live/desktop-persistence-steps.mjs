@@ -175,14 +175,23 @@ rows.push({
     }
     await ctx.editDocument(page);
     const before = await ctx.readDocument(page);
+    const beforeIds = await readProjectIds(page);
     // Let the last write settle (JOY_QA_KILL_WAIT_MS, default 6 s), then pull the plug with no clean shutdown.
     await page.waitForTimeout(Number(process.env.JOY_QA_KILL_WAIT_MS ?? 6_000));
     const session = await ctx.killApp();
     const projectHeading = session.page.getByRole('heading', { name: 'Projects', exact: true });
     if (await projectHeading.isVisible().catch(() => false)) {
-      const ids = await readProjectIds(session.page);
-      if (!ids.title) throw new Error('BLOCKED D-A09-02: the saved project title is unavailable');
-      await session.page.locator('.project-library-card', { hasText: ids.title }).first().click();
+      // After a hard kill the app may show the Projects page: open the project that was open before the kill.
+      if (!beforeIds.title)
+        throw new Error('BLOCKED D-A09-02: the project title before the kill is unavailable');
+      const card = session.page
+        .locator('.project-library-card', { hasText: beforeIds.title })
+        .first();
+      if ((await card.count()) === 0)
+        throw new Error(
+          `the project "${beforeIds.title}" is not in the Projects list after the kill`,
+        );
+      await card.click();
     }
     const deadline = Date.now() + 15_000;
     let reopened = null;
