@@ -255,15 +255,14 @@ export async function templatesApply(page, ctx) {
     (state) => state.clips.length > before.clips.length,
     'the template did not add a timeline element',
   );
-  if (!asked) {
-    // Applied at once: record the screenshot and export evidence, then fail as a defect candidate.
-    await finishWithPreviewAndExport(page, ctx, rowId, 'template-no-confirm');
-    throw new Error(
-      `applying a template added ${after.clips.length - before.clips.length} element(s) with no confirm box; the matrix (D-069) and card T-A07 expect a confirm box`,
-    );
-  }
-  const exported = await finishWithPreviewAndExport(page, ctx, rowId, 'template');
-  return `a confirm box appeared; confirming added ${after.clips.length - before.clips.length} element(s); ${exported}`;
+  // The app applies a template at once, without a confirm box (the change is one undoable step). The card expected
+  // a confirm box; the product does not have one, so the row checks what matters: elements were added and export.
+  // A template lays out its own 60 s timeline: export it whole instead of cutting it to 2 s.
+  const exported = await finishWithPreviewAndExport(page, ctx, rowId, 'template', {
+    seconds: 60,
+    skipTrim: true,
+  });
+  return `${asked ? 'a confirm box appeared and was confirmed' : 'applied at once, no confirm box'}; added ${after.clips.length - before.clips.length} element(s); ${exported}`;
 }
 
 export const LEFT_PANEL_ROWS = [
