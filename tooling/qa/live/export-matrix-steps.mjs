@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import {
   compareFrames,
@@ -504,6 +504,15 @@ async function runTenMinuteMemoryRow(page, ctx) {
       workingSetBytes: processes.reduce((sum, item) => sum + item.workingSetBytes, 0),
       atMs: Date.now(),
     });
+    // Written at once, so a run that is stopped early still leaves the curve (per process, in MiB).
+    const line = `${new Date().toISOString()} ${processes
+      .map(
+        (proc) =>
+          `${proc.role ?? 'main'}:${proc.pid}:${(proc.workingSetBytes / 1048576).toFixed(0)}`,
+      )
+      .join(' ')}
+`;
+    appendFileSync(join(rowEvidenceDir(ctx, 'D-A10-12'), 'memory-live.txt'), line, 'utf8');
   };
   take();
   const started = Date.now();
