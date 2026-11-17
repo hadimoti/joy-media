@@ -5,12 +5,24 @@ const events = vi.hoisted(() => ({
   log: [] as string[],
   timeResolution: 1000,
   stallTrack: false,
+  failTrack: false,
   onTrackRead: undefined as (() => void) | undefined,
+  urlSources: [] as { readonly url: string }[],
 }));
 
 vi.mock('mediabunny', () => ({
   ALL_FORMATS: [],
   BlobSource: class {},
+  UrlSource: class {
+    readonly url: string;
+    constructor(url: string) {
+      this.url = url;
+      events.urlSources.push(this);
+    }
+    dispose() {
+      events.log.push('source-dispose');
+    }
+  },
   EncodedPacketSink: class {
     packets() {
       // Out of order on purpose: the reader sorts them.
@@ -21,7 +33,12 @@ vi.mock('mediabunny', () => ({
     }
   },
   Input: class {
+    readonly source: { dispose?: () => void } | undefined;
+    constructor(options: { source?: { dispose?: () => void } }) {
+      this.source = options.source;
+    }
     async getPrimaryVideoTrack() {
+      if (events.failTrack) throw new Error('track read failed');
       // A track read that never settles, to test cancellation.
       if (events.stallTrack) {
         events.onTrackRead?.();
@@ -39,6 +56,8 @@ vi.mock('mediabunny', () => ({
     }
     dispose() {
       events.log.push('dispose');
+      // As mediabunny does: the input frees its reference, which disposes an unshared source.
+      this.source?.dispose?.();
     }
   },
 }));
@@ -47,7 +66,9 @@ beforeEach(() => {
   events.log = [];
   events.timeResolution = 1000;
   events.stallTrack = false;
+  events.failTrack = false;
   events.onTrackRead = undefined;
+  events.urlSources = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => ({ ok: true, blob: async () => new Blob([]) })),
@@ -104,6 +125,62 @@ describe('readSourceFrameTiming', () => {
     const pending = readSourceFrameTimingWithin('blob:clip', controller.signal, 60_000);
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  describe.each(['https://example.test/clip.mp4', 'joy-asset://asset-a'])('from %s', (url) => {
+    function stubRangeProbe(supportsRanges: boolean): ReturnType<typeof vi.fn> {
+      const cancel = vi.fn(async () => undefined);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: true,
+          status: supportsRanges ? 206 : 200,
+          headers: {
+            get: (name: string) =>
+              supportsRanges && name === 'Content-Range' ? 'bytes 0-0/42' : null,
+          },
+          body: { cancel },
+          blob: async () => new Blob([]),
+        })),
+      );
+      return cancel;
+    }
+
+    it('probes the range, reads through UrlSource, and disposes it on success', async () => {
+      const cancel = stubRangeProbe(true);
+      const timing = await readSourceFrameTiming(url, new AbortController().signal);
+
+      expect(timing).toEqual({
+        frameDurationUs: 1_000_000 / 30,
+        toleranceUs: 500,
+        storedFrameUs: [0, 33_000],
+      });
+      expect(fetch).toHaveBeenCalledWith(url, {
+        headers: { Range: 'bytes=0-0' },
+        signal: expect.any(AbortSignal),
+      });
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(events.urlSources.map((source) => source.url)).toEqual([url]);
+      expect(events.log).toEqual(['stats', 'dispose', 'source-dispose']);
+    });
+
+    it('disposes the UrlSource when the track read fails', async () => {
+      stubRangeProbe(true);
+      events.failTrack = true;
+      const timing = await readSourceFrameTiming(url, new AbortController().signal);
+
+      expect(timing).toBeUndefined();
+      expect(events.urlSources).toHaveLength(1);
+      expect(events.log).toEqual(['dispose', 'source-dispose']);
+    });
+
+    it('keeps the Blob path, with no UrlSource, when the range probe is refused', async () => {
+      stubRangeProbe(false);
+      await readSourceFrameTiming(url, new AbortController().signal);
+
+      expect(events.urlSources).toHaveLength(0);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('keeps the frame length with no tolerance when the resolution cannot be read', async () => {

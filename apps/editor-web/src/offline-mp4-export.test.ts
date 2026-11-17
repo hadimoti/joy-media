@@ -704,7 +704,7 @@ describe('createBlobSink', () => {
 });
 
 describe('createOpfsBlobSink', () => {
-  function fakeOpfs(writeError?: Error, failAfterFirstWrite = false) {
+  function fakeOpfs(writeError?: Error, failAfterFirstWrite = false, abortError?: Error) {
     const files = new Map<string, Uint8Array[]>();
     const removed: string[] = [];
     const directory = {
@@ -723,7 +723,9 @@ describe('createOpfsBlobSink', () => {
                 chunks.push(new Uint8Array(chunk));
               },
               async close() {},
-              async abort() {},
+              async abort() {
+                if (abortError !== undefined) throw abortError;
+              },
             };
           },
           async getFile() {
@@ -742,7 +744,16 @@ describe('createOpfsBlobSink', () => {
         files.delete(name);
       },
       async *entries() {
-        for (const name of files.keys()) yield [name, {} as never] as [string, never];
+        // Every entry was last written long ago, so the stale sweep may remove it.
+        for (const name of files.keys())
+          yield [
+            name,
+            {
+              async getFile() {
+                return { lastModified: 0 };
+              },
+            } as never,
+          ] as [string, never];
       },
     };
     const fakeFileHandleConstructor = function FakeFileHandle() {};
@@ -813,6 +824,17 @@ describe('createOpfsBlobSink', () => {
     expect(opfs.removed).toHaveLength(1);
   });
 
+  it('removes the staged file when aborting the file stream rejects', async () => {
+    const opfs = fakeOpfs(undefined, false, new Error('abort rejected'));
+    const sink = await createOpfsBlobSink();
+    const writer = sink.writable.getWriter();
+    await writer.write(new Uint8Array([1]));
+    await writer.abort(new Error('cancelled')).catch(() => undefined);
+
+    expect(opfs.files.size).toBe(0);
+    expect(opfs.removed).toHaveLength(1);
+  });
+
   it('removes stale staging entries at the next export start', async () => {
     const opfs = fakeOpfs();
     const stageDirectory = await opfs.directory.getDirectoryHandle('export-staging', {
@@ -843,6 +865,35 @@ describe('createOpfsBlobSink', () => {
         yield [
           'export-staged-recent.mp4.part',
           { getFile: async () => ({ lastModified: now - 60_000 }) },
+        ];
+        yield [
+          'export-staged-old.mp4.part',
+          { getFile: async () => ({ lastModified: now - 3 * 3_600_000 }) },
+        ];
+      },
+    };
+    await removeStaleOpfsExportStages(directory as never);
+    expect(removed).toEqual(['export-staged-old.mp4.part']);
+  });
+
+  it('keeps a staging file whose modification time cannot be read (another window may hold it)', async () => {
+    const removed: string[] = [];
+    const now = Date.now();
+    const directory = {
+      async getDirectoryHandle() {
+        return this;
+      },
+      async removeEntry(name: string) {
+        removed.push(name);
+      },
+      async *entries() {
+        yield [
+          'export-staged-locked.mp4.part',
+          {
+            getFile: async () => {
+              throw new DOMException('file is in use', 'NoModificationAllowedError');
+            },
+          },
         ];
         yield [
           'export-staged-old.mp4.part',
