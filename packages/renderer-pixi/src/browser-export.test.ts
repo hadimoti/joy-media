@@ -3,6 +3,7 @@ import {
   BROWSER_MP4_MIME_CANDIDATES,
   BROWSER_MP4_MIME_TYPE,
   UnsupportedBrowserMp4Error,
+  createBrowserMp4Sink,
   downloadBrowserMp4,
   packBrowserExport,
   selectBrowserMp4MimeType,
@@ -323,6 +324,142 @@ describe('browser export contracts', () => {
     ).rejects.toThrow('provide either paintFrame or renderFrame, not both');
   });
 });
+
+describe('browser export staging files', () => {
+  it('waits for the recorder chunk being written before removing a cancelled staging file', async () => {
+    const harness = installRecorderHarness('video/mp4');
+    // An abort that does not wait for the chunk still in flight: the removal must not depend on it.
+    const opfs = installOpfsStaging({ writeDelayMs: 5, abortWaitsForWrite: false });
+    const abortController = new AbortController();
+    await expect(
+      downloadBrowserMp4({
+        manifest: { ...manifest, frameRate: 1 },
+        frameCount: 2,
+        canvas: harness.canvas,
+        audioTrack: harness.audioTrack,
+        mimeType: 'video/mp4',
+        paintFrame: () => {},
+        onProgress: () => abortController.abort(),
+        signal: abortController.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(opfs.files.size).toBe(0);
+    expect(opfs.removed).toHaveLength(1);
+  });
+
+  it('keeps a staged file whose removal was refused, and removes it on a later discard', async () => {
+    const opfs = installOpfsStaging({ removeFailures: 1 });
+    const sink = await createBrowserMp4Sink();
+    sink.append(new Blob(['chunk']));
+    await sink.discard();
+    expect(opfs.files.size).toBe(1);
+
+    await sink.discard();
+    expect(opfs.files.size).toBe(0);
+  });
+
+  it('keeps a staging file whose modification time cannot be read and removes only aged ones', async () => {
+    const now = Date.now();
+    const opfs = installOpfsStaging({
+      existing: {
+        'export-staged-unreadable.mp4.part': 'unreadable',
+        'export-staged-old.mp4.part': now - 3 * 3_600_000,
+        'export-staged-recent.mp4.part': now - 60_000,
+        'keep.mp4': now - 3 * 3_600_000,
+      },
+    });
+    const sink = await createBrowserMp4Sink();
+    await sink.discard();
+
+    expect(opfs.removed).toContain('export-staged-old.mp4.part');
+    expect(opfs.removed).not.toContain('export-staged-unreadable.mp4.part');
+    expect(opfs.removed).not.toContain('export-staged-recent.mp4.part');
+    expect(opfs.files.has('export-staged-unreadable.mp4.part')).toBe(true);
+    expect(opfs.files.has('keep.mp4')).toBe(true);
+  });
+});
+
+/**
+ * An in-memory OPFS staging directory. `abortWaitsForWrite` defaults to true, as a WHATWG stream
+ * does; `removeFailures` makes the next removals fail the way a file in use does.
+ */
+function installOpfsStaging(
+  options: {
+    readonly existing?: Readonly<Record<string, number | 'unreadable'>>;
+    readonly abortWaitsForWrite?: boolean;
+    readonly writeDelayMs?: number;
+    readonly removeFailures?: number;
+  } = {},
+) {
+  interface FakeFile {
+    readonly name: string;
+    readonly chunks: Blob[];
+    readonly modified: number | 'unreadable';
+    pending: number;
+  }
+  const files = new Map<string, FakeFile>();
+  const removed: string[] = [];
+  let removeFailures = options.removeFailures ?? 0;
+  const addFile = (name: string, modified: number | 'unreadable'): FakeFile => {
+    const file: FakeFile = { name, chunks: [], modified, pending: 0 };
+    files.set(name, file);
+    return file;
+  };
+  for (const [name, modified] of Object.entries(options.existing ?? {})) addFile(name, modified);
+  const handleFor = (file: FakeFile) => ({
+    async createWritable() {
+      return {
+        async write(chunk: Blob) {
+          file.pending++;
+          try {
+            await new Promise((resolve) => setTimeout(resolve, options.writeDelayMs ?? 0));
+            file.chunks.push(chunk);
+          } finally {
+            file.pending--;
+          }
+        },
+        async close() {},
+        async abort() {
+          if (options.abortWaitsForWrite === false) return;
+          while (file.pending > 0) await new Promise((resolve) => setTimeout(resolve, 1));
+        },
+      };
+    },
+    async getFile() {
+      if (file.modified === 'unreadable')
+        throw new DOMException('file is in use', 'NoModificationAllowedError');
+      return new File(file.chunks, file.name, { lastModified: file.modified });
+    },
+  });
+  const directory = {
+    async getDirectoryHandle() {
+      return this;
+    },
+    async getFileHandle(name: string) {
+      return handleFor(files.get(name) ?? addFile(name, Date.now()));
+    },
+    async removeEntry(name: string) {
+      if (removeFailures > 0) {
+        removeFailures -= 1;
+        throw new DOMException('file is in use', 'NoModificationAllowedError');
+      }
+      const file = files.get(name);
+      if (file === undefined) throw new DOMException('no such file', 'NotFoundError');
+      if (file.pending > 0) throw new DOMException('file is in use', 'NoModificationAllowedError');
+      files.delete(name);
+      removed.push(name);
+    },
+    async *entries() {
+      for (const file of [...files.values()]) yield [file.name, handleFor(file)] as const;
+    },
+  };
+  const fileHandleConstructor = function FakeFileHandle() {};
+  Object.assign(fileHandleConstructor.prototype, { createWritable() {} });
+  vi.stubGlobal('FileSystemFileHandle', fileHandleConstructor);
+  vi.stubGlobal('navigator', { storage: { getDirectory: async () => directory } });
+  return { files, removed };
+}
 
 function installRecorderHarness(
   reportedMimeType: string,

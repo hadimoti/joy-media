@@ -78,7 +78,7 @@ export const BROWSER_MP4_MIME_CANDIDATES = [
 export type BrowserMp4MimeType = (typeof BROWSER_MP4_MIME_CANDIDATES)[number];
 export type BrowserMp4MimeSupport = (mimeType: BrowserMp4MimeType) => boolean;
 
-interface BrowserMp4Sink {
+export interface BrowserMp4Sink {
   append(chunk: Blob): void;
   finish(type: string): Promise<Blob>;
   discard(): Promise<void>;
@@ -100,7 +100,39 @@ interface BrowserOpfsFile {
   getFile(): Promise<File>;
 }
 
-async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
+/** A staging file younger than this may belong to another window's running export. */
+export const STALE_EXPORT_STAGE_AGE_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Whether a staging entry may be removed as abandoned. A file whose modification time cannot be
+ * read is kept: it may be another window's open writable, and removing it would break that export.
+ */
+export async function isAbandonedExportStage(handle: {
+  readonly getFile?: () => Promise<{ readonly lastModified?: number }>;
+}): Promise<boolean> {
+  const modified = await Promise.resolve()
+    .then(() => handle.getFile?.())
+    .then((file) => file?.lastModified)
+    .catch(() => undefined);
+  return typeof modified === 'number' && Date.now() - modified >= STALE_EXPORT_STAGE_AGE_MS;
+}
+
+/**
+ * Removes a staged file. Reports `true` only when the file is really gone: removed now, or already
+ * missing. A removal the browser refuses (the file is still in use) reports `false`, so a later
+ * discard can try again.
+ */
+async function removeStagedFile(directory: BrowserOpfsDirectory, name: string): Promise<boolean> {
+  try {
+    await directory.removeEntry(name);
+    return true;
+  } catch (error) {
+    return (error as { readonly name?: unknown } | null)?.name === 'NotFoundError';
+  }
+}
+
+/** Stages the recorder's chunks in OPFS, or in memory when OPFS is unavailable. Exported for the staging tests. */
+export async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
   const parts: Blob[] = [];
   let discarded = false;
   const fallback: BrowserMp4Sink = {
@@ -136,17 +168,12 @@ async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
     directory = await root.getDirectoryHandle('export-staging', { create: true });
     if (directory.entries !== undefined) {
       for await (const [staleName, staleHandle] of directory.entries()) {
-        if (staleName.startsWith('export-staged-') && staleName.endsWith('.mp4.part')) {
-          // A file younger than two hours may belong to another window's running export.
-          const modified = await Promise.resolve()
-            .then(() =>
-              (staleHandle as { getFile?: () => Promise<{ lastModified?: number }> }).getFile?.(),
-            )
-            .then((staleFile) => staleFile?.lastModified)
-            .catch(() => undefined);
-          if (typeof modified === 'number' && Date.now() - modified < 2 * 60 * 60 * 1000) continue;
+        if (
+          staleName.startsWith('export-staged-') &&
+          staleName.endsWith('.mp4.part') &&
+          (await isAbandonedExportStage(staleHandle))
+        )
           await directory.removeEntry(staleName).catch(() => undefined);
-        }
       }
     }
     name = `export-staged-${crypto.randomUUID()}.mp4.part`;
@@ -180,8 +207,7 @@ async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
           } catch (error) {
             if (size !== 0) throw error;
             await writable.abort?.().catch(() => undefined);
-            await directory!.removeEntry(name).catch(() => undefined);
-            removed = true;
+            removed = await removeStagedFile(directory!, name);
             fallbackMode = true;
             parts.push(chunk);
           }
@@ -200,12 +226,13 @@ async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
       return blob.type === type ? blob : new Blob([blob], { type });
     },
     async discard() {
-      if (discarded) return;
       discarded = true;
+      // A chunk already being written (the recorder's final `dataavailable`) settles before the
+      // stream is aborted and the file removed. Appends after this point are skipped.
+      await queue;
       if (fallbackMode) parts.length = 0;
       else if (!closed) await writable.abort?.().catch(() => undefined);
-      if (!removed) await directory!.removeEntry(name).catch(() => undefined);
-      removed = true;
+      if (!removed) removed = await removeStagedFile(directory!, name);
     },
   };
 }
