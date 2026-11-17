@@ -94,6 +94,14 @@ async function storeChatGptProfile(
 }
 
 describe('IPC dispatch', () => {
+  it('flushes Electron DOM storage when the renderer requests it', () => {
+    const flushStorageData = vi.fn();
+    const handlers = createIpcHandlers({ ...deps(), flushStorageData });
+
+    expect(handlers['desktop.storage.flush'](undefined)).toEqual({ ok: true, data: undefined });
+    expect(flushStorageData).toHaveBeenCalledOnce();
+  });
+
   it('registers every generation job operation in the main-process handler table', () => {
     const handlers = createIpcHandlers(deps());
     for (const channel of [
