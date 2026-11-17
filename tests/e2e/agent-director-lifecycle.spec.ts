@@ -229,7 +229,7 @@ test.describe('JOY Live Director lifecycle evidence', () => {
     await composer.press('Enter');
     const secondProposal = page.getByRole('region', { name: 'JOY Agent live proposal' });
     await expect(secondProposal).toBeVisible({ timeout: 20_000 });
-    await expect(secondProposal).toContainText('Set scaleX keyframe at 0µs');
+    await expect(secondProposal).toContainText('Animate Scale X at 0 s');
     await expect(secondProposal).toHaveAttribute('data-agent-preview-ready', 'true', {
       timeout: 20_000,
     });

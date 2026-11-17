@@ -35,7 +35,7 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     await openReferenceWorkspace(page);
     await selectProductClip(page);
     await openPanel(page, 'Effects');
-    const addButtons = page.locator('.effect-add-btn:not([disabled])');
+    const addButtons = page.locator('.effect-card .library-card-add:not([disabled])');
     await addButtons.nth(0).click();
     await addButtons.nth(1).click();
 
@@ -107,27 +107,28 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     await openReferenceWorkspace(page);
     await selectIntroJunction(page);
     await openPanel(page, 'Transitions');
-    const cards = page
-      .getByRole('group', { name: 'Transition type' })
-      .locator('.transition-card[data-transition-type]');
+    const cards = page.locator('.transition-card[data-library-id]');
     const first = cards.nth(0);
     const second = cards.nth(1);
-    const favoriteType = await first.getAttribute('data-transition-type');
-    await first.getByRole('button', { name: 'Add to favorites' }).click();
-    await first.click();
-    await expect(first).toHaveAttribute('aria-pressed', 'true');
-    await second.click();
-    await expect(second).toHaveAttribute('aria-pressed', 'true');
+    const favoriteType = await first.getAttribute('data-library-id');
+    const favoriteButton = first.locator('.library-card-favorite');
+    await favoriteButton.click();
+    await expect(favoriteButton).toHaveAttribute('aria-pressed', 'true');
+    await first.locator('.library-card-add').click();
+    await expect(first).toHaveClass(/is-active/);
+    await second.locator('.library-card-add').click();
+    await expect(second).toHaveClass(/is-active/);
     await page.getByRole('button', { name: 'Remove selected transition' }).click();
     await expect(page.getByRole('button', { name: 'Remove selected transition' })).toHaveCount(0);
 
     await page.reload();
     await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
     await openPanel(page, 'Transitions');
-    const persisted = page
-      .locator(`.transition-card[data-transition-type="${favoriteType}"]`)
-      .first();
-    await expect(persisted.getByRole('button', { name: 'Remove from favorites' })).toBeVisible();
+    const persisted = page.locator(`.transition-card[data-library-id="${favoriteType}"]`).first();
+    await expect(persisted.locator('.library-card-favorite')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     await recordEvidence(testInfo, {
       caseId: 74,
       functional: 'PASS',
@@ -185,7 +186,7 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
       'Red Saturation',
       'Red Luminance',
     ]) {
-      await expect(page.getByRole('slider', { name: property })).toBeVisible();
+      await expect(page.getByRole('slider', { name: property, exact: true })).toBeVisible();
       await expect(
         page.getByRole('button', { name: `Add ${property} keyframe at playhead` }),
       ).toBeVisible();
@@ -245,7 +246,7 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
       .click();
     await expect(page.getByText('No effects applied', { exact: true })).toBeVisible();
     await openPanel(page, 'Effects');
-    await page.locator('.effect-add-btn:not([disabled])').first().click();
+    await page.locator('.effect-card .library-card-add:not([disabled])').first().click();
     await openPanel(page, 'Inspector');
     await page
       .getByRole('tablist', { name: 'Inspector sections' })
