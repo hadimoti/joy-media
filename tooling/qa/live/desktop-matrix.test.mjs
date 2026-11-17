@@ -29,6 +29,7 @@ import {
 } from './desktop-timeline-steps.mjs';
 import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
 import { EXPORT_MATRIX_ROWS } from './export-matrix-steps.mjs';
+import { TIMELINE_DND_H04_ROWS } from './timeline-dnd-h04-scripted-rows.mjs';
 import { createFakePage } from './fake-page.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -456,12 +457,13 @@ test('executeRow: pass writes no defect; fail writes defect text and a file; blo
   assert.ok(failed.ms >= 0 && typeof failed.screenshot === 'string');
 });
 
-test('row tables: unique ids in the T-A05, T-A06 and T-A09 ranges, each with a title and run function', () => {
+test('row tables: unique ids in the T-A05, T-A06, T-A09 and T-H04 ranges, each with a title and run function', () => {
   const ids = [
     ...PROJECTS_IMPORT_ROWS,
     ...TIMELINE_ROWS,
     ...PERSISTENCE_ROWS,
     ...EXPORT_MATRIX_ROWS,
+    ...TIMELINE_DND_H04_ROWS,
   ].map((row) => row.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(MATRIX_IDS.toSorted(), ids.toSorted());
@@ -469,6 +471,7 @@ test('row tables: unique ids in the T-A05, T-A06 and T-A09 ranges, each with a t
   for (const row of TIMELINE_ROWS) assert.match(row.id, /^D-A06-\d{2}$/u);
   for (const row of PERSISTENCE_ROWS) assert.match(row.id, /^D-A09-\d{2}$/u);
   for (const row of EXPORT_MATRIX_ROWS) assert.match(row.id, /^D-A10-\d{2}$/u);
+  for (const row of TIMELINE_DND_H04_ROWS) assert.match(row.id, /^D-H(?:01|02|06|07|08|10)$/u);
   for (const row of Object.values(MATRIX_ROWS)) {
     assert.ok(row.title && typeof row.run === 'function', row.id);
     assert.ok(['blocker', 'major', 'minor'].includes(row.severity), row.id);
