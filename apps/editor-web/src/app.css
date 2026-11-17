@@ -19485,6 +19485,13 @@ label {
   box-shadow: 0 2px 7px rgb(0 0 0 / 55%);
   opacity: 1;
 }
+/* The empty junction is an invisible 22 px drop target on every cut. It sits above both clips, so on a short
+   clip (a one second clip at the default zoom is about 14 px) it covered the whole clip and swallowed its
+   clicks. It only catches the pointer while an editor drag is in progress; the page marks that on the body. */
+body:not([data-editor-pointer-dragging])
+  .timeline-transition-junction.timeline-transition-junction--empty {
+  pointer-events: none;
+}
 
 /* Adjustment-layer library: one clear target, one primary action. */
 .adjustment-library-panel .joy-panel-body {
