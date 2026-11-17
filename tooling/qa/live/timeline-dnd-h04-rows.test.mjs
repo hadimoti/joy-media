@@ -52,6 +52,7 @@ function makeH04Fake(t, id) {
   const media = join(fixtures, 'fixture-video.mp4');
   writeFileSync(media, 'fake fixture bytes for a readable media path');
   writeFileSync(join(fixtures, 'picture-1080.jpg'), 'distinct picture fixture bytes');
+  writeFileSync(join(fixtures, 'audio-stereo.wav'), 'distinct audio fixture bytes');
   const clips =
     id === 'D-H01' ? [{ id: 'seed', assetId: 'seed-asset', trackId: 'track-1', startUs: 0 }] : [];
   const drops = [];

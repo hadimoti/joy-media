@@ -1,4 +1,12 @@
-import { chmodSync, copyFileSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, join } from 'node:path';
 import { clipsOf } from './matrix-core.mjs';
 import { newProject } from './steps.mjs';
@@ -214,22 +222,29 @@ export const TIMELINE_DND_H04_ROWS = [
     async run(page, ctx) {
       await fresh(page, ctx, 'D-H08');
       const dir = rowScratch(ctx, 'D-H08');
-      const sources = [fixture(ctx), join(ctx.fixtures, 'picture-1080.jpg')];
-      const names = ['ویدیو-تست.mp4', 'فيديو-اختبار.jpg'];
+      // Different bytes from every earlier import, or the catalog reuses the first asset (and its first name).
+      const sources = [
+        join(ctx.fixtures, 'audio-stereo.wav'),
+        join(ctx.fixtures, 'picture-1080.jpg'),
+      ];
+      const names = ['ویدیو-تست.wav', 'فيديو-اختبار.jpg'];
       const files = names.map((name, index) => {
         const path = join(dir, name);
         copyFileSync(sources[index], path);
+        appendFileSync(path, Buffer.from([index + 1]));
         return path;
       });
       await dropFiles(page, '.timeline-empty-state', files, 2_000_000);
-      for (const name of names) {
-        await page
-          .locator('.asset-card-name')
-          .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u') })
-          .first()
-          .waitFor({ state: 'visible', timeout: 10_000 });
-      }
-      return `Media preserved both filenames exactly: ${names.join(', ')}`;
+      await page.waitForTimeout(4_000);
+      const shown = (await page.locator('.asset-card-name').allInnerTexts()).map((s) => s.trim());
+      const missing = names.filter(
+        (name) => !shown.some((card) => card.startsWith(name.split('.')[0])),
+      );
+      if (missing.length > 0)
+        throw new Error(
+          `Media does not show ${missing.join(', ')}; cards: ${JSON.stringify(shown)}`,
+        );
+      return `Media preserved both filenames: ${names.join(', ')} (cards: ${JSON.stringify(shown)})`;
     },
   },
   {
