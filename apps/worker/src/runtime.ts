@@ -325,6 +325,11 @@ export class WorkerRuntime {
           { cancelled: options.cancelled },
         );
         await options.progress(80);
+        // The export returning does not mean the job is still wanted: a cancel can land during the encode's tail.
+        if (options.cancelled()) {
+          this.log.write(`job ${job.id} canceled`);
+          return { state: 'canceled' };
+        }
         const { sha256, bytes } = await hashFile(outputPath);
         if (bytes < 1) throw new Error('render.export output is empty');
         const localRef = `export-${job.id}-${sha256.slice(0, 16)}`;
@@ -335,6 +340,12 @@ export class WorkerRuntime {
         await options.progress(90);
         const verified = verifyExport(finalOutput);
         await options.progress(100);
+        if (options.cancelled()) {
+          // Drop the retained derivative too: a canceled job must not leave one behind.
+          rmSync(finalOutput, { force: true });
+          this.log.write(`job ${job.id} canceled`);
+          return { state: 'canceled' };
+        }
         this.log.write(`job ${job.id} completed`);
         return {
           state: 'completed',

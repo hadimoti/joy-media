@@ -350,4 +350,245 @@ describe('WorkerDaemon', () => {
       rmSync(derivativeDirectory, { recursive: true, force: true });
     }
   });
+
+  it('stops heartbeating before it starts the completion call', async () => {
+    let stop = false;
+    let completeStarted = false;
+    let heartbeatsDuringComplete = 0;
+    let leased = false;
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'complete-race', projectId: 'project-1', type: 'fixture.thumbnail' };
+      },
+      heartbeat: async () => {
+        if (completeStarted) heartbeatsDuringComplete += 1;
+        return { cancelRequested: false };
+      },
+      complete: async () => {
+        completeStarted = true;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        stop = true;
+      },
+      fail: async () => undefined,
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return {
+          state: 'completed' as const,
+          result: { kind: 'fixture.thumbnail' as const },
+        };
+      },
+    } as unknown as WorkerRuntime;
+
+    await new WorkerDaemon(client, runtime).run({
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 2,
+      stopped: () => stop,
+    });
+    expect(heartbeatsDuringComplete).toBe(0);
+  });
+
+  it('stops heartbeating for a failed job before it reports the failure and sleeps', async () => {
+    let stop = false;
+    let failStarted = false;
+    let heartbeatsAfterFail = 0;
+    let leased = false;
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'failing-job', projectId: 'project-1', type: 'render.export' };
+      },
+      heartbeat: async () => {
+        if (failStarted) heartbeatsAfterFail += 1;
+        return { cancelRequested: false };
+      },
+      complete: async () => undefined,
+      fail: async () => {
+        failStarted = true;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        stop = true;
+      },
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        throw new Error('ffmpeg crashed');
+      },
+    } as unknown as WorkerRuntime;
+
+    await new WorkerDaemon(client, runtime).run({
+      pollIntervalMs: 40,
+      heartbeatIntervalMs: 2,
+      stopped: () => stop,
+    });
+    expect(heartbeatsAfterFail).toBe(0);
+  });
+
+  it('reports a cancel that lands after the export as canceled, not completed', async () => {
+    let stop = false;
+    let leased = false;
+    const calls: string[] = [];
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'late-cancel', projectId: 'project-1', type: 'render.export' };
+      },
+      heartbeat: async (_jobId: string, progress: number) => ({
+        cancelRequested: progress >= 80,
+      }),
+      uploadDerivative: async () => calls.push('upload'),
+      complete: async () => {
+        calls.push('complete');
+        stop = true;
+      },
+      fail: async (_jobId: string, error: string) => {
+        calls.push(`fail:${error}`);
+        stop = true;
+      },
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async (
+        _job: unknown,
+        options: { readonly progress: (value: number) => Promise<void> },
+      ) => {
+        await options.progress(80);
+        return {
+          state: 'completed' as const,
+          result: {
+            kind: 'render.export' as const,
+            assetId: 'asset-1',
+            sha256: 'c'.repeat(64),
+            bytes: 1,
+            localRef: 'export-late-cancel',
+            descriptor: { mimeType: 'video/mp4' as const, width: 64, height: 36, durationUs: 1 },
+          },
+        };
+      },
+      derivativeFile: async () => {
+        calls.push('derivative');
+        return { path: 'unused', bytes: 1 };
+      },
+    } as unknown as WorkerRuntime;
+
+    await new WorkerDaemon(client, runtime).run({
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 1_000,
+      stopped: () => stop,
+    });
+    expect(calls).toEqual(['fail:canceled']);
+  });
+
+  it('does not complete a job whose cancel arrives while its derivative uploads', async () => {
+    let stop = false;
+    let leased = false;
+    let cancelRequested = false;
+    const calls: string[] = [];
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'upload-cancel', projectId: 'project-1', type: 'render.export' };
+      },
+      heartbeat: async () => ({ cancelRequested }),
+      uploadDerivative: async () => {
+        calls.push('upload');
+        cancelRequested = true;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      },
+      complete: async () => {
+        calls.push('complete');
+        stop = true;
+      },
+      fail: async (_jobId: string, error: string) => {
+        calls.push(`fail:${error}`);
+        stop = true;
+      },
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async () => ({
+        state: 'completed' as const,
+        result: {
+          kind: 'render.export' as const,
+          assetId: 'asset-1',
+          sha256: 'd'.repeat(64),
+          bytes: 1,
+          localRef: 'export-upload-cancel',
+          descriptor: { mimeType: 'video/mp4' as const, width: 64, height: 36, durationUs: 1 },
+        },
+      }),
+      derivativeFile: async () => ({ path: 'unused', bytes: 1 }),
+    } as unknown as WorkerRuntime;
+
+    await new WorkerDaemon(client, runtime).run({
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 2,
+      stopped: () => stop,
+    });
+    expect(calls).toEqual(['upload', 'fail:canceled']);
+  });
+
+  it('reports a failure after a cancel request as canceled', async () => {
+    let stop = false;
+    let leased = false;
+    const calls: string[] = [];
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'cancel-then-crash', projectId: 'project-1', type: 'media.qc' };
+      },
+      heartbeat: async (_jobId: string, progress: number) => ({
+        cancelRequested: progress >= 50,
+      }),
+      complete: async () => {
+        calls.push('complete');
+        stop = true;
+      },
+      fail: async (_jobId: string, error: string) => {
+        calls.push(`fail:${error}`);
+        stop = true;
+      },
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async (
+        _job: unknown,
+        options: { readonly progress: (value: number) => Promise<void> },
+      ) => {
+        await options.progress(50);
+        throw new Error('ffmpeg exited with status 1');
+      },
+    } as unknown as WorkerRuntime;
+
+    await new WorkerDaemon(client, runtime).run({
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 1_000,
+      stopped: () => stop,
+    });
+    expect(calls).toEqual(['fail:canceled']);
+  });
 });

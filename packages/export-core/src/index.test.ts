@@ -230,6 +230,64 @@ describe('deterministic export contract', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   }, 20_000);
+  it('names the OS error and keeps it as the cause when ffmpeg cannot be started', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-missing-ffmpeg-'));
+    const fixturePath = join(directory, 'browser.mp4');
+    const outputPath = join(directory, 'remuxed.mp4');
+    const missingFfmpeg = join(directory, 'no-such-ffmpeg');
+    renderFixture(manifest, fixturePath);
+    try {
+      const failure = await remuxBrowserMp4Async(fixturePath, outputPath, 30, undefined, {
+        ffmpegPath: missingFfmpeg,
+      }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(Error);
+      const error = failure as Error;
+      expect(error.message).toContain('ENOENT');
+      expect(error.message).toContain(missingFfmpeg);
+      expect(error.cause).toMatchObject({ code: 'ENOENT' });
+      expect(readdirSync(directory).some((name) => name.includes('.partial.'))).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it('never starts ffmpeg when the export is already aborted or canceled', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-precanceled-remux-'));
+    const fixturePath = join(directory, 'browser.mp4');
+    const outputPath = join(directory, 'remuxed.mp4');
+    const scriptPath = join(directory, 'marks-start.mjs');
+    const markerPath = join(directory, 'started.txt');
+    renderFixture(manifest, fixturePath);
+    writeFileSync(
+      scriptPath,
+      `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(markerPath)}, 'started');\n`,
+    );
+    const controller = new AbortController();
+    controller.abort();
+    try {
+      await expect(
+        remuxBrowserMp4Async(fixturePath, outputPath, 30, undefined, {
+          ffmpegPath: process.execPath,
+          ffmpegArgsPrefix: [scriptPath],
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow('canceled');
+      await expect(
+        remuxBrowserMp4Async(fixturePath, outputPath, 30, undefined, {
+          ffmpegPath: process.execPath,
+          ffmpegArgsPrefix: [scriptPath],
+          cancelled: () => true,
+        }),
+      ).rejects.toThrow('canceled');
+      expect(existsSync(markerPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   it('normalizes slow browser-capture timestamps to the authored frame count', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-timeline-'));
     const fixturePath = join(directory, 'slow-browser.mp4');
