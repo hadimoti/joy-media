@@ -144,10 +144,20 @@ describe('BrowserControlPlaneClient on the local desktop channels', () => {
         progress: 0,
         cancelRequested: true,
       },
-      'desktop.media.derivative.bytes': {
+      'desktop.media.derivative.transfer.begin': {
+        transferId: 'transfer-r1',
         mimeType: 'video/mp4',
         sha256: 'a'.repeat(64),
+        size: 3,
+        chunkBytes: 4,
+      },
+      'desktop.media.derivative.transfer.chunk': {
+        offset: 0,
         bytes: new Uint8Array([7, 8, 9]),
+      },
+      'desktop.media.derivative.transfer.finish': {
+        sha256: 'a'.repeat(64),
+        size: 3,
       },
     });
     const client = new BrowserControlPlaneClient(bridge);
@@ -168,6 +178,16 @@ describe('BrowserControlPlaneClient on the local desktop channels', () => {
     const bytes = await client.derivativeBytes('project-r', 'asset-r1', 'editor-job-r1');
     expect(bytes.type).toBe('video/mp4');
     expect(bytes.size).toBe(3);
+    expect([...new Uint8Array(await bytes.arrayBuffer())]).toEqual([7, 8, 9]);
+    expect(
+      calls
+        .filter(({ channel }) => channel.includes('derivative.transfer'))
+        .map(({ channel }) => channel),
+    ).toEqual([
+      'desktop.media.derivative.transfer.begin',
+      'desktop.media.derivative.transfer.chunk',
+      'desktop.media.derivative.transfer.finish',
+    ]);
 
     // Cancelling uses the desktop's job ID, never the editor's ID.
     await client.cancel('project-r', 'editor-job-r1');
@@ -175,6 +195,52 @@ describe('BrowserControlPlaneClient on the local desktop channels', () => {
       channel: 'desktop.media.job.cancel',
       payload: { jobId: 'desktop-job-1' },
     });
+  });
+
+  it('cancels a derivative transfer when the caller aborts between chunks', async () => {
+    const abortController = new AbortController();
+    const calls: { channel: string; payload: unknown }[] = [];
+    const bridge: DesktopMediaBridge = {
+      invoke: async (channel, payload) => {
+        calls.push({ channel, payload });
+        if (channel === 'desktop.media.render.enqueue') return { jobId: 'desktop-job-abort' };
+        if (channel === 'desktop.media.derivative.transfer.begin') {
+          return {
+            transferId: 'transfer-abort',
+            mimeType: 'video/mp4',
+            sha256: 'b'.repeat(64),
+            size: 8,
+            chunkBytes: 4,
+          };
+        }
+        if (channel === 'desktop.media.derivative.transfer.chunk') {
+          abortController.abort();
+          return { offset: 0, bytes: new Uint8Array([1, 2, 3, 4]) };
+        }
+        if (channel === 'desktop.media.derivative.transfer.cancel') return { cancelled: true };
+        throw new Error(`Unexpected channel ${channel}`);
+      },
+    };
+    const client = new BrowserControlPlaneClient(bridge);
+    await client.enqueueRenderExport('project-abort', 'editor-job-abort', 'asset-abort', {
+      timeline: [],
+    });
+
+    await expect(
+      client.derivativeBytes(
+        'project-abort',
+        'asset-abort',
+        'editor-job-abort',
+        abortController.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(calls.map(({ channel }) => channel)).toContain(
+      'desktop.media.derivative.transfer.cancel',
+    );
+    expect(calls.map(({ channel }) => channel)).not.toContain(
+      'desktop.media.derivative.transfer.finish',
+    );
   });
 
   it('reports a job the desktop is running as leased, not queued', async () => {

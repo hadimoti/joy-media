@@ -59,6 +59,7 @@ import {
 } from './effects-pixi.js';
 import { createGlTransitionFilter, type GlTransitionFilterHandle } from './gl-transition-filter.js';
 import { dualTextureBitmapsReady } from './transition-bitmaps.js';
+import { createImageDataWriter } from './image-data-writer.js';
 
 export { dualTextureBitmapsReady } from './transition-bitmaps.js';
 
@@ -257,6 +258,7 @@ export async function createBrowserPixiRenderer(
   layers.sortableChildren = true;
 
   const spriteMap = new Map<string, LayerContainer>();
+  const writeBitmapToCanvas = createImageDataWriter();
   let frameWidth = options.width ?? 320;
   let frameHeight = options.height ?? 180;
   let frameResolution = options.resolution ?? 1;
@@ -356,7 +358,7 @@ export async function createBrowserPixiRenderer(
     const sprite = new Sprite(texture);
     sprite.label = `video-frame:${node.id}`;
     const layer = { visual: sprite, videoCanvas: canvas, videoTexture: texture };
-    updateVideoTexture(layer, node, bitmap);
+    updateVideoTexture(layer, node, bitmap, writeBitmapToCanvas);
     return layer;
   };
 
@@ -364,6 +366,7 @@ export async function createBrowserPixiRenderer(
     layer: Pick<LayerContainer, 'visual' | 'videoCanvas' | 'videoTexture'>,
     node: VideoFrameNode,
     bitmap: BrowserVideoFrameBitmap,
+    writePixels: ReturnType<typeof createImageDataWriter>,
   ): void => {
     const canvas = layer.videoCanvas;
     const texture = layer.videoTexture;
@@ -375,9 +378,7 @@ export async function createBrowserPixiRenderer(
     const context = canvas.getContext('2d');
     if (context === null)
       throw new Error(`${BROWSER_PACKAGE_ENTRY}: unable to create video texture canvas`);
-    const image = context.createImageData(bitmap.width, bitmap.height);
-    image.data.set(bitmap.data);
-    context.putImageData(image, 0, 0);
+    writePixels(context, bitmap.width, bitmap.height, bitmap.data);
     texture.source.update();
     layer.visual.width = node.width;
     layer.visual.height = node.height;
@@ -700,7 +701,8 @@ export async function createBrowserPixiRenderer(
             );
           existing.kind = node.kind;
         } else if (node.kind === 'video-frame' && videoBitmap !== undefined) {
-          if (existing.visual instanceof Sprite) updateVideoTexture(existing, node, videoBitmap);
+          if (existing.visual instanceof Sprite)
+            updateVideoTexture(existing, node, videoBitmap, writeBitmapToCanvas);
           else {
             const video = paintVideoVisual(node, videoBitmap);
             replaceVisual(existing, video.visual);
@@ -747,10 +749,10 @@ export async function createBrowserPixiRenderer(
       const existing = transitionLayer.getChildByName(`transition:${node.id}`) as
         TransitionLayerContainer | null | undefined;
       if (existing === null || existing === undefined) {
-        const container = createTransitionLayer(node, videoBitmaps);
+        const container = createTransitionLayer(node, videoBitmaps, writeBitmapToCanvas);
         transitionLayer.addChild(container);
       } else {
-        updateTransitionLayer(existing, node, videoBitmaps);
+        updateTransitionLayer(existing, node, videoBitmaps, writeBitmapToCanvas);
       }
       drawCalls += 1;
     }
@@ -949,11 +951,12 @@ interface TransitionLayerContainer extends Container {
 function createTransitionLayer(
   node: TransitionNode,
   videoBitmaps: ReadonlyMap<string, BrowserVideoFrameBitmap>,
+  writePixels: ReturnType<typeof createImageDataWriter>,
 ): TransitionLayerContainer {
   const container = new Container() as TransitionLayerContainer;
   container.name = `transition:${node.id}`;
   container.zIndex = node.zIndex;
-  updateTransitionLayer(container, node, videoBitmaps);
+  updateTransitionLayer(container, node, videoBitmaps, writePixels);
   return container;
 }
 
@@ -968,6 +971,7 @@ function ensureBitmapTexture(
   canvas: HTMLCanvasElement | undefined,
   texture: Texture | undefined,
   bitmap: BrowserVideoFrameBitmap,
+  writePixels: ReturnType<typeof createImageDataWriter>,
 ): { canvas: HTMLCanvasElement; texture: Texture } {
   const nextCanvas = canvas ?? document.createElement('canvas');
   if (nextCanvas.width !== bitmap.width || nextCanvas.height !== bitmap.height) {
@@ -977,9 +981,7 @@ function ensureBitmapTexture(
   const context = nextCanvas.getContext('2d');
   if (context === null)
     throw new Error(`${BROWSER_PACKAGE_ENTRY}: transition canvas 2d unavailable`);
-  const image = context.createImageData(bitmap.width, bitmap.height);
-  image.data.set(bitmap.data);
-  context.putImageData(image, 0, 0);
+  writePixels(context, bitmap.width, bitmap.height, bitmap.data);
   const nextTexture = texture ?? Texture.from(nextCanvas, true);
   nextTexture.source.update();
   return { canvas: nextCanvas, texture: nextTexture };
@@ -989,6 +991,7 @@ function updateTransitionLayer(
   container: TransitionLayerContainer,
   node: TransitionNode,
   videoBitmaps: ReadonlyMap<string, BrowserVideoFrameBitmap>,
+  writePixels: ReturnType<typeof createImageDataWriter>,
 ): void {
   const fromBitmap = videoBitmaps.get(node.leftClipId);
   const toBitmap = videoBitmaps.get(node.rightClipId);
@@ -1017,10 +1020,15 @@ function updateTransitionLayer(
     container.overlay = undefined;
   }
 
-  const from = ensureBitmapTexture(container.fromCanvas, container.fromTexture, fromBitmap);
+  const from = ensureBitmapTexture(
+    container.fromCanvas,
+    container.fromTexture,
+    fromBitmap,
+    writePixels,
+  );
   container.fromCanvas = from.canvas;
   container.fromTexture = from.texture;
-  const to = ensureBitmapTexture(container.toCanvas, container.toTexture, toBitmap);
+  const to = ensureBitmapTexture(container.toCanvas, container.toTexture, toBitmap, writePixels);
   container.toCanvas = to.canvas;
   container.toTexture = to.texture;
 
