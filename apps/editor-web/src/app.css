@@ -16113,7 +16113,7 @@ label {
 /* The list columns follow the width of the media panel itself, not the window: the panel is often much
    narrower than the window, and a list wider than the panel pushed the thumbnail and name out of sight.
    Hide what does not fit: the Collection column first, then Size. */
-@container (max-width: 38rem) {
+@container (max-width: 42rem) {
   .asset-list-header,
   .asset-grid--list .asset-card {
     grid-template-columns: 1.25rem 2.65rem minmax(0, 1fr) 4.5rem 5.35rem;
