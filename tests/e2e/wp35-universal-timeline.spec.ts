@@ -48,6 +48,11 @@ test.describe('WP-35 universal timeline closeout', () => {
       ],
     });
     const viewer = page.locator('.joy-code-3d');
+    const unavailable = page.getByRole('status').filter({ hasText: '3D preview unavailable.' });
+    await expect(viewer.or(unavailable)).toBeVisible({ timeout: 15_000 });
+    if (await unavailable.isVisible()) {
+      test.skip(true, 'This browser has no WebGL context for the 3D render check.');
+    }
     await viewer.locator('input[type="file"]').setInputFiles({
       name: 'e2e-triangle.gltf',
       mimeType: 'model/gltf+json',
