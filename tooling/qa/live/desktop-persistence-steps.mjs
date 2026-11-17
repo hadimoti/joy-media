@@ -179,6 +179,7 @@ rows.push({
     // Let the last write settle (JOY_QA_KILL_WAIT_MS, default 6 s), then pull the plug with no clean shutdown.
     await page.waitForTimeout(Number(process.env.JOY_QA_KILL_WAIT_MS ?? 6_000));
     const session = await ctx.killApp();
+    await ctx.shot('D-A09-02', 'right-after-kill').catch(() => undefined);
     const projectHeading = session.page.getByRole('heading', { name: 'Projects', exact: true });
     if (await projectHeading.isVisible().catch(() => false)) {
       // After a hard kill the app may show the Projects page: open the project that was open before the kill.
