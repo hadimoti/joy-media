@@ -119,6 +119,9 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Joy Code Settings: the custom endpoint tick stays valid after the connection is saved, a profile chosen for an agent slot is no longer lost while its models load, and Suggest only shows no Approve button.
 - Undo of a track colour or track family works, and the track header follows.
 - A colour-graded clip inside a transition kept no size, so the transition picture could come out wrong or blank in the Monitor and in the export. Fixed.
+- A long export (10 minutes) failed after about 12 minutes with "worker lease expired": the export helper stopped reporting while it finished the file. Fixed; a 10-minute 1080p export now completes.
+- The 4K export preset failed at the final check ("decoder policy"). Fixed.
+- Cancelling an export of an H.264 or a WebM clip stops it, frees the Export button and keeps no file.
 
 ## Known limits
 
@@ -141,7 +144,8 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - **Text from templates is placed by its top edge**, while the Inspector counts from the centre. Position Y 540 draws the text about half a height low.
 - **Text gradients use anchors.** There is no angle field and no "reset anchors" button.
 - **Smart guides, snapping while you move on the Monitor, text editing in place, crop handles and the right-click menu on the Monitor** are planned for v1.1.2.
-- **Joy Code can run a quality check on the open project** (it samples frames of the composition on this computer and reports findings; asked in words, for example "run a quality check and fix the problems"). It does not yet check where titles and captions sit (no text-box checks), and it cannot yet make pictures or videos.
+- **Joy Code can run a quality check on the open project** (it samples frames of the composition on this computer and reports findings; asked in words, for example "run a quality check and fix the problems"). It measures where titles and captions sit on a check-only copy of the renderer and says when text could not be measured. It cannot yet make pictures or videos.
+- **Very long exports use a lot of memory.** A 10-minute 1080p export finishes (about 15 minutes on the test laptop) but the app can use about 4 GB while it runs. Shorter exports use far less.
 - **Joy Code cannot yet repair a failed quality check on its own.** The repair step is not connected in the app. The quality check card is not kept after a reload; only its summary line is.
 - **Glow** still blurs the whole picture. **Vibrance** is slightly different in the preview and in the command-line render. The Tone Geometry Angle slider does nothing until a shape other than Circle is chosen.
 - The HSL band names do not match their centre angles (Yellow shows 90 degrees, Green 135).
@@ -156,12 +160,12 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 These are built and tested in code. They were not yet seen working in the running app when these notes were written.
 
 - Crop numbers cutting the picture in the Monitor and the export.
-- Monitor overlays, guides, background and bars; the preview quality control; frame stepping and the time readout.
+- Monitor overlays, guides, background and bars; frame stepping and the time readout. (Seen working on 17 Nov: the Preview quality control in the Monitor bar, Scopes in the Colour panel, and the Format menu with grouped export presets.)
 - Colour on old projects compared with v1.1.0, and the graphics card path of the colour engine.
 - Whether the Format control saves frame rate and background settings, and whether exports match the canvas size.
 - Sample projects without missing media, missing-clip marks on the timeline, the Monitor and the Inspector, and the export warning about missing media.
 - The Asset Library Storage dialog and its Open folder button.
-- Scopes in one place, the library card design, transition cards that play the real transition, and the centred Format button with grouped export presets.
+- The library card design and transition cards that play the real transition.
 - Animate panel changes, and the panel header menu.
 - Audio fades in the Audio panel.
 - Workspace presets keep their own layout when you switch between Edit, Automate and the others.
