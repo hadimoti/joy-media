@@ -1,5 +1,5 @@
 /** T-A09 desktop persistence and missing-media rows. */
-import { readdirSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -197,8 +197,12 @@ rows.push({
     }
     if (reopened === null) throw new Error('the project did not reopen after the kill');
     if (normalizeDocument(reopened) !== normalizeDocument(before.document)) {
+      const dir = join(ctx.outDir, 'D-A09-02');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'before.json'), normalizeDocument(before.document), 'utf8');
+      writeFileSync(join(dir, 'after.json'), normalizeDocument(reopened), 'utf8');
       throw new Error(
-        `the document after the kill differs from the document before it: before ${normalizeDocument(before.document).slice(0, 700)} || after ${normalizeDocument(reopened).slice(0, 700)}`,
+        'the document after the kill differs from the document before it (before.json and after.json are saved)',
       );
     }
     return {
