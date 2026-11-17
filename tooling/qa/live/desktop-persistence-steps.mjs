@@ -194,6 +194,25 @@ rows.push({
         );
       await card.click();
     }
+    // The app may start on a new empty project after a hard kill: then open the Projects Library and pick the
+    // project that was open before. A missing project is data loss; a project that only needs opening is not.
+    let openedFromLibrary = false;
+    await session.page.waitForTimeout(3_000);
+    const nowIds = await readProjectIds(session.page).catch(() => ({}));
+    if (nowIds.active !== beforeIds.active) {
+      await openMenu(session.page, 'File');
+      await session.page.getByRole('menuitem', { name: /^Projects Library/u }).click();
+      const libraryCard = session.page
+        .locator('.project-library-card', { hasText: beforeIds.title })
+        .first();
+      await libraryCard.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined);
+      if ((await libraryCard.count()) === 0)
+        throw new Error(
+          `the project "${beforeIds.title}" is not in the Projects Library after the kill: its work is lost`,
+        );
+      await libraryCard.click();
+      openedFromLibrary = true;
+    }
     const deadline = Date.now() + 15_000;
     let reopened = null;
     while (Date.now() < deadline) {
@@ -216,7 +235,7 @@ rows.push({
       );
     }
     return {
-      message: `app killed hard after an edit; project ${before.projectId} reopened with the same document`,
+      message: `app killed hard after an edit; project ${before.projectId} reopened with the same document${openedFromLibrary ? ' (the app started on a new project; the old one was opened from the Projects Library)' : ''}`,
       evidence: [await ctx.shot('D-A09-02', 'reopened-after-kill')],
     };
   },
