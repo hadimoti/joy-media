@@ -176,8 +176,8 @@ rows.push({
     await ctx.editDocument(page);
     const before = await ctx.readDocument(page);
     const beforeIds = await readProjectIds(page);
-    // Let the last write settle (JOY_QA_KILL_WAIT_MS, default 45 s: killed after 3 s or 10 s the new project is lost, defect 132), then pull the plug with no clean shutdown.
-    await page.waitForTimeout(Number(process.env.JOY_QA_KILL_WAIT_MS ?? 45_000));
+    // Let the last write settle (JOY_QA_KILL_WAIT_MS, default 3 s: before the storage flush fix of defect 132 a kill within 10 s lost the new project), then pull the plug with no clean shutdown.
+    await page.waitForTimeout(Number(process.env.JOY_QA_KILL_WAIT_MS ?? 3_000));
     const session = await ctx.killApp();
     await ctx.shot('D-A09-02', 'right-after-kill').catch(() => undefined);
     const projectHeading = session.page.getByRole('heading', { name: 'Projects', exact: true });
