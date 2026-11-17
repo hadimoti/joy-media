@@ -3,6 +3,7 @@ import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
 import { DEFAULT_COMPOSITION_SIZE, INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import type { ProjectCatalogEntry } from './project-catalog.js';
 import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
+import { SAMPLE_MEDIA } from './sample-media-cache.js';
 import { TIMELINE_ELEMENTS_SHOWCASE } from './timeline-elements-showcase.js';
 
 const NOW = '2026-11-13T09:00:00.000Z';
@@ -119,5 +120,23 @@ describe('seedsForCatalogEntry: the sample projects keep their own sizes', () =>
     );
 
     expect(seeds.timeline.id).toBe(REFERENCE_PROJECT.id);
+  });
+
+  it('seeds the Local editor sample without the clips whose media ships nowhere', () => {
+    const seeds = seedsForCatalogEntry(
+      entry({ id: INITIAL_EDITOR_PROJECT.id, visualProjectId: INITIAL_EDITOR_PROJECT.id }),
+    );
+    const shipped = new Set(SAMPLE_MEDIA.map((media) => media.assetId));
+    const videoClips = Object.values(seeds.timeline.compositions)
+      .flatMap((composition) => composition.tracks.flatMap((track) => track.clips))
+      .filter((clip) => clip.kind === 'video');
+
+    expect(videoClips.map((clip) => clip.id)).toEqual(['intro', 'product', 'outro']);
+    for (const clip of videoClips) expect(shipped.has(clip.assetId)).toBe(true);
+    expect(Object.keys(seeds.visual.visualObjects)).toEqual(
+      expect.arrayContaining(['intro-title', 'product-image', 'outro-shape', 'scene-title']),
+    );
+    expect(seeds.visual.id).toBe(INITIAL_EDITOR_PROJECT.id);
+    expect(seeds.visual.title).toBe('Entry');
   });
 });

@@ -582,6 +582,11 @@ test('D-A05-60 fails with the known "cannot resolve visual asset" message and pa
   assert.equal(failed.status, 'failed');
   assert.match(failed.message, /known failure still present/u);
   assert.match(failed.defect, /Export the sample project/u);
+  app.world.textByKey['.export-toast'] =
+    'Export failed: Missing media in this export: b-roll-a. Relink or replace the clip.';
+  const missing = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
+  assert.equal(missing.status, 'failed');
+  assert.match(missing.message, /the sample ships without a clip's media/u);
   app.world.textByKey['.export-toast'] = 'Completed — export.mp4 verified';
   const passed = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
   assert.equal(passed.status, 'passed', passed.message);
