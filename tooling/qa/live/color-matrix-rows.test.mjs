@@ -16,10 +16,11 @@ import { restoreColorRowUi } from './color-panel-steps.mjs';
 test('the live colour registry exposes T-F23 pixel equality and T-K07 rows in card order', () => {
   assert.deepEqual(
     COLOR_MATRIX_ROWS.map((row) => row.id),
-    ['D-F23-01', 'D-K01', 'D-K02', 'D-K03', 'D-K04'],
+    ['D-F23-01', 'D-F23-02', 'D-K01', 'D-K02', 'D-K03', 'D-K04'],
   );
   assert.deepEqual(Object.keys(COLOR_MATRIX_ROWS_BY_ID), [
     'D-F23-01',
+    'D-F23-02',
     'D-K01',
     'D-K02',
     'D-K03',

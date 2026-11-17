@@ -10,6 +10,7 @@ import { applyEachBuiltInLook, runColourLifecycle } from './color-persistence-st
 import { dragWheelChangesGrade } from './color-wheels-steps.mjs';
 import { compareFrames, extractExportFrame } from '../compare.mjs';
 import { exportAndProbe } from './export-probe.mjs';
+import { runRecorderFallbackExportRow } from './export-recorder-fallback-steps.mjs';
 import { blurFocus, ensureTimelineClip, previewShot, selectClipById } from './ui-steps.mjs';
 import { readProjectIds, readLiveTimeline } from './matrix-core.mjs';
 import { blockedRow } from './rows.mjs';
@@ -471,6 +472,15 @@ export const COLOR_MATRIX_ROWS = Object.freeze([
         );
       }
       return `first and later exports have identical decoded pixels (${comparison.totalChannels} channels)`;
+    },
+  },
+  {
+    id: 'D-F23-02',
+    area: 'recorder fallback export finishes and the file is valid',
+    title: 'Recorder fallback export finishes and the file is valid',
+    severity: 'major',
+    async run(page, ctx) {
+      return runRecorderFallbackExportRow(page, ctx);
     },
   },
   {
