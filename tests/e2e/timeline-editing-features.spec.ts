@@ -17,6 +17,9 @@ test.describe('Timeline editing features — aspect ratio, merge, and speed', ()
     await expect(selector).toBeVisible();
     await selector.click();
     await page.locator('.canvas-format-popover').getByRole('button', { name: '1:1' }).click();
+    const reframe = page.getByRole('dialog', { name: 'Reframe clips for the new canvas?' });
+    await expect(reframe).toBeVisible();
+    await reframe.getByRole('button', { name: 'Apply' }).click();
     await expect(selector).toHaveAccessibleName(/Format: 1:1/);
 
     await page.getByRole('button', { name: 'Undo' }).click();
@@ -24,6 +27,9 @@ test.describe('Timeline editing features — aspect ratio, merge, and speed', ()
 
     await selector.click();
     await page.locator('.canvas-format-popover').getByRole('button', { name: '1:1' }).click();
+    const secondReframe = page.getByRole('dialog', { name: 'Reframe clips for the new canvas?' });
+    await expect(secondReframe).toBeVisible();
+    await secondReframe.getByRole('button', { name: 'Apply' }).click();
     await page.reload();
     await expect(page.getByRole('button', { name: /Format: 1:1/ })).toBeVisible();
   });

@@ -198,7 +198,7 @@ test.describe('WP-35 universal timeline closeout', () => {
     expect(lastVisualBox).not.toBeNull();
     expect(firstAudioBox).not.toBeNull();
     expect(firstAudioBox!.y).toBeGreaterThan(lastVisualBox!.y);
-    await expect(page.getByLabel('Monitor preview quality')).toHaveValue('quarter');
+    await expect(page.getByLabel('Preview quality')).toHaveValue('quarter');
     await expect(page.getByLabel('Monitor preview renderer')).toHaveValue('auto');
     const rulerBackground = await page.locator('.timeline-scrub-row').evaluate((element) => {
       const computed = getComputedStyle(element);

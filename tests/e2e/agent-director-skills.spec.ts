@@ -409,11 +409,10 @@ test.describe('JOY Live Director creative recipes', () => {
     await dialog.getByRole('button', { name: 'Done' }).click();
 
     await openRecipes(page);
-    const assistantMessages = page.locator('.joy-code-message.is-assistant');
-    const before = await assistantMessages.count();
     await page.getByRole('button', { name: 'Run Build Rough Cut', exact: true }).click();
-    const runReply = assistantMessages.nth(before);
-    await expect(runReply).toContainText(/failed|could not validate/i, { timeout: 40_000 });
+    await expect(
+      page.getByText('Joy Code could not check this change safely. No edits were applied.'),
+    ).toBeVisible({ timeout: 40_000 });
     await expect(page.getByRole('region', { name: 'JOY Agent live proposal' })).toHaveCount(0);
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
     expect(provider.stages).toContain('structured-validate');
