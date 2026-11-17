@@ -417,7 +417,9 @@ describe('browser export contracts', () => {
     vi.stubGlobal('ImageData', FakeImageData);
 
     const buffers: (Uint8ClampedArray | undefined)[] = [];
-    const frames = [new Uint8Array([1, 2, 3, 255]), new Uint8Array([4, 5, 6, 255])];
+    const pixel = (r: number, g: number, b: number): number[] =>
+      Array.from({ length: 4 }, () => [r, g, b, 255]).flat();
+    const frames = [new Uint8Array(pixel(1, 2, 3)), new Uint8Array(pixel(4, 5, 6))];
     await downloadBrowserMp4({
       manifest: { ...manifest, durationUs: 2_000 },
       frameCount: 2,
@@ -435,10 +437,7 @@ describe('browser export contracts', () => {
     expect(buffers[1]).toBe(buffers[0]);
     expect(imageInstances).toHaveLength(1);
     expect(imageInstances[0]?.data).toBe(buffers[0]);
-    expect(snapshots).toEqual([
-      [1, 2, 3, 255],
-      [4, 5, 6, 255],
-    ]);
+    expect(snapshots).toEqual([pixel(1, 2, 3), pixel(4, 5, 6)]);
   });
 });
 
