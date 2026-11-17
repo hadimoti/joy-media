@@ -387,19 +387,20 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
   }
 
   const liveLabel = label;
-  let tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();
+  const tabLabel = liveLabel;
+  let tab = page.locator(`.panel-tab[aria-label="${tabLabel}"]`).first();
   if (!(await tab.isVisible())) {
     await page
       .locator('.app-menubar button.app-menu-trigger')
       .getByText('View', { exact: true })
       .click();
     const menuItem = page.getByRole('menuitem', {
-      name: liveLabel === '3D Scene' ? 'Open 3D Scene' : liveLabel,
+      name: liveLabel,
       exact: true,
     });
     await expect(menuItem).toBeVisible();
     await menuItem.click();
-    tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();
+    tab = page.locator(`.panel-tab[aria-label="${tabLabel}"]`).first();
   }
   await expect(tab).toBeVisible();
   await tab.click();
@@ -408,7 +409,8 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
   } else if (liveLabel === 'Joy Code') {
     await expect(page.locator('.joy-code-panel')).toBeVisible();
   } else if (liveLabel === '3D Scene') {
-    await expect(page.locator('.scene3d-panel')).toBeVisible();
+    // The 3D viewer chunk (three.js) is slow to load on a cold dev server.
+    await expect(page.locator('.scene3d-panel')).toBeVisible({ timeout: 45_000 });
   } else {
     // The shared shell keeps the panel name accessible while omitting the
     // redundant visible title row.
