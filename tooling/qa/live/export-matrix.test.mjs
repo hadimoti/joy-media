@@ -4,17 +4,24 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { compareRgbFrames } from '../compare.mjs';
+import { createFakePage } from './fake-page.mjs';
 import {
+  CANCEL_MIN_BUSY_MS,
+  CANCEL_MIN_TIMELINE_SECONDS,
+  CANCEL_POLL_MS,
   FRAME_COMPARE_SAMPLES,
   EXPORT_MATRIX_IDS,
   EXPORT_MATRIX_ROWS,
   assertNoStagedLibraryEntries,
   burnInRegionDimensions,
+  clickNamed,
   inspectPreset,
   monitorPictureRect,
   parseProcessTreeWorkingSet,
   processTreeWorkingSet,
+  runCancelRow,
   timecodeIsWithinFrame,
+  timelineSecondsFromBoxes,
 } from './export-matrix-steps.mjs';
 
 const validProbe = {
@@ -143,4 +150,159 @@ test('memory sampler reports spawn and PowerShell failures with useful details',
     () => processTreeWorkingSet(12, { run: () => ({ status: 1, stderr: 'CIM access denied' }) }),
     /process memory sample failed: CIM access denied; exit code 1/u,
   );
+});
+
+/**
+ * A scripted export on the fake page with a virtual clock. `readState(poll, clicked)` gives the Export button state
+ * at each poll; the Cancel button shows when `cancelVisible` is true. The clock moves only through `wait`.
+ */
+function scriptedCancel({ readState, cancelVisible = true, fixtureSeconds = 3 }) {
+  const clock = { t: 0 };
+  const record = { clicks: [], busyAt: undefined, lengthen: [] };
+  let polls = 0;
+  const page = createFakePage({
+    answers: ({ path, method, fn }) => {
+      if (method === 'evaluate' && fn === 'readExportState') {
+        const state = readState(polls, record.clicks.length > 0);
+        polls += 1;
+        if (state.busy && record.busyAt === undefined) record.busyAt = clock.t;
+        return state;
+      }
+      if (path.includes('Cancel export')) {
+        if (method === 'isVisible') return cancelVisible;
+        if (method === 'click') record.clicks.push(clock.t);
+      }
+      if (path.includes('Reframe') && method === 'isVisible') return false;
+      return undefined;
+    },
+  });
+  const ctx = { downloadDir: 'scratch-downloads', media: 'fixtures\\source.mp4', appPid: 1 };
+  const deps = {
+    ensureClip: async () => ({ clips: [{ id: 'clip-1' }] }),
+    fixtureSeconds: () => fixtureSeconds,
+    lengthen: async (_page, _rowId, options) => {
+      record.lengthen.push(options);
+      return CANCEL_MIN_TIMELINE_SECONDS;
+    },
+    listMp4: () => [],
+    processNames: () => ['joy media.exe', 'msedgewebview2.exe'],
+    now: () => clock.t,
+    wait: async (ms) => {
+      clock.t += ms;
+    },
+  };
+  return { page, ctx, deps, record };
+}
+
+const exportedThenIdle = (poll, clicked) =>
+  clicked ? { busy: false, toast: 'Export cancelled' } : { busy: poll >= 1, toast: '' };
+
+test('cancel is clicked as soon as the button shows, after the short minimum, not after a fixed 4 s', async () => {
+  const { page, ctx, deps, record } = scriptedCancel({ readState: exportedThenIdle });
+  const message = await runCancelRow(page, ctx, 'D-A10-14', 'vp9-webm-audio.webm', deps);
+  assert.equal(record.clicks.length, 1);
+  const waited = record.clicks[0] - record.busyAt;
+  assert.ok(waited >= CANCEL_MIN_BUSY_MS, `cancel came ${waited} ms after busy, below the minimum`);
+  assert.ok(
+    waited <= CANCEL_MIN_BUSY_MS + CANCEL_POLL_MS,
+    `cancel came ${waited} ms after busy; it should follow the minimum at once`,
+  );
+  assert.match(message, /cancelled \d\.\d s after it went busy/u);
+  assert.match(message, /timeline lengthened to 30\.0 s/u);
+});
+
+test('an export that finishes before the Cancel click is BLOCKED with the stated reason, not a click timeout', async () => {
+  // Busy for one poll only, then the button is back to Export; no Cancel button ever shows.
+  const { page, ctx, deps, record } = scriptedCancel({
+    readState: (poll) => ({ busy: poll === 1, toast: '' }),
+    cancelVisible: false,
+  });
+  await assert.rejects(
+    runCancelRow(page, ctx, 'D-A10-14', 'vp9-webm-audio.webm', deps),
+    (error) => {
+      assert.equal(
+        error.message,
+        'BLOCKED D-A10-14: the export finished before it could be cancelled (fixture too short on this machine)',
+      );
+      return true;
+    },
+  );
+  assert.equal(record.clicks.length, 0);
+});
+
+test('an export that ends while the Cancel click is in flight is also BLOCKED', async () => {
+  // The button shows at the check, but the export ends before the click lands: the click times out and the
+  // Export button is no longer busy, so the row says BLOCKED rather than the click timeout.
+  let finished = false;
+  const { page, ctx, deps } = scriptedCancel({
+    readState: () => ({ busy: !finished, toast: '' }),
+  });
+  const failing = Object.create(page);
+  failing.getByRole = (role, options) => {
+    const locator = page.getByRole(role, options);
+    if (options?.name !== 'Cancel export') return locator;
+    return {
+      ...locator,
+      click: async () => {
+        finished = true;
+        throw new Error('locator.click: Timeout 5000ms exceeded.');
+      },
+    };
+  };
+  await assert.rejects(
+    runCancelRow(failing, ctx, 'D-A10-14', 'vp9-webm-audio.webm', deps),
+    (error) => {
+      assert.equal(
+        error.message,
+        'BLOCKED D-A10-14: the export finished before it could be cancelled (fixture too short on this machine)',
+      );
+      return true;
+    },
+  );
+});
+
+test('the timeline is lengthened for the 3-second WebM row but not for the 10-minute row', async () => {
+  const webm = scriptedCancel({ readState: exportedThenIdle, fixtureSeconds: 3 });
+  await runCancelRow(webm.page, webm.ctx, 'D-A10-14', 'vp9-webm-audio.webm', webm.deps);
+  assert.deepEqual(webm.record.lengthen, [
+    { clipSeconds: 3, minSeconds: CANCEL_MIN_TIMELINE_SECONDS },
+  ]);
+
+  const tenMinute = scriptedCancel({ readState: exportedThenIdle, fixtureSeconds: 600 });
+  const message = await runCancelRow(
+    tenMinute.page,
+    tenMinute.ctx,
+    'D-A10-13',
+    'h264-1080p-10min.mp4',
+    tenMinute.deps,
+  );
+  assert.deepEqual(tenMinute.record.lengthen, []);
+  assert.match(message, /600\.0 s source, not lengthened/u);
+});
+
+test('a failed click names the control that could not be reached', async () => {
+  const locator = {
+    click: async () => {
+      throw new Error('locator.click: Timeout 10000ms exceeded.\nCall log:\n  waiting');
+    },
+  };
+  await assert.rejects(clickNamed(locator, 'button "Cancel export"'), (error) => {
+    assert.equal(
+      error.message,
+      'could not click button "Cancel export" within 10000 ms: locator.click: Timeout 10000ms exceeded.',
+    );
+    return true;
+  });
+});
+
+test('timeline length is read from the clip boxes and does not depend on the zoom', () => {
+  const at = (width) =>
+    Array.from({ length: 4 }, (_, index) => ({
+      id: `c${index}`,
+      left: index * width,
+      right: (index + 1) * width,
+    }));
+  assert.equal(timelineSecondsFromBoxes(at(100), 3), 12);
+  assert.equal(timelineSecondsFromBoxes(at(37), 3), 12);
+  assert.equal(timelineSecondsFromBoxes([], 3), 0);
 });
