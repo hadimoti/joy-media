@@ -391,6 +391,55 @@ describe('browser export contracts', () => {
     ).rejects.toThrow(/even width and height/u);
     expect(harness.generatorCreated).not.toHaveBeenCalled();
   });
+
+  it('reuses the RGBA buffer only after putImageData has copied the current frame', async () => {
+    const harness = installRecorderHarness('video/mp4');
+    const imageInstances: { readonly data: Uint8ClampedArray }[] = [];
+    const snapshots: number[][] = [];
+    class FakeImageData {
+      constructor(
+        readonly data: Uint8ClampedArray,
+        readonly width: number,
+        readonly height: number,
+      ) {
+        imageInstances.push(this);
+      }
+    }
+    const context = {
+      putImageData: vi.fn((image: FakeImageData) => {
+        // The real canvas copies ImageData synchronously; keep that handoff behavior explicit.
+        snapshots.push([...image.data]);
+      }),
+    };
+    Object.assign(harness.canvas, {
+      getContext: vi.fn(() => context),
+    });
+    vi.stubGlobal('ImageData', FakeImageData);
+
+    const buffers: (Uint8ClampedArray | undefined)[] = [];
+    const frames = [new Uint8Array([1, 2, 3, 255]), new Uint8Array([4, 5, 6, 255])];
+    await downloadBrowserMp4({
+      manifest: { ...manifest, durationUs: 2_000 },
+      frameCount: 2,
+      canvas: harness.canvas,
+      audioTrack: harness.audioTrack,
+      mimeType: 'video/mp4',
+      renderFrame: (index, target) => {
+        buffers.push(target);
+        target?.set(frames[index]!);
+        return target ?? frames[index]!;
+      },
+    });
+
+    expect(buffers[0]).toBeInstanceOf(Uint8ClampedArray);
+    expect(buffers[1]).toBe(buffers[0]);
+    expect(imageInstances).toHaveLength(1);
+    expect(imageInstances[0]?.data).toBe(buffers[0]);
+    expect(snapshots).toEqual([
+      [1, 2, 3, 255],
+      [4, 5, 6, 255],
+    ]);
+  });
 });
 
 describe('browser export staging files', () => {

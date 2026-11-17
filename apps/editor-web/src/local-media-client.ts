@@ -121,6 +121,8 @@ const registeredAssets = new Map<string, BrowserAsset>();
 const LIBRARY_ASSET_ID_PATTERN = /^joylib-[a-f0-9]{64}$/;
 const MAX_LOCAL_WHISPER_MEDIA_BYTES = 200 * 1024 * 1024;
 const LOCAL_WHISPER_MEDIA_TOO_LARGE = 'Local Whisper media exceeds the 200 MB limit.';
+const MAX_LOCAL_DERIVATIVE_BYTES = 5 * 1024 * 1024 * 1024;
+const MAX_DERIVATIVE_CHUNK_BYTES = 4 * 1024 * 1024;
 
 function defaultBridge(): DesktopMediaBridge {
   return {
@@ -153,6 +155,21 @@ async function call<T>(bridge: DesktopMediaBridge, channel: string, payload?: un
       error instanceof Error ? error.message : 'The local media request failed',
     );
   }
+}
+
+function abortableCall<T>(
+  bridge: DesktopMediaBridge,
+  channel: string,
+  payload: unknown,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) return Promise.reject(new DOMException('Transfer cancelled', 'AbortError'));
+  const request = call<T>(bridge, channel, payload);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(new DOMException('Transfer cancelled', 'AbortError'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    request.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }
 
 function trackedJob(projectId: string, jobId: string): TrackedJob {
@@ -699,14 +716,100 @@ export class BrowserControlPlaneClient {
     throw notAvailable('Retrying a job');
   }
 
-  async derivativeBytes(projectId: string, _assetId: string, derivativeId: string): Promise<Blob> {
+  async derivativeBytes(
+    projectId: string,
+    _assetId: string,
+    derivativeId: string,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
     const tracked = trackedJob(projectId, derivativeId);
-    const derivative = await call<{ readonly mimeType: string; readonly bytes: Uint8Array }>(
-      this.bridge,
-      'desktop.media.derivative.bytes',
-      { jobId: tracked.desktopJobId },
-    );
-    return new Blob([derivative.bytes as BlobPart], { type: derivative.mimeType });
+    signal?.throwIfAborted();
+    const transfer = await call<{
+      readonly transferId: string;
+      readonly mimeType: string;
+      readonly sha256: string;
+      readonly size: number;
+      readonly chunkBytes: number;
+    }>(this.bridge, 'desktop.media.derivative.transfer.begin', { jobId: tracked.desktopJobId });
+    const parts: BlobPart[] = [];
+    let completed = false;
+    try {
+      if (signal?.aborted) throw new DOMException('Transfer cancelled', 'AbortError');
+      if (
+        !Number.isSafeInteger(transfer.size) ||
+        transfer.size < 0 ||
+        transfer.size > MAX_LOCAL_DERIVATIVE_BYTES ||
+        !Number.isSafeInteger(transfer.chunkBytes) ||
+        transfer.chunkBytes < 1 ||
+        transfer.chunkBytes > MAX_DERIVATIVE_CHUNK_BYTES ||
+        !/^[a-f0-9]{64}$/.test(transfer.sha256)
+      ) {
+        throw new Error('The desktop returned invalid derivative transfer metadata');
+      }
+      let offset = 0;
+      while (offset < transfer.size) {
+        signal?.throwIfAborted();
+        const request = {
+          transferId: transfer.transferId,
+          offset,
+        };
+        const chunk = await (signal === undefined
+          ? call<{ readonly offset: number; readonly bytes: Uint8Array }>(
+              this.bridge,
+              'desktop.media.derivative.transfer.chunk',
+              request,
+            )
+          : abortableCall<{ readonly offset: number; readonly bytes: Uint8Array }>(
+              this.bridge,
+              'desktop.media.derivative.transfer.chunk',
+              request,
+              signal,
+            ));
+        signal?.throwIfAborted();
+        const rawBytes: unknown = chunk.bytes;
+        const bytes =
+          rawBytes instanceof Uint8Array
+            ? rawBytes
+            : rawBytes instanceof ArrayBuffer
+              ? new Uint8Array(rawBytes)
+              : undefined;
+        const expectedBytes = Math.min(transfer.chunkBytes, transfer.size - offset);
+        if (chunk.offset !== offset || bytes === undefined || bytes.byteLength !== expectedBytes) {
+          throw new Error('The desktop returned an invalid derivative transfer chunk');
+        }
+        parts.push(bytes as BlobPart);
+        offset += bytes.byteLength;
+      }
+      signal?.throwIfAborted();
+      const verified = await (signal === undefined
+        ? call<{ readonly sha256: string; readonly size: number }>(
+            this.bridge,
+            'desktop.media.derivative.transfer.finish',
+            { transferId: transfer.transferId },
+          )
+        : abortableCall<{ readonly sha256: string; readonly size: number }>(
+            this.bridge,
+            'desktop.media.derivative.transfer.finish',
+            { transferId: transfer.transferId },
+            signal,
+          ));
+      if (verified.sha256 !== transfer.sha256 || verified.size !== transfer.size) {
+        throw new Error('The desktop returned an invalid derivative checksum');
+      }
+      completed = true;
+      return new Blob(parts, { type: transfer.mimeType });
+    } finally {
+      if (!completed) {
+        try {
+          await call(this.bridge, 'desktop.media.derivative.transfer.cancel', {
+            transferId: transfer.transferId,
+          });
+        } catch {
+          // The transfer expires on the main process if cancellation cannot cross IPC.
+        }
+      }
+      parts.length = 0;
+    }
   }
 
   async transcribeSpeech(

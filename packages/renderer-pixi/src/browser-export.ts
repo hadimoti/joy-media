@@ -453,8 +453,14 @@ export interface BrowserMp4ExportSource {
   readonly frameCount: number;
   /** Draws one frame into `canvas`; this preserves the GPU preview path. */
   readonly paintFrame?: (index: number) => void | Promise<void>;
-  /** CPU fallback that writes RGBA pixels into the recorder canvas. */
-  readonly renderFrame?: (index: number) => Uint8Array | Promise<Uint8Array>;
+  /**
+   * CPU fallback that fills the borrowed RGBA destination (or returns pixels for compatibility).
+   * The destination may be reused after this call resolves and must not be retained by the caller.
+   */
+  readonly renderFrame?: (
+    index: number,
+    destination?: Uint8ClampedArray,
+  ) => Uint8Array | Uint8ClampedArray | Promise<Uint8Array | Uint8ClampedArray>;
   /** Optional canvas already owned by the preview renderer. */
   readonly canvas?: HTMLCanvasElement;
   /** Authored/program audio supplied by the caller, when available. */
@@ -520,6 +526,10 @@ export async function downloadBrowserMp4(
   let stopped: Promise<void> | undefined;
   let sink: BrowserMp4Sink | undefined;
   const bytesPerFrame = width * height * 4;
+  const renderPixels =
+    source.renderFrame === undefined ? undefined : new Uint8ClampedArray(bytesPerFrame);
+  const renderImage =
+    source.renderFrame === undefined ? undefined : new ImageData(renderPixels!, width, height);
   const frameDurationMs = 1_000 / frameRate;
   try {
     const generatedVideo = createVideoFrameTrack();
@@ -580,15 +590,14 @@ export async function downloadBrowserMp4(
       if (source.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
       if (source.paintFrame !== undefined) await source.paintFrame(index);
       else {
-        const frame = await source.renderFrame!(index);
-        if (frame.length !== bytesPerFrame) {
+        const returned = await source.renderFrame!(index, renderPixels);
+        if (returned !== renderPixels && returned.byteLength !== bytesPerFrame) {
           throw new RangeError(
-            `frame ${index} length ${frame.length} does not match ${bytesPerFrame} bytes (${width}x${height} RGBA)`,
+            `frame ${index} length ${returned.byteLength} does not match ${bytesPerFrame} bytes (${width}x${height} RGBA)`,
           );
         }
-        const pixels = new Uint8ClampedArray(frame.length);
-        pixels.set(frame);
-        context!.putImageData(new ImageData(pixels, width, height), 0, 0);
+        if (returned !== renderPixels) renderPixels!.set(returned);
+        context!.putImageData(renderImage!, 0, 0);
       }
       // A requestAnimationFrame boundary lets a 2D/WebGL paint commit before
       // the frame is copied to the generated video track.

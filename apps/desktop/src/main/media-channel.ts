@@ -1,5 +1,6 @@
-import { readFile } from 'node:fs/promises';
-import { createHash, randomBytes } from 'node:crypto';
+import { readFile, stat as statFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { createHash, randomBytes, type Hash } from 'node:crypto';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { ProviderUnavailableError, evaluateEndpoint } from '@joy-media/provider-sdk';
@@ -57,6 +58,10 @@ export const MEDIA_CHANNELS = [
   'desktop.media.job.status',
   'desktop.media.job.cancel',
   'desktop.media.derivative.bytes',
+  'desktop.media.derivative.transfer.begin',
+  'desktop.media.derivative.transfer.chunk',
+  'desktop.media.derivative.transfer.finish',
+  'desktop.media.derivative.transfer.cancel',
   'desktop.media.audio.denoise',
   'desktop.media.preview.frame',
   'desktop.media.workers.list',
@@ -91,6 +96,14 @@ export interface MediaChannelDeps {
   };
   /** Test seam for reading a derivative file. Defaults to the real filesystem. */
   readonly readDerivative?: (path: string) => Promise<Uint8Array>;
+  /** Test seams for bounded derivative transfer reads. */
+  readonly statDerivative?: (path: string) => Promise<{ readonly size: number }>;
+  readonly readDerivativeRange?: (
+    path: string,
+    start: number,
+    end: number,
+    signal: AbortSignal,
+  ) => Promise<Uint8Array>;
 }
 
 const ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
@@ -108,6 +121,47 @@ const WHISPER_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
 const WHISPER_UNAVAILABLE = 'The local Whisper server could not process the media.';
 const WHISPER_MEDIA_TOO_LARGE = 'Local Whisper media exceeds the 200 MB limit.';
 const WHISPER_RESPONSE_TOO_LARGE = 'The local Whisper server response exceeds the 64 MB limit.';
+const DERIVATIVE_TRANSFER_CHUNK_BYTES = 4 * 1024 * 1024;
+const DERIVATIVE_TRANSFER_TTL_MS = 30 * 60 * 1000;
+const MAX_ACTIVE_DERIVATIVE_TRANSFERS = 2;
+
+interface DerivativeTransfer {
+  readonly id: string;
+  readonly jobId: string;
+  readonly path: string;
+  readonly mimeType: string;
+  readonly expectedSha256: string;
+  readonly expectedBytes: number;
+  readonly hash: Hash;
+  nextOffset: number;
+  lastActiveAt: number;
+  activeRead?: AbortController;
+}
+
+function readDerivativeFileRange(
+  path: string,
+  start: number,
+  end: number,
+  signal: AbortSignal,
+): Promise<Uint8Array> {
+  const expectedBytes = end - start + 1;
+  return new Promise((resolve, reject) => {
+    const result = new Uint8Array(expectedBytes);
+    let written = 0;
+    const stream = createReadStream(path, { start, end, signal });
+    stream.on('data', (chunk) => {
+      const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+      if (written + bytes.byteLength > result.byteLength) {
+        stream.destroy(new Error('Derivative range exceeded its requested size'));
+        return;
+      }
+      result.set(bytes, written);
+      written += bytes.byteLength;
+    });
+    stream.once('error', reject);
+    stream.once('end', () => resolve(result.subarray(0, written)));
+  });
+}
 
 function requestWhisper(
   url: URL,
@@ -441,6 +495,19 @@ export function createMediaChannelHandlers(
   deps: MediaChannelDeps,
 ): Readonly<Record<MediaChannel, (payload: unknown) => MediaResult | Promise<MediaResult>>> {
   const readDerivative = deps.readDerivative ?? ((path: string) => readFile(path));
+  const statDerivative =
+    deps.statDerivative ?? (async (path: string) => ({ size: (await statFile(path)).size }));
+  const readDerivativeRange = deps.readDerivativeRange ?? readDerivativeFileRange;
+  const derivativeTransfers = new Map<string, DerivativeTransfer>();
+  const pruneDerivativeTransfers = (): void => {
+    const expiredBefore = Date.now() - DERIVATIVE_TRANSFER_TTL_MS;
+    for (const [id, transfer] of derivativeTransfers) {
+      if (transfer.lastActiveAt < expiredBefore) {
+        derivativeTransfers.delete(id);
+        transfer.activeRead?.abort();
+      }
+    }
+  };
 
   const submitJob = (jobType: string, payload: unknown): MediaResult => {
     const request = asRequest(payload);
@@ -820,17 +887,168 @@ export function createMediaChannelHandlers(
       if (jobId === undefined) return { ok: false, error: 'Invalid job id' };
       const job = deps.orchestrator.get(jobId);
       if (job?.derivative === undefined) return { ok: false, error: 'No derivative for this job' };
+      let fileSize: number;
+      try {
+        fileSize = (await statDerivative(job.derivative.path)).size;
+      } catch {
+        return { ok: false, error: 'Derivative file is not available' };
+      }
+      if (
+        fileSize > MAX_LOCAL_ORIGINAL_BYTES ||
+        fileSize !== job.derivative.bytes ||
+        !Number.isSafeInteger(fileSize)
+      ) {
+        return { ok: false, error: 'Derivative failed its checksum' };
+      }
       let bytes: Uint8Array;
       try {
         bytes = await readDerivative(job.derivative.path);
       } catch {
         return { ok: false, error: 'Derivative file is not available' };
       }
+      if (bytes.byteLength !== fileSize)
+        return { ok: false, error: 'Derivative failed its checksum' };
       const sha256 = createHash('sha256').update(bytes).digest('hex');
       if (sha256 !== job.derivative.sha256) {
         return { ok: false, error: 'Derivative failed its checksum' };
       }
       return { ok: true, data: { mimeType: job.derivative.mimeType, sha256, bytes } };
+    },
+    'desktop.media.derivative.transfer.begin': async (payload) => {
+      pruneDerivativeTransfers();
+      const jobId = asJobId(payload);
+      if (jobId === undefined) return { ok: false, error: 'Invalid job id' };
+      const job = deps.orchestrator.get(jobId);
+      if (job?.derivative === undefined) return { ok: false, error: 'No derivative for this job' };
+      if (
+        !Number.isSafeInteger(job.derivative.bytes) ||
+        job.derivative.bytes < 0 ||
+        job.derivative.bytes > MAX_LOCAL_ORIGINAL_BYTES
+      ) {
+        return { ok: false, error: 'Derivative exceeds the 5 GiB transfer limit' };
+      }
+      let size: number;
+      try {
+        size = (await statDerivative(job.derivative.path)).size;
+      } catch {
+        return { ok: false, error: 'Derivative file is not available' };
+      }
+      if (!Number.isSafeInteger(size) || size < 0 || size > MAX_LOCAL_ORIGINAL_BYTES) {
+        return { ok: false, error: 'Derivative exceeds the 5 GiB transfer limit' };
+      }
+      if (size !== job.derivative.bytes) {
+        return { ok: false, error: 'Derivative file size does not match its recorded size' };
+      }
+      if (derivativeTransfers.size >= MAX_ACTIVE_DERIVATIVE_TRANSFERS) {
+        return { ok: false, error: 'Too many derivative transfers are active' };
+      }
+      const id = randomBytes(16).toString('hex');
+      const transfer: DerivativeTransfer = {
+        id,
+        jobId,
+        path: job.derivative.path,
+        mimeType: job.derivative.mimeType,
+        expectedSha256: job.derivative.sha256,
+        expectedBytes: size,
+        hash: createHash('sha256'),
+        nextOffset: 0,
+        lastActiveAt: Date.now(),
+      };
+      derivativeTransfers.set(id, transfer);
+      return {
+        ok: true,
+        data: {
+          transferId: id,
+          mimeType: transfer.mimeType,
+          sha256: transfer.expectedSha256,
+          size,
+          chunkBytes: DERIVATIVE_TRANSFER_CHUNK_BYTES,
+        },
+      };
+    },
+    'desktop.media.derivative.transfer.chunk': async (payload) => {
+      pruneDerivativeTransfers();
+      if (typeof payload !== 'object' || payload === null) {
+        return { ok: false, error: 'Invalid derivative transfer request' };
+      }
+      const request = payload as Record<string, unknown>;
+      const transferId = asId(request['transferId']);
+      const offset = request['offset'];
+      if (transferId === undefined || typeof offset !== 'number' || !Number.isSafeInteger(offset)) {
+        return { ok: false, error: 'Invalid derivative transfer request' };
+      }
+      const transfer = derivativeTransfers.get(transferId);
+      if (transfer === undefined) return { ok: false, error: 'Unknown derivative transfer' };
+      if (transfer.activeRead !== undefined) {
+        return { ok: false, error: 'A derivative transfer chunk is already being read' };
+      }
+      if (offset !== transfer.nextOffset || offset < 0 || offset >= transfer.expectedBytes) {
+        return { ok: false, error: 'Invalid derivative transfer offset' };
+      }
+      const count = Math.min(
+        DERIVATIVE_TRANSFER_CHUNK_BYTES,
+        transfer.expectedBytes - transfer.nextOffset,
+      );
+      const controller = new AbortController();
+      transfer.activeRead = controller;
+      transfer.lastActiveAt = Date.now();
+      try {
+        const bytes = await readDerivativeRange(
+          transfer.path,
+          offset,
+          offset + count - 1,
+          controller.signal,
+        );
+        if (derivativeTransfers.get(transferId) !== transfer || controller.signal.aborted) {
+          return { ok: false, error: 'Derivative transfer was cancelled' };
+        }
+        if (bytes.byteLength !== count) {
+          derivativeTransfers.delete(transferId);
+          return { ok: false, error: 'Derivative file changed during transfer' };
+        }
+        transfer.hash.update(bytes);
+        transfer.nextOffset += bytes.byteLength;
+        transfer.lastActiveAt = Date.now();
+        return { ok: true, data: { offset, bytes } };
+      } catch {
+        if (derivativeTransfers.get(transferId) === transfer)
+          derivativeTransfers.delete(transferId);
+        return { ok: false, error: 'Derivative file is not available' };
+      } finally {
+        if (transfer.activeRead === controller) delete transfer.activeRead;
+      }
+    },
+    'desktop.media.derivative.transfer.finish': (payload) => {
+      pruneDerivativeTransfers();
+      if (typeof payload !== 'object' || payload === null) {
+        return { ok: false, error: 'Invalid derivative transfer request' };
+      }
+      const transferId = asId((payload as Record<string, unknown>)['transferId']);
+      if (transferId === undefined)
+        return { ok: false, error: 'Invalid derivative transfer request' };
+      const transfer = derivativeTransfers.get(transferId);
+      if (transfer === undefined) return { ok: false, error: 'Unknown derivative transfer' };
+      if (transfer.activeRead !== undefined || transfer.nextOffset !== transfer.expectedBytes) {
+        return { ok: false, error: 'Derivative transfer is incomplete' };
+      }
+      derivativeTransfers.delete(transferId);
+      const sha256 = transfer.hash.digest('hex');
+      if (sha256 !== transfer.expectedSha256) {
+        return { ok: false, error: 'Derivative failed its checksum' };
+      }
+      return { ok: true, data: { sha256, size: transfer.expectedBytes } };
+    },
+    'desktop.media.derivative.transfer.cancel': (payload) => {
+      pruneDerivativeTransfers();
+      if (typeof payload !== 'object' || payload === null) return { ok: true };
+      const transferId = asId((payload as Record<string, unknown>)['transferId']);
+      if (transferId === undefined) return { ok: true };
+      const transfer = derivativeTransfers.get(transferId);
+      if (transfer !== undefined) {
+        derivativeTransfers.delete(transferId);
+        transfer.activeRead?.abort();
+      }
+      return { ok: true };
     },
     'desktop.media.workers.list': () => {
       const presence = deps.jobStore.presence();

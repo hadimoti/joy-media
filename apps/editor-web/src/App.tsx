@@ -5505,6 +5505,7 @@ function EditorWorkspace({
           controlPlaneProject.controlPlaneProjectId,
           stagedExportAssetId,
           workerJob.derivative.id,
+          abortController.signal,
         );
         abortController.signal.throwIfAborted();
         // The Worker already verified its own remux contract, but the browser
