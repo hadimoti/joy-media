@@ -133,6 +133,9 @@ export type IpcHandler = (
 ) => Promise<IpcResult> | IpcResult;
 
 /** Builds the channel -> handler dispatch table. Never exposed directly to the renderer. */
+/** The longest the library settings reply waits for the drive type; see `driveTypeOf`. */
+export const DRIVE_TYPE_WAIT_MS = 400;
+
 export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcHandler> {
   const now = deps.now ?? (() => new Date().toISOString());
   const newId = deps.newId ?? (() => crypto.randomUUID());
@@ -142,10 +145,23 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
    * never a broken settings dialog. */
   const driveTypeOf = async (directory: string): Promise<AssetLibraryDriveType> => {
     if (deps.classifyDrive === undefined) return 'unknown';
+    // The answer comes from a Windows query that can take seconds the first time. The settings dialog shows the
+    // folder as soon as it has the reply, so the reply never waits longer than DRIVE_TYPE_WAIT_MS: a slower answer
+    // is "unknown" now and is cached by the probe for the next time (the app also asks once at start).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const patience = new Promise<AssetLibraryDriveType>((resolve) => {
+      timer = setTimeout(() => resolve('unknown'), DRIVE_TYPE_WAIT_MS);
+    });
     try {
-      return (await deps.classifyDrive(directory)) ?? 'unknown';
+      const answer = Promise.resolve(deps.classifyDrive(directory)).then(
+        (type) => type ?? 'unknown',
+        () => 'unknown' as const,
+      );
+      return await Promise.race([answer, patience]);
     } catch {
       return 'unknown';
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   };
 
