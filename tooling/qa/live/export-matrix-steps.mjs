@@ -201,7 +201,8 @@ async function runPresetRow(page, ctx, presetId) {
   assertNoStagedLibraryEntries(ctx, rowId);
   const checked = inspectPreset(exported.probe, presetId);
   const decode = (ctx.run ?? spawnSync)(
-    process.env.JOY_MEDIA_FFMPEG ?? 'C:\\ffmpeg\\files\\bin\\ffmpeg.exe',
+    // Like every other live step: JOY_MEDIA_FFMPEG, else the ffmpeg on PATH (a fixed folder only fits one machine).
+    process.env.JOY_MEDIA_FFMPEG ?? 'ffmpeg',
     ['-v', 'error', '-i', exported.path, '-t', '2', '-f', 'null', '-'],
     { encoding: 'utf8', timeout: 120_000, windowsHide: true },
   );
