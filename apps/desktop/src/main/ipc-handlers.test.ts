@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
+import { createIpcHandlers, dispatchIpcRequest, DRIVE_TYPE_WAIT_MS } from './ipc-handlers.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import type { SupervisedChild } from './worker-supervisor.js';
@@ -998,6 +998,54 @@ describe('IPC dispatch', () => {
 
     expect(res.ok).toBe(true);
     expect((res.data as { driveType: string }).driveType).toBe('removable');
+  });
+
+  it('asset-library.get-settings does not wait for a slow drive answer: the folder comes back at once as "unknown"', async () => {
+    vi.useFakeTimers();
+    try {
+      const d = deps();
+      let resolveSlow: (type: 'removable') => void = () => undefined;
+      const slow = new Promise<'removable'>((resolve) => {
+        resolveSlow = resolve;
+      });
+      const handlers = createIpcHandlers({ ...d, classifyDrive: () => slow });
+
+      const pending = dispatchIpcRequest(handlers, {
+        origin: 'joy-media-app://renderer',
+        channel: 'desktop.asset-library.get-settings',
+      });
+      await vi.advanceTimersByTimeAsync(DRIVE_TYPE_WAIT_MS + 1);
+      const res = await pending;
+
+      expect(res.ok).toBe(true);
+      expect((res.data as { driveType: string }).driveType).toBe('unknown');
+      expect((res.data as { directory: string }).directory).not.toBe('');
+      resolveSlow('removable');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asset-library.get-settings still reports a drive answer that arrives within the wait', async () => {
+    vi.useFakeTimers();
+    try {
+      const d = deps();
+      const handlers = createIpcHandlers({
+        ...d,
+        classifyDrive: () => new Promise((resolve) => setTimeout(() => resolve('network'), 100)),
+      });
+
+      const pending = dispatchIpcRequest(handlers, {
+        origin: 'joy-media-app://renderer',
+        channel: 'desktop.asset-library.get-settings',
+      });
+      await vi.advanceTimersByTimeAsync(150);
+      const res = await pending;
+
+      expect((res.data as { driveType: string }).driveType).toBe('network');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('asset-library.get-settings says "unknown" when the drive cannot be told, so nobody is warned', async () => {

@@ -386,7 +386,8 @@ if (!app.requestSingleInstanceLock()) {
     // Opens the asset library folder in the OS file browser. shell.openPath
     // resolves with the reason it failed, or an empty string when it worked.
     openDirectory: async (directory) => shell.openPath(directory),
-    // Works out whether the library sits on a drive that is always there.
+    // Works out whether the library sits on a drive that is always there. The settings reply waits for it only a
+    // moment (ipc-handlers DRIVE_TYPE_WAIT_MS); the app asks once at start so the answer is already cached.
     classifyDrive: async (directory) => classifyDriveOfDirectory(directory),
     secretStore,
     providerBroker,
@@ -515,6 +516,11 @@ if (!app.requestSingleInstanceLock()) {
     // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
     // Keys are read only after ready: safeStorage is not guaranteed to work before it.
     void checkProfileCredentials(localDatabase, secretStore).catch(() => undefined);
+    // The drive-type question (a Windows query that can take seconds) is asked once now, in the background, so the
+    // Asset Library Storage dialog finds the answer cached and opens with the folder shown at once.
+    void classifyDriveOfDirectory(localDatabase.getAssetLibraryInfo().directory).catch(
+      () => undefined,
+    );
     try {
       localJobApiStart = startLocalJobApi({
         orchestrator: jobOrchestrator,
