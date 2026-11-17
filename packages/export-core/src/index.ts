@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -314,6 +314,107 @@ export function remuxBrowserMp4(
       { shell: false, encoding: 'utf8' },
     );
     if (result.status !== 0) throw new Error(`ffmpeg remux failed: ${result.stderr}`);
+    renameSync(temporaryPath, outputPath);
+    return verifyExport(outputPath);
+  } catch (error) {
+    if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
+/** Async Worker path: keep the event loop available for lease heartbeats while FFmpeg runs. */
+export async function remuxBrowserMp4Async(
+  inputPath: string,
+  outputPath: string,
+  frameRate = 30,
+  frameCount?: number,
+  options: {
+    readonly signal?: AbortSignal;
+    readonly cancelled?: () => boolean;
+    readonly ffmpegPath?: string;
+    readonly ffmpegArgsPrefix?: readonly string[];
+  } = {},
+): Promise<ExportProbe> {
+  if (!Number.isFinite(frameRate) || frameRate <= 0 || frameRate > 120)
+    throw new RangeError('browser remux frame rate is invalid');
+  if (
+    frameCount !== undefined &&
+    (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount / frameRate > 86_400)
+  )
+    throw new RangeError('browser remux frame count is invalid');
+  const temporaryPath = join(
+    dirname(outputPath),
+    `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
+  );
+  const normalizeTimeline =
+    frameCount === undefined
+      ? []
+      : [
+          '-vf',
+          `setpts=N/(${frameRate}*TB),tpad=stop_mode=clone:stop=-1`,
+          '-af',
+          'asetpts=PTS-STARTPTS,apad',
+          '-frames:v',
+          String(frameCount),
+          '-t',
+          (frameCount / frameRate).toFixed(6),
+        ];
+  const args = [
+    '-y',
+    '-i',
+    inputPath,
+    ...normalizeTimeline,
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-r',
+    String(frameRate),
+    '-movflags',
+    '+faststart',
+    temporaryPath,
+  ];
+  try {
+    if (options.signal?.aborted || options.cancelled?.()) throw new Error('canceled');
+    const child = spawn(
+      options.ffmpegPath ?? 'ffmpeg',
+      [...(options.ffmpegArgsPrefix ?? []), ...args],
+      {
+        shell: false,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      },
+    );
+    let stderr = '';
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    const closed = new Promise<{ readonly code: number | null; readonly error?: Error }>(
+      (resolve) => {
+        child.once('error', (error: Error) => resolve({ code: null, error }));
+        child.once('close', (code: number | null) => resolve({ code }));
+      },
+    );
+    let abort = false;
+    const terminate = (): void => {
+      abort = true;
+      child.kill();
+    };
+    options.signal?.addEventListener('abort', terminate, { once: true });
+    const cancellationTimer = setInterval(() => {
+      if (options.cancelled?.()) terminate();
+    }, 20);
+    try {
+      const outcome = await closed;
+      if (abort || options.signal?.aborted || options.cancelled?.()) throw new Error('canceled');
+      if (outcome.error !== undefined) throw new Error(`ffmpeg remux failed: ${stderr}`);
+      if (outcome.code !== 0) throw new Error(`ffmpeg remux failed: ${stderr}`);
+    } finally {
+      clearInterval(cancellationTimer);
+      options.signal?.removeEventListener('abort', terminate);
+    }
     renameSync(temporaryPath, outputPath);
     return verifyExport(outputPath);
   } catch (error) {

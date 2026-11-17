@@ -14,6 +14,106 @@ import type { GpuPreviewHost } from './gpu-preview-host.js';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 describe('WorkerDaemon', () => {
+  it('keeps an export leased while the async export stage exceeds the short lease window', async () => {
+    let stop = false;
+    let lastHeartbeat = Date.now();
+    let heartbeats = 0;
+    const client = {
+      hello: async () => undefined,
+      lease: async () => ({ id: 'long-export', projectId: 'project-1', type: 'render.export' }),
+      heartbeat: async () => {
+        lastHeartbeat = Date.now();
+        heartbeats += 1;
+        return { cancelRequested: false };
+      },
+      uploadDerivative: async () => undefined,
+      complete: async () => {
+        expect(Date.now() - lastHeartbeat).toBeLessThan(20);
+        stop = true;
+      },
+      fail: async () => undefined,
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 45));
+        return {
+          state: 'completed' as const,
+          result: {
+            kind: 'render.export' as const,
+            assetId: 'asset-1',
+            sha256: 'a'.repeat(64),
+            bytes: 1,
+            localRef: 'export-long-export',
+            descriptor: { mimeType: 'video/mp4' as const, width: 64, height: 36, durationUs: 1 },
+          },
+        };
+      },
+      derivativeFile: async () => ({ path: 'unused', bytes: 1 }),
+    } as unknown as WorkerRuntime;
+
+    await new WorkerDaemon(client, runtime).run({
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 5,
+      stopped: () => stop,
+    });
+    expect(heartbeats).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps heartbeating while the post-run derivative check and upload are slow', async () => {
+    let stop = false;
+    let phase = 'run';
+    let postRunHeartbeats = 0;
+    const client = {
+      hello: async () => undefined,
+      lease: async () => ({ id: 'slow-upload', projectId: 'project-1', type: 'render.export' }),
+      heartbeat: async () => {
+        if (phase !== 'run') postRunHeartbeats += 1;
+        return { cancelRequested: false };
+      },
+      uploadDerivative: async () => {
+        phase = 'upload';
+        await new Promise((resolve) => setTimeout(resolve, 35));
+      },
+      complete: async () => {
+        stop = true;
+      },
+      fail: async () => undefined,
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async () => {
+        phase = 'hash';
+        return {
+          state: 'completed' as const,
+          result: {
+            kind: 'render.export' as const,
+            assetId: 'asset-1',
+            sha256: 'b'.repeat(64),
+            bytes: 1,
+            localRef: 'export-slow-upload',
+            descriptor: { mimeType: 'video/mp4' as const, width: 64, height: 36, durationUs: 1 },
+          },
+        };
+      },
+      derivativeFile: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 35));
+        return { path: 'unused', bytes: 1 };
+      },
+    } as unknown as WorkerRuntime;
+
+    await new WorkerDaemon(client, runtime).run({
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 5,
+      stopped: () => stop,
+    });
+    expect(postRunHeartbeats).toBeGreaterThanOrEqual(3);
+  });
+
   it('stops on session expiry so a supervisor can restart through pairing', async () => {
     const client = {
       hello: async () => undefined,

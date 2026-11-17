@@ -18,6 +18,7 @@ export class WorkerDaemon {
     readonly pollIntervalMs?: number;
     /** Idle GPU preview polling is deliberately slower than job polling. */
     readonly gpuPreviewPollIntervalMs?: number;
+    readonly heartbeatIntervalMs?: number;
     readonly stopped: () => boolean;
   }): Promise<void> {
     const pollIntervalMs = options.pollIntervalMs ?? 1_000;
@@ -45,6 +46,7 @@ export class WorkerDaemon {
     let leasedJobToken: string | undefined;
     while (!options.stopped()) {
       if (gpuPreviewError !== undefined) throw gpuPreviewError;
+      let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
       try {
         if (Date.now() - lastHelloAt >= 15_000) {
           await this.client.hello(
@@ -73,26 +75,21 @@ export class WorkerDaemon {
             heartbeatInFlight = false;
           }
         };
-        const heartbeatTimer = setInterval(() => {
+        heartbeatTimer = setInterval(() => {
           void sendHeartbeat().catch((error: unknown) => {
             this.runtime.log.write(
               `heartbeat failed: ${error instanceof Error ? error.message.slice(0, 180) : 'unknown error'}`,
             );
           });
-        }, 10_000);
-        let result: Awaited<ReturnType<WorkerRuntime['run']>>;
-        try {
-          result = await this.runtime.run(job, {
-            cancelled: () => options.stopped() || cancelRequested || gpuPreviewError !== undefined,
-            progress: async (progress) => {
-              currentProgress = progress;
-              await sendHeartbeat();
-            },
-          });
-          if (gpuPreviewError !== undefined) throw gpuPreviewError;
-        } finally {
-          clearInterval(heartbeatTimer);
-        }
+        }, options.heartbeatIntervalMs ?? 10_000);
+        const result = await this.runtime.run(job, {
+          cancelled: () => options.stopped() || cancelRequested || gpuPreviewError !== undefined,
+          progress: async (progress) => {
+            currentProgress = progress;
+            await sendHeartbeat();
+          },
+        });
+        if (gpuPreviewError !== undefined) throw gpuPreviewError;
         if (result.state === 'completed') {
           // Upload verified bytes for browser-consumable derivatives. Fixture and
           // provider receipts remain Worker-local until their own contracts land.
@@ -138,6 +135,8 @@ export class WorkerDaemon {
           leasedJobToken = undefined;
         }
         await sleep(pollIntervalMs);
+      } finally {
+        if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
       }
     }
   }

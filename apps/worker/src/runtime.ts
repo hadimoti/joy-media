@@ -38,7 +38,7 @@ import {
   type UpscaleWorkerDerivative,
   type UpscalingAvailability,
 } from './local-upscaling.js';
-import { executeLeasedExport, exportJobPayload } from './export-job.js';
+import { executeLeasedExportAsync, exportJobPayload } from './export-job.js';
 import { runMediaQc, type MediaQcReceipt } from './media-qc.js';
 import { verifyExport } from '@joy-media/export-core';
 
@@ -315,13 +315,14 @@ export class WorkerRuntime {
         await options.progress(5);
         await this.options.downloadJobAsset(job.id, job.leaseToken, sourcePath);
         await options.progress(40);
-        executeLeasedExport(
+        await executeLeasedExportAsync(
           { complete: () => undefined },
           this.identity.workerId,
           job.id,
           { sourcePath, payload },
           outputPath,
           job.leaseToken,
+          { cancelled: options.cancelled },
         );
         await options.progress(80);
         const { sha256, bytes } = await hashFile(outputPath);
