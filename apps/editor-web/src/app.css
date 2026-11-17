@@ -19284,7 +19284,7 @@ label {
   gap: 2px;
   min-width: 0;
   padding: 3px 4px;
-  overflow-x: auto;
+  overflow: hidden;
   scrollbar-width: none;
   border-bottom: 1px solid var(--joy-border);
   background: var(--joy-bg-elevated);
@@ -19315,6 +19315,16 @@ label {
   white-space: nowrap;
 }
 
+.feature-hub-nav.is-compact > button {
+  flex: 1 1 0;
+  min-width: 2rem;
+  padding-inline: 0.2rem;
+}
+
+.feature-hub-nav.is-compact .feature-hub-label {
+  display: none;
+}
+
 .feature-hub-nav > button:hover {
   background: var(--joy-bg-control);
   color: var(--joy-text);
@@ -19340,6 +19350,7 @@ label {
   width: 0.85rem;
   height: 0.85rem;
   place-items: center;
+  color: var(--joy-accent);
 }
 
 .feature-hub-icon svg {

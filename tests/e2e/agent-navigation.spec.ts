@@ -85,9 +85,8 @@ test.describe('JOY Agent navigation', () => {
 
     const readiness = page.getByRole('status', { name: 'Edit readiness' });
     await expect(readiness).toBeVisible();
-    await expect(readiness).toContainText(
-      'Joy Code is optional. Connect your own AI model to edit by describing what you want.',
-    );
+    await expect(readiness.getByRole('heading', { name: 'No model connected' })).toBeVisible();
+    await expect(readiness.getByRole('button', { name: 'Connect a model' })).toBeVisible();
     // One calm card: the engineer wording is gone.
     await expect(readiness).not.toContainText('Connect a model with JOY edit tools');
     const dimensions = await readiness.evaluate((element) => ({
@@ -125,7 +124,7 @@ test.describe('JOY Agent navigation', () => {
 
     const readiness = page.getByRole('status', { name: 'Recipes readiness' });
     await expect(readiness).toBeVisible();
-    await expect(readiness).toContainText('Joy Code is optional.');
+    await expect(readiness.getByRole('heading', { name: 'No model connected' })).toBeVisible();
     await expect(readiness.getByRole('button', { name: 'Connect a model' })).toBeVisible();
 
     // Run controls remain visible for discovery, but the current UI disables
@@ -148,7 +147,7 @@ test.describe('JOY Agent navigation', () => {
 
     const readiness = page.getByRole('status', { name: 'Looks readiness' });
     await expect(readiness).toBeVisible();
-    await expect(readiness).toContainText('Joy Code is optional.');
+    await expect(readiness.getByRole('heading', { name: 'No model connected' })).toBeVisible();
     await expect(readiness.getByRole('button', { name: 'Connect a model' })).toBeVisible();
 
     const looks = page.getByRole('region', { name: 'Living Looks' });

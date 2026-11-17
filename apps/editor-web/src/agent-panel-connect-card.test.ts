@@ -69,7 +69,10 @@ describe('Joy Code not-connected card wiring', () => {
   });
 
   it('keeps one message and one action for the not-connected state', () => {
-    expect(cardSource.match(/Joy Code is optional\. Connect your own AI model/g)).toHaveLength(1);
+    expect(cardSource.match(/JOY_CODE_CONNECT_MODEL_MESSAGE = 'No model connected'/)).toHaveLength(
+      1,
+    );
     expect(cardSource.match(/'Connect a model'/g)).toHaveLength(1);
+    expect(cardSource).toContain('<h3 className="joy-code-connect-card-message">');
   });
 });

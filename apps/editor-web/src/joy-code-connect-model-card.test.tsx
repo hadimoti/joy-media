@@ -35,7 +35,7 @@ describe('Joy Code connect card', () => {
     return container!;
   }
 
-  it('shows one calm sentence and one gold action when no model is connected', async () => {
+  it('shows a short state name and one gold action when no model is connected', async () => {
     const onConnect = vi.fn();
     const rendered = await render(
       <JoyCodeReadinessSlot
@@ -50,6 +50,7 @@ describe('Joy Code connect card', () => {
     expect(card).not.toBeNull();
     expect(card!.getAttribute('aria-label')).toBe('Edit readiness');
     expect(rendered.textContent).toContain(JOY_CODE_CONNECT_MODEL_MESSAGE);
+    expect(rendered.querySelector('h3')?.textContent).toBe('No model connected');
     // The technical notice is gone: the card is the whole message.
     expect(rendered.textContent).not.toContain('JOY edit tools');
 
