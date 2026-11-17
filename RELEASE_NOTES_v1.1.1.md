@@ -94,6 +94,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Plain Left and Right now move a selected clip by one pixel, and step the playhead when nothing is selected.
 - Dragging an effect or filter card onto a clip no longer starts the browser's picture drag.
 - The Monitor zoom keys Ctrl+0, Ctrl+1, Ctrl++ and Ctrl+- did not work. Fixed.
+- On a large screen a one-second clip next to a cut could not be clicked. Fixed.
 
 ### Menus and panels
 
@@ -122,6 +123,20 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - A long export (10 minutes) failed after about 12 minutes with "worker lease expired": the export helper stopped reporting while it finished the file. Fixed; a 10-minute 1080p export now completes.
 - The 4K export preset failed at the final check ("decoder policy"). Fixed.
 - Cancelling an export of an H.264 or a WebM clip stops it, frees the Export button and keeps no file.
+- The Asset Library Storage dialog no longer shows a large empty area under its buttons. In a short window the dialog scrolls.
+- The Asset Library Folder dialog shows its folder at once, instead of waiting for a slow Windows drive check.
+- In a narrow Media panel, the list view shows the picture and name. The Collection and Size columns hide when the panel is narrow, so nothing is cut.
+- On the Projects page, the Projects and Trash tabs and the Grid and List switch are icons. Hovering over one shows its name.
+- The Media panel message ("... added to the timeline") has a close button.
+
+### Saving and export
+
+- The project is saved to disk soon after every change, when a window closes, and when the app quits. A crash or power cut loses almost nothing.
+- Temporary export files in the browser storage are cleaned up reliably after a cancel or a failure. They are not deleted while another window still uses them.
+- The sample project "Local editor project" now exports. It had two clips with no media behind them. An export that is refused for missing media now names the clips.
+- The colour of an exported video no longer changes when you export a second time in the browser version.
+- The export quality is higher. The final video is encoded with almost no loss: a 10-minute export takes about the same time, and the file is about 390 MB instead of 220 MB.
+- The export helper no longer reports false errors after a job ends. A cancel during the last steps is honoured: the job shows cancelled, not failed. If a needed video tool is missing, the message gives the real reason.
 
 ## Known limits
 
@@ -131,7 +146,6 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - **Providers.** Kimi and xAI model answers and the Get a key and API docs links on the provider cards may not work as expected.
 - **Export.** The command line has 3 export choices (MP4, WebM, ProRes). The app has 5 presets, so the same request can give different files. Some effects may not appear in exported videos.
 - **Effect previews.** Some effect cards play the wrong preview loop, so the card may not show the effect as it looks.
-- **Sample project export.** Exporting one sample project can fail with "cannot resolve visual asset".
 - **Some drags.** One clip dragged from the asset panel showed on the timeline but was missing from the saved project; this is not yet explained. Dropping an image from the Asset Library onto the filter layer can do nothing, with no message.
 - **Export size.** Export size may follow the selected preset instead of the canvas size.
 - **Projects page when maximised.** The bottom of the Projects page can sit behind the Windows taskbar.
@@ -154,6 +168,8 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - The web build of the drop progress Cancel button cannot stop the file that is being imported. The desktop app is not affected.
 - **Position X** uses offsets from the centre for picture clips and pixels for text clips, so the same number can mean different things.
 - **Small items, not yet fixed:** the vertical ruler on the Monitor has no numbers; Alt+arrow scaling at the smallest size can change a box's shape; the Monitor's frame-step keys are not in the command palette; the command palette shows a different Undo shortcut from the menus; the View menu cannot reopen the Captions, Text, Audio, Transitions, Colour, Motion or Templates panels; the command line prints an older provider risk sentence; one title template still says "New tools for JOY Studio"; some icon buttons in Joy Code Settings keep fixed colours instead of the theme colours; the History panel shows internal ids in a few labels.
+- Long titles run off the frame. They do not wrap yet (a fix is in work).
+- On a hard kill during the half second after an edit, that last edit can still be lost. The file is written within about half a second to two seconds.
 
 ## Not yet checked on screen
 
@@ -164,6 +180,7 @@ These are built and tested in code. They were not yet seen working in the runnin
 - Colour on old projects compared with v1.1.0, and the graphics card path of the colour engine.
 - Whether the Format control saves frame rate and background settings, and whether exports match the canvas size.
 - Sample projects without missing media, missing-clip marks on the timeline, the Monitor and the Inspector, and the export warning about missing media.
+- Sample project export. The fix for exporting the sample project "Local editor project" is in the code but not yet seen working in the app. Before the fix, exporting one sample project could fail with "cannot resolve visual asset".
 - The Asset Library Storage dialog and its Open folder button.
 - The library card design and transition cards that play the real transition.
 - Animate panel changes, and the panel header menu.
