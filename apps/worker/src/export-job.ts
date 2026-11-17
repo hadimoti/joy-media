@@ -1,6 +1,7 @@
 import {
   freezeManifest,
   remuxBrowserMp4,
+  remuxBrowserMp4Async,
   verifyExportAgainstManifest,
 } from '@joy-media/export-core';
 import type { RenderManifest } from '@joy-media/export-core';
@@ -44,6 +45,34 @@ export function executeLeasedExport(
   try {
     const manifest = freezeManifest(input.payload.manifest);
     remuxBrowserMp4(input.sourcePath, outputPath, manifest.frameRate, input.payload.frameCount);
+    const probe = verifyExportAgainstManifest(outputPath, manifest);
+    coordinator.complete(workerId, jobId, undefined, undefined, leaseToken);
+    return { outputPath, videoCodec: probe.videoCodec, audioCodec: probe.audioCodec };
+  } catch (error) {
+    if (existsSync(outputPath)) rmSync(outputPath, { force: true });
+    throw error;
+  }
+}
+
+/** Worker execution keeps FFmpeg asynchronous so lease heartbeats can run. */
+export async function executeLeasedExportAsync(
+  coordinator: ExportLeaseCoordinator,
+  workerId: string,
+  jobId: string,
+  input: LeasedExportInput,
+  outputPath: string,
+  leaseToken?: string,
+  options: { readonly signal?: AbortSignal; readonly cancelled?: () => boolean } = {},
+): Promise<ExportJobResult> {
+  try {
+    const manifest = freezeManifest(input.payload.manifest);
+    await remuxBrowserMp4Async(
+      input.sourcePath,
+      outputPath,
+      manifest.frameRate,
+      input.payload.frameCount,
+      options,
+    );
     const probe = verifyExportAgainstManifest(outputPath, manifest);
     coordinator.complete(workerId, jobId, undefined, undefined, leaseToken);
     return { outputPath, videoCodec: probe.videoCodec, audioCodec: probe.audioCodec };

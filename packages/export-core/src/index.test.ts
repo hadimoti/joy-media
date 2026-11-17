@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -9,6 +9,7 @@ import {
   freezeManifest,
   dimensionsForPreset,
   remuxBrowserMp4,
+  remuxBrowserMp4Async,
   renderFixture,
   renderRgbaFrames,
   verifyExport,
@@ -122,6 +123,42 @@ describe('deterministic export contract', () => {
     expect(probe.frameRate).toBe(30);
     expect(readdirSync(directory).some((name) => name.includes('.partial.'))).toBe(false);
   });
+  it('runs async remux with a fake ffmpeg, reports failures, and aborts cleanly', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-async-remux-'));
+    const fixturePath = join(directory, 'browser.mp4');
+    const outputPath = join(directory, 'remuxed.mp4');
+    const scriptPath = join(directory, 'fake-ffmpeg.mjs');
+    renderFixture(manifest, fixturePath);
+    const runFakeFfmpeg = (script: string, signal?: AbortSignal) => {
+      writeFileSync(scriptPath, script);
+      return remuxBrowserMp4Async(fixturePath, outputPath, 30, undefined, {
+        ffmpegPath: process.execPath,
+        ffmpegArgsPrefix: [scriptPath],
+        ...(signal === undefined ? {} : { signal }),
+      });
+    };
+    try {
+      const successScript = [
+        "import { copyFileSync } from 'node:fs';",
+        'const args = process.argv.slice(2);',
+        "copyFileSync(args[args.indexOf('-i') + 1], args.at(-1));",
+      ].join('\n');
+      const probe = await runFakeFfmpeg(successScript);
+      expect(probe).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
+      rmSync(outputPath, { force: true });
+
+      await expect(
+        runFakeFfmpeg("process.stderr.write('fake remux failure'); process.exit(7);"),
+      ).rejects.toThrow('ffmpeg remux failed: fake remux failure');
+      const controller = new AbortController();
+      const aborted = runFakeFfmpeg('setInterval(() => undefined, 1000);', controller.signal);
+      setTimeout(() => controller.abort(), 35);
+      await expect(aborted).rejects.toThrow('canceled');
+      expect(readdirSync(directory).some((name) => name.includes('.partial.'))).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
   it('normalizes slow browser-capture timestamps to the authored frame count', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-timeline-'));
     const fixturePath = join(directory, 'slow-browser.mp4');
