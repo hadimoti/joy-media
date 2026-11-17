@@ -533,7 +533,12 @@ export async function configureJoyAgent(
   await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Joy Code Settings' });
   await expect(dialog).toBeVisible();
-  await dialog.getByRole('button', { name: /Connection and sign-in/ }).click();
+  // The settings dialog opens on its own page list: pick AI models, and open the connection section only when it
+  // is closed (a second click would close it).
+  await dialog.getByRole('button', { name: 'AI models', exact: true }).click();
+  const endpointSection = dialog.getByRole('button', { name: /Connection and sign-in/ }).first();
+  if ((await endpointSection.getAttribute('aria-expanded')) !== 'true')
+    await endpointSection.click();
   // The current settings form exposes provider choices in the custom endpoint section.
   // Use its own selector rather than a stale accessible name from the former BYOK form.
   await dialog.locator('.joy-own-key select').first().selectOption('openai-compatible');
