@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BROWSER_MP4_MIME_CANDIDATES,
   BROWSER_MP4_MIME_TYPE,
+  EXPORT_BT709_COLOR_SPACE,
+  EXPORT_CANVAS_COLOR_SPACE,
   UnsupportedBrowserMp4Error,
   downloadBrowserMp4,
   packBrowserExport,
@@ -9,6 +11,13 @@ import {
   triggerBrowserDownload,
   type BrowserMp4MimeType,
 } from './browser-export.js';
+
+type ExplicitVideoFrameInit = VideoFrameInit & {
+  readonly colorSpace?: VideoColorSpaceInit;
+  readonly format?: VideoPixelFormat;
+  readonly codedWidth?: number;
+  readonly codedHeight?: number;
+};
 
 const manifest = { width: 1, height: 1, frameRate: 1_000, durationUs: 1_000 };
 
@@ -63,7 +72,7 @@ describe('browser export contracts', () => {
     });
     expect(readiness).toHaveBeenCalledWith(['YekanBakh', 'Vazin']);
     expect(readiness.mock.invocationCallOrder[0]).toBeLessThan(
-      harness.captureStream.mock.invocationCallOrder[0]!,
+      harness.generatorCreated.mock.invocationCallOrder[0]!,
     );
   });
 
@@ -98,13 +107,13 @@ describe('browser export contracts', () => {
       filename: 'selected.mp4',
     });
 
-    expect(harness.captureStream).toHaveBeenCalledWith(0);
+    expect(harness.generatorCreated).toHaveBeenCalledOnce();
     expect(harness.recorderOptions).toMatchObject({ mimeType: 'video/mp4' });
     expect(harness.addTrack).toHaveBeenCalledWith(harness.audioTrack);
     expect(result.mimeType).toBe('video/mp4;codecs=avc1.640028,mp4a.40.2');
     expect(result.blob?.type).toBe(result.mimeType);
     expect(result.encoded).toBe(true);
-    expect(harness.videoTrack.requestFrame).toHaveBeenCalledOnce();
+    expect(harness.writtenFrames).toHaveLength(1);
     expect(harness.videoTrack.stop).toHaveBeenCalledOnce();
     expect(harness.audioTrack.stop).not.toHaveBeenCalled();
     expect(harness.removeTrack).toHaveBeenCalledWith(harness.audioTrack);
@@ -183,20 +192,64 @@ describe('browser export contracts', () => {
     expect(harness.canvas).toMatchObject({ width: 640, height: 360 });
   });
 
-  it('falls back to a timed capture stream when manual frame requests are unavailable', async () => {
-    const harness = installRecorderHarness('video/mp4', { manualCapture: false });
-    await downloadBrowserMp4({
+  it('uses explicit sRGB input and BT.709 output frames for first and second recorder exports', async () => {
+    const harness = installRecorderHarness('video/mp4');
+    const source = {
       manifest,
       frameCount: 1,
+      canvas: harness.canvas,
+      audioTrack: harness.audioTrack,
+      mimeType: 'video/mp4' as const,
+      paintFrame: () => {},
+    };
+    await downloadBrowserMp4(source);
+    await downloadBrowserMp4(source);
+
+    expect(harness.frameOptions).toHaveLength(4);
+    expect(harness.frameOptions.map((options) => options.colorSpace)).toEqual([
+      EXPORT_CANVAS_COLOR_SPACE,
+      EXPORT_BT709_COLOR_SPACE,
+      EXPORT_CANVAS_COLOR_SPACE,
+      EXPORT_BT709_COLOR_SPACE,
+    ]);
+    expect(harness.frameOptions.map((options) => options.format)).toEqual([
+      undefined,
+      'I420',
+      undefined,
+      'I420',
+    ]);
+    expect(harness.writtenFrames).toHaveLength(2);
+    expect(harness.generatorCreated).toHaveBeenCalledTimes(2);
+  });
+
+  it('writes each authored frame to the generated track with explicit BT.709 metadata', async () => {
+    const harness = installRecorderHarness('video/mp4');
+    await downloadBrowserMp4({
+      manifest,
+      frameCount: 2,
       canvas: harness.canvas,
       audioTrack: harness.audioTrack,
       mimeType: 'video/mp4',
       paintFrame: () => {},
     });
 
-    expect(harness.captureStream.mock.calls.map(([rate]) => rate)).toEqual([0, 1_000]);
-    expect(harness.unsupportedManualTrack.stop).toHaveBeenCalledOnce();
-    expect(harness.videoTrack.requestFrame).toBeUndefined();
+    expect(harness.frameOptions).toHaveLength(4);
+    expect(harness.frameOptions.map((options) => options.timestamp)).toEqual([0, 0, 1_000, 1_000]);
+    expect(harness.frameOptions.filter((options) => options.format === 'I420')).toEqual([
+      expect.objectContaining({
+        colorSpace: EXPORT_BT709_COLOR_SPACE,
+        format: 'I420',
+      }),
+      expect.objectContaining({
+        colorSpace: EXPORT_BT709_COLOR_SPACE,
+        format: 'I420',
+      }),
+    ]);
+    expect(harness.frameOptions.filter((options) => options.format !== 'I420')).toEqual([
+      expect.objectContaining({ colorSpace: EXPORT_CANVAS_COLOR_SPACE }),
+      expect.objectContaining({ colorSpace: EXPORT_CANVAS_COLOR_SPACE }),
+    ]);
+    expect(harness.writtenFrames).toHaveLength(2);
   });
 
   it('stops recorder and owned video resources on render failure without stopping authored audio', async () => {
@@ -324,36 +377,15 @@ describe('browser export contracts', () => {
   });
 });
 
-function installRecorderHarness(
-  reportedMimeType: string,
-  options: { readonly manualCapture?: boolean } = {},
-) {
-  const videoTrack =
-    options.manualCapture === false
-      ? { requestFrame: undefined, stop: vi.fn() }
-      : { requestFrame: vi.fn(), stop: vi.fn() };
-  const unsupportedManualTrack = { stop: vi.fn() };
+function installRecorderHarness(reportedMimeType: string) {
+  const videoTracks: { readonly kind: string; readonly stop: ReturnType<typeof vi.fn> }[] = [];
+  const writtenFrames: unknown[] = [];
+  const frameOptions: ExplicitVideoFrameInit[] = [];
+  const generatorCreated = vi.fn();
   const audioTrack = { kind: 'audio', stop: vi.fn() };
-  const streamTracks: unknown[] = [videoTrack];
-  const removeTrack = vi.fn((track: unknown) => {
-    const index = streamTracks.indexOf(track);
-    if (index >= 0) streamTracks.splice(index, 1);
-  });
-  const addTrack = vi.fn((track: unknown) => streamTracks.push(track));
-  const stream = {
-    addTrack,
-    removeTrack,
-    getVideoTracks: () => [videoTrack],
-  };
-  const unsupportedManualStream = {
-    addTrack: vi.fn(),
-    removeTrack: vi.fn(),
-    getVideoTracks: () => [unsupportedManualTrack],
-  };
-  const captureStream = vi.fn((frameRate: number) =>
-    frameRate === 0 && options.manualCapture === false ? unsupportedManualStream : stream,
-  );
-  const canvas = { width: 1, height: 1, captureStream };
+  const addTrack = vi.fn();
+  const removeTrack = vi.fn();
+  const canvas = { width: 1, height: 1 };
   const recorderState = {
     starts: 0,
     stops: 0,
@@ -390,6 +422,80 @@ function installRecorderHarness(
     }
   }
 
+  class FakeVideoFrame {
+    readonly width: number;
+    readonly height: number;
+
+    constructor(
+      source: unknown,
+      readonly init: ExplicitVideoFrameInit,
+    ) {
+      frameOptions.push(init);
+      const sourceSize = source as { readonly width?: number; readonly height?: number };
+      this.width = init.codedWidth ?? sourceSize.width ?? 1;
+      this.height = init.codedHeight ?? sourceSize.height ?? 1;
+    }
+
+    allocationSize(): number {
+      return this.width * this.height * 4;
+    }
+
+    async copyTo(destination: AllowSharedBufferSource): Promise<PlaneLayout[]> {
+      const bytes = new Uint8Array(destination as ArrayBuffer);
+      for (let offset = 0; offset < bytes.length; offset += 4) {
+        bytes.set([200, 50, 50, 255], offset);
+      }
+      return [{ offset: 0, stride: this.width * 4 }];
+    }
+
+    close(): void {}
+  }
+
+  class FakeTrackGenerator {
+    readonly kind = 'video';
+    readonly writable: WritableStream<VideoFrame>;
+    readonly stop: ReturnType<typeof vi.fn>;
+
+    constructor() {
+      generatorCreated();
+      const videoTrack = { kind: 'video', stop: vi.fn() };
+      videoTracks.push(videoTrack);
+      this.stop = videoTrack.stop;
+      const writer = {
+        ready: Promise.resolve(),
+        write: vi.fn(async (frame: unknown) => {
+          writtenFrames.push(frame);
+        }),
+        close: vi.fn(async () => {}),
+        abort: vi.fn(async () => {}),
+      };
+      this.writable = { getWriter: () => writer } as unknown as WritableStream<VideoFrame>;
+    }
+  }
+
+  class FakeMediaStream {
+    readonly tracks: unknown[];
+
+    constructor(tracks: unknown[] = []) {
+      this.tracks = [...tracks];
+    }
+
+    addTrack(track: unknown): void {
+      addTrack(track);
+      this.tracks.push(track);
+    }
+
+    removeTrack(track: unknown): void {
+      removeTrack(track);
+      const index = this.tracks.indexOf(track);
+      if (index >= 0) this.tracks.splice(index, 1);
+    }
+
+    getVideoTracks(): unknown[] {
+      return this.tracks.filter((track) => (track as { kind?: string }).kind === 'video');
+    }
+  }
+
   const body = {
     appendChild: vi.fn((anchor: { isConnected: boolean }) => {
       anchor.isConnected = true;
@@ -415,6 +521,9 @@ function installRecorderHarness(
     click: () => anchor.dispatchEvent(new Event('click')),
   });
   vi.stubGlobal('MediaRecorder', Recorder);
+  vi.stubGlobal('VideoFrame', FakeVideoFrame);
+  vi.stubGlobal('MediaStreamTrackGenerator', FakeTrackGenerator);
+  vi.stubGlobal('MediaStream', FakeMediaStream);
   vi.stubGlobal('document', { createElement: () => anchor, body });
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     callback(0);
@@ -428,11 +537,14 @@ function installRecorderHarness(
   return {
     canvas: canvas as unknown as HTMLCanvasElement,
     audioTrack: audioTrack as unknown as MediaStreamTrack,
-    videoTrack,
-    unsupportedManualTrack,
+    get videoTrack() {
+      return videoTracks[0]!;
+    },
+    frameOptions,
+    writtenFrames,
+    generatorCreated,
     addTrack,
     removeTrack,
-    captureStream,
     get recorderStarts() {
       return recorderState.starts;
     },
