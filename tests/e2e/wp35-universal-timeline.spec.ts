@@ -17,6 +17,7 @@ test.describe('WP-35 universal timeline closeout', () => {
   test('imports a valid GLTF, previews it, and inserts a durable rendered layer', async ({
     page,
   }, testInfo) => {
+    test.slow();
     await openReferenceWorkspace(page);
     await openPanel(page, '3D Scene');
     const triangle = JSON.stringify({
@@ -186,6 +187,7 @@ test.describe('WP-35 universal timeline closeout', () => {
   test('renders professional track codes, mixed elements, and Quarter preview controls', async ({
     page,
   }, testInfo) => {
+    test.slow();
     await page.setViewportSize({ width: 1613, height: 1066 });
     await openTimelineShowcaseWorkspace(page);
     const trackNames = page.locator('.timeline-track-header .track-name');

@@ -153,6 +153,7 @@ test.describe('WP-32 real-project workflow acceptance', () => {
   test('completes the disposable-project journey from import through verified export', async ({
     page,
   }, testInfo) => {
+    test.slow();
     test.setTimeout(360_000);
     const suffix = `${testInfo.project.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const title = `WP32 journey ${suffix}`;

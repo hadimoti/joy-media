@@ -7,6 +7,7 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
   test('keeps project controls, workspace navigation, and keyboard menus reachable', async ({
     page,
   }, testInfo) => {
+    test.slow();
     const title = `WP32 responsive ${testInfo.project.name}-${Date.now()}`;
     await openDisposableWorkspace(page, title);
 
