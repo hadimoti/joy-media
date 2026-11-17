@@ -257,9 +257,9 @@ export async function templatesApply(page, ctx) {
   );
   // The app applies a template at once, without a confirm box (the change is one undoable step). The card expected
   // a confirm box; the product does not have one, so the row checks what matters: elements were added and export.
-  // A template lays out its own 60 s timeline: export it whole instead of cutting it to 2 s.
+  // The template timeline is 5 s long here: export it whole instead of cutting it to 2 s (the cut gave 60 s).
   const exported = await finishWithPreviewAndExport(page, ctx, rowId, 'template', {
-    seconds: 60,
+    seconds: 5,
     skipTrim: true,
   });
   return `${asked ? 'a confirm box appeared and was confirmed' : 'applied at once, no confirm box'}; added ${after.clips.length - before.clips.length} element(s); ${exported}`;
