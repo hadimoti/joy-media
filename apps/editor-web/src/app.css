@@ -8380,6 +8380,10 @@ label {
 .asset-library-storage-dialog.joy-agent-settings-dialog > .agent-settings-body {
   flex: 0 1 auto;
   min-height: 0;
+  /* In a short window the sections keep their own height and the body scrolls; they are never squeezed or cut. */
+  grid-auto-rows: max-content;
+  align-content: start;
+  overflow: auto;
 }
 .asset-library-storage-hint {
   margin-top: 0;
