@@ -3,6 +3,111 @@ import { existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { validateH264ExportDimensions } from '@joy-media/job-protocol';
+
+/** CRF 16 with slow is near-transparent for 1080p delivery; yuv420p keeps broad H.264 compatibility. */
+export const EXPORT_FINAL_ENCODE = Object.freeze({
+  crf: 16,
+  preset: 'slow',
+  audioBitrate: '256k',
+});
+
+function finalEncodeArgs(): string[] {
+  return [
+    '-c:v',
+    'libx264',
+    '-crf',
+    String(EXPORT_FINAL_ENCODE.crf),
+    '-preset',
+    EXPORT_FINAL_ENCODE.preset,
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-b:a',
+    EXPORT_FINAL_ENCODE.audioBitrate,
+  ];
+}
+
+export function browserRemuxArgs(
+  inputPath: string,
+  outputPath: string,
+  frameRate: number,
+  frameCount: number | undefined,
+  hasBt709LimitedRange: boolean,
+): readonly string[] {
+  const normalizeTimeline =
+    frameCount === undefined
+      ? []
+      : [
+          '-vf',
+          // Keep the authored cadence and clone a missing terminal frame before applying the exact frame count.
+          `setpts=N/(${frameRate}*TB),tpad=stop_mode=clone:stop=-1`,
+          '-af',
+          'asetpts=PTS-STARTPTS,apad',
+          '-frames:v',
+          String(frameCount),
+          '-t',
+          (frameCount / frameRate).toFixed(6),
+        ];
+  return [
+    '-y',
+    '-i',
+    inputPath,
+    ...normalizeTimeline,
+    ...finalEncodeArgs(),
+    ...(hasBt709LimitedRange
+      ? [
+          '-color_primaries',
+          'bt709',
+          '-color_trc',
+          'bt709',
+          '-colorspace',
+          'bt709',
+          '-color_range',
+          'tv',
+        ]
+      : []),
+    '-r',
+    String(frameRate),
+    '-movflags',
+    '+faststart',
+    outputPath,
+  ];
+}
+
+export function probeBrowserVideoColor(inputPath: string): boolean {
+  const result = spawnSync(
+    'ffprobe',
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'stream=color_primaries,color_transfer,color_space,color_range',
+      '-of',
+      'json',
+      inputPath,
+    ],
+    { shell: false, encoding: 'utf8' },
+  );
+  if (result.status !== 0) throw new Error(`ffprobe input color probe failed: ${result.stderr}`);
+  const parsed = JSON.parse(result.stdout) as {
+    streams?: {
+      color_primaries?: string;
+      color_transfer?: string;
+      color_space?: string;
+      color_range?: string;
+    }[];
+  };
+  const video = parsed.streams?.[0];
+  return (
+    video?.color_primaries === 'bt709' &&
+    video.color_transfer === 'bt709' &&
+    video.color_space === 'bt709' &&
+    video.color_range === 'tv'
+  );
+}
 export type ExportPresetId =
   | 'social-h264-aac'
   | 'reels-1080'
@@ -73,12 +178,7 @@ export function ffmpegArgs(manifest: RenderManifest, outputPath: string): readon
     'anullsrc=r=48000:cl=stereo',
     '-t',
     durationSeconds,
-    '-c:v',
-    'libx264',
-    '-pix_fmt',
-    'yuv420p',
-    '-c:a',
-    'aac',
+    ...finalEncodeArgs(),
     '-movflags',
     '+faststart',
     outputPath,
@@ -143,12 +243,7 @@ export function renderRgbaFrames(
         'anullsrc=r=48000:cl=stereo',
         '-frames:v',
         String(frames.length),
-        '-c:v',
-        'libx264',
-        '-pix_fmt',
-        'yuv420p',
-        '-c:a',
-        'aac',
+        ...finalEncodeArgs(),
         '-movflags',
         '+faststart',
         temporaryPath,
@@ -274,45 +369,14 @@ export function remuxBrowserMp4(
     `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
   );
   try {
-    const normalizeTimeline =
-      frameCount === undefined
-        ? []
-        : [
-            '-vf',
-            // CanvasCaptureMediaStreamTrack is realtime and may deliver one
-            // fewer frame on a cold/software Chromium encoder. Keep the
-            // authored cadence and clone the terminal decoded frame when the
-            // recorder is short, so the remuxed contract is exactly the
-            // manifest's frame count rather than silently truncating it.
-            `setpts=N/(${frameRate}*TB),tpad=stop_mode=clone:stop=-1`,
-            '-af',
-            'asetpts=PTS-STARTPTS,apad',
-            '-frames:v',
-            String(frameCount),
-            '-t',
-            (frameCount / frameRate).toFixed(6),
-          ];
-    const result = spawnSync(
-      'ffmpeg',
-      [
-        '-y',
-        '-i',
-        inputPath,
-        ...normalizeTimeline,
-        '-c:v',
-        'libx264',
-        '-pix_fmt',
-        'yuv420p',
-        '-c:a',
-        'aac',
-        '-r',
-        String(frameRate),
-        '-movflags',
-        '+faststart',
-        temporaryPath,
-      ],
-      { shell: false, encoding: 'utf8' },
+    const args = browserRemuxArgs(
+      inputPath,
+      temporaryPath,
+      frameRate,
+      frameCount,
+      probeBrowserVideoColor(inputPath),
     );
+    const result = spawnSync('ffmpeg', args, { shell: false, encoding: 'utf8' });
     if (result.status !== 0) throw new Error(`ffmpeg remux failed: ${result.stderr}`);
     renameSync(temporaryPath, outputPath);
     return verifyExport(outputPath);
@@ -346,38 +410,15 @@ export async function remuxBrowserMp4Async(
     dirname(outputPath),
     `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
   );
-  const normalizeTimeline =
-    frameCount === undefined
-      ? []
-      : [
-          '-vf',
-          `setpts=N/(${frameRate}*TB),tpad=stop_mode=clone:stop=-1`,
-          '-af',
-          'asetpts=PTS-STARTPTS,apad',
-          '-frames:v',
-          String(frameCount),
-          '-t',
-          (frameCount / frameRate).toFixed(6),
-        ];
-  const args = [
-    '-y',
-    '-i',
-    inputPath,
-    ...normalizeTimeline,
-    '-c:v',
-    'libx264',
-    '-pix_fmt',
-    'yuv420p',
-    '-c:a',
-    'aac',
-    '-r',
-    String(frameRate),
-    '-movflags',
-    '+faststart',
-    temporaryPath,
-  ];
   try {
     if (options.signal?.aborted || options.cancelled?.()) throw new Error('canceled');
+    const args = browserRemuxArgs(
+      inputPath,
+      temporaryPath,
+      frameRate,
+      frameCount,
+      probeBrowserVideoColor(inputPath),
+    );
     const child = spawn(
       options.ffmpegPath ?? 'ffmpeg',
       [...(options.ffmpegArgsPrefix ?? []), ...args],

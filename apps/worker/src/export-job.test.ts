@@ -2,9 +2,23 @@ import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { renderFixture } from '@joy-media/export-core';
-import { executeLeasedExport, exportJobPayload } from './export-job.js';
+import { browserRemuxArgs, EXPORT_FINAL_ENCODE, renderFixture } from '@joy-media/export-core';
+import { executeLeasedExport, executeLeasedExportAsync, exportJobPayload } from './export-job.js';
 describe('leased export job', () => {
+  it('uses the shared quality settings in Worker remux arguments', () => {
+    const args = browserRemuxArgs('staged.mp4', 'output.mp4', 30, 3, false);
+    expect(args.slice(args.indexOf('-crf'), args.indexOf('-pix_fmt'))).toEqual([
+      '-crf',
+      String(EXPORT_FINAL_ENCODE.crf),
+      '-preset',
+      EXPORT_FINAL_ENCODE.preset,
+    ]);
+    expect(args.slice(args.indexOf('-b:a'), args.indexOf('-r'))).toEqual([
+      '-b:a',
+      EXPORT_FINAL_ENCODE.audioBitrate,
+    ]);
+  });
+
   it('accepts the canvas-backed Landscape 4K format manifest', () => {
     const result = exportJobPayload({
       schemaVersion: 1,
@@ -98,6 +112,40 @@ describe('leased export job', () => {
     );
     expect(result).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
     expect(calls).toEqual(['worker-1:job-1']);
+  });
+
+  it('completes the asynchronous Worker path with the final H.264/AAC encode', async () => {
+    const calls: string[] = [];
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-leased-export-async-'));
+    const source = join(directory, 'source.mp4');
+    const output = join(directory, 'out.mp4');
+    const manifest = {
+      projectId: 'p',
+      revision: 1,
+      width: 64,
+      height: 36,
+      frameRate: 30,
+      durationUs: 100_000,
+      preset: 'reels-1080' as const,
+    };
+    renderFixture(manifest, source);
+    const result = await executeLeasedExportAsync(
+      { complete: (workerId, jobId) => calls.push(`${workerId}:${jobId}`) },
+      'worker-1',
+      'job-async',
+      {
+        sourcePath: source,
+        payload: {
+          schemaVersion: 1,
+          frameCount: 3,
+          producer: 'browser-staged-preview-export',
+          manifest,
+        },
+      },
+      output,
+    );
+    expect(result).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
+    expect(calls).toEqual(['worker-1:job-async']);
   });
   it('does not complete a lease and removes output when rendering fails', () => {
     const calls: string[] = [];

@@ -5,11 +5,14 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
 import {
+  browserRemuxArgs,
+  EXPORT_FINAL_ENCODE,
   ffmpegArgs,
   freezeManifest,
   dimensionsForPreset,
   remuxBrowserMp4,
   remuxBrowserMp4Async,
+  probeBrowserVideoColor,
   renderFixture,
   renderRgbaFrames,
   verifyExport,
@@ -28,6 +31,41 @@ describe('deterministic export contract', () => {
   it('freezes a manifest and uses argument arrays', () => {
     expect(freezeManifest(manifest)).toEqual(manifest);
     expect(ffmpegArgs(manifest, 'out.mp4')).toContain('libx264');
+  });
+
+  it('uses the shared final encode settings on both browser remux paths', () => {
+    const args = browserRemuxArgs('staged.mp4', 'output.mp4', 30, 30, false);
+    expect(args).toContain('libx264');
+    expect(args).toContain('-pix_fmt');
+    expect(args).toContain('yuv420p');
+    expect(args).toContain('-crf');
+    expect(args).toContain(String(EXPORT_FINAL_ENCODE.crf));
+    expect(args).toContain('-preset');
+    expect(args).toContain(EXPORT_FINAL_ENCODE.preset);
+    expect(args).toContain('-b:a');
+    expect(args).toContain(EXPORT_FINAL_ENCODE.audioBitrate);
+    expect(args.slice(args.indexOf('-vf'), args.indexOf('-af'))).toEqual([
+      '-vf',
+      'setpts=N/(30*TB),tpad=stop_mode=clone:stop=-1',
+    ]);
+  });
+
+  it('adds BT.709 limited-range tags only for tagged staged inputs', () => {
+    const untaggedArgs = browserRemuxArgs('staged.mp4', 'output.mp4', 30, undefined, false);
+    const taggedArgs = browserRemuxArgs('staged.mp4', 'output.mp4', 30, undefined, true);
+    expect(untaggedArgs).not.toContain('-color_primaries');
+    expect(taggedArgs).toEqual(
+      expect.arrayContaining([
+        '-color_primaries',
+        'bt709',
+        '-color_trc',
+        'bt709',
+        '-colorspace',
+        'bt709',
+        '-color_range',
+        'tv',
+      ]),
+    );
   });
 
   it('accepts a normal canvas export size', () => {
@@ -115,6 +153,7 @@ describe('deterministic export contract', () => {
     const fixturePath = join(directory, 'browser.mp4');
     const outputPath = join(directory, 'remuxed.mp4');
     renderFixture(manifest, fixturePath);
+    expect(probeBrowserVideoColor(fixturePath)).toBe(false);
     const probe = remuxBrowserMp4(fixturePath, outputPath);
     expect(probe.videoCodec).toBe('h264');
     expect(probe.audioCodec).toBe('aac');
@@ -122,6 +161,38 @@ describe('deterministic export contract', () => {
     expect(probe.audioStreamCount).toBe(1);
     expect(probe.frameRate).toBe(30);
     expect(readdirSync(directory).some((name) => name.includes('.partial.'))).toBe(false);
+  });
+
+  it('detects BT.709 limited-range tags on the staged input', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-color-probe-'));
+    const fixturePath = join(directory, 'browser.mp4');
+    const taggedPath = join(directory, 'tagged.mp4');
+    const outputPath = join(directory, 'remuxed.mp4');
+    renderFixture(manifest, fixturePath);
+    const tagged = spawnSync(
+      'ffmpeg',
+      [
+        '-y',
+        '-i',
+        fixturePath,
+        '-c',
+        'copy',
+        '-color_primaries',
+        'bt709',
+        '-color_trc',
+        'bt709',
+        '-colorspace',
+        'bt709',
+        '-color_range',
+        'tv',
+        taggedPath,
+      ],
+      { encoding: 'utf8', shell: false },
+    );
+    expect(tagged.status).toBe(0);
+    expect(probeBrowserVideoColor(taggedPath)).toBe(true);
+    remuxBrowserMp4(taggedPath, outputPath);
+    expect(probeBrowserVideoColor(outputPath)).toBe(true);
   });
   it('runs async remux with a fake ffmpeg, reports failures, and aborts cleanly', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-async-remux-'));
