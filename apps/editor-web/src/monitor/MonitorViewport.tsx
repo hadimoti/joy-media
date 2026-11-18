@@ -24,6 +24,9 @@ import {
 import { panByDrag } from './monitor-hand.js';
 import type { MonitorBackground } from './monitor-view-options.js';
 import { MonitorNavigation, type MonitorThumbnailReader } from './MonitorNavigator.js';
+import { MonitorHoverOutline } from './MonitorHoverOutline.js';
+import { updateMonitorHoverCanvasPoint } from './monitor-hover.js';
+import type { MonitorElement } from './monitor-selection.js';
 import {
   clampPan,
   fitView,
@@ -288,6 +291,8 @@ export interface MonitorViewportProps {
   readonly selection?: MonitorViewportSelection | undefined;
   /** The Monitor background (View menu): checkerboard by default. */
   readonly background?: MonitorBackground | undefined;
+  /** Hide the hover outline while the Monitor is playing. */
+  readonly playing?: boolean | undefined;
   readonly children: ReactNode;
 }
 
@@ -303,6 +308,10 @@ export interface MonitorViewportSelection {
   readonly click: (canvasPoint: MonitorPoint, modifiers: { shift: boolean; alt: boolean }) => void;
   /** A drag that started on empty canvas, released at `end`. */
   readonly marquee: (start: MonitorPoint, end: MonitorPoint, modifiers: { shift: boolean }) => void;
+  /** The topmost element under a resting pointer, excluding the shared selection. */
+  readonly hover?: (canvasPoint: MonitorPoint) => MonitorElement | undefined;
+  /** Data revisions that should refresh a resting pointer hit without pointer movement. */
+  readonly hoverRevision?: unknown;
   /**
    * A drag that started on an element moves it (T-M05a). Called once when the
    * press becomes a drag; the result follows the pointer and ends on release.
@@ -376,6 +385,17 @@ function viewportPoint(
   return { x: event.clientX - rect.left, y: event.clientY - rect.top };
 }
 
+function sameHoverTarget(
+  current: MonitorElement | null,
+  next: MonitorElement | undefined,
+): boolean {
+  if (current === null) return next === undefined;
+  if (next === undefined || current.id !== next.id) return false;
+  const a = current.bounds.corners;
+  const b = next.bounds.corners;
+  return a.every((corner, index) => corner.x === b[index]?.x && corner.y === b[index]?.y);
+}
+
 /** The clipping viewport and pointer router. Children are positioned inside it. */
 export function MonitorViewport({
   controller,
@@ -386,6 +406,7 @@ export function MonitorViewport({
   readThumbnail,
   selection,
   background,
+  playing = false,
   children,
 }: MonitorViewportProps) {
   const spaceHeld = useSpaceHold();
@@ -397,8 +418,89 @@ export function MonitorViewport({
   latest.current = controller;
   const latestSelection = useRef(selection);
   latestSelection.current = selection;
+  const latestPlaying = useRef(playing);
+  latestPlaying.current = playing;
   const pressRef = useRef<SelectPress | null>(null);
   const [marquee, setMarquee] = useState<{ start: MonitorPoint; end: MonitorPoint } | null>(null);
+  const pointerRef = useRef({ inside: false, clientX: 0, clientY: 0 });
+  const hoverCanvasPointRef = useRef({ x: 0, y: 0 });
+  const interactionRef = useRef(false);
+  const hoverFrameRef = useRef<number | null>(null);
+  const hoverTargetRef = useRef<MonitorElement | null>(null);
+  const [hoverTarget, setHoverTarget] = useState<MonitorElement | null>(null);
+
+  const setHover = useCallback((next: MonitorElement | undefined) => {
+    if (sameHoverTarget(hoverTargetRef.current, next)) return;
+    const target = next ?? null;
+    hoverTargetRef.current = target;
+    setHoverTarget(target);
+  }, []);
+  const updateHover = useCallback(() => {
+    hoverFrameRef.current = null;
+    const pointer = pointerRef.current;
+    if (
+      !pointer.inside ||
+      interactionRef.current ||
+      latestPlaying.current ||
+      latestSelection.current === undefined
+    ) {
+      setHover(undefined);
+      return;
+    }
+    const current = latest.current;
+    const viewport = current.viewportRef.current;
+    if (viewport === null) {
+      setHover(undefined);
+      return;
+    }
+    const rect = viewport.getBoundingClientRect();
+    const insideFrame = updateMonitorHoverCanvasPoint(
+      hoverCanvasPointRef.current,
+      current.view,
+      current.frame,
+      pointer.clientX - rect.left,
+      pointer.clientY - rect.top,
+    );
+    setHover(
+      insideFrame ? latestSelection.current?.hover?.(hoverCanvasPointRef.current) : undefined,
+    );
+  }, [setHover]);
+  const scheduleHover = useCallback(() => {
+    if (hoverFrameRef.current !== null) return;
+    hoverFrameRef.current = requestAnimationFrame(updateHover);
+  }, [updateHover]);
+  const clearHover = useCallback(() => {
+    if (hoverFrameRef.current !== null) {
+      cancelAnimationFrame(hoverFrameRef.current);
+      hoverFrameRef.current = null;
+    }
+    setHover(undefined);
+  }, [setHover]);
+
+  useEffect(() => {
+    if (!pointerRef.current.inside || playing) {
+      clearHover();
+      return;
+    }
+    scheduleHover();
+    return () => {
+      if (hoverFrameRef.current !== null) {
+        cancelAnimationFrame(hoverFrameRef.current);
+        hoverFrameRef.current = null;
+      }
+    };
+  }, [
+    clearHover,
+    controller.frame,
+    controller.view.panX,
+    controller.view.panY,
+    controller.view.zoom,
+    controller.viewportSize,
+    playing,
+    scheduleHover,
+    selection,
+    selection?.hoverRevision,
+  ]);
 
   const endSelectPress = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>, commit: boolean) => {
@@ -486,6 +588,9 @@ export function MonitorViewport({
 
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      pointerRef.current.clientX = event.clientX;
+      pointerRef.current.clientY = event.clientY;
+      pointerRef.current.inside = true;
       const press = pressRef.current;
       if (press !== null && press.pointerId === event.pointerId) {
         const point = viewportPoint(event, event.currentTarget);
@@ -507,7 +612,10 @@ export function MonitorViewport({
         return;
       }
       const drag = panRef.current;
-      if (drag === null || drag.pointerId !== event.pointerId) return;
+      if (drag === null || drag.pointerId !== event.pointerId) {
+        if (!interactionRef.current) scheduleHover();
+        return;
+      }
       const { viewportSize, frame } = latest.current;
       setView(
         panByDrag(
@@ -519,7 +627,7 @@ export function MonitorViewport({
         ),
       );
     },
-    [setView],
+    [scheduleHover, setView],
   );
 
   const onDoubleClick = useCallback(
@@ -558,8 +666,31 @@ export function MonitorViewport({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onPointerDownCapture={(event) => {
+        pointerRef.current.clientX = event.clientX;
+        pointerRef.current.clientY = event.clientY;
+        pointerRef.current.inside = true;
+        interactionRef.current = true;
+        clearHover();
+      }}
+      onPointerUpCapture={(event) => {
+        pointerRef.current.clientX = event.clientX;
+        pointerRef.current.clientY = event.clientY;
+        interactionRef.current = false;
+        scheduleHover();
+      }}
+      onPointerCancelCapture={(event) => {
+        pointerRef.current.clientX = event.clientX;
+        pointerRef.current.clientY = event.clientY;
+        interactionRef.current = false;
+        scheduleHover();
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
+      onPointerLeave={() => {
+        pointerRef.current.inside = false;
+        clearHover();
+      }}
       onPointerUp={(event) => {
         endSelectPress(event, true);
         endPan(event);
@@ -571,6 +702,8 @@ export function MonitorViewport({
       onLostPointerCapture={(event) => {
         endSelectPress(event, false);
         endPan(event);
+        interactionRef.current = false;
+        scheduleHover();
       }}
       onMouseDown={(event) => {
         // No autoscroll and no paste on the middle button.
@@ -582,6 +715,11 @@ export function MonitorViewport({
       onDoubleClick={onDoubleClick}
     >
       {children}
+      <MonitorHoverOutline
+        target={hoverTarget}
+        frame={controller.frame}
+        frameRect={monitorFrameRect(controller.view, controller.frame)}
+      />
       {marquee !== null && (
         <div
           className="monitor-marquee"

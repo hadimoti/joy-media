@@ -90,6 +90,7 @@ import { scopedKeyTable } from '../keyboard-shortcuts.js';
 import { MonitorSelectionOverlay } from './MonitorSelectionOverlay.js';
 import { MonitorTransformBox } from './MonitorTransformBox.js';
 import { boxContainsPoint } from './monitor-hit-test.js';
+import { monitorHoverElementAt } from './monitor-hover.js';
 import { buildMonitorGroupOverlay, buildMonitorOverlays } from './monitor-overlay-model.js';
 import type { MonitorTransformHost, TransformPatches } from './monitor-transform-drag.js';
 import {
@@ -348,6 +349,7 @@ function MonitorPanelContent({
     readonly clipByNode: ReadonlyMap<string, string>;
   }>({ overlay: EMPTY_MONITOR_OVERLAY, clipByNode: new Map() });
   const readMonitorElementsRef = useRef<() => readonly MonitorElement[]>(() => []);
+  const monitorElementsRef = useRef<readonly MonitorElement[]>([]);
   readMonitorElementsRef.current = () => {
     const renderer = rendererRef.current;
     const frame = currentFrameRef.current;
@@ -364,6 +366,7 @@ function MonitorPanelContent({
   const refreshSelectionOutlineRef = useRef<() => void>(() => {});
   refreshSelectionOutlineRef.current = () => {
     const elements = readMonitorElementsRef.current();
+    monitorElementsRef.current = elements;
     const targets = readTransformTargetsRef.current();
     setTransformTargets((current) =>
       JSON.stringify(current) === JSON.stringify(targets) ? current : targets,
@@ -443,8 +446,11 @@ function MonitorPanelContent({
   const [transformTargets, setTransformTargets] = useState<readonly MonitorTransformTarget[]>([]);
   const monitorSelection = useMemo<MonitorViewportSelection>(() => {
     const setters = { selectClips, toggleSelection, clearSelection };
+    const hoverRevision = [state.playheadUs, previewVisualProject, timelineProject] as const;
     return {
       isElementAt: (point) => monitorHitClipIds(point, readMonitorElementsRef.current()).length > 0,
+      hover: (point) => monitorHoverElementAt(point, monitorElementsRef.current, state.selectedIds),
+      hoverRevision,
       click: (point, modifiers) =>
         applyMonitorSelection(
           monitorClickAction(
@@ -484,7 +490,16 @@ function MonitorPanelContent({
         return transformController.startGesture({ kind: 'move' }, start, clipIds);
       },
     };
-  }, [clearSelection, selectClips, toggleSelection, transformController]);
+  }, [
+    clearSelection,
+    previewVisualProject,
+    selectClips,
+    state.playheadUs,
+    state.selectedIds,
+    timelineProject,
+    toggleSelection,
+    transformController,
+  ]);
   // Announced to screen readers (polite) when Tab changes the selected element (T-M12).
   const [keyAnnouncement, setKeyAnnouncement] = useState('');
   // Keyboard-only editing of the picture (T-M12): with focus on the picture (its
@@ -1050,6 +1065,7 @@ function MonitorPanelContent({
         readThumbnail={readNavigatorThumbnail}
         selection={monitorSelection}
         background={viewOptions.background}
+        playing={state.playing}
       >
         <div ref={containerRef} className="monitor-canvas" />
         {mediaOfflineName !== undefined && <MediaOfflineNote name={mediaOfflineName} />}

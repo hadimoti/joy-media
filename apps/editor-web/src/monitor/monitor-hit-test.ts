@@ -25,6 +25,10 @@ function selectable(element: HitTestElement): boolean {
   return element.locked !== true && element.hidden !== true;
 }
 
+function hit(element: HitTestElement, canvasPoint: { x: number; y: number }): boolean {
+  return selectable(element) && boxContainsPoint(element.bounds.corners, canvasPoint);
+}
+
 function cross(a: NodePoint, b: NodePoint, p: NodePoint): number {
   return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
 }
@@ -66,11 +70,18 @@ export function hitTestElements(
   canvasPoint: { x: number; y: number },
   elements: readonly HitTestElement[],
 ): readonly string[] {
-  return elements
-    .filter(
-      (element) => selectable(element) && boxContainsPoint(element.bounds.corners, canvasPoint),
-    )
-    .map((element) => element.id);
+  const ids: string[] = [];
+  for (const element of elements) if (hit(element, canvasPoint)) ids.push(element.id);
+  return ids;
+}
+
+/** The first selectable element under the point, using click selection order. */
+export function hitTestTopElement<T extends HitTestElement>(
+  canvasPoint: { x: number; y: number },
+  elements: readonly T[],
+): T | undefined {
+  for (const element of elements) if (hit(element, canvasPoint)) return element;
+  return undefined;
 }
 
 /** The axis-aligned rectangle between two drag points (any direction). */

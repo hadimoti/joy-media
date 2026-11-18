@@ -2076,6 +2076,22 @@ h2 {
   stroke: var(--joy-accent);
   stroke-width: 1px;
 }
+.monitor-hover-outline-layer {
+  position: absolute;
+  z-index: 2.5;
+  overflow: visible;
+  pointer-events: none;
+}
+.monitor-hover-outline-keyline {
+  fill: none;
+  stroke: var(--joy-bg-deep);
+  stroke-width: 3.5px;
+}
+.monitor-hover-outline {
+  fill: none;
+  stroke: var(--joy-accent);
+  stroke-width: 1.5px;
+}
 .monitor-marquee {
   position: absolute;
   z-index: 2;
