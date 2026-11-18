@@ -1,24 +1,17 @@
 // Tests for the run inputs the shadow comparison reads (plan section 3.4, D18). A complete run must produce a summary the writer
-// accepts, for either topology, and every missing or unverified input must be refused by name.
+// accepts, and every missing or unverified input must be refused by name.
 import { describe, expect, it } from 'vitest';
-import { executedTests } from './hosted-verify.mjs';
 import { buildRunSummary, GATE_CHECKS, LANES_BY_TOPOLOGY } from './ci-v3-run-summary.mjs';
-import {
-  buildRunInputs,
-  GATE_CHECK_IDS,
-  vitestFromHostedReport,
-  vitestFromReferenceReport,
-} from './ci-v3-run-inputs.mjs';
+import { buildRunInputs, GATE_CHECK_IDS, vitestFromHostedReport } from './ci-v3-run-inputs.mjs';
 
 const SHA = 'a'.repeat(40);
 const TRANSITIONS = { installPrevious: 'passed', uninstall: 'passed', userDataPreserved: 'passed' };
 const VITEST = { executed: ['apps/a/src/a.test.ts::suite passes'], failed: [] };
 const VERDICT = {
   'single-pass': 'release.exact-candidate',
-  'two-pass': 'release.exact-candidate-two-pass',
 };
 
-type Topology = 'single-pass' | 'two-pass';
+type Topology = 'single-pass';
 
 function fixture(topology: Topology, overrides: Record<string, unknown> = {}) {
   const needs = Object.fromEntries(
@@ -65,29 +58,12 @@ describe('run inputs for the shadow comparison', () => {
     expect(summary.gateChecks.tests).toBe('passed');
   });
 
-  it('builds two-pass inputs for the v2 run, with its six lanes and its own verdict scenario', () => {
-    const inputs = buildRunInputs(fixture('two-pass'));
-    const summary = buildRunSummary(inputs);
-    expect(Object.keys(summary.lanes)).toHaveLength(6);
-    expect(summary.scenarios['release.exact-candidate-two-pass']).toBeDefined();
-    expect(summary.topology).toBe('two-pass');
-  });
-
   it('refuses a run whose needs context lacks one of its topology lanes', () => {
     const base = fixture('single-pass');
     const needs: Record<string, unknown> = { ...base.needs };
     delete needs['fixture-acceptance'];
     expect(() => buildRunInputs(fixture('single-pass', { needs }))).toThrow(
       /no result for fixture-acceptance/u,
-    );
-  });
-
-  it('refuses a v2 run that is missing one of its six lanes', () => {
-    const base = fixture('two-pass');
-    const needs: Record<string, unknown> = { ...base.needs };
-    delete needs['prod-build-smoke'];
-    expect(() => buildRunInputs(fixture('two-pass', { needs }))).toThrow(
-      /no result for prod-build-smoke/u,
     );
   });
 
@@ -156,36 +132,5 @@ describe('where the Vitest results come from', () => {
     expect(() => vitestFromHostedReport({ ...hostedOk, merge: { ok: false } })).toThrow(
       /no verified test list/u,
     );
-  });
-
-  it('takes the v2 results from a Vitest JSON report that passed every test it ran', () => {
-    const report = {
-      numFailedTests: 0,
-      numPassedTests: 2,
-      testResults: [
-        {
-          name: 'C:/repo/apps/a/src/a.test.ts',
-          assertionResults: [
-            { ancestorTitles: ['suite'], title: 'one', fullName: 'suite one', status: 'passed' },
-            { ancestorTitles: [], title: 'two', fullName: 'two', status: 'passed' },
-          ],
-        },
-      ],
-    };
-    expect(vitestFromReferenceReport(report).executed).toEqual([
-      'apps/a/src/a.test.ts::suite one',
-      'apps/a/src/a.test.ts::two',
-    ]);
-    expect(executedTests(report)).toHaveLength(2);
-  });
-
-  it('refuses a reference Vitest report with a failed test, or with no results', () => {
-    expect(() =>
-      vitestFromReferenceReport({ numFailedTests: 1, numPassedTests: 2, testResults: [] }),
-    ).toThrow(/did not pass every test/u);
-    expect(() =>
-      vitestFromReferenceReport({ numFailedTests: 0, numPassedTests: 0, testResults: [] }),
-    ).toThrow(/did not pass every test/u);
-    expect(() => vitestFromReferenceReport({})).toThrow(/has no test results/u);
   });
 });

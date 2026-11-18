@@ -402,13 +402,11 @@ describe('single-pass readiness evidence (release-candidate-v3)', () => {
     ).toThrow(/does not match candidate SHA/u);
   });
 
-  it('builds the single-pass lane list and the two-pass lane list from separate shapes', async () => {
+  it('builds the single-pass lane list and source count from its shape', async () => {
     const { SHAPES } = await import('./create-readiness-evidence.mjs');
     expect(SHAPES['single-pass'].lanes).toEqual(SINGLE_LANES);
-    // The single-pass and two-pass topologies remain separate, so their lane lists differ.
-    expect(SHAPES['two-pass'].lanes).toHaveLength(6);
-    expect(SHAPES['single-pass'].lanes).not.toEqual(SHAPES['two-pass'].lanes);
     expect(SHAPES['single-pass'].sourceCount).toBe(2);
-    expect(SHAPES['two-pass'].sourceCount).toBe(4);
+    // The two-pass shape is removed with release-candidate-v2: its topology is refused.
+    expect(Object.keys(SHAPES)).toEqual(['single-pass']);
   });
 });

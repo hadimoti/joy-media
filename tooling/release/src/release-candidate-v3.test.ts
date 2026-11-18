@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -8,9 +7,7 @@ import { SINGLE_PASS_LANES } from './ci-v3-run-summary.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS = join(resolve(HERE, '../../..'), '.github', 'workflows');
-const V2_PATH = join(WORKFLOWS, 'release-candidate-v2.yml');
 const V3_PATH = join(WORKFLOWS, 'release-candidate-v3.yml');
-const V2_SHA256 = 'f3ff81afa7242973e2844697e11ea907bc79fdaefc02697dc0195d49dada4f9d';
 const yaml = createRequire(join(resolve(HERE, '../../..'), 'package.json'))('js-yaml') as {
   load(source: string): unknown;
 };
@@ -39,9 +36,7 @@ type Workflow = {
   jobs: Record<string, Job>;
 };
 
-const V2 = readFileSync(V2_PATH, 'utf8');
 const V3 = readFileSync(V3_PATH, 'utf8');
-const v2 = yaml.load(V2) as Workflow;
 const v3 = yaml.load(V3) as Workflow;
 const RETIRED_LANES = ['linux-real-services', 'real-service-acceptance', 'p3-real-services'];
 const FINAL_NEEDS = ['validate-candidate', ...SINGLE_PASS_LANES];
@@ -63,8 +58,6 @@ describe('release-candidate-v3 workflow', () => {
     expect(v3.permissions).toEqual({ contents: 'read' });
     expect(v3.concurrency.group).toBe('release-candidate-v3-${{ inputs.candidate_sha }}');
     expect(v3.concurrency['cancel-in-progress']).toBe(false);
-    expect(createHash('sha256').update(V2).digest('hex')).toBe(V2_SHA256);
-    expect(v2.name).toBe('release-candidate-v2');
   });
 
   it('removes the retired service lanes and pins the final summary to every active job', () => {

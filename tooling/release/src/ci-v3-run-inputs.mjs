@@ -1,18 +1,14 @@
 // Assembles the inputs ci-v3-run-summary.mjs needs from one shadow run's own outputs (plan section 3.4, D18). The shadow job calls it
-// after the gate, so the comparison reads the run's real results and invents nothing. The same builder serves both topologies:
-// v3 names its Vitest results in the hosted-verify report, and v2 names them in a Vitest JSON report of the same commit.
+// after the gate, so the comparison reads the run's real results and invents nothing. v3 names its Vitest results in the
+// hosted-verify report.
 //
 //   node tooling/release/src/ci-v3-run-inputs.mjs --topology single-pass --needs <needs.json> --gate <report.json> \
 //     --readiness <evidence.json> --windows <acceptance.json> --hosted <hosted-verify-report.json> \
-//     --candidate-sha <sha> --run-attempt <n> --out <run-inputs.json>
-//   node tooling/release/src/ci-v3-run-inputs.mjs --topology two-pass --needs <needs.json> --gate <report.json> \
-//     --readiness <evidence.json> --windows <acceptance.json> --vitest-json <reference-vitest.json> \
 //     --candidate-sha <sha> --run-attempt <n> --out <run-inputs.json>
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LANES_BY_TOPOLOGY } from './ci-v3-run-summary.mjs';
-import { executedTests } from './hosted-verify.mjs';
 
 // The 17 gate checks, as the gate names them. ci-v3-run-summary.mjs requires each one; ci-v3-run-inputs.test.ts pins this list.
 export const GATE_CHECK_IDS = [
@@ -123,17 +119,6 @@ export function vitestFromHostedReport(hosted) {
   return vitestFromTests(hosted.executed);
 }
 
-/** Reads the Vitest results of a two-pass run from a Vitest JSON report of the same commit. Refuses a report with any failure. */
-export function vitestFromReferenceReport(report) {
-  if (report === null || typeof report !== 'object' || !Array.isArray(report.testResults)) {
-    throw new Error('the reference Vitest report has no test results');
-  }
-  if (report.numFailedTests !== 0 || !(report.numPassedTests > 0)) {
-    throw new Error('the reference Vitest report did not pass every test it ran');
-  }
-  return vitestFromTests(executedTests(report));
-}
-
 function parseArgs(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index += 2) {
@@ -155,9 +140,7 @@ function parseArgs(argv) {
   ]) {
     if (!options[name]) throw new Error(`Missing --${name}`);
   }
-  if (options.topology === 'single-pass' && !options.hosted) throw new Error('Missing --hosted');
-  if (options.topology === 'two-pass' && !options['vitest-json'])
-    throw new Error('Missing --vitest-json');
+  if (!options.hosted) throw new Error('Missing --hosted');
   return options;
 }
 
@@ -167,10 +150,7 @@ function readJson(path) {
 
 function main(argv) {
   const options = parseArgs(argv);
-  const vitest =
-    options.topology === 'single-pass'
-      ? vitestFromHostedReport(readJson(options.hosted))
-      : vitestFromReferenceReport(readJson(options['vitest-json']));
+  const vitest = vitestFromHostedReport(readJson(options.hosted));
   const inputs = buildRunInputs({
     topology: options.topology,
     needs: readJson(options.needs),

@@ -5,13 +5,12 @@ import {
   GATE_CHECKS,
   LANES_BY_TOPOLOGY,
   SINGLE_PASS_LANES,
-  TWO_PASS_LANES,
 } from './ci-v3-run-summary.mjs';
 
 // Plan section 8b: one run summary per gate run. The summary is written only from complete inputs.
 const SHA = 'a'.repeat(40);
 
-function runInputs(topology: 'two-pass' | 'single-pass') {
+function runInputs(topology: 'single-pass') {
   const verdict = SHAPES[topology].verdict;
   return {
     topology,
@@ -31,14 +30,13 @@ function runInputs(topology: 'two-pass' | 'single-pass') {
 }
 
 describe('run summary', () => {
-  it("keeps each topology's lanes equal to the gate's own lanes", () => {
-    // Each topology's lanes are the gate's own lanes, so the summary and the gate cannot drift apart.
-    expect(TWO_PASS_LANES).toEqual(SHAPES['two-pass'].lanes);
+  it("keeps the topology's lanes equal to the gate's own lanes", () => {
+    // The topology's lanes are the gate's own lanes, so the summary and the gate cannot drift apart.
     expect(SINGLE_PASS_LANES).toEqual(SHAPES['single-pass'].lanes);
   });
 
-  it('writes a complete summary for each topology, with its own lanes', () => {
-    for (const topology of ['two-pass', 'single-pass'] as const) {
+  it('writes a complete summary for the topology, with its own lanes', () => {
+    for (const topology of ['single-pass'] as const) {
       const summary = buildRunSummary(runInputs(topology));
       expect(summary.topology).toBe(topology);
       expect(Object.keys(summary.lanes).sort()).toEqual([...LANES_BY_TOPOLOGY[topology]].sort());
