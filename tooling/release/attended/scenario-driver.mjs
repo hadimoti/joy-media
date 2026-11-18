@@ -34,6 +34,12 @@ function sleep(ms) {
  * Waits for a promise, but no longer than ms. The timer is referenced while it runs, so the wait is real,
  * and it is cleared as soon as the promise settles, so it does not hold the process open afterwards.
  */
+/** The timeline shows a clip by its file name without the extension. */
+function clipStem(name) {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
 export function boundedWait(promise, ms) {
   let timer;
   const timeout = new Promise((resolvePromise) => {
@@ -653,14 +659,16 @@ function freshEditorPageOf(base) {
       await card.waitFor({ timeout: 120_000 });
       await card.getByRole('button', { name: `Add ${name} to timeline`, exact: true }).click();
       await page
-        .locator(`.timeline-clip:not(.timeline-clip--audio)[title^="${name}"]`)
+        .locator(`.timeline-clip:not(.timeline-clip--audio)[aria-label^="${clipStem(name)},"]`)
         .first()
         .waitFor({ timeout: 60_000 });
     },
 
     async timelineClipCount(name) {
       return withinTime(
-        page.locator(`.timeline-clip:not(.timeline-clip--audio)[title^="${name}"]`).count(),
+        page
+          .locator(`.timeline-clip:not(.timeline-clip--audio)[aria-label^="${clipStem(name)},"]`)
+          .count(),
         'the timeline clip count',
         30_000,
       );
@@ -845,7 +853,9 @@ function semanticsEditorPageOf(base) {
   const button = (name) => page.getByRole('button', { name, exact: true });
   const menuItem = (name) => page.getByRole('menuitem', { name, exact: true });
   const timelineClip = (label) =>
-    page.locator(`.timeline-clip:not(.timeline-clip--audio)[title^="${label}"]`).first();
+    page
+      .locator(`.timeline-clip:not(.timeline-clip--audio)[aria-label^="${clipStem(label)},"]`)
+      .first();
   const visible = (locator) =>
     withinTime(locator.isVisible(), 'a visibility check', 30_000).catch(() => false);
 
