@@ -296,7 +296,7 @@ const CSS = `:root {
   --rule: #2f3036;
   --fg: #e9e9ed;
   --muted: #a9abb4;
-  --faint: #7d7f89;
+  --faint: #8a8c96;
   --link: #f4b72f;
   --accent: #f4b72f;
   --accent-fg: #14120a;
@@ -373,7 +373,7 @@ pre code { background: none; padding: 0; }
   .feature-split, .feature-pair, .cards { grid-template-columns: minmax(0, 1fr); }
   .feature-split .feature-text, .feature-split .shot,
   .feature-split-left .feature-text, .feature-split-left .shot { grid-column: 1; grid-row: auto; }
-  .feature-split .shot { margin-top: 24px; max-width: 360px; }
+  .feature-split .shot { margin-top: 24px; max-width: min(360px, 100%); }
   .feature { margin-top: 48px; }
 }
 @media (max-width: 600px) {
