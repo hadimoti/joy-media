@@ -10,6 +10,8 @@
     { "path": "../../packages/playback-engine" },
     { "path": "../../packages/project-persistence" },
     { "path": "../../packages/project-schema" },
+    { "path": "../../packages/render-ir" },
+    { "path": "../../packages/renderer-pixi" },
     { "path": "../../packages/test-fixtures" }
   ]
 }

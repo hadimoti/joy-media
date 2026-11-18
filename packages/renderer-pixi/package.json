@@ -18,6 +18,10 @@
     "./browser-export": {
       "types": "./dist/browser-export.d.ts",
       "default": "./dist/browser-export.js"
+    },
+    "./text-direction": {
+      "types": "./dist/text-direction.d.ts",
+      "default": "./dist/text-direction.js"
     }
   },
   "scripts": {

@@ -56,6 +56,27 @@ describe('visualObjectToRenderNode', () => {
     expect(node.id).toBe('text-1');
   });
 
+  it('preserves automatic direction and logical alignment for the browser renderer', () => {
+    const obj = makeObject({
+      id: 'rtl-auto',
+      kind: 'text',
+      text: 'سلام',
+      textStyle: { ...DEFAULT_TEXT_STYLE_V1, direction: 'auto', align: 'start' },
+    });
+    const node = visualObjectToRenderNode(resolved(obj));
+    expect(node).toMatchObject({ kind: 'text', direction: 'auto', align: 'start' });
+    expect(() =>
+      validateRenderFrameIR({
+        version: 1,
+        compositionId: 'root',
+        timeUs: 0,
+        viewport: { width: 1080, height: 1920, dpr: 1 },
+        background: { r: 0, g: 0, b: 0, a: 255 },
+        nodes: node === undefined ? [] : [node],
+      }),
+    ).not.toThrow();
+  });
+
   it('maps image objects to sprite nodes with placeholder dimensions', () => {
     const obj = makeObject({ id: 'img-1', kind: 'image', assetId: 'asset-a' });
     const node = visualObjectToRenderNode(resolved(obj));

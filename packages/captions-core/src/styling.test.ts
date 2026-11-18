@@ -7,6 +7,7 @@ import {
   DEFAULT_CAPTION_TEMPLATE_ID,
   JOY_CAPTION_TEMPLATES,
   layoutTemplatedCaptionNodes,
+  resolveCaptionTextDirection,
   resolveCaptionTemplate,
 } from './index.js';
 import type { CaptionCue } from './index.js';
@@ -114,6 +115,29 @@ describe('templated layout', () => {
     expect(active?.color).toEqual({ r: 233, g: 185, b: 73, a: 255 });
   });
 
+  it('keeps the karaoke active-word index aligned after missing and empty source words', () => {
+    const karaokeCue = cue(
+      {
+        styleRef: 'joy-karaoke-pop',
+        words: { ...words, empty: { id: 'empty', text: '', startUs: 0, endUs: 1 } },
+        segments: [
+          {
+            id: 'seg',
+            startUs: 0,
+            endUs: 2_000_000,
+            wordIds: ['missing', 'empty', 'w1', 'w2', 'w3', 'w4'],
+          },
+        ],
+      },
+      700_000,
+    );
+
+    const nodes = layoutTemplatedCaptionNodes([karaokeCue], viewport) as readonly TextNode[];
+    const active = nodes.flatMap((node) => node.spans ?? []).find((span) => span.emphasis === true);
+
+    expect(active?.text).toBe('makes');
+  });
+
   it('disables karaoke under a display override because word mapping is broken', () => {
     const overridden = cue({
       styleRef: 'joy-karaoke-pop',
@@ -132,7 +156,7 @@ describe('templated layout', () => {
     expect(nodes.map((n) => n.text).join(' ')).toBe('JOY sings captions');
   });
 
-  it('resolves logical start alignment against the document direction (§33.4)', () => {
+  it('keeps logical start alignment for per-line auto direction (§33.4)', () => {
     const rtl = cue({
       styleRef: 'joy-rtl-classic',
       language: 'fa-IR',
@@ -141,11 +165,65 @@ describe('templated layout', () => {
     });
     const nodes = layoutTemplatedCaptionNodes([rtl], viewport) as readonly TextNode[];
     expect(nodes[0]!.direction).toBe('rtl');
-    expect(nodes[0]!.align).toBe('right');
+    expect(nodes[0]!.align).toBe('start');
+    expect(nodes[0]!.transform.translateX).toBeGreaterThan(viewport.viewportWidth / 2);
 
     const ltr = cue({ styleRef: 'joy-rtl-classic' });
     const ltrNodes = layoutTemplatedCaptionNodes([ltr], viewport) as readonly TextNode[];
-    // Logical 'start' resolves to the left edge for LTR documents.
-    expect(ltrNodes[0]!.align).toBe('left');
+    expect(ltrNodes[0]!.direction).toBe('ltr');
+    expect(ltrNodes[0]!.align).toBe('start');
+    expect(ltrNodes[0]!.transform.translateX).toBeLessThan(viewport.viewportWidth / 2);
+  });
+
+  it.each(['ltr', 'rtl'] as const)(
+    'honors explicit %s direction for every templated caption line',
+    (documentDirection) => {
+      const mixed = cue({
+        direction: documentDirection,
+        language: 'fa-IR',
+        styleRef: 'joy-rtl-classic',
+        words: {
+          persian: {
+            id: 'persian',
+            text: '\u0633\u0644\u0627\u0645'.repeat(8),
+            startUs: 0,
+            endUs: 1_000_000,
+          },
+          english: { id: 'english', text: 'JOY'.repeat(10), startUs: 1_000_000, endUs: 2_000_000 },
+        },
+        segments: [
+          {
+            id: 'seg',
+            startUs: 0,
+            endUs: 2_000_000,
+            wordIds: ['persian', 'english'],
+          },
+        ],
+      });
+      const nodes = layoutTemplatedCaptionNodes([mixed], viewport) as readonly TextNode[];
+      const persianLine = nodes.find((node) => node.text.startsWith('\u0633\u0644\u0627\u0645'))!;
+      const englishLine = nodes.find((node) => node.text.startsWith('JOY'))!;
+
+      expect(persianLine.direction).toBe(documentDirection);
+      expect(persianLine.align).toBe('start');
+      expect(persianLine.transform.translateX > viewport.viewportWidth / 2).toBe(
+        documentDirection === 'rtl',
+      );
+      expect(englishLine.direction).toBe(documentDirection);
+      expect(englishLine.align).toBe('start');
+      expect(englishLine.transform.translateX > viewport.viewportWidth / 2).toBe(
+        documentDirection === 'rtl',
+      );
+    },
+  );
+});
+
+describe('caption text direction', () => {
+  it('resolves RTL direction from Persian digits unless a strong letter decides first', () => {
+    expect(resolveCaptionTextDirection('\u06F1\u06F4\u06F0\u06F2/\u06F0\u06F8/\u06F2\u06F5')).toBe(
+      'rtl',
+    );
+    expect(resolveCaptionTextDirection('\u06F1\u06F2\u06F3 JOY')).toBe('ltr');
+    expect(resolveCaptionTextDirection('123 456')).toBe('ltr');
   });
 });

@@ -378,8 +378,8 @@ function TextEditor({
             }
           >
             <option value="auto">Auto</option>
-            <option value="ltr">LTR</option>
-            <option value="rtl">RTL</option>
+            <option value="ltr">Left to right</option>
+            <option value="rtl">Right to left</option>
           </select>
         </label>
         <details className="font-catalog-discovery">

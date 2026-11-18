@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as Pixi from 'pixi.js';
+import { CanvasTextMetrics } from 'pixi.js';
 import type { ColorGradeIR, RenderFrameIR } from '@joy-media/render-ir';
 import { createBrowserPixiRenderer } from './browser.js';
 
@@ -13,6 +14,7 @@ const harness = vi.hoisted(() => ({
   /** Largest drawing buffer the fake browser hands out (per side). */
   maxDrawingBuffer: Number.POSITIVE_INFINITY,
   renders: 0,
+  persianFontReady: false,
 }));
 
 vi.mock('pixi.js', async (importOriginal) => {
@@ -75,6 +77,7 @@ beforeEach(() => {
   });
   harness.maxDrawingBuffer = Number.POSITIVE_INFINITY;
   harness.renders = 0;
+  harness.persianFontReady = false;
 });
 
 afterEach(() => {
@@ -299,6 +302,141 @@ describe('setView (Monitor only)', () => {
     renderer.setView(undefined);
     expect(renderer.canvas.width).toBe(1280);
     expect(renderer.canvas.style.width).toBe('');
+    renderer.destroy();
+  });
+});
+
+describe('text fonts that finish loading after the first Monitor frame', () => {
+  it('reuses one measurement canvas when multiple RTL text nodes wrap in a frame', async () => {
+    const context = {
+      font: '',
+      direction: 'ltr' as 'ltr' | 'rtl',
+      measureText: vi.fn((text: string) => ({ width: [...text].length * 12 })),
+    };
+    const createElement = vi.fn(() => ({ getContext: () => context }));
+    vi.stubGlobal('document', { createElement });
+    vi.spyOn(CanvasTextMetrics, 'measureText').mockImplementation((text, style) => {
+      const content = String(text ?? '');
+      const fontSize = Number(style?.fontSize ?? 16);
+      const width = [...content].length * fontSize * 0.6;
+      return {
+        text: content,
+        style,
+        width,
+        height: fontSize * 1.2,
+        lines: [content],
+        lineWidths: [width],
+        lineHeight: fontSize * 1.2,
+        maxLineWidth: width,
+        fontProperties: { ascent: fontSize * 0.8, descent: fontSize * 0.2, fontSize },
+      } as unknown as ReturnType<typeof CanvasTextMetrics.measureText>;
+    });
+    const textNode = (id: string, text: string) => ({
+      kind: 'text' as const,
+      id,
+      zIndex: 0,
+      opacity: 1,
+      transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+      text,
+      direction: 'rtl' as const,
+      maxWidth: 100,
+      fontSizePx: 16,
+      color: { r: 255, g: 255, b: 255, a: 255 },
+    });
+    const renderer = await createBrowserPixiRenderer();
+    const elementCountBeforeRender = createElement.mock.calls.length;
+
+    renderer.render({
+      ...frame(320, 180),
+      nodes: [
+        textNode('one', '\u0633\u0644\u0627\u0645'),
+        textNode('two', '\u0645\u0631\u062D\u0628\u0627'),
+      ],
+    });
+
+    expect(createElement.mock.calls.length - elementCountBeforeRender).toBe(2);
+    renderer.destroy();
+  });
+
+  it('refreshes Persian titles and captions after their font subset loads while keeping English metrics', async () => {
+    const fonts = Object.assign(new EventTarget(), {
+      load: vi.fn(async (_font: string, _text?: string) => []),
+    });
+    const context = {
+      direction: 'inherit' as 'ltr' | 'rtl' | 'inherit',
+      textAlign: 'start' as 'left' | 'right' | 'center' | 'start' | 'end',
+      fillText: () => undefined,
+      strokeText: () => undefined,
+      measureText: (text: string) => ({ width: [...text].length * 14 }),
+    };
+    vi.stubGlobal('document', {
+      createElement: () => ({ getContext: () => context }),
+      fonts,
+    });
+    vi.spyOn(CanvasTextMetrics, 'measureText').mockImplementation((text, style) => {
+      const content = String(text ?? '');
+      const fontSize = Number(style?.fontSize ?? 16);
+      const width = [...content].reduce((sum, character) => {
+        if (/\s/u.test(character)) return sum + fontSize * 0.28;
+        if (/[\u0590-\u08ff]/u.test(character)) {
+          return sum + fontSize * (harness.persianFontReady ? 0.48 : 0.62);
+        }
+        return sum + fontSize * 0.56;
+      }, 0);
+      const metrics = {
+        text: content,
+        style,
+        width,
+        height: fontSize * 1.2,
+        lines: [content],
+        lineWidths: [width],
+        lineHeight: fontSize * 1.2,
+        maxLineWidth: width,
+        fontProperties: {
+          ascent: fontSize * 0.8,
+          descent: fontSize * 0.2,
+          fontSize,
+        },
+      };
+      return metrics as unknown as ReturnType<typeof CanvasTextMetrics.measureText>;
+    });
+
+    const textNode = (id: string, text: string, direction: 'ltr' | 'auto', fontSizePx: number) => ({
+      kind: 'text' as const,
+      id,
+      zIndex: 0,
+      opacity: 1,
+      transform: { translateX: 400, translateY: 200, scaleX: 1, scaleY: 1 },
+      text,
+      direction,
+      align: 'center' as const,
+      fontFamily: direction === 'ltr' ? 'Inter Variable' : 'Vazirmatn Variable',
+      fontSizePx,
+      color: { r: 255, g: 255, b: 255, a: 255 },
+    });
+    const title = textNode('rtl-title', 'سلام دنیا JOY ۱۲۳', 'auto', 96);
+    const caption = textNode('rtl-caption', 'این یک کپشن است', 'auto', 48);
+    const englishTitle = textNode('ltr-title', 'A Better Story', 'ltr', 96);
+    const renderer = await createBrowserPixiRenderer();
+    renderer.render({ ...frame(800, 450), nodes: [title, caption, englishTitle] });
+
+    const before = {
+      title: renderer.nodeBounds(title.id)!.width,
+      caption: renderer.nodeBounds(caption.id)!.width,
+      english: renderer.nodeBounds(englishTitle.id)!.width,
+    };
+    expect(before.title).toBeGreaterThan(0);
+    expect(before.caption).toBeGreaterThan(0);
+    expect(before.english).toBeGreaterThan(0);
+
+    harness.persianFontReady = true;
+    const rendersBeforeFontReady = harness.renders;
+    fonts.dispatchEvent(new Event('loadingdone'));
+
+    expect(harness.renders).toBeGreaterThan(rendersBeforeFontReady);
+    expect(renderer.nodeBounds(title.id)!.width).toBeLessThan(before.title);
+    expect(renderer.nodeBounds(caption.id)!.width).toBeLessThan(before.caption);
+    expect(renderer.nodeBounds(englishTitle.id)!.width).toBe(before.english);
     renderer.destroy();
   });
 });

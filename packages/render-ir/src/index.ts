@@ -47,7 +47,10 @@ export {
   rotatePointAbout,
 } from './node-geometry.js';
 export {
+  resolveLogicalTextAlign,
+  resolveParagraphTextDirections,
+  resolveTextDirection,
+  textPlateBounds,
   resolveTextWrapWidth,
   TEXT_SAFE_AREA_MARGIN_FRACTION,
-  textPlateBounds,
 } from './text-layout.js';

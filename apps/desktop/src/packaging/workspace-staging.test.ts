@@ -260,9 +260,15 @@ describe('the staged workspace packages of this repository', () => {
       if (found === undefined) throw new Error(`${name} is not a workspace package`);
       return found;
     });
-    // Needs `pnpm install`, as the packager does: the Worker's playwright-core must be found.
+    // Needs `pnpm install`, as the packager does: every Worker runtime package must be found.
     const closure = thirdPartyRuntimeClosure(owners, locateInstalledPackage);
-    expect(closure.map((entry) => entry.name)).toEqual(['playwright-core']);
+    expect(closure.map((entry) => entry.name)).toEqual([
+      '@fontsource-variable/inter',
+      '@fontsource-variable/vazirmatn',
+      '@fontsource/noto-naskh-arabic',
+      '@fontsource/noto-sans-arabic',
+      'playwright-core',
+    ]);
   });
 });
 

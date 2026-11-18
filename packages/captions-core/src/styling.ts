@@ -11,9 +11,15 @@
  * with a stale style (§20.5 fallback spirit).
  */
 
-import type { Rgba, RenderNode, TextNode, TextSpan } from '@joy-media/render-ir';
+import {
+  resolveLogicalTextAlign,
+  type Rgba,
+  type RenderNode,
+  type TextNode,
+  type TextSpan,
+} from '@joy-media/render-ir';
 import type { CaptionCue } from './index.js';
-import { activeCaptionWord, resolveCaptionDirection, segmentDisplayText } from './index.js';
+import { activeCaptionWord, resolveCaptionTextDirection, segmentDisplayText } from './index.js';
 
 export interface CaptionTemplate {
   readonly id: string;
@@ -177,22 +183,20 @@ export function layoutTemplatedCaptionNodes(
       align: clipStyle?.align ?? baseTemplate.align,
       ...(plateColor === undefined ? {} : { plateColor }),
     };
-    const direction = resolveCaptionDirection(cue.document);
-    const align =
-      template.align === 'center'
-        ? 'center'
-        : (template.align === 'start') === (direction === 'ltr')
-          ? 'left'
-          : 'right';
+    const align = template.align;
 
     const displayText = segmentDisplayText(cue.document, cue.segment);
     if (displayText.length === 0) continue;
     // Karaoke needs intact source tokens; an override breaks word mapping.
+    const sourceWordIds =
+      cue.segment.textOverride === undefined
+        ? cue.segment.wordIds.filter(
+            (wordId) => (cue.document.words[wordId]?.text ?? '').length > 0,
+          )
+        : [];
     const sourceTokens =
       cue.segment.textOverride === undefined
-        ? cue.segment.wordIds
-            .map((wordId) => cue.document.words[wordId]?.text ?? '')
-            .filter((token) => token.length > 0)
+        ? sourceWordIds.map((wordId) => cue.document.words[wordId]!.text)
         : displayText.split(/\s+/);
 
     // Responsive sizing: shrink until the wrap fits the template's line budget.
@@ -207,22 +211,24 @@ export function layoutTemplatedCaptionNodes(
     const safeX = template.safeAreaPct.x * options.viewportWidth;
     const safeY = template.safeAreaPct.y * options.viewportHeight;
     const usableWidth = options.viewportWidth - 2 * safeX;
-    const anchorX =
-      align === 'left'
-        ? safeX
-        : align === 'right'
-          ? options.viewportWidth - safeX
-          : options.viewportWidth / 2;
-    const positionedAnchorX = anchorX + (clipStyle?.positionX ?? 0) * options.viewportWidth;
     const lineHeightPx = fontSizePx * template.lineHeightFactor;
 
     const activeWord =
       template.karaoke && cue.segment.textOverride === undefined
         ? activeCaptionWord(cue.document, cue.segment, cue.documentTimeUs)
         : undefined;
-    const activeIndex = activeWord === undefined ? -1 : cue.segment.wordIds.indexOf(activeWord.id);
+    const activeIndex = activeWord === undefined ? -1 : sourceWordIds.indexOf(activeWord.id);
 
     for (const [lineIndex, line] of [...lines].reverse().entries()) {
+      const lineDirection = resolveCaptionTextDirection(line.text, cue.document.direction);
+      const lineAlignment = resolveLogicalTextAlign(align, lineDirection);
+      const anchorX =
+        lineAlignment === 'left'
+          ? safeX
+          : lineAlignment === 'right'
+            ? options.viewportWidth - safeX
+            : options.viewportWidth / 2;
+      const positionedAnchorX = anchorX + (clipStyle?.positionX ?? 0) * options.viewportWidth;
       const lineY =
         options.viewportHeight -
         safeY -
@@ -243,7 +249,7 @@ export function layoutTemplatedCaptionNodes(
         },
         text: line.text,
         color: template.textColor,
-        direction,
+        direction: lineDirection,
         align,
         maxWidth: usableWidth,
         fontSizePx,

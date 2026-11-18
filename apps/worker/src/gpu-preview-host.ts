@@ -1,5 +1,15 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { chromium, type Browser, type Page } from 'playwright-core';
+import {
+  resolveLogicalTextAlign,
+  resolveTextDirection,
+  type RenderNode,
+} from '@joy-media/render-ir';
+import {
+  canvasFontFamilyStack,
+  serializeTextWrapRuntimeSource,
+} from '@joy-media/renderer-pixi/text-direction';
 import {
   WORKER_PROTOCOL_VERSION,
   type GpuPreviewFrameRequest,
@@ -7,6 +17,115 @@ import {
 } from '@joy-media/job-protocol';
 
 const SOFTWARE_RENDERER = /swiftshader|software|llvmpipe|softpipe|mesa offscreen/i;
+const nodeRequire = createRequire(import.meta.url);
+const TEXT_WRAP_RUNTIME_SOURCE = serializeTextWrapRuntimeSource();
+const GPU_TEXT_FONT_FILES = [
+  {
+    family: 'Inter Variable',
+    weight: '100 900',
+    packageName: '@fontsource-variable/inter',
+    fileName: 'inter-latin-wght-normal.woff2',
+  },
+  {
+    family: 'Vazirmatn Variable',
+    weight: '100 900',
+    packageName: '@fontsource-variable/vazirmatn',
+    fileName: 'vazirmatn-arabic-wght-normal.woff2',
+  },
+  {
+    family: 'Noto Sans Arabic',
+    weight: '400',
+    packageName: '@fontsource/noto-sans-arabic',
+    fileName: 'noto-sans-arabic-arabic-400-normal.woff2',
+  },
+  {
+    family: 'Noto Sans Arabic',
+    weight: '700',
+    packageName: '@fontsource/noto-sans-arabic',
+    fileName: 'noto-sans-arabic-arabic-700-normal.woff2',
+  },
+  {
+    family: 'Noto Naskh Arabic',
+    weight: '400',
+    packageName: '@fontsource/noto-naskh-arabic',
+    fileName: 'noto-naskh-arabic-arabic-400-normal.woff2',
+  },
+  {
+    family: 'Noto Naskh Arabic',
+    weight: '700',
+    packageName: '@fontsource/noto-naskh-arabic',
+    fileName: 'noto-naskh-arabic-arabic-700-normal.woff2',
+  },
+] as const;
+
+interface GpuTextStyle {
+  readonly lineDirections: readonly ('ltr' | 'rtl')[];
+  readonly lineAlignments: readonly ('left' | 'center' | 'right')[];
+  readonly fontFamilyStack: readonly string[];
+}
+
+function resolveGpuTextDirection(
+  text: string,
+  requested: 'ltr' | 'rtl' | 'auto' = 'auto',
+): 'ltr' | 'rtl' {
+  return resolveTextDirection(text, requested);
+}
+
+function resolveGpuTextAlign(
+  align: 'left' | 'center' | 'right' | 'start' | 'end',
+  direction: 'ltr' | 'rtl',
+): 'left' | 'center' | 'right' {
+  return resolveLogicalTextAlign(align, direction);
+}
+
+function gpuTextFontCss(): string {
+  return GPU_TEXT_FONT_FILES.map(({ family, weight, packageName, fileName }) => {
+    const fontPath = nodeRequire.resolve(`${packageName}/files/${fileName}`);
+    const fontBase64 = readFileSync(fontPath).toString('base64');
+    return `@font-face { font-family: ${JSON.stringify(family)}; font-style: normal; font-weight: ${weight}; font-display: block; src: url("data:font/woff2;base64,${fontBase64}") format("woff2"); }`;
+  }).join('\n');
+}
+
+async function prepareGpuPreviewFonts(page: Page): Promise<void> {
+  await page.addStyleTag({ content: gpuTextFontCss() });
+  await page.evaluate(async () => {
+    await Promise.all([
+      document.fonts.load('16px "Inter Variable"', 'JOY 123'),
+      document.fonts.load(
+        '16px "Vazirmatn Variable"',
+        '\u0633\u0644\u0627\u0645 \u06F1\u06F2\u06F3',
+      ),
+      document.fonts.load('16px "Noto Sans Arabic"', '\u0645\u0631\u062D\u0628\u0627'),
+      document.fonts.load('16px "Noto Naskh Arabic"', '\u0645\u0631\u062D\u0628\u0627'),
+    ]);
+  });
+}
+
+function collectGpuTextStyles(nodes: readonly RenderNode[]): Record<string, GpuTextStyle> {
+  const styles: Record<string, GpuTextStyle> = {};
+  const visit = (node: RenderNode): void => {
+    if (node.kind === 'group') {
+      node.children.forEach(visit);
+      return;
+    }
+    if (node.kind !== 'text') return;
+    const requested = node.direction ?? 'ltr';
+    const lines = node.text.split(/\r\n|\n|\r/u);
+    const lineDirections = lines.map((line) => resolveGpuTextDirection(line, requested));
+    styles[node.id] = {
+      lineDirections,
+      lineAlignments: lineDirections.map((direction) =>
+        resolveGpuTextAlign(node.align ?? 'left', direction),
+      ),
+      fontFamilyStack: canvasFontFamilyStack(
+        node.text,
+        node.fontFamily === 'Arial, sans-serif' ? undefined : node.fontFamily,
+      ),
+    };
+  };
+  nodes.forEach(visit);
+  return styles;
+}
 
 export interface HardwareGpuIdentity {
   readonly renderer: string;
@@ -38,6 +157,7 @@ export class GpuPreviewHost {
     });
     try {
       const page = await browser.newPage({ viewport: { width: 320, height: 180 } });
+      await prepareGpuPreviewFonts(page);
       const identity = await page.evaluate(() => {
         const canvas = document.createElement('canvas');
         const gl = canvas.getContext('webgl2', {
@@ -75,6 +195,8 @@ export class GpuPreviewHost {
       frame: request.frame,
       quality: request.quality,
       bitmaps: request.bitmaps ?? [],
+      textStyles: collectGpuTextStyles(request.frame.nodes),
+      textWrapRuntimeSource: TEXT_WRAP_RUNTIME_SOURCE,
     });
     return {
       protocolVersion: WORKER_PROTOCOL_VERSION,
@@ -115,8 +237,16 @@ async function renderGpuFrame(input: {
   frame: GpuPreviewFrameRequest['frame'];
   quality: GpuPreviewFrameRequest['quality'];
   bitmaps: NonNullable<GpuPreviewFrameRequest['bitmaps']>;
+  textStyles: Readonly<Record<string, GpuTextStyle>>;
+  textWrapRuntimeSource: string;
 }): Promise<{ width: number; height: number; pngBase64: string }> {
   const scale = input.quality === 'quarter' ? 0.25 : input.quality === 'half' ? 0.5 : 1;
+  const wrapTextByWords = new Function(`return ${input.textWrapRuntimeSource};`)() as (
+    text: string,
+    maxWidth: number,
+    measure: (candidate: string, direction: 'ltr' | 'rtl') => number,
+    direction: 'ltr' | 'rtl',
+  ) => { text: string; lineDirections: readonly ('ltr' | 'rtl')[] };
   const width = Math.max(1, Math.round(input.frame.viewport.width * scale));
   const height = Math.max(1, Math.round(input.frame.viewport.height * scale));
   const canvas = document.createElement('canvas');
@@ -243,30 +373,75 @@ async function renderGpuFrame(input: {
     }
     if (node.kind === 'text') {
       const fontSize = Math.max(1, (node.fontSizePx ?? 16) * scale);
-      const family = node.fontFamily ?? 'Arial, sans-serif';
+      const textStyle = input.textStyles[node.id];
+      if (textStyle === undefined) throw new Error(`GPU text styles are missing for ${node.id}`);
+      const paragraphs = node.text.split(/\r\n|\n|\r/u);
+      const lines: string[] = [];
+      const lineDirections: ('ltr' | 'rtl')[] = [];
+      const lineAlignments: ('left' | 'center' | 'right')[] = [];
+      const family = textStyle.fontFamilyStack
+        .map((fontFamily) => JSON.stringify(fontFamily))
+        .join(', ');
+      const lineHeightPx = fontSize * (node.lineHeight ?? 1.25);
       context.save();
       context.globalAlpha = node.opacity;
-      context.direction = node.direction ?? 'ltr';
-      context.textAlign = node.align ?? 'left';
       context.textBaseline = 'top';
       context.font = `${node.italic ? 'italic ' : ''}${node.fontWeight ?? 400} ${fontSize}px ${family}`;
+      if ('letterSpacing' in context) {
+        (context as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing =
+          `${(node.tracking ?? 0) * scale}px`;
+      }
       const x = node.transform.translateX * scale;
       const y = node.transform.translateY * scale;
-      const metrics = context.measureText(node.text);
+      paragraphs.forEach((paragraph, paragraphIndex) => {
+        const direction = textStyle.lineDirections[paragraphIndex] ?? 'ltr';
+        const alignment = textStyle.lineAlignments[paragraphIndex] ?? 'left';
+        context.direction = direction;
+        context.textAlign = alignment;
+        const wrapped =
+          node.maxWidth === undefined
+            ? { text: paragraph, lineDirections: [direction] }
+            : wrapTextByWords(
+                paragraph,
+                node.maxWidth * scale,
+                (candidate, measuredDirection) => {
+                  context.direction = measuredDirection;
+                  return context.measureText(candidate).width;
+                },
+                direction,
+              );
+        const wrappedLines = wrapped.text.split('\n');
+        wrappedLines.forEach((line, lineIndex) => {
+          lines.push(line);
+          lineDirections.push(wrapped.lineDirections[lineIndex] ?? direction);
+          lineAlignments.push(alignment);
+        });
+      });
+      const lineMetrics = lines.map((line, index) => {
+        context.direction = lineDirections[index] ?? 'ltr';
+        context.textAlign = lineAlignments[index] ?? 'left';
+        return context.measureText(line);
+      });
+      const lineLefts = lineMetrics.map((metrics, index) => {
+        const align = lineAlignments[index] ?? 'left';
+        return align === 'center'
+          ? x - metrics.width / 2
+          : align === 'right'
+            ? x - metrics.width
+            : x;
+      });
+      const plateLeft = Math.min(...lineLefts);
+      const plateRight = Math.max(
+        ...lineLefts.map((left, index) => left + (lineMetrics[index]?.width ?? 0)),
+      );
       if (node.background !== undefined) {
         const padding = Math.max(2, fontSize * 0.12);
-        const plateX =
-          node.align === 'center'
-            ? x - metrics.width / 2
-            : node.align === 'right'
-              ? x - metrics.width
-              : x;
         context.fillStyle = `rgba(${node.background.r},${node.background.g},${node.background.b},${node.background.a / 255})`;
         context.fillRect(
-          plateX - padding,
+          plateLeft - padding,
           y - padding,
-          metrics.width + padding * 2,
-          fontSize * 1.25 + padding * 2,
+          plateRight - plateLeft + padding * 2,
+          lines.length * lineHeightPx + padding * 2,
         );
       }
       const textColor = node.fill?.kind === 'solid' ? node.fill.color : node.color;
@@ -280,19 +455,17 @@ async function renderGpuFrame(input: {
       if (node.stroke !== undefined) {
         context.lineWidth = node.stroke.widthPx * scale;
         context.strokeStyle = `rgba(${node.stroke.color.r},${node.stroke.color.g},${node.stroke.color.b},${node.stroke.color.a / 255})`;
-        context.strokeText(
-          node.text,
-          x,
-          y,
-          node.maxWidth === undefined ? undefined : node.maxWidth * scale,
-        );
+        lines.forEach((line, index) => {
+          context.direction = lineDirections[index] ?? 'ltr';
+          context.textAlign = lineAlignments[index] ?? 'left';
+          context.strokeText(line, x, y + index * lineHeightPx);
+        });
       }
-      context.fillText(
-        node.text,
-        x,
-        y,
-        node.maxWidth === undefined ? undefined : node.maxWidth * scale,
-      );
+      lines.forEach((line, index) => {
+        context.direction = lineDirections[index] ?? 'ltr';
+        context.textAlign = lineAlignments[index] ?? 'left';
+        context.fillText(line, x, y + index * lineHeightPx);
+      });
       context.restore();
       continue;
     }

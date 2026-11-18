@@ -275,6 +275,18 @@ importers:
 
   apps/worker:
     dependencies:
+      '@fontsource-variable/inter':
+        specifier: 5.2.6
+        version: 5.2.6
+      '@fontsource-variable/vazirmatn':
+        specifier: 5.2.6
+        version: 5.2.6
+      '@fontsource/noto-naskh-arabic':
+        specifier: 5.2.6
+        version: 5.2.6
+      '@fontsource/noto-sans-arabic':
+        specifier: 5.2.6
+        version: 5.2.6
       '@joy-media/export-core':
         specifier: workspace:*
         version: link:../../packages/export-core
@@ -284,6 +296,12 @@ importers:
       '@joy-media/project-persistence':
         specifier: workspace:*
         version: link:../../packages/project-persistence
+      '@joy-media/render-ir':
+        specifier: workspace:*
+        version: link:../../packages/render-ir
+      '@joy-media/renderer-pixi':
+        specifier: workspace:*
+        version: link:../../packages/renderer-pixi
       playwright-core:
         specifier: ^1.62.1
         version: 1.62.1
