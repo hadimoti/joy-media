@@ -138,7 +138,9 @@ export async function run(argv = process.argv.slice(2)) {
   }
   const runId = randomUUID();
   const liveTest = options.testIds.some((id) => LIVE_ROWS.some((row) => row.id === id));
-  const exportMatrix = options.testIds.some((id) => id.startsWith('D-A10-'));
+  // Rows that export need the driver in test mode: the file is then saved in the scratch download folder (without
+  // it Electron shows a Save window and the row sees no file). D-A05-60 exports the sample project.
+  const exportMatrix = options.testIds.some((id) => id.startsWith('D-A10-') || id === 'D-A05-60');
   const testMode =
     liveTest || options.testIds.some((id) => id.startsWith('D-A09-')) || exportMatrix;
   const evidenceTask = liveTest

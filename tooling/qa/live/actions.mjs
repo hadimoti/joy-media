@@ -327,15 +327,23 @@ export const ACTION_CHECKS = {
     const before = listNonMp4(t.ctx.downloadDir);
     await t.fire();
     let fresh;
-    for (let attempt = 0; attempt < 60 && fresh === undefined; attempt += 1) {
+    // The package carries the project's media as data, so a project with a large clip needs a while.
+    for (let attempt = 0; attempt < 240 && fresh === undefined; attempt += 1) {
       fresh = listNonMp4(t.ctx.downloadDir).find(
         (name) =>
           !before.includes(name) || statSync(join(t.ctx.downloadDir, name)).mtimeMs >= startedAt,
       );
       if (fresh === undefined) await t.page.waitForTimeout(500);
     }
-    if (fresh === undefined)
-      throw new Error('no editable project file appeared in the scratch download folder');
+    if (fresh === undefined) {
+      const toasts = await t.page
+        .locator('[class*="toast"]')
+        .allInnerTexts()
+        .catch(() => []);
+      throw new Error(
+        `no editable project file appeared in the scratch download folder (toasts: ${toasts.join(' | ').slice(0, 200) || 'none'})`,
+      );
+    }
     const path = join(t.ctx.downloadDir, fresh);
     if (statSync(path).size === 0) throw new Error(`${fresh} is empty`);
     const parsed = JSON.parse(readFileSync(path, 'utf8'));

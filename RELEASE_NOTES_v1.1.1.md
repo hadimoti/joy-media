@@ -133,7 +133,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 
 - Changes are written to the app's storage within about half a second, and flushed to disk when a window closes and when the app quits.
 - Temporary export files in the browser storage are cleaned up at the next export or app start. Files younger than two hours are left alone, so another window's export is not interrupted.
-- The sample project "Local editor project" no longer carries the two clips that had no media behind them. An export that is refused for missing media now names the clips.
+- The sample project "Local editor project" no longer carries the two clips that had no media behind them, and it now exports (seen working on 18 Nov). An export that is refused for missing media now names the clips.
 - The colour of an exported video no longer changes when you export a second time in the browser version.
 - The export quality is higher. In the desktop app the final video is encoded with almost no loss. Measured on a 10-minute 1080p export: it takes about the same time (about 14 minutes), and the file is about 390 MB instead of 220 MB.
 - The export helper no longer reports false errors after a job ends. A cancel during the last steps is honoured: the job shows cancelled, not failed. If a needed video tool is missing, the message gives the real reason.
@@ -180,7 +180,6 @@ These are built and tested in code. They were not yet seen working in the runnin
 - Colour on old projects compared with v1.1.0, and the graphics card path of the colour engine.
 - Whether the Format control saves frame rate and background settings, and whether exports match the canvas size.
 - Sample projects without missing media, missing-clip marks on the timeline, the Monitor and the Inspector, and the export warning about missing media.
-- Sample project export. The fix for exporting the sample project "Local editor project" is in the code but not yet seen working in the app. Before the fix, exporting one sample project could fail with "cannot resolve visual asset".
 - The Asset Library Storage dialog and its Open folder button.
 - The library card design and transition cards that play the real transition.
 - Animate panel changes, and the panel header menu.
