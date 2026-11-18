@@ -319,8 +319,10 @@ function MonitorPanelContent({
     [],
   );
   // Project card (T-D07): keep the library card's format, length and cover up to date.
-  // A short wait after the last change, and once more when the editor closes. The
-  // cover is the frame on show; a failed capture keeps the old cover (see saveProjectCard).
+  // A short wait after the last change, and once more when the editor closes.
+  // The renderer exposes only its currently displayed frame; do not seek or disturb the
+  // playhead for a card capture. Save a first-frame cover only when the monitor is already at 0.
+  // A missing frame keeps the old cover or the placeholder (see saveProjectCard).
   const cardSnapshotRef = useRef<() => void>(() => undefined);
   cardSnapshotRef.current = () => {
     const rootId = timelineProject.rootCompositionId;
@@ -331,7 +333,10 @@ function MonitorPanelContent({
       projectId: visualProject.id,
       canvas: { width: visualComposition.width, height: visualComposition.height },
       durationUs: timelineEffectiveDurationUs(timelineComposition),
-      readFrame: () => rendererRef.current?.readPixels(COVER_MAX_SIDE, COVER_MAX_SIDE),
+      readFrame: () =>
+        state.playheadUs === 0
+          ? rendererRef.current?.readPixels(COVER_MAX_SIDE, COVER_MAX_SIDE)
+          : undefined,
     });
   };
   useEffect(() => {

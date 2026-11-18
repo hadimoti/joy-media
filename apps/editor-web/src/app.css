@@ -11805,10 +11805,10 @@ label {
   width: 100%;
   margin: 0;
   padding: 0;
-  border: 1px solid #2e2e32;
+  border: 1px solid var(--joy-border);
   border-radius: 0.4rem;
-  background: #1f1f21;
-  color: inherit;
+  background: var(--joy-bg-panel);
+  color: var(--joy-text);
   text-align: start;
   cursor: pointer;
   overflow: hidden;
@@ -11819,14 +11819,18 @@ label {
 .project-library-card:hover {
   border-color: var(--joy-accent);
 }
+.project-library-card:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 2px;
+}
 /* The cover: the whole frame at its own shape, on a neutral ground (T-D07). */
 .project-library-card-thumb {
   display: grid;
   height: 9rem;
   place-items: center;
   overflow: hidden;
-  background: #252528;
-  border-bottom: 1px solid #2e2e32;
+  background: var(--joy-bg-elevated);
+  border-bottom: 1px solid var(--joy-border);
 }
 .project-library-grid.is-list .project-library-card-thumb {
   height: 5.5rem;
@@ -11851,13 +11855,17 @@ label {
 .project-library-card-placeholder {
   display: grid;
   place-items: center;
-  border: 1px dashed #5a5a62;
+  border: 1px dashed var(--joy-border-hover);
   border-radius: 0.2rem;
-  background: #1c1c1f;
-  color: #8d8d93;
-  font-size: 0.75rem;
+  background: var(--joy-bg-inset);
+  color: var(--joy-text-faint);
+  font-size: max(12px, var(--joy-type-xs));
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+.project-library-card-placeholder svg {
+  width: 1rem;
+  height: 1rem;
 }
 .project-library-card-body {
   display: grid;
@@ -11875,14 +11883,14 @@ label {
 .project-library-card-title strong {
   display: block;
   overflow: hidden;
-  font-size: 0.92rem;
+  font-size: max(12px, var(--joy-type-lg));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .project-library-card-meta {
   overflow: hidden;
-  color: #9d9da1;
-  font-size: 0.75rem;
+  color: var(--joy-text-secondary);
+  font-size: max(12px, var(--joy-type-xs));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -11898,14 +11906,19 @@ label {
   gap: 0.6rem;
   border: 1px dashed var(--joy-accent);
   border-radius: 0.4rem;
-  background: #2a2412;
-  color: #f0c346;
+  background: var(--joy-accent-dim);
+  color: var(--joy-accent);
   font: inherit;
+  font-size: max(12px, var(--joy-type-md));
   font-weight: 600;
   cursor: pointer;
 }
 .project-library-new-tile:hover {
-  background: #3a3015;
+  background: color-mix(in srgb, var(--joy-accent) 18%, var(--joy-bg-panel));
+}
+.project-library-new-tile:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 2px;
 }
 .project-library-new-tile svg {
   width: 2rem;
