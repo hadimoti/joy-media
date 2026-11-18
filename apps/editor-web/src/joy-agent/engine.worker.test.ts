@@ -167,11 +167,15 @@ async function mountedWorker(
               ? 'AUTH_FAILED'
               : response.status === 402
                 ? 'BILLING_REQUIRED'
-                : 'PROVIDER_HTTP_ERROR',
+                : response.status === 429
+                  ? 'RATE_LIMITED'
+                  : 'PROVIDER_HTTP_ERROR',
           message:
             response.status === 402
               ? 'The provider account needs credit to complete this request.'
-              : 'The provider returned an error.',
+              : response.status === 429
+                ? 'The provider says the usage limit is reached. Try again later.'
+                : 'The provider returned an error.',
         };
     receive?.({
       data: {
@@ -431,6 +435,28 @@ describe('JOY Agent Engine Worker V2', () => {
         }),
       ),
     );
+  });
+
+  it('reports a provider usage limit as rate-limited, not as a network failure', async () => {
+    const worker = await mountedWorker(() => new Response('{"error":"quota"}', { status: 429 }));
+
+    worker.send({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'test' });
+
+    await vi.waitFor(() =>
+      expect(worker.output).toContainEqual(
+        expect.objectContaining({
+          type: 'test-result',
+          status: {
+            provider: 'openai-compatible',
+            modelId: 'fixture-model',
+            capability: 'incompatible',
+            message: 'The provider says the usage limit is reached. Try again later.',
+            reason: 'rate-limited',
+          },
+        }),
+      ),
+    );
+    expect(JSON.stringify(worker.output)).not.toContain('CORS or network error');
   });
 
   it('gives each probe call its own deadline, so three replies of 16 seconds each all count', async () => {

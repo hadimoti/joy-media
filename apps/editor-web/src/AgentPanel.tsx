@@ -60,11 +60,11 @@ import {
   CloseIcon,
   ColorAdjustIcon,
   EnhanceIcon,
-  GearIcon,
   ListIcon,
   PlayIcon,
   PlusIcon,
   SaveIcon,
+  SettingsGearIcon,
   UndoIcon,
 } from './icons.js';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
@@ -3922,7 +3922,7 @@ export function AgentPanel({
                 title="Joy Code Settings"
                 onClick={onOpenSettings}
               >
-                <GearIcon />
+                <SettingsGearIcon />
               </button>
             )}
           </div>

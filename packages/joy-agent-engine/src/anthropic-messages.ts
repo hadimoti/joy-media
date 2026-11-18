@@ -315,7 +315,8 @@ function jsonErrorResponse(status: number, code: string): Response {
 function errorCodeForStatus(status: number): string {
   if (status === 401 || status === 403) return 'JOY_AGENT_AUTH_FAILED';
   if (status === 413) return 'JOY_AGENT_RESPONSE_TOO_LARGE';
-  if (status === 408 || status === 429 || status >= 500) return 'JOY_AGENT_CORS_OR_NETWORK';
+  if (status === 429) return 'JOY_AGENT_RATE_LIMITED';
+  if (status === 408 || status >= 500) return 'JOY_AGENT_CORS_OR_NETWORK';
   return 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
 }
 

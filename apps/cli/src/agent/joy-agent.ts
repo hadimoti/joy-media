@@ -7,7 +7,7 @@ import {
   type JoyDocumentOperation,
   type JoyTimelineOperation,
 } from '@joy-media/joy-agent-engine';
-import type { AgentSlot } from '@joy-media/provider-sdk';
+import { type AgentSlot, USAGE_LIMIT_MESSAGE } from '@joy-media/provider-sdk';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { c } from '../utils/logger.js';
 import { CliJoyAgentToolBridge, type StagedOperationsSummary } from './bridge.js';
@@ -99,7 +99,7 @@ function explainFailure(
       return `The provider answered HTTP 404. Check that the URL is the API base (usually ending in /v1) and that model "${modelId}" exists.`;
     }
     if (status === 429) {
-      return 'The provider is rate-limiting requests (HTTP 429). Wait a moment and retry.';
+      return USAGE_LIMIT_MESSAGE;
     }
     if (status >= 500) return `The provider had a server error (HTTP ${status}). Retry later.`;
     return `The provider answered HTTP ${status}.`;

@@ -241,6 +241,17 @@ function samePrivateIds(left: readonly string[], right: readonly string[]): bool
  * Checks a connection before it is posted to the Worker. It keeps the saved profile and the URL the
  * user saw; no key is part of it (PLAN-v4 §6b).
  */
+/**
+ * True for an error a connection check rejects with when the provider's usage limit was reached. The Worker's
+ * error code travels on the error (see the `error` message handler), so the caller need not parse its text.
+ */
+export function isUsageLimitRejection(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error as Error & { code?: unknown }).code === 'JOY_AGENT_RATE_LIMITED'
+  );
+}
+
 export function normalizeSessionConfig(
   input: Readonly<Partial<ByokSessionConfig>>,
 ): ByokSessionConfig {
@@ -754,7 +765,8 @@ export function createSingleWorkerEngineClient(
         if (item !== undefined) {
           pending.delete(key);
           clearTimeout(item.timer);
-          item.reject(new Error(message.message));
+          // The code travels with the error, so a caller can tell a provider usage limit from a network failure.
+          item.reject(Object.assign(new Error(message.message), { code: message.code }));
         }
         if (message.requestId !== undefined) {
           const activeQueueKey = activeQueueKeysByRunId.get(message.requestId);

@@ -163,7 +163,11 @@ describe('agent run (real binary, mock LLM)', () => {
 
   const failures: Array<[string, ChatReply, RegExp]> = [
     ['HTTP 401', httpError(401), /rejected the API key \(HTTP 401\)/],
-    ['HTTP 429', httpError(429), /rate-limiting requests \(HTTP 429\)/],
+    [
+      'HTTP 429',
+      httpError(429),
+      /The provider says the usage limit is reached\. Try again later\./,
+    ],
     ['HTTP 500', httpError(500), /server error \(HTTP 500\)/],
     [
       'a 200 with a malformed JSON body',

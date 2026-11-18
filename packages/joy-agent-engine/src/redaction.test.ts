@@ -61,9 +61,27 @@ describe('JOY Agent redaction', () => {
       'JOY_AGENT_AUTH_FAILED',
     ],
     [new Error('HTTP 401: unauthorized'), 'JOY_AGENT_AUTH_FAILED'],
+    [new Error('HTTP 429: too many requests'), 'JOY_AGENT_RATE_LIMITED'],
+    [{ statusCode: 429, message: 'request failed' }, 'JOY_AGENT_RATE_LIMITED'],
+    [{ status: '429', message: 'request failed' }, 'JOY_AGENT_RATE_LIMITED'],
+    [
+      { statusCode: 500, message: 'Internal Server Error', responseBody: 'rate limit exceeded' },
+      'JOY_AGENT_RATE_LIMITED',
+    ],
     [new Error('HTTP 500: internal server error'), 'JOY_AGENT_PROVIDER_INCOMPATIBLE'],
   ] as const)('classifies provider errors without moving existing codes', (error, code) => {
     expect(classifyJoyAgentError(error)).toBe(code);
+  });
+
+  it('marks a provider rate limit as retryable, unlike an incompatible provider', () => {
+    expect(toSafeJoyAgentError(new Error('HTTP 429: too many requests'))).toEqual({
+      code: 'JOY_AGENT_RATE_LIMITED',
+      retryable: true,
+    });
+    expect(toSafeJoyAgentError(new Error('HTTP 500: internal server error'))).toEqual({
+      code: 'JOY_AGENT_PROVIDER_INCOMPATIBLE',
+      retryable: false,
+    });
   });
 
   it('reports that the provider account needs credit and does not mark billing retryable', () => {

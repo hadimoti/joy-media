@@ -768,6 +768,15 @@
   text-align: left;
 }
 
+.joy-provider-signed-in {
+  margin: 0;
+  color: var(--joy-accent);
+  font-size: var(--joy-type-sm);
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: left;
+}
+
 .joy-provider-sign-in-waiting {
   display: flex;
   align-items: center;

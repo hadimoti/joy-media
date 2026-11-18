@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { USAGE_LIMIT_REACHED } from '@joy-media/provider-sdk';
 import { CREATIVE_SKILL_BLOCK_REASONS } from './joy-agent/skill-runner.js';
 import { CREATIVE_SKILL_HOST_FAILURE_CODES } from './joy-agent/creative-skill-host-adapter.js';
 import { JOY_AGENT_RUN_ERROR_CODES } from './joy-agent/run-events.js';
@@ -183,5 +184,15 @@ describe('Joy Code plain messages', () => {
     expect(JOY_CODE_MESSAGES['audio-not-prepared'].sentence).toBe(
       'Joy Code could not read the audio in this composition. No edits were applied.',
     );
+  });
+
+  it('shows a provider usage limit as its own plain message with a try-again action', () => {
+    const message = JOY_CODE_MESSAGES.JOY_AGENT_RATE_LIMITED;
+    expect(message.title).toBe('Usage limit reached');
+    expect(message.sentence).toBe(
+      'The provider says the usage limit is reached. No edits were applied.',
+    );
+    expect(message.sentence.startsWith(USAGE_LIMIT_REACHED)).toBe(true);
+    expect(message.action).toEqual({ label: 'Try again', kind: 'retry' });
   });
 });

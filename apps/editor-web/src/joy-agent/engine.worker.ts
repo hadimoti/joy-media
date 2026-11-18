@@ -1,5 +1,6 @@
 import { listModelVisibleJoyEditorOperations } from './editor-operation-registry.js';
 import { createModelVisibleJoyCodeProposalParameters } from '@joy-media/agent-tools';
+import { USAGE_LIMIT_MESSAGE } from '@joy-media/provider-sdk';
 import {
   createBrowserAgentToolCatalog,
   runBoundedToolExchange,
@@ -609,12 +610,14 @@ function bindObservationPort(event: MessageEvent<unknown>): boolean {
 function currentStatus(
   capability: ByokSessionStatus['capability'] = providerCapability,
   message?: string,
+  reason?: ByokSessionStatus['reason'],
 ): ByokSessionStatus {
   return {
     provider: session?.provider ?? 'openai-compatible',
     modelId: session?.modelId ?? '',
     capability,
     ...(message === undefined ? {} : { message }),
+    ...(reason === undefined ? {} : { reason }),
   };
 }
 
@@ -746,6 +749,8 @@ function providerErrorCode(code: string): JoyAgentErrorCode {
   if (code === 'RESPONSE_TOO_LARGE' || code === 'JOY_AGENT_RESPONSE_TOO_LARGE') {
     return 'JOY_AGENT_RESPONSE_TOO_LARGE';
   }
+  // HTTP 429 from the provider: its usage limit, which is not a refusal of the request.
+  if (code === 'RATE_LIMITED') return 'JOY_AGENT_RATE_LIMITED';
   // A refusal by the endpoint policy, the key binding or the request itself is not a network failure.
   if (PROVIDER_REFUSAL_CODES.has(code)) return 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
   return 'JOY_AGENT_CORS_OR_NETWORK';
@@ -920,10 +925,13 @@ async function testConnection(): Promise<void> {
               ? 'The provider account needs credit to complete this request.'
               : errorCode === 'JOY_AGENT_RESPONSE_TOO_LARGE'
                 ? 'Provider response too large'
-                : errorCode === 'JOY_AGENT_PROVIDER_INCOMPATIBLE' &&
-                    error instanceof JoyAgentWorkerError
-                  ? error.message.slice(0, 180)
-                  : 'CORS or network error',
+                : errorCode === 'JOY_AGENT_RATE_LIMITED'
+                  ? USAGE_LIMIT_MESSAGE
+                  : errorCode === 'JOY_AGENT_PROVIDER_INCOMPATIBLE' &&
+                      error instanceof JoyAgentWorkerError
+                    ? error.message.slice(0, 180)
+                    : 'CORS or network error',
+        errorCode === 'JOY_AGENT_RATE_LIMITED' ? 'rate-limited' : undefined,
       ),
     });
   }
@@ -1312,6 +1320,7 @@ function failureMessage(
   if (code === 'JOY_AGENT_BILLING_REQUIRED') {
     return { code, message: 'The provider account needs credit to complete this request.' };
   }
+  if (code === 'JOY_AGENT_RATE_LIMITED') return { code, message: USAGE_LIMIT_MESSAGE };
   if (code === 'JOY_AGENT_RESPONSE_TOO_LARGE')
     return { code, message: 'Provider response too large' };
   if (code === 'JOY_AGENT_TIMEOUT') return { code, message: 'Provider request timed out' };

@@ -20,6 +20,7 @@ import {
   type CreativeSkillHostFailureCode,
 } from './joy-agent/creative-skill-host-adapter.js';
 import { JOY_AGENT_RUN_ERROR_CODES, type JoyAgentRunErrorCode } from './joy-agent/run-events.js';
+import { USAGE_LIMIT_REACHED } from '@joy-media/provider-sdk';
 
 export type JoyCodeActionKind = 'retry' | 'open-settings' | 'dismiss';
 
@@ -166,6 +167,11 @@ export const JOY_CODE_MESSAGES: Readonly<Record<JoyCodeMessageKey, JoyCodeMessag
     title: 'This model cannot run Joy Code',
     sentence: `This model cannot run Joy Code's edit tools. ${NOTHING_APPLIED}`,
     action: { label: 'Choose another model', kind: 'open-settings' },
+  },
+  JOY_AGENT_RATE_LIMITED: {
+    title: 'Usage limit reached',
+    sentence: `${USAGE_LIMIT_REACHED} ${NOTHING_APPLIED}`,
+    action: TRY_AGAIN,
   },
   JOY_AGENT_INTERRUPTED: {
     title: 'The run was interrupted',

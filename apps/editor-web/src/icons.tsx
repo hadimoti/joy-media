@@ -304,8 +304,9 @@ export function AiEffectIcon() {
   return <PngMaskIcon src={UI_ICONS.agentAi} />;
 }
 
-export function SettingsGearIcon() {
-  return <PngMaskIcon src={UI_ICONS.settings} />;
+/** The real gear for "settings". Sized like the 16 px vector icons it sits beside. */
+export function SettingsGearIcon({ size = 16 }: { readonly size?: number }) {
+  return <PngMaskIcon src={UI_ICONS.settings} size={size} />;
 }
 
 /** Three small controls — a crisp vector affordance for runtime tuning. */
@@ -1488,16 +1489,6 @@ export function SocialIcon() {
       <circle cx="8" cy="8" r="6.25" />
       <path d="M1.75 8h12.5" />
       <path d="M8 1.75c1.85 2 2.8 4 2.8 6.25S9.85 12.25 8 14.25C6.15 12.25 5.2 10.25 5.2 8s.95-4.25 2.8-6.25Z" />
-    </Svg>
-  );
-}
-
-/** A cog — the settings trigger. */
-export function GearIcon() {
-  return (
-    <Svg size={16}>
-      <circle cx="8" cy="8" r="2.25" />
-      <path d="M8 2v1.5M8 12.5V14M14 8h-1.5M3.5 8H2M12.24 3.76l-1.06 1.06M4.82 11.18l-1.06 1.06M12.24 12.24l-1.06-1.06M4.82 4.82 3.76 3.76" />
     </Svg>
   );
 }

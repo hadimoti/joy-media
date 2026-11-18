@@ -51,9 +51,12 @@ function apiKeyRegions(provider: RegistryProvider): readonly ProviderRegion[] {
 export function ProviderSignInPanel({
   onSignedIn,
   onSaved,
+  signedInProviderIds,
 }: {
   readonly onSignedIn: (profile: DesktopProviderProfile) => void;
   readonly onSaved?: (profile: DesktopProviderProfile) => void;
+  /** Providers with a saved profile the person can use. Their sign-in route shows that it is signed in. */
+  readonly signedInProviderIds?: readonly string[] | undefined;
 }) {
   const [busy, setBusy] = useState<RegistryProviderId | undefined>(undefined);
   const [signInStatus, setSignInStatus] = useState<
@@ -139,6 +142,7 @@ export function ProviderSignInPanel({
           provider={provider}
           signInBusy={busy === provider.id}
           signInDisabled={busy !== undefined}
+          signedIn={signedInProviderIds?.includes(provider.id) === true}
           signInMessage={signInStatus?.provider === provider.id ? signInStatus.message : undefined}
           signInRemainingMs={
             busy === provider.id && waitingSince !== undefined
@@ -173,6 +177,7 @@ function ProviderRouteAccordion({
   provider,
   signInBusy,
   signInDisabled,
+  signedIn,
   signInMessage,
   signInRemainingMs,
   onSignIn,
@@ -183,6 +188,8 @@ function ProviderRouteAccordion({
   readonly provider: RegistryProvider;
   readonly signInBusy: boolean;
   readonly signInDisabled: boolean;
+  /** A saved profile for this provider exists, so the sign-in is already done. */
+  readonly signedIn: boolean;
   readonly signInMessage?: string | undefined;
   /** Time left in the wait for the browser, while this provider's sign-in runs. */
   readonly signInRemainingMs?: number | undefined;
@@ -418,6 +425,9 @@ function ProviderRouteAccordion({
             <h4 className="joy-provider-route-title">
               {SETTINGS_PROVIDER_SIGN_IN.oauthRouteTitle}
             </h4>
+            {signedIn && (
+              <p className="joy-provider-signed-in">{SETTINGS_PROVIDER_SIGN_IN.signedInLine}</p>
+            )}
             <button
               type="button"
               className="button-secondary"
@@ -426,7 +436,9 @@ function ProviderRouteAccordion({
             >
               {(signInBusy
                 ? SETTINGS_PROVIDER_SIGN_IN.signInButtonBusy
-                : SETTINGS_PROVIDER_SIGN_IN.signInButton
+                : signedIn
+                  ? SETTINGS_PROVIDER_SIGN_IN.signInAgainButton
+                  : SETTINGS_PROVIDER_SIGN_IN.signInButton
               ).replace('{provider}', () => label)}
             </button>
             {signInBusy && signInRemainingMs !== undefined && (

@@ -61,7 +61,8 @@ export type JoyAgentErrorCode =
   | 'JOY_AGENT_INVALID_TOOL'
   | 'JOY_AGENT_INVALID_PROPOSAL'
   | 'JOY_AGENT_STALE_REVISION'
-  | 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
+  | 'JOY_AGENT_PROVIDER_INCOMPATIBLE'
+  | 'JOY_AGENT_RATE_LIMITED';
 
 export type JoyAgentProvider =
   'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom';
@@ -102,6 +103,8 @@ export interface ByokSessionStatus {
   readonly modelId: string;
   readonly capability: 'untested' | 'tool-loop' | 'plan-only' | 'incompatible';
   readonly message?: string;
+  /** Why the connection stopped, when the provider named it: its usage limit was reached. */
+  readonly reason?: 'rate-limited';
 }
 
 /**
@@ -313,6 +316,7 @@ const ERROR_CODES: ReadonlySet<string> = new Set([
   'JOY_AGENT_INVALID_PROPOSAL',
   'JOY_AGENT_STALE_REVISION',
   'JOY_AGENT_PROVIDER_INCOMPATIBLE',
+  'JOY_AGENT_RATE_LIMITED',
 ]);
 const TASK_KINDS: ReadonlySet<string> = new Set([
   'joy-code',
@@ -359,11 +363,13 @@ function isSafeStatus(value: unknown): value is ByokSessionStatus {
     CAPABILITIES.has(value.capability) &&
     (value.message === undefined ||
       (typeof value.message === 'string' && value.message.length <= 512)) &&
+    (value.reason === undefined || value.reason === 'rate-limited') &&
     exactKeys(value, [
       'provider',
       'modelId',
       'capability',
       ...(value.message === undefined ? [] : ['message']),
+      ...(value.reason === undefined ? [] : ['reason']),
     ])
   );
 }

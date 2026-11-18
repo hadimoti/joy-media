@@ -14,6 +14,7 @@ import {
   findRegistryProvider,
   generationSupport,
   normalizeBaseUrl,
+  USAGE_LIMIT_MESSAGE,
 } from '@joy-media/provider-sdk';
 import {
   parseChatModels,
@@ -134,6 +135,7 @@ export type BrokerErrorCode =
   | 'NETWORK_ERROR'
   | 'SIGN_IN_REQUIRED'
   | 'PLAN_LIMIT_REACHED'
+  | 'RATE_LIMITED'
   | 'RESPONSE_INCOMPLETE'
   | 'RESPONSE_INTERRUPTED'
   | 'MODEL_CHOICE_REQUIRED'
@@ -1534,6 +1536,10 @@ async function send(
     if (response.status === 402) {
       throw new BrokerError('BILLING_REQUIRED', BILLING_REQUIRED_MESSAGE);
     }
+    // HTTP 429 is the provider's usage limit, not a refusal of the request. The text is safe to show.
+    if (response.status === 429) {
+      throw new BrokerError('RATE_LIMITED', USAGE_LIMIT_MESSAGE);
+    }
     if (!response.ok) {
       throw new BrokerError(
         'PROVIDER_HTTP_ERROR',
@@ -1677,6 +1683,8 @@ function probeErrorCode(code: BrokerErrorCode): DirectProviderErrorCode {
       return 'NETWORK_ERROR';
     case 'RESPONSE_TOO_LARGE':
       return 'RESPONSE_TOO_LARGE';
+    case 'RATE_LIMITED':
+      return 'RATE_LIMITED';
     default:
       return 'PROVIDER_INCOMPATIBLE';
   }

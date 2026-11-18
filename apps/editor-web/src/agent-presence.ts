@@ -79,7 +79,8 @@ export interface JoyAgentPresenceEvent {
     | 'JOY_AGENT_INVALID_TOOL'
     | 'JOY_AGENT_INVALID_PROPOSAL'
     | 'JOY_AGENT_STALE_REVISION'
-    | 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
+    | 'JOY_AGENT_PROVIDER_INCOMPATIBLE'
+    | 'JOY_AGENT_RATE_LIMITED';
 }
 
 export interface AgentPresenceState {
