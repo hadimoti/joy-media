@@ -32,11 +32,11 @@
       "height": 240,
       "bytes": 9182,
       "outputSha256": "391f845b5b1912970fe0955f5511b750d6658e338e3a58a2e1497376cf962951",
-      "inputHash": "63130317fb2ce100fe421822d35f7dda993990a95b8b2763ca6a84af2f2c8ae0",
+      "inputHash": "a97eb410b7bbb5e32b75f38597d5d55c0172d37e43f1e933fba4abda2fad1cad",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "brightness": 0.18,
           "contrast": 0.32
@@ -52,11 +52,11 @@
       "height": 240,
       "bytes": 8722,
       "outputSha256": "d6a31cea899aa884a7c1f06210af2c8aa3ac867115ee9e851615c0967aedbaff",
-      "inputHash": "52578ebf6655e4c51e80071b267159d216868d75bb028ecd4f12599662b896bb",
+      "inputHash": "f06a53f3fa9570faed06368f06c37c686f54f4169df06a2546968b88eab3459c",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "hue": 0.28,
           "saturation": 0.45
@@ -72,11 +72,11 @@
       "height": 240,
       "bytes": 9224,
       "outputSha256": "46ed6fcc5cbe2a9c332ea44b24ae77d8843bfe0dfddc5b837194a9c8896a09d8",
-      "inputHash": "7414a6c9c3502db9c3f323491c5d8a485ca0cb8db6a14287c5cf37e5add244ba",
+      "inputHash": "68a0e00627d2a33a1a2f8ba11f2cf84ad48cfc12aae0fc7860dc97a5605f12fc",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 0.85
         },
@@ -91,11 +91,11 @@
       "height": 240,
       "bytes": 8810,
       "outputSha256": "828a80fcfc2a529425d3ff6514154a9b35866903bad1c5fd9037f0657c5e1bbb",
-      "inputHash": "d315bb009db412dde31daeb414cddc0d3b638bd968cd070fa771ca211a6a8af4",
+      "inputHash": "ac8a5b05013f76b7b7e8ab0344aeecd6c369de99be20b0861fe4b8a6914dcbc7",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 0.35
         },
@@ -110,11 +110,11 @@
       "height": 240,
       "bytes": 8302,
       "outputSha256": "f63ca37cff74934bfefc0157f2d566c8b403d2d2512daf9872be6ba22d27e49f",
-      "inputHash": "032240be7d272066e7d0a7bd3c0b0404aaa29389acf001649bf6463d43918f99",
+      "inputHash": "2242d89577c43aa173adf16d22b8a8d7ca25bec3eb1904526ab60d110479674e",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 0.5
         },
@@ -129,11 +129,11 @@
       "height": 240,
       "bytes": 2906,
       "outputSha256": "795f577f2e779d538ce0d25f7147b0323c2de7d56cfa29c5f1a85c572a7c12fd",
-      "inputHash": "296f66c20c19060f4c79ce4ba0a7716ee8690e7e0c70ab4611ab063cf9cb89c6",
+      "inputHash": "a466cfeb87c1eb5ee143acdecb0a574943af62efdfa43f6e86b53a31be18469c",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 4
         },
@@ -148,11 +148,11 @@
       "height": 240,
       "bytes": 8812,
       "outputSha256": "e31c4e10967d9878b0d188ba1f8416f9de4dee3d72601617133da323777260da",
-      "inputHash": "2922ba004caf818da4b97f7092da0b3d23cdcae9c8c8f9140c029dc05445ea5c",
+      "inputHash": "8e8a0fcda3ef92bdb8327dac13fc89a18e9e775d3d229c631dc4db4bba7cb52a",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 0.4,
           "threshold": 0.6
@@ -168,11 +168,11 @@
       "height": 240,
       "bytes": 2218,
       "outputSha256": "76c30c2ccfef84b96454b587d187252a67eccb46dbe9c17970a0635a9d52e86b",
-      "inputHash": "ce4337644a37947475fc37595a3754f8a6b79e62decebb9e2dbb3fdde4e4db20",
+      "inputHash": "c755120528b6820992e1ce59c86b50a36c8abfebdef743782e94b849812b24fb",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "distance": 8,
           "opacity": 0.5
@@ -188,11 +188,11 @@
       "height": 240,
       "bytes": 3078,
       "outputSha256": "05a23eb4236befeab13a9109c204240a16317a9c8410ecdf23c951fd16b2699c",
-      "inputHash": "4f44c6262b76c25c569925e0a051d9d43b1df947c4bac950a392e2db006a0ed8",
+      "inputHash": "edd34a7315671abf2da38dce8531b8e50b2c615b2ad04888fdc0c0f2a357fd37",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 0.4
         },
@@ -207,11 +207,11 @@
       "height": 240,
       "bytes": 29676,
       "outputSha256": "7b030c006e9b629243ee4b24f3b20720acbc3a55a979dbc8e512462bf373aaef",
-      "inputHash": "baf181b1742e2e3de5eae7efd9ed737c524229898b7d59bfe476c0183cda9e4e",
+      "inputHash": "364aa03ee51f2af68febe0eee23de55c712f1691a7f1744c0033ebb66b248196",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 0.2
         },
@@ -226,11 +226,11 @@
       "height": 240,
       "bytes": 9688,
       "outputSha256": "b4738ebb184a4a6e65556eea81d9d0d2d96e5c275142c4f7246798379ba7cea0",
-      "inputHash": "80dabf7d2d7d65feecdb34c709be5e836e36f0d70ce615a35d83ec460bc6a4ab",
+      "inputHash": "3f1506847e46c568b3fb5f4046fa877ef09b0b0b72345105c55eb1581ee964c9",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "levels": 8
         },
@@ -245,11 +245,11 @@
       "height": 240,
       "bytes": 1458,
       "outputSha256": "32f37d78508ccb18ffbf047aefa1260be5422ee7a608c4d3f9faff845d990ffa",
-      "inputHash": "60df81d666aae31caaa991b6217691b2b1208468c64b898c1681de7742b52de7",
+      "inputHash": "ed244759f0d0776465c16d66c65446a0836976075a990f6c7892cc254b629c51",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "blockSize": 8
         },
@@ -264,11 +264,11 @@
       "height": 240,
       "bytes": 7184,
       "outputSha256": "aa801bc1a1cb1e5ea6a1832408041bae1851560e24dc0b5206a07b6cfd602e5f",
-      "inputHash": "38fcc9c775a0229cd8d1ed9b2656a56505b5274ee9574bb93e4f7e91f2ea4a1a",
+      "inputHash": "4d5d5790cec3ed4300d5b6c04557e63c37bd3cd3303c9278e7a1791fc7c3fb89",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "b": 0,
           "g": 0,
@@ -286,11 +286,11 @@
       "height": 240,
       "bytes": 9264,
       "outputSha256": "c86922c804673076ca24efea067404aa2c7c26181154aa2d2d2bcb3121c71c57",
-      "inputHash": "7a0830dd55255cd40416a41fb2282b4ea8858bd3e42080f323bfe42f9778a9f6",
+      "inputHash": "b1d6279325a1af2fbfcda47b76cb6164e43a1dae01d5a2353419712490f04d62",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "highlights": 0.24,
           "midtones": 0.2,
@@ -307,11 +307,11 @@
       "height": 240,
       "bytes": 5876,
       "outputSha256": "97548e7d41d9f4bdc5a53c509583b4f5211a92bdce0d0eee2a10a0cbc86acba3",
-      "inputHash": "b34def40d3c4fb2b0b4f66c1b4e71a3292bffa19592b4d54c3b0a8702341b557",
+      "inputHash": "08dc7304cd77799cd73a1b029107750368eadd66113d68e7187590d323a6758a",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 6
         },
@@ -326,11 +326,11 @@
       "height": 240,
       "bytes": 6526,
       "outputSha256": "271eef49ff92fd1f3b1cc3a3a970886b944b23762ff238c943256c2647e9fb73",
-      "inputHash": "4f8f4fcd473e17084abb1a3f3fe48036cddb89e54a5e7bae057c08cd9edf7b25",
+      "inputHash": "0b84a4fc14fa0bf177956d8d0e6a227d833fcc2aa92093c72b5e9c776b6c3450",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 5
         },
@@ -345,11 +345,11 @@
       "height": 240,
       "bytes": 8366,
       "outputSha256": "c399977a2ce3765571ccb3f80d476ab7bac0493feb338ec782d4493eb931d874",
-      "inputHash": "0b0d90d60d02667b2fffc0af85bae829b7c1a43366a1aea399403b94cfbb5db5",
+      "inputHash": "2a2aa93d42e99c24eaf78e78de9da90ea48dc87bab9fcc319f35962b5f783cb4",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 8,
           "focusHeight": 0.3,
@@ -366,11 +366,11 @@
       "height": 240,
       "bytes": 9662,
       "outputSha256": "04ae514e85b54f4feb4d9782c4e1d5a3c5990c3102eb5a81015e1e51cc20224f",
-      "inputHash": "cc1fcac0b3e9f70a8b88c8780189d26b68df62115401cf26968dff290f20aeb1",
+      "inputHash": "87b07b3e6815fe5757706ae21eb9def7f811445f4c78c723a32917040dd12c26",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 0.65,
           "radius": 0.4
@@ -386,11 +386,11 @@
       "height": 240,
       "bytes": 10158,
       "outputSha256": "81435a39b952cbc9d51d0953227cd25b6a9ae520ccd62e82adeb9e9496924abc",
-      "inputHash": "cfbdbea2c403f6664798b8bbb8b17c1f91dc9fa3198141929c19ad085771c447",
+      "inputHash": "23f4adbf88370a31bd57c72c3a94624ec7b027108652b63b57dc840679d90af1",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "angle": 1.35,
           "radius": 0.5
@@ -406,11 +406,11 @@
       "height": 240,
       "bytes": 9800,
       "outputSha256": "3ade24e21c35135f80400eb60dac34ad96a6efeeceb87f4fa063344a3022d5a2",
-      "inputHash": "25cd81717b1eea23c0acbc4ab0092987fc7022b9a38b8534b45fa632c5021b1d",
+      "inputHash": "387582c8af3f99a49727b2ea5a22f97570a5ed81b031b41c0eb9b3202dec5f3d",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amplitude": 0.02,
           "frequency": 10
@@ -426,11 +426,11 @@
       "height": 240,
       "bytes": 22878,
       "outputSha256": "6889c92f21f7fd7b96c6c68bc7958870e233ab2bd87ee5e7ad3fd83466467fa2",
-      "inputHash": "bfe1bfe60efcef1f83fe061844525116c1024f4c1d8a8137108fc43ef4fd6d34",
+      "inputHash": "21e099d49927c8c0a8d4b81452c1858cdf077260b8513bc0bd5f954f5563fd7e",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "noise": 0.08,
           "scanlines": 0.5
@@ -446,11 +446,11 @@
       "height": 240,
       "bytes": 13378,
       "outputSha256": "6a12b42166a68906697251d20a93a812303a49ff84c7c7273ef39b33648c17ce",
-      "inputHash": "6844726c00e07d8a110c6a41704189067433fd788d92fa42bf7fa3c45afe881a",
+      "inputHash": "0f1ae35cc8ad0fa502b75e93e95a2ebc3fa86e37394cfb8829804d7123353eee",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "threshold": 0.3
         },
@@ -465,11 +465,11 @@
       "height": 240,
       "bytes": 8862,
       "outputSha256": "2cbded27bdfea1e814797ec26064c7b64a64c56949438307a6a6eccbc1246312",
-      "inputHash": "3bbf20fe16983354cea82d40c15c8d498c44db5ce8da15811425cbc24ba40843",
+      "inputHash": "88748fd5203164f9d3ad8753412986d3ffc36cc597ad1cc98870155df9082cd8",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "strength": 1
         },
@@ -484,11 +484,11 @@
       "height": 240,
       "bytes": 978,
       "outputSha256": "40073fe7a2501c2bfe15c3dc8a8335385602f5aa05e0e0d9a7ba04e340c395d2",
-      "inputHash": "499d8e003d209fe86263eb06c3dcd79309a4129578e35da96b027ac273a1e621",
+      "inputHash": "f45d0a0df9ff740080441b36d37630df4192c6300863c9e383ff83fd09fb2fb4",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "blockSize": 16
         },
@@ -503,11 +503,11 @@
       "height": 240,
       "bytes": 11712,
       "outputSha256": "b63f40b9ef142431898d627d8d852766a69b6a5accf9db4fb8cacd4c6006c839",
-      "inputHash": "e1c5635c60a9f66ffc153706f566daaac92d9cabd496fb6cdabe30628e4e6a64",
+      "inputHash": "4f0b0207e11f2a56fe6456b37426ab63d11a3c7a0f50cb318771ea2256e4fc20",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "amount": 0.5,
           "radius": 1,
@@ -524,11 +524,11 @@
       "height": 240,
       "bytes": 7186,
       "outputSha256": "daa26375a33d566ca982354d41e19f1b643edcd665885bc0e61e6c0305e87ec6",
-      "inputHash": "448540ff593b6269006917803c72a6e18059c239cdf4b4ebd6ddf536290eb913",
+      "inputHash": "62915085c3190da304abcc19746844cdb7195be61e126c27ab1b3a1fc7984a99",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "contrast": 0.2,
           "invert": 0,
@@ -546,11 +546,11 @@
       "height": 240,
       "bytes": 21840,
       "outputSha256": "93a062c9f029ca5e1922e90716b6fde76947c45ca69d23099ade088c01da8aa6",
-      "inputHash": "3ffaa232abf58f99b27fb98c47a50c6a66802164d4cf4f7b99a564d7c59a091f",
+      "inputHash": "e095f7c8e9aef78905c3d05f3fcf1ccb70640d6493d9918491c3433ebfcda2e9",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "cellSize": 2,
           "colorMode": 0,
@@ -569,11 +569,11 @@
       "height": 240,
       "bytes": 20416,
       "outputSha256": "18056367e6d8a58f5ee07154b274c1713033911675675dfe5bee724b79d67355",
-      "inputHash": "c62391d152a8ab4482f92d961e50f3c09e69acdc4f82b475633d5d0dcfe2de2a",
+      "inputHash": "d07f3ac3f31d66cf8f935cb698c0f7e8a850a72e816680e038345b15c55990d6",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "angle": 22.5,
           "cellSize": 10,
@@ -593,11 +593,11 @@
       "height": 240,
       "bytes": 13614,
       "outputSha256": "66448e1e18e9a0877314b55da5696ac96be56719928ad7da1931fa254e87ad8e",
-      "inputHash": "fc100e2f640f5ddb6034c4a6ae2bcc65ec30049ae6f02e021fc174918f59dee3",
+      "inputHash": "2fca8f543d6aae034897b4a1f5c2cb302897320b09bb1d6e36f267e8fb5ab792",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "detail": 1,
           "edgeBoost": 0.75,
@@ -616,11 +616,11 @@
       "height": 240,
       "bytes": 17674,
       "outputSha256": "208a98910fe9e12193dd19bd5fc3fa5b3451925c9d46dd8a6fa1f490e8115d19",
-      "inputHash": "edf2ce13034396d8a6486f5f4d533798944b917e9055e4cda3576da0b72e73ed",
+      "inputHash": "6d48d4765518c449f3d0e417946b0f85b2b5887838a19df299b0da34e44384ef",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "cellHeight": 14,
           "cellWidth": 10,
@@ -645,11 +645,11 @@
       "height": 240,
       "bytes": 2346,
       "outputSha256": "365c90d5de910e38b15e10ba3f1a65f72adcb94c55ff0e9df6922f7ca52600f4",
-      "inputHash": "917094c486fe570be7a7b178255eebfaa28998889d83a88241c59452c9906f19",
+      "inputHash": "5dc9e7d188417c1e11e29b37e154112f9dcdd626101492dd60900b89bf8fa2b1",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "cellSize": 12,
           "colorMode": 1,
@@ -668,11 +668,11 @@
       "height": 240,
       "bytes": 11862,
       "outputSha256": "7822db3e9bf58504a773363000e6bc60cae6061185b6aca3c92553271f239bc7",
-      "inputHash": "5ccb8db7ae21ce749e74dc7e51dd1e657a5620e05a23a72b90a5de1837b8fedf",
+      "inputHash": "c745db00424dd6c3d78636112cfe6585e6739e4b5b91e613bef46e22c108e937",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "angle": 0,
           "cellSize": 14,
@@ -692,11 +692,11 @@
       "height": 240,
       "bytes": 14422,
       "outputSha256": "e1db8fb47d807bf0b59a4d05b2258a0d5a645a170ec02a4daa7f97a1a3a361ce",
-      "inputHash": "17c0f17980a2cbf9a5547017476292a1eae5a52c1f544adaf480de090db754a4",
+      "inputHash": "c9c5f8a39e43438bedcce971e5b62bee1c48c816c4a2c069c732502788d20736",
       "inputs": {
         "sourcePicture": "filter-preview-source-2.jpg",
         "sourceSha256": "c36c0999cb023c77be6608d2f1cb285d0710ee2e8f52963c344bfa2bce9cfa97",
-        "shaderSource": "60f3d8572d2b1e0d07e9b44f828d3aa4d0568b753f3aec7d9e17d9724461235b",
+        "shaderSource": "3f72d6bd655dae352de832be498836bb64d5272252b3e6baf2bbb34c44f83b8a",
         "defaultValues": {
           "colorMode": 1,
           "direction": 1,
