@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as windowModule from './window.js';
 import {
   DEV_LOADING_BAR_MS,
   DEV_RENDERER_URL,
@@ -66,6 +67,45 @@ describe('devLoadingPageHtml', () => {
 describe('PACKAGED_LOADING_DELAY_MS', () => {
   it('waits briefly before showing the loading window on packaged starts', () => {
     expect(PACKAGED_LOADING_DELAY_MS).toBe(300);
+  });
+});
+
+describe('createPackagedLoadingGate', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('shows the renderer without ever showing the splash when ready before the delay', () => {
+    vi.useFakeTimers();
+    const showLoading = vi.fn();
+    const showRenderer = vi.fn();
+    const createGate = windowModule.createPackagedLoadingGate;
+
+    expect(createGate).toBeTypeOf('function');
+    const gate = createGate!(showLoading, showRenderer);
+    vi.advanceTimersByTime(PACKAGED_LOADING_DELAY_MS - 1);
+
+    expect(showLoading).not.toHaveBeenCalled();
+    gate.rendererReady();
+    expect(showRenderer).toHaveBeenCalledOnce();
+
+    vi.advanceTimersByTime(1);
+    expect(showLoading).not.toHaveBeenCalled();
+  });
+
+  it('shows the splash after the delay and the renderer when it becomes ready', () => {
+    vi.useFakeTimers();
+    const showLoading = vi.fn();
+    const showRenderer = vi.fn();
+    const createGate = windowModule.createPackagedLoadingGate;
+
+    expect(createGate).toBeTypeOf('function');
+    const gate = createGate!(showLoading, showRenderer);
+    vi.advanceTimersByTime(PACKAGED_LOADING_DELAY_MS);
+
+    expect(showLoading).toHaveBeenCalledOnce();
+    expect(showRenderer).not.toHaveBeenCalled();
+
+    gate.rendererReady();
+    expect(showRenderer).toHaveBeenCalledOnce();
   });
 });
 

@@ -26,10 +26,40 @@ export const DEV_RENDERER_RETRY_MS = 1000;
 export const DEV_LOADING_BAR_MS = 2800;
 
 /**
- * A packaged start shows the JOY Media loading window after a short grace period and opens the editor once its page has
- * loaded and the loading bar is full (DEV_LOADING_BAR_MS). Fast starts never display the loading window.
+ * A packaged start shows the JOY Media loading window after a short grace period only if its renderer is still loading.
+ * Fast starts show the renderer directly without a loading-window flash.
  */
 export const PACKAGED_LOADING_DELAY_MS = 300;
+
+export interface PackagedLoadingGate {
+  readonly rendererReady: () => void;
+  readonly dispose: () => void;
+}
+
+/** Delays the loading window, while allowing a ready renderer to skip it and show immediately. */
+export function createPackagedLoadingGate(
+  showLoading: () => void,
+  showRenderer: () => void,
+): PackagedLoadingGate {
+  let rendererIsReady = false;
+  let disposed = false;
+  const timer = setTimeout(() => {
+    if (!rendererIsReady && !disposed) showLoading();
+  }, PACKAGED_LOADING_DELAY_MS);
+
+  return {
+    rendererReady: () => {
+      if (rendererIsReady || disposed) return;
+      rendererIsReady = true;
+      clearTimeout(timer);
+      showRenderer();
+    },
+    dispose: () => {
+      disposed = true;
+      clearTimeout(timer);
+    },
+  };
+}
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);

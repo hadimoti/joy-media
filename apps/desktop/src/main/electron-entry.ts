@@ -41,9 +41,9 @@ import {
   DEV_LOADING_BAR_MS,
   DEV_RENDERER_RETRY_MS,
   DEV_RENDERER_URL,
-  PACKAGED_LOADING_DELAY_MS,
   PACKAGED_RENDERER_SCHEME,
   buildSecureWebPreferences,
+  createPackagedLoadingGate,
   devLoadingPageHtml,
   resolveRendererTarget,
 } from './window.js';
@@ -119,9 +119,8 @@ function windowIconOption(): { icon?: string } {
 }
 
 /**
- * A packaged window stays hidden until its renderer has loaded. If that takes longer than
- * PACKAGED_LOADING_DELAY_MS, a small JOY Media loading window (a data: page, so no network) shows until then.
- * A quick start never shows it. The renderer's load is the signal: `did-finish-load` on the packaged page.
+ * A packaged window stays hidden until its renderer has loaded. A small JOY Media loading window (a data: page, so no
+ * network) appears after PACKAGED_LOADING_DELAY_MS only when the renderer is still loading.
  */
 function showPackagedWindowWhenLoaded(win: BrowserWindow): void {
   let splash: BrowserWindow | undefined;
@@ -157,34 +156,23 @@ function showPackagedWindowWhenLoaded(win: BrowserWindow): void {
     const page = devLoadingPageHtml(readLoadingLogoDataUrl());
     void loadingWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
   };
-  const startedAt = Date.now();
-  const timer = setTimeout(openSplash, PACKAGED_LOADING_DELAY_MS);
-  let editorTimer: ReturnType<typeof setTimeout> | undefined;
   const showEditor = (): void => {
     loaded = true;
-    clearTimeout(timer);
     closeSplash();
     if (!win.isDestroyed()) win.show();
   };
-  // Like the development start: the editor opens once its page has loaded AND the loading bar is full.
-  const showEditorWhenBarIsFull = (): void => {
-    const rest = DEV_LOADING_BAR_MS - (Date.now() - startedAt);
-    if (rest <= 0) showEditor();
-    else editorTimer = setTimeout(showEditor, rest);
-  };
-  win.webContents.once('did-finish-load', showEditorWhenBarIsFull);
+  const gate = createPackagedLoadingGate(openSplash, showEditor);
+  win.webContents.once('did-finish-load', gate.rendererReady);
   win.webContents.on(
     'did-fail-load',
     (_event, errorCode, _errorDescription, _validatedUrl, isMainFrame) => {
       // -3 is an aborted navigation. A failed main frame still shows its error page, as it did before the wait.
       if (errorCode === -3 || !isMainFrame) return;
-      clearTimeout(editorTimer);
-      showEditor();
+      gate.rendererReady();
     },
   );
   win.on('closed', () => {
-    clearTimeout(timer);
-    clearTimeout(editorTimer);
+    gate.dispose();
     closeSplash();
   });
 }
@@ -647,8 +635,8 @@ if (!app.requestSingleInstanceLock()) {
     win.on('close', () => storageFlush.flushNow());
     cancelWhenPageGoes(agentRequests, win);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    void win.loadURL(resolveRendererTarget(isDev));
     if (!isDev && !isSmokeMode) showPackagedWindowWhenLoaded(win);
+    void win.loadURL(resolveRendererTarget(isDev));
     if (isDev) {
       // A development window loads the editor dev server. While it does not answer, the window shows the JOY Media
       // loading page and checks the server every few seconds, then opens the editor as soon as it answers.
