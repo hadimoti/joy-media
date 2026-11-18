@@ -12,7 +12,7 @@
  * the shortcuts dialog), AppMenuBar, AssetLibrarySettingsDialog and JoyAgentSettingsDialog; the first live run
  * must confirm each one.
  */
-import { readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import { readdirSync, readFileSync, renameSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { blockedRow, notReachable, runParts } from './rows.mjs';
 import {
@@ -314,11 +314,15 @@ export const ACTION_CHECKS = {
     }
     // A second export saves under the same name (the menu run, then the palette run), so a file counts as new
     // when its name is new or it was written again after this point.
-    // The earlier file may still be open (the Import row chose it in a file input), so Windows refuses to
-    // overwrite it; remove it first and, when that is refused, let the new file land under a new name.
+    // The earlier file may still be open (the Import row chose it in a file input), so Windows may refuse to
+    // overwrite it. Move it aside (a rename works while it is open) and keep the import pointing at it; when the
+    // move is refused too, the driver saves the new download under a timestamped name.
     for (const name of listNonMp4(t.ctx.downloadDir)) {
+      const from = join(t.ctx.downloadDir, name);
+      const aside = join(t.ctx.downloadDir, `earlier-${Date.now()}-${name}`);
       try {
-        unlinkSync(join(t.ctx.downloadDir, name));
+        renameSync(from, aside);
+        if (t.ctx.editableProjectFile === from) t.ctx.editableProjectFile = aside;
       } catch {
         // locked: the driver saves the new download under a timestamped name
       }
@@ -336,10 +340,12 @@ export const ACTION_CHECKS = {
       if (fresh === undefined) await t.page.waitForTimeout(500);
     }
     if (fresh === undefined) {
-      const toasts = await t.page
-        .locator('[class*="toast"]')
-        .allInnerTexts()
-        .catch(() => []);
+      let toasts = [];
+      try {
+        toasts = await t.page.locator('[class*="toast"]').allInnerTexts();
+      } catch {
+        // diagnostics only
+      }
       throw new Error(
         `no editable project file appeared in the scratch download folder (toasts: ${toasts.join(' | ').slice(0, 200) || 'none'})`,
       );
@@ -848,9 +854,11 @@ async function runMenuAndPalette(page, ctx) {
       if (check === undefined) throw new Error(`${item.id} has no action check`);
       try {
         return await check({ page, ctx, rowId, surface, fire });
-      } finally {
-        // A failed action must not leave a popup or focus trap behind for the next action (cascade).
+      } catch (error) {
+        // A failed action must not leave a popup or focus trap behind for the next action (cascade). A passing
+        // action is left alone: Escape would also close an open panel.
         await page.keyboard.press('Escape').catch(() => undefined);
+        throw error;
       }
     },
   );

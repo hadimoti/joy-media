@@ -140,16 +140,22 @@ export async function run(argv = process.argv.slice(2)) {
   const liveTest = options.testIds.some((id) => LIVE_ROWS.some((row) => row.id === id));
   // Rows that export need the driver in test mode: the file is then saved in the scratch download folder (without
   // it Electron shows a Save window and the row sees no file). D-A05-60 exports the sample project.
-  const exportMatrix = options.testIds.some((id) => id.startsWith('D-A10-') || id === 'D-A05-60');
+  const exportMatrix = options.testIds.some((id) => id.startsWith('D-A10-'));
+  const sampleExport = options.testIds.includes('D-A05-60');
   const testMode =
-    liveTest || options.testIds.some((id) => id.startsWith('D-A09-')) || exportMatrix;
+    liveTest ||
+    options.testIds.some((id) => id.startsWith('D-A09-')) ||
+    exportMatrix ||
+    sampleExport;
   const evidenceTask = liveTest
     ? 'T-A07-A08'
-    : exportMatrix
-      ? 'T-A10'
-      : options.testIds.some((id) => id.startsWith('D-A09-'))
-        ? 'T-A09'
-        : 'T-A02';
+    : sampleExport
+      ? 'T-A05'
+      : exportMatrix
+        ? 'T-A10'
+        : options.testIds.some((id) => id.startsWith('D-A09-'))
+          ? 'T-A09'
+          : 'T-A02';
   const outDir = resolve(options.out ?? join(LAB.evidence, evidenceTask, runId));
   const scratchRoot = LAB.scratch;
   const profileDir = join(scratchRoot, 'profiles', runId);

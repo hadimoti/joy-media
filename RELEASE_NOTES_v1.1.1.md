@@ -135,7 +135,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Temporary export files in the browser storage are cleaned up at the next export or app start. Files younger than two hours are left alone, so another window's export is not interrupted.
 - The sample project "Local editor project" no longer carries the two clips that had no media behind them, and it now exports (seen working on 18 Nov). An export that is refused for missing media now names the clips.
 - The colour of an exported video no longer changes when you export a second time in the browser version.
-- The export quality is higher. In the desktop app the final video is encoded with almost no loss. Measured on a 10-minute 1080p export: it takes about the same time (about 14 minutes), and the file is about 390 MB instead of 220 MB.
+- The export quality is higher. In the desktop app the final video is encoded with almost no loss. Measured on a 10-minute 1080p export: it takes about the same time, and the file is about 390 MB instead of 220 MB.
 - The export helper no longer reports false errors after a job ends. A cancel during the last steps is honoured: the job shows cancelled, not failed. If a needed video tool is missing, the message gives the real reason.
 
 ## Known limits

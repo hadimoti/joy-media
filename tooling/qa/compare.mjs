@@ -227,6 +227,8 @@ export async function extractExportFrame(exportPath, timestamp, outputPath, dime
  * Lanczos, text edges) wash out while a colour matrix or range error (about 15 levels) stays visible.
  */
 export async function downscaleArea(inputPath, outputPath, factor = 8) {
+  if (!Number.isInteger(factor) || factor < 1)
+    throw new Error('downscaleArea: factor must be a whole number of 1 or more');
   await run(ffmpeg, [
     '-y',
     '-v',

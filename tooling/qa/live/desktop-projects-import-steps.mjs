@@ -12,7 +12,15 @@
  * `run.mjs` has already pointed the Asset Library Folder at the scratch library. Fixtures are
  * read from C:\jgp\v111\fixtures (T-A04), never copied or changed.
  */
-import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { importThroughLeftPanel, newProject, openMenu } from './steps.mjs';
 import { FIXTURE_ROOT, clipsOf, readDocument, rowsById } from './matrix-core.mjs';
@@ -430,6 +438,21 @@ rows.push({
   },
 });
 
+/** True when the file starts like an MP4: bytes 4 to 8 spell "ftyp" (a half copied download does not pass). */
+function startsLikeMp4(path) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const head = Buffer.alloc(12);
+    const read = readSync(fd, head, 0, 12, 0);
+    return read >= 12 && head.subarray(4, 8).toString('latin1') === 'ftyp';
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
 /** The size of the newest MP4 written after `since` (ms epoch) in the scratch download folder, or 0. */
 function freshMp4Size(downloadDir, since) {
   if (!downloadDir) return 0;
@@ -437,8 +460,9 @@ function freshMp4Size(downloadDir, since) {
     let size = 0;
     for (const name of readdirSync(downloadDir)) {
       if (!/\.mp4$/iu.test(name)) continue;
-      const info = statSync(join(downloadDir, name));
-      if (info.mtimeMs >= since - 1_000) size = Math.max(size, info.size);
+      const path = join(downloadDir, name);
+      const info = statSync(path);
+      if (info.mtimeMs >= since && startsLikeMp4(path)) size = Math.max(size, info.size);
     }
     return size;
   } catch {

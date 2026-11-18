@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -607,7 +615,20 @@ test('D-A05-60 fails with the known "cannot resolve visual asset" message and pa
   assert.equal(stalled.status, 'failed');
   assert.match(stalled.message, /no MP4 in the scratch download folder/u);
   app.world.textByKey['.export-toast'] = '';
-  writeFileSync(join(ctx.downloadDir, 'Local editor project.mp4'), Buffer.from([0, 0, 0, 24]));
+  const mp4Path = join(ctx.downloadDir, 'Local editor project.mp4');
+  const header = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom', 'latin1')]);
+  // An MP4 left by an earlier row (older than this run) is not this export.
+  writeFileSync(mp4Path, header);
+  utimesSync(mp4Path, new Date(Date.now() - 600_000), new Date(Date.now() - 600_000));
+  const stale = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
+  assert.equal(stale.status, 'failed');
+  // A file that does not start like an MP4 (a half copied download) is not a pass either.
+  writeFileSync(mp4Path, Buffer.from([0, 0, 0, 24]));
+  utimesSync(mp4Path, new Date(Date.now() + 600_000), new Date(Date.now() + 600_000));
+  const broken = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
+  assert.equal(broken.status, 'failed');
+  writeFileSync(mp4Path, header);
+  utimesSync(mp4Path, new Date(Date.now() + 600_000), new Date(Date.now() + 600_000));
   const passed = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
   assert.equal(passed.status, 'passed', passed.message);
 });
