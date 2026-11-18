@@ -293,6 +293,11 @@ export interface MonitorViewportProps {
   readonly background?: MonitorBackground | undefined;
   /** Hide the hover outline while the Monitor is playing. */
   readonly playing?: boolean | undefined;
+  /** A right-click inside the drawn frame, in authored canvas coordinates. */
+  readonly onContextMenu?: (
+    event: ReactMouseEvent<HTMLDivElement>,
+    canvasPoint: MonitorPoint,
+  ) => void;
   readonly children: ReactNode;
 }
 
@@ -306,6 +311,8 @@ export interface MonitorViewportSelection {
   readonly isElementAt: (canvasPoint: MonitorPoint) => boolean;
   /** A plain press and release (no drag). */
   readonly click: (canvasPoint: MonitorPoint, modifiers: { shift: boolean; alt: boolean }) => void;
+  /** Returns true when the element handled its double-click. */
+  readonly doubleClick?: (canvasPoint: MonitorPoint) => boolean;
   /** A drag that started on empty canvas, released at `end`. */
   readonly marquee: (start: MonitorPoint, end: MonitorPoint, modifiers: { shift: boolean }) => void;
   /** The topmost element under a resting pointer, excluding the shared selection. */
@@ -410,6 +417,7 @@ export function MonitorViewport({
   selection,
   background,
   playing = false,
+  onContextMenu,
   children,
 }: MonitorViewportProps) {
   const spaceHeld = useSpaceHold();
@@ -636,13 +644,18 @@ export function MonitorViewport({
 
   const onDoubleClick = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
+      const point = screenToCanvasPoint(
+        latest.current.view,
+        viewportPoint(event, event.currentTarget),
+      );
+      if (latestSelection.current?.doubleClick?.(point) === true) {
+        event.preventDefault();
+        return;
+      }
       const fit = doubleClickReturnsToFit({
         tool: effectiveMonitorTool(latest.current.tool, monitorSpaceGesture.isHolding()),
         // A double-click on an element keeps its own meaning (T-M04 hit test).
-        onElement:
-          latestSelection.current?.isElementAt(
-            screenToCanvasPoint(latest.current.view, viewportPoint(event, event.currentTarget)),
-          ) ?? false,
+        onElement: latestSelection.current?.isElementAt(point) ?? false,
         onControl: isEditableTarget(event.target) || isInteractiveTarget(event.target),
       });
       if (fit) setFit();
@@ -715,6 +728,21 @@ export function MonitorViewport({
       }}
       onAuxClick={(event) => {
         if (event.button === MIDDLE_BUTTON) event.preventDefault();
+      }}
+      onContextMenu={(event) => {
+        const canvasPoint = screenToCanvasPoint(
+          latest.current.view,
+          viewportPoint(event, event.currentTarget),
+        );
+        const { width, height } = latest.current.frame;
+        if (
+          canvasPoint.x < 0 ||
+          canvasPoint.y < 0 ||
+          canvasPoint.x > width ||
+          canvasPoint.y > height
+        )
+          return;
+        onContextMenu?.(event, canvasPoint);
       }}
       onDoubleClick={onDoubleClick}
     >

@@ -72,6 +72,13 @@ export function TimelineContextMenu({
           ) ?? candidates[0]!;
         focusedIndexRef.current = next;
         menuRef.current?.querySelector<HTMLElement>(`[data-menu-index="${next}"]`)?.focus();
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        const item = menu.items[focusedIndexRef.current];
+        if (item?.action !== undefined && item.disabled !== true) {
+          event.preventDefault();
+          item.action();
+          onClose();
+        }
       }
     };
 

@@ -148,6 +148,23 @@ export function TextPanel({
   );
 }
 
+/** The same plain-text document edit used by the Text panel and Monitor overlay. */
+export function textObjectWithDraftText(object: VisualObjectV1, draftText: string): VisualObjectV1 {
+  return {
+    ...object,
+    text: draftText,
+    textDocument: {
+      version: 1,
+      blocks: [
+        {
+          id: object.textDocument?.blocks[0]?.id ?? 'text-block-1',
+          runs: [{ text: draftText }],
+        },
+      ],
+    },
+  };
+}
+
 /**
  * An outline style has a stroke around its letters. Its fill is often dark, so
  * on a dark tile the outline cannot be seen: such a template gets a mid-grey tile (T-D15).
@@ -282,14 +299,7 @@ function TextEditor({
           dir={style.direction === 'rtl' ? 'rtl' : 'auto'}
           aria-label="Text content"
           onChange={(event) => setDraftText(event.currentTarget.value)}
-          onBlur={() =>
-            updateDocument({
-              version: 1,
-              blocks: [
-                { id: document.blocks[0]?.id ?? 'text-block-1', runs: [{ text: draftText }] },
-              ],
-            })
-          }
+          onBlur={() => onChange(textObjectWithDraftText(object, draftText))}
         />
         <div className="text-highlight-actions">
           <button

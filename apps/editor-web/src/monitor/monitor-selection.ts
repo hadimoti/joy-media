@@ -177,6 +177,36 @@ export interface MonitorSelectionSetters {
   readonly clearSelection: () => void;
 }
 
+export type MonitorContextAction = 'fit' | 'fill' | 'crop' | 'relink';
+
+export interface MonitorContextMenuItem {
+  readonly label: string;
+  readonly action: () => void;
+}
+
+/** The context actions that have a matching editor command for this element. */
+export function buildMonitorContextMenuItems(input: {
+  readonly objectId: string;
+  readonly clipId: string;
+  readonly canFit: boolean;
+  readonly canCrop: boolean;
+  readonly missing: boolean;
+  readonly onAction: (action: MonitorContextAction, targetId: string) => void;
+}): readonly MonitorContextMenuItem[] {
+  const items: MonitorContextMenuItem[] = [];
+  if (input.canFit) {
+    items.push(
+      { label: 'Fit to frame', action: () => input.onAction('fit', input.objectId) },
+      { label: 'Fill frame', action: () => input.onAction('fill', input.objectId) },
+    );
+  }
+  if (input.canCrop)
+    items.push({ label: 'Crop', action: () => input.onAction('crop', input.objectId) });
+  if (input.missing)
+    items.push({ label: 'Relink', action: () => input.onAction('relink', input.clipId) });
+  return items;
+}
+
 /** Writes an action through the shared selection, the only place it is kept. */
 export function applyMonitorSelection(
   action: MonitorSelectionAction,

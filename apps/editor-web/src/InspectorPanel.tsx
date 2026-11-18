@@ -12,7 +12,6 @@ import {
   audioClipPropertyBinding,
   canonicalBindingKey,
   type AnimatablePropertyV1,
-  type ClipV1,
   type JoyProjectV1,
   type PropertyBindingV2,
   type TimeRemapV2,
@@ -66,7 +65,7 @@ import {
 } from './monitor/monitor-transform-preview.js';
 import type { TransformPatches } from './monitor/monitor-transform-drag.js';
 import type { LocalTransform } from './monitor/monitor-transform-maths.js';
-import { calculateMediaFitTransform, type MediaFitTransformInput } from './media-fit-transform.js';
+import { buildMediaFitTransaction, mediaFitSelection } from './media-fit-transform.js';
 import { ColorSwatchPicker } from './ColorPickerPopover.js';
 import {
   linkedScalePair,
@@ -264,71 +263,6 @@ const LIVE_PREVIEW_KEYS: ReadonlySet<string> = new Set([
   'scaleY',
   'rotationDeg',
 ]);
-
-type MediaFitSelection = Omit<MediaFitTransformInput, 'mode'> & {
-  readonly disabledReason?: string;
-};
-
-function mediaFitSelection(
-  project: JoyProjectV1 | undefined,
-  object: VisualObjectV1 | undefined,
-  selectedClipId: string | undefined,
-): MediaFitSelection | undefined {
-  if (project === undefined || object === undefined) return undefined;
-  if (selectedClipId === undefined) return undefined;
-
-  let composition: JoyProjectV1['compositions'][string] | undefined;
-  let selectedClip: ClipV1 | undefined;
-  for (const candidate of Object.values(project.compositions)) {
-    const clip = candidate.tracks
-      .flatMap((track) => track.clips)
-      .find((item) => item.id === selectedClipId);
-    if (clip !== undefined) {
-      composition = candidate;
-      selectedClip = clip;
-      break;
-    }
-  }
-  if (composition === undefined) return undefined;
-
-  const assetId =
-    object.assetId ?? (selectedClip?.kind === 'video' ? selectedClip.assetId : undefined);
-  const asset = assetId === undefined ? undefined : project.assets[assetId];
-  const sourceWidth = asset?.descriptor?.width;
-  const sourceHeight = asset?.descriptor?.height;
-  if (
-    (asset?.kind !== 'video' && asset?.kind !== 'image') ||
-    sourceWidth === undefined ||
-    sourceHeight === undefined ||
-    ![sourceWidth, sourceHeight, composition.width, composition.height].every(
-      (value) => Number.isFinite(value) && value > 0,
-    )
-  )
-    return undefined;
-
-  const animatedTransform = (['x', 'y', 'scaleX', 'scaleY', 'rotationDeg'] as const).some(
-    (key) => object.animations?.[key] !== undefined || object.expressions?.[key] !== undefined,
-  );
-  const disabledReason =
-    object.parentId !== undefined
-      ? 'Fit and Fill are unavailable for parented media.'
-      : composition.activeCameraId !== undefined
-        ? 'Fit and Fill are unavailable while this composition has an active camera.'
-        : animatedTransform
-          ? 'Fit and Fill are unavailable for animated or expression-driven transforms.'
-          : undefined;
-
-  return {
-    sourceWidth,
-    sourceHeight,
-    frameWidth: composition.width,
-    frameHeight: composition.height,
-    rotationDeg: object.transform.rotationDeg,
-    crop: object.transform.crop,
-    anchor: { x: object.transform.anchorX ?? 0.5, y: object.transform.anchorY ?? 0.5 },
-    ...(disabledReason === undefined ? {} : { disabledReason }),
-  };
-}
 
 /** A typed value the Monitor can draw: finite, and a scale above zero (no flip in v1.1.1). */
 function drawableLiveValue(key: string, value: number): boolean {
@@ -861,30 +795,9 @@ export function InspectorPanel({
   };
 
   const applyMediaFit = (mode: 'fit' | 'fill') => {
-    if (idle || mediaFit === undefined || mediaFit.disabledReason !== undefined) return;
-    const transform = calculateMediaFitTransform({ ...mediaFit, mode });
-    if (transform === undefined) return;
-    onDispatch({
-      label: mode === 'fit' ? 'Fit to frame' : 'Fill frame',
-      commands: [
-        {
-          type: 'object.setTransformProperty',
-          payload: { objectId: target.id, key: 'x', value: transform.x },
-        },
-        {
-          type: 'object.setTransformProperty',
-          payload: { objectId: target.id, key: 'y', value: transform.y },
-        },
-        {
-          type: 'object.setTransformProperty',
-          payload: { objectId: target.id, key: 'scaleX', value: transform.scaleX },
-        },
-        {
-          type: 'object.setTransformProperty',
-          payload: { objectId: target.id, key: 'scaleY', value: transform.scaleY },
-        },
-      ],
-    });
+    if (idle || mediaFit === undefined) return;
+    const transaction = buildMediaFitTransaction(target.id, mediaFit, mode);
+    if (transaction !== undefined) onDispatch(transaction);
   };
 
   // One Visual-tab transform row (T-D08). The Visual tab places these in pairs.
