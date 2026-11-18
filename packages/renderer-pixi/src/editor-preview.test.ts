@@ -22,6 +22,33 @@ describe('Pixi editor preview host', () => {
     expect(editorPreview.overlay.selections).toHaveLength(1);
   });
 
+  it('uses the first paragraph direction for preview text plates', () => {
+    const frame: RenderFrameIR = {
+      ...content,
+      viewport: { width: 80, height: 12, dpr: 1 },
+      nodes: [
+        {
+          kind: 'text',
+          id: 'mixed-paragraphs',
+          text: '日本語\nسلام',
+          direction: 'auto',
+          align: 'start',
+          color: { r: 255, g: 255, b: 255, a: 255 },
+          background: { r: 220, g: 30, b: 40, a: 255 },
+          zIndex: 1,
+          opacity: 1,
+          transform: { translateX: 48, translateY: 2, scaleX: 1, scaleY: 1 },
+        },
+      ],
+    };
+    const pixi = renderPixiPreview(frame);
+    const pixelAt = (pixels: Uint8Array, x: number, y: number) => [
+      ...pixels.slice((y * frame.viewport.width + x) * 4, (y * frame.viewport.width + x) * 4 + 4),
+    ];
+
+    expect(pixelAt(pixi.pixels, 16, 1)).toEqual([0, 0, 0, 255]);
+  });
+
   it('applies master color grade to content pixels', () => {
     const graded: RenderFrameIR = {
       ...content,

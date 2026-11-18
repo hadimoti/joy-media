@@ -20,7 +20,7 @@ import {
   type ComponentType,
   type ReactNode,
 } from 'react';
-import { SearchIcon } from './icons.js';
+import { CloseIcon, SearchIcon } from './icons.js';
 import {
   PanelIdentityContext,
   useAgentPanelPresence,
@@ -82,6 +82,8 @@ export interface PanelShellProps {
   readonly note?: string | undefined;
   /** Dynamic status notes announce; passive hints stay quiet. */
   readonly noteMode?: 'status' | 'hint' | undefined;
+  /** When given, the note shows a close icon in front of it that calls this (the user can dismiss it). */
+  readonly onDismissNote?: (() => void) | undefined;
   /** Skip the centered title row (dock tab already names the panel). */
   readonly hideHeader?: boolean | undefined;
   readonly children: ReactNode;
@@ -192,6 +194,7 @@ export function PanelShell({
   inactive = false,
   note,
   noteMode = 'status',
+  onDismissNote,
   hideHeader = false,
   panelId,
   children,
@@ -308,6 +311,17 @@ export function PanelShell({
           role={noteMode === 'hint' ? undefined : 'status'}
           aria-live={noteMode === 'hint' ? undefined : 'polite'}
         >
+          {onDismissNote !== undefined && (
+            <button
+              type="button"
+              className="joy-panel-note-close"
+              aria-label="Dismiss message"
+              title="Dismiss"
+              onClick={onDismissNote}
+            >
+              <CloseIcon />
+            </button>
+          )}
           {note}
         </p>
       )}

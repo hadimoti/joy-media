@@ -14,7 +14,12 @@ import {
   MAX_LOCAL_ORIGINAL_BYTES,
   MAX_ORIGINAL_CHUNK_BYTES,
 } from './local-originals.js';
-import { createMediaChannelHandlers, MEDIA_CHANNELS, publicJobError } from './media-channel.js';
+import {
+  createMediaChannelHandlers,
+  MEDIA_CHANNELS,
+  publicJobError,
+  type MediaChannelDeps,
+} from './media-channel.js';
 import type { AssetLibraryPort } from '../store/asset-library.js';
 
 const tempDirs: string[] = [];
@@ -29,6 +34,7 @@ function setup(
     endpoint?: string;
     modelId?: string;
   },
+  mediaDeps: Pick<MediaChannelDeps, 'readDerivativeRange' | 'statDerivative'> = {},
 ) {
   const db = new LocalDatabase({ filePath: ':memory:', now: () => 'T0' });
   const assetLibrary = typeof library === 'function' ? library(db) : library;
@@ -47,6 +53,7 @@ function setup(
     projectDocuments: db.projectDocuments,
     assets: db.localAssets,
     originals: createLocalOriginalWriter({ directory: originalsDir, assets: db.localAssets }),
+    ...mediaDeps,
     ...(assetLibrary === undefined ? {} : { library: assetLibrary }),
     ...(whisper === undefined
       ? {}
@@ -86,6 +93,32 @@ async function closeWhisperServer(server: Server): Promise<void> {
 
 const DOCUMENT = { schemaVersion: 1, clips: [] };
 
+function finishedDerivativeJob(
+  id: string,
+  path: string,
+  bytes: number,
+  sha256: string,
+): DispatchJob {
+  return {
+    id,
+    kind: 'derivative:export',
+    jobType: 'render.export',
+    refId: 'ref-1',
+    status: 'done',
+    createdAt: 'T0',
+    updatedAt: 'T0',
+    error: undefined,
+    progress: 1,
+    attempts: 1,
+    workerId: 'w-1',
+    leaseToken: undefined,
+    leaseExpiresAt: undefined,
+    cancelRequested: false,
+    derivative: { sha256, bytes, mimeType: 'video/mp4', path },
+    resultJson: undefined,
+  };
+}
+
 describe('publicJobError', () => {
   it('keeps a plain Worker error, and withholds one that names a file', () => {
     expect(publicJobError('source is not a video')).toBe('source is not a video');
@@ -99,13 +132,17 @@ describe('publicJobError', () => {
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {
     expect(new Set(MEDIA_CHANNELS).size).toBe(MEDIA_CHANNELS.length);
-    expect(MEDIA_CHANNELS).toHaveLength(21);
+    expect(MEDIA_CHANNELS).toHaveLength(25);
     expect(MEDIA_CHANNELS).toContain('desktop.media.qc.run');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.remove-internal');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-chunk');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-finish');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-abort');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.revoke-dropped');
+    expect(MEDIA_CHANNELS).toContain('desktop.media.derivative.transfer.begin');
+    expect(MEDIA_CHANNELS).toContain('desktop.media.derivative.transfer.chunk');
+    expect(MEDIA_CHANNELS).toContain('desktop.media.derivative.transfer.finish');
+    expect(MEDIA_CHANNELS).toContain('desktop.media.derivative.transfer.cancel');
   });
 
   it('connects localhost through 127.0.0.1 while preserving the Host header and saved model provenance', async () => {
@@ -638,6 +675,110 @@ describe('desktop.media channels', () => {
     db.jobDispatch.insert(job);
     const result = await handlers['desktop.media.derivative.bytes']({ jobId: 'job-missing' });
     expect(result).toEqual({ ok: false, error: 'Derivative file is not available' });
+  });
+
+  it('streams a derivative in bounded chunks and verifies its hash before finish', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-media-derivative-transfer-'));
+    try {
+      const source = Buffer.from('exact derivative bytes');
+      const path = join(dir, 'export.mp4');
+      writeFileSync(path, source);
+      const sha256 = createHash('sha256').update(source).digest('hex');
+      const { db, handlers } = setup();
+      db.jobDispatch.insert(finishedDerivativeJob('job-stream', path, source.length, sha256));
+
+      const begin = await handlers['desktop.media.derivative.transfer.begin']({
+        jobId: 'job-stream',
+      });
+      expect(begin).toMatchObject({
+        ok: true,
+        data: { mimeType: 'video/mp4', sha256, size: source.length, chunkBytes: 4 * 1024 * 1024 },
+      });
+      const transferId = (begin.data as { transferId: string }).transferId;
+      const chunk = await handlers['desktop.media.derivative.transfer.chunk']({
+        transferId,
+        offset: 0,
+      });
+      expect(chunk.ok).toBe(true);
+      const chunkBytes = (chunk.data as { bytes: Uint8Array }).bytes;
+      expect(Buffer.from(chunkBytes)).toEqual(source);
+      expect(await handlers['desktop.media.derivative.transfer.finish']({ transferId })).toEqual({
+        ok: true,
+        data: { sha256, size: source.length },
+      });
+      expect(
+        await handlers['desktop.media.derivative.transfer.chunk']({ transferId, offset: 0 }),
+      ).toMatchObject({
+        ok: false,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('cancels an in-flight derivative read and releases its transfer state', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-media-derivative-cancel-'));
+    try {
+      const source = Buffer.from('cancel me');
+      const path = join(dir, 'export.mp4');
+      writeFileSync(path, source);
+      const readAborted = vi.fn();
+      const { db, handlers } = setup(undefined, undefined, {
+        readDerivativeRange: (_path, _start, _end, signal) =>
+          new Promise<Uint8Array>((_resolve, reject) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                readAborted();
+                reject(new Error('read aborted'));
+              },
+              { once: true },
+            );
+          }),
+      });
+      const sha256 = createHash('sha256').update(source).digest('hex');
+      db.jobDispatch.insert(finishedDerivativeJob('job-cancel', path, source.length, sha256));
+
+      const begin = await handlers['desktop.media.derivative.transfer.begin']({
+        jobId: 'job-cancel',
+      });
+      const transferId = (begin.data as { transferId: string }).transferId;
+      const pendingChunk = handlers['desktop.media.derivative.transfer.chunk']({
+        transferId,
+        offset: 0,
+      });
+      await Promise.resolve();
+      expect(await handlers['desktop.media.derivative.transfer.cancel']({ transferId })).toEqual({
+        ok: true,
+      });
+      expect(await pendingChunk).toMatchObject({ ok: false });
+      expect(readAborted).toHaveBeenCalledOnce();
+      expect(
+        await handlers['desktop.media.derivative.transfer.chunk']({ transferId, offset: 0 }),
+      ).toMatchObject({
+        ok: false,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an oversized derivative before reading any chunks', async () => {
+    const rangeReader = vi.fn();
+    const { db, handlers } = setup(undefined, undefined, {
+      statDerivative: async () => ({ size: MAX_LOCAL_ORIGINAL_BYTES + 1 }),
+      readDerivativeRange: rangeReader,
+    });
+    db.jobDispatch.insert(
+      finishedDerivativeJob('job-oversized', 'virtual-oversized.mp4', 1, 'a'.repeat(64)),
+    );
+
+    const result = await handlers['desktop.media.derivative.transfer.begin']({
+      jobId: 'job-oversized',
+    });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(rangeReader).not.toHaveBeenCalled();
   });
 
   it('reports not-yet-available for the channels whose local stores are not built', () => {

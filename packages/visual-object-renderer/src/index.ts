@@ -33,6 +33,7 @@ import type {
   TextFillIR,
   TextSpan,
 } from '@joy-media/render-ir';
+import { resolveTextWrapWidth } from '@joy-media/render-ir';
 import type { TimeUs, TransitionV1 } from '@joy-media/project-schema';
 import { mergeTransitionParams, resolveTransitionShaderId } from '@joy-media/transition-shaders';
 import {
@@ -179,6 +180,7 @@ export function visualObjectToRenderNode(
         ? {}
         : { fontFamily: resolveContentFontFamily(style.fontFamily) }),
       ...(style?.fontSizePx === undefined ? {} : { fontSizePx: style.fontSizePx }),
+      ...(style?.maxWidth === undefined ? {} : { maxWidth: style.maxWidth }),
       ...(style?.fontWeight === undefined ? {} : { fontWeight: style.fontWeight }),
       ...(style?.italic === undefined ? {} : { italic: style.italic }),
       ...(style?.lineHeight === undefined ? {} : { lineHeight: style.lineHeight }),
@@ -291,8 +293,15 @@ export function buildRenderFrameIR(
     const imageSize = options.imageSizesByObjectId?.[resolved.object.id];
     const node = visualObjectToRenderNode(resolved, effects, imageSize);
     if (node) {
-      const zIndex = options.zIndexByObjectId?.[node.id];
-      nodes.push(zIndex === undefined ? node : { ...node, zIndex });
+      const rotationRadians = ((node.transform.rotationDeg ?? 0) * Math.PI) / 180;
+      const defaultTextWrapDimension =
+        Math.abs(Math.sin(rotationRadians)) > Math.abs(Math.cos(rotationRadians)) ? height : width;
+      const laidOutNode =
+        node.kind === 'text'
+          ? { ...node, maxWidth: resolveTextWrapWidth(defaultTextWrapDimension, node.maxWidth) }
+          : node;
+      const zIndex = options.zIndexByObjectId?.[laidOutNode.id];
+      nodes.push(zIndex === undefined ? laidOutNode : { ...laidOutNode, zIndex });
     }
   }
 

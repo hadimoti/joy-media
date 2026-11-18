@@ -115,6 +115,29 @@ describe('templated layout', () => {
     expect(active?.color).toEqual({ r: 233, g: 185, b: 73, a: 255 });
   });
 
+  it('keeps the karaoke active-word index aligned after missing and empty source words', () => {
+    const karaokeCue = cue(
+      {
+        styleRef: 'joy-karaoke-pop',
+        words: { ...words, empty: { id: 'empty', text: '', startUs: 0, endUs: 1 } },
+        segments: [
+          {
+            id: 'seg',
+            startUs: 0,
+            endUs: 2_000_000,
+            wordIds: ['missing', 'empty', 'w1', 'w2', 'w3', 'w4'],
+          },
+        ],
+      },
+      700_000,
+    );
+
+    const nodes = layoutTemplatedCaptionNodes([karaokeCue], viewport) as readonly TextNode[];
+    const active = nodes.flatMap((node) => node.spans ?? []).find((span) => span.emphasis === true);
+
+    expect(active?.text).toBe('makes');
+  });
+
   it('disables karaoke under a display override because word mapping is broken', () => {
     const overridden = cue({
       styleRef: 'joy-karaoke-pop',
@@ -153,7 +176,7 @@ describe('templated layout', () => {
   });
 
   it.each(['ltr', 'rtl'] as const)(
-    'resolves each mixed caption line independently in an explicitly %s document',
+    'honors explicit %s direction for every templated caption line',
     (documentDirection) => {
       const mixed = cue({
         direction: documentDirection,
@@ -181,12 +204,16 @@ describe('templated layout', () => {
       const persianLine = nodes.find((node) => node.text.startsWith('\u0633\u0644\u0627\u0645'))!;
       const englishLine = nodes.find((node) => node.text.startsWith('JOY'))!;
 
-      expect(persianLine.direction).toBe('rtl');
+      expect(persianLine.direction).toBe(documentDirection);
       expect(persianLine.align).toBe('start');
-      expect(persianLine.transform.translateX).toBeGreaterThan(viewport.viewportWidth / 2);
-      expect(englishLine.direction).toBe('ltr');
+      expect(persianLine.transform.translateX > viewport.viewportWidth / 2).toBe(
+        documentDirection === 'rtl',
+      );
+      expect(englishLine.direction).toBe(documentDirection);
       expect(englishLine.align).toBe('start');
-      expect(englishLine.transform.translateX).toBeLessThan(viewport.viewportWidth / 2);
+      expect(englishLine.transform.translateX > viewport.viewportWidth / 2).toBe(
+        documentDirection === 'rtl',
+      );
     },
   );
 });

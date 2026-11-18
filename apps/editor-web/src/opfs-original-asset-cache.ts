@@ -8,6 +8,8 @@ export interface OriginalAssetDescriptor {
   readonly mimeType: string;
 }
 
+const WRITE_CHUNK_BYTES = 8 * 1024 * 1024;
+
 /** Stores a selected original in the current browser profile without exposing a path. */
 export class OpfsOriginalAssetCache {
   constructor(private readonly root: OpfsDirectoryHandle | undefined) {}
@@ -15,18 +17,25 @@ export class OpfsOriginalAssetCache {
   async put(descriptor: OriginalAssetDescriptor, file: Blob): Promise<void> {
     validate(descriptor, file);
     if (this.root === undefined) throw new Error('OPFS is unavailable in this browser');
-    const hash = hex(
-      new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())),
-    );
+    const hash = await sha256OfBlob(file);
     if (hash !== descriptor.sha256) throw new Error('selected asset changed while registering');
     const directory = await this.root.getDirectoryHandle('joy-media-assets', { create: true });
     const writable = await (
       await directory.getFileHandle(`${descriptor.assetId}.bin`, { create: true })
     ).createWritable();
     try {
-      await writable.write(file);
-    } finally {
+      for (let offset = 0; offset < file.size; offset += WRITE_CHUNK_BYTES) {
+        await writable.write(file.slice(offset, Math.min(file.size, offset + WRITE_CHUNK_BYTES)));
+      }
       await writable.close();
+    } catch (error) {
+      await writable.abort?.().catch(() => undefined);
+      try {
+        await this.remove(descriptor.assetId);
+      } catch {
+        // Preserve the write error; the failed removal can be retried by its caller.
+      }
+      throw error;
     }
   }
 
@@ -70,6 +79,26 @@ export class OpfsOriginalAssetCache {
     }
   }
 
+  /**
+   * False when the browser has no OPFS. `get` then returns undefined for every asset, which says
+   * nothing about whether a file is missing, so callers that list missing media check this first.
+   */
+  isAvailable(): boolean {
+    return this.root !== undefined;
+  }
+
+  /** Removes one cached original. A missing entry is already removed; storage errors surface for retry. */
+  async remove(assetId: string): Promise<void> {
+    if (this.root === undefined) return;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(assetId)) return;
+    try {
+      const directory = await this.root.getDirectoryHandle('joy-media-assets', { create: false });
+      await directory.removeEntry(`${assetId}.bin`);
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+  }
+
   /** Returns the cached original blob when present in this browser profile. */
   async get(assetId: string): Promise<Blob | undefined> {
     if (this.root === undefined) return undefined;
@@ -85,13 +114,14 @@ export class OpfsOriginalAssetCache {
 }
 
 export async function openOpfsOriginalAssetCache(): Promise<OpfsOriginalAssetCache> {
-  const getDirectory = (
-    globalThis.navigator?.storage as
-      (StorageManager & { readonly getDirectory?: () => Promise<OpfsDirectoryHandle> }) | undefined
-  )?.getDirectory;
-  return new OpfsOriginalAssetCache(
-    getDirectory === undefined ? undefined : await getDirectory.call(navigator.storage),
-  );
+  try {
+    const storage = globalThis.navigator?.storage as
+      (StorageManager & { readonly getDirectory?: () => Promise<OpfsDirectoryHandle> }) | undefined;
+    if (storage?.getDirectory === undefined) return new OpfsOriginalAssetCache(undefined);
+    return new OpfsOriginalAssetCache(await storage.getDirectory());
+  } catch {
+    return new OpfsOriginalAssetCache(undefined);
+  }
 }
 
 function validate(descriptor: OriginalAssetDescriptor, file: Blob): void {
@@ -102,11 +132,15 @@ function validate(descriptor: OriginalAssetDescriptor, file: Blob): void {
   if (!/^(video|audio|image)\/[a-z0-9.+-]+$/i.test(descriptor.mimeType))
     throw new Error('selected asset type is unsupported');
 }
-function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+export async function sha256Hex(blob: Blob): Promise<string> {
+  return sha256OfBlob(blob);
 }
 
-export async function sha256Hex(blob: Blob): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
-  return hex(new Uint8Array(digest));
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    (error as { readonly name?: unknown }).name === 'NotFoundError'
+  );
 }

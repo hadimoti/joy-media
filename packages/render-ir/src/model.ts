@@ -133,7 +133,7 @@ export interface TextNode extends RenderNodeBase {
   readonly direction?: 'ltr' | 'rtl' | 'auto';
   /** How the rendered run anchors to transform.translate. Default 'left'. */
   readonly align?: 'left' | 'center' | 'right' | 'start' | 'end';
-  /** Layout constraint in viewport pixels; renderers wrap/shrink within it. */
+  /** Wrap width in frame pixels; the shared visual-object builder resolves the default. */
   readonly maxWidth?: number;
   /** Evaluated glyph size in viewport pixels; renderer default when absent. */
   readonly fontSizePx?: number;

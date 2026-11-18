@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { nodeBoundsFromBox } from '@joy-media/render-ir';
-import { collectTextLayoutBounds, type TextLayoutCandidate } from './text-layout-bounds-collect.js';
+import {
+  collectTextLayoutBounds,
+  type TextLayoutCandidate,
+  type TextLayoutNodeMeasurement,
+} from './text-layout-bounds-collect.js';
 
 const COLOR = { r: 255, g: 255, b: 255 };
 const REVISION = 'rev-1';
@@ -92,6 +96,29 @@ describe('collectTextLayoutBounds', () => {
     expect(result.notMeasured).toBe(true);
   });
 
+  it('keeps a zero-size empty title as an empty QC box', () => {
+    const zero = nodeBoundsFromBox(
+      'empty-title',
+      { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+      { x: 0, y: 0, width: 0, height: 0 },
+    );
+    const emptyNode = {
+      id: 'empty-title',
+      bounds: zero,
+      textColor: COLOR,
+      emptyText: true,
+    } as TextLayoutNodeMeasurement & { readonly emptyText: true };
+    const result = collectTextLayoutBounds(
+      [candidate('empty-title')],
+      [{ ...frame(['empty-title']), nodes: [emptyNode] }],
+    );
+
+    expect(result.boxes).toMatchObject([
+      { id: 'empty-title', x: 0, y: 0, width: 0, height: 0, emptyText: true },
+    ]);
+    expect(result.unavailable).toEqual([]);
+  });
+
   it('keeps two caption lines and overlapping titles as separate boxes', () => {
     const ids = ['caption:clip:cue:line0', 'caption:clip:cue:line1', 'title:a', 'title:b'];
     const result = collectTextLayoutBounds(
@@ -100,6 +127,25 @@ describe('collectTextLayoutBounds', () => {
     );
     expect(result.boxes).toHaveLength(4);
     expect(result.boxes.map((box) => box.id)).toContain('caption:clip:cue:line1');
+  });
+
+  it('projects the renderer-measured height of a wrapped title into the QC box', () => {
+    const wrapped = nodeBoundsFromBox(
+      'wrapped-title',
+      { translateX: 50, translateY: 50, scaleX: 1, scaleY: 1 },
+      { x: 0, y: 0, width: 90, height: 40 },
+    );
+    const result = collectTextLayoutBounds(
+      [candidate('wrapped-title')],
+      [
+        {
+          ...frame(['wrapped-title']),
+          nodes: [{ id: 'wrapped-title', bounds: wrapped, textColor: COLOR }],
+        },
+      ],
+    );
+
+    expect(result.boxes[0]).toMatchObject({ width: 0.9, height: 0.4 });
   });
 
   it('caps large cue lists without throwing or treating overflow as a failed check', () => {

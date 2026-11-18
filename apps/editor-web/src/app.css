@@ -358,6 +358,35 @@ input[type='checkbox']:focus-visible {
   text-align: center;
 }
 
+/* A note that can be dismissed: the close icon sits in front of the text, in the theme yellow. */
+.joy-panel-note-close {
+  display: inline-flex;
+  width: 1.4rem;
+  height: 1.4rem;
+  margin-inline-end: 0.35rem;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--joy-accent);
+  cursor: pointer;
+}
+.joy-panel-note-close:hover,
+.joy-panel-note-close:focus-visible {
+  background: var(--joy-bg-raised);
+}
+.joy-panel-note-close:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--joy-accent) 70%, transparent);
+  outline-offset: 1px;
+}
+.joy-panel-note-close svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
 .joy-panel-hint {
   flex-shrink: 0;
   margin: 0;
@@ -8370,6 +8399,21 @@ label {
 .asset-library-storage-dialog {
   max-width: 640px;
 }
+/* The dialog also carries the Joy Code Settings frame class, which fixes a tall height for that dialog's tabs.
+   This dialog is short: it is as tall as its content (up to the window), so no empty space shows under the footer. */
+.agent-settings-dialog.joy-agent-settings-dialog.asset-library-storage-dialog {
+  height: auto;
+  max-height: min(820px, calc(100vh - 48px));
+  overflow: hidden;
+}
+.asset-library-storage-dialog.joy-agent-settings-dialog > .agent-settings-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  /* In a short window the sections keep their own height and the body scrolls; they are never squeezed or cut. */
+  grid-auto-rows: max-content;
+  align-content: start;
+  overflow: auto;
+}
 .asset-library-storage-hint {
   margin-top: 0;
 }
@@ -11407,6 +11451,24 @@ label {
   border-color: #4b4b51;
   background: #29292d;
   color: #f0b429;
+}
+/* The tabs and the view switch are icons (the name stays in aria-label and title); icons use the theme yellow. */
+.project-library-tabs button svg,
+.project-library-view button svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: none;
+  color: var(--joy-accent);
+}
+.project-library-tab-count {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.project-library-view button {
+  display: inline-flex;
+  min-width: 2.1rem;
+  align-items: center;
+  justify-content: center;
 }
 .project-library-tabs button:focus-visible,
 .project-library-new-tile:focus-visible,
@@ -16095,6 +16157,39 @@ label {
     transform: none;
   }
 }
+/* The list columns follow the width of the media panel itself, not the window: the panel is often much
+   narrower than the window, and a list wider than the panel pushed the thumbnail and name out of sight.
+   Hide what does not fit: the Collection column first, then Size. */
+@container (max-width: 42rem) {
+  .asset-list-header,
+  .asset-grid--list .asset-card {
+    grid-template-columns: 1.25rem 2.65rem minmax(0, 1fr) 4.5rem 5.35rem;
+  }
+  .asset-list-header-collection,
+  .asset-grid--list .asset-card-collection {
+    display: none;
+  }
+}
+@container (max-width: 31rem) {
+  .asset-list-header,
+  .asset-grid--list .asset-card {
+    grid-template-columns: 1.15rem 2.4rem minmax(0, 1fr) 4.25rem;
+  }
+  .asset-list-header-size,
+  .asset-grid--list .asset-card-meta {
+    display: none;
+  }
+  .asset-list-header-thumb,
+  .asset-grid--list .asset-card-media-wrap,
+  .asset-grid--list .asset-card-media {
+    width: 2.4rem;
+  }
+  .asset-grid--list .asset-card-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+}
 .workspace.dockview-theme-dark,
 #root .workspace {
   flex: 1;
@@ -19436,6 +19531,13 @@ label {
   background: var(--joy-bg-raised);
   box-shadow: 0 2px 7px rgb(0 0 0 / 55%);
   opacity: 1;
+}
+/* The empty junction is an invisible 22 px drop target on every cut. It sits above both clips, so on a short
+   clip (a one second clip at the default zoom is about 14 px) it covered the whole clip and swallowed its
+   clicks. It only catches the pointer while an editor drag is in progress; the page marks that on the body. */
+body:not([data-editor-pointer-dragging])
+  .timeline-transition-junction.timeline-transition-junction--empty {
+  pointer-events: none;
 }
 
 /* Adjustment-layer library: one clear target, one primary action. */

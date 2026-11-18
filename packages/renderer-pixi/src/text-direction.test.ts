@@ -58,6 +58,10 @@ describe('canvas text direction', () => {
     expect(resolveParagraphDirections('سلام\nJOY', 'auto')).toEqual(['rtl', 'ltr']);
   });
 
+  it('uses the shared strong-direction resolver for CJK-prefixed Arabic paragraphs', () => {
+    expect(resolveParagraphDirection('日本語 سلام', 'auto')).toBe('ltr');
+  });
+
   it('wraps Persian at word boundaries and keeps the ZWNJ word intact', () => {
     const result = wrapTextByWords(
       'من می‌خواهم فارسی بخوانم',

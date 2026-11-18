@@ -47,6 +47,15 @@ export class WorkerDaemon {
     while (!options.stopped()) {
       if (gpuPreviewError !== undefined) throw gpuPreviewError;
       let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+      let heartbeatStopped = false;
+      let cancelRequested = false;
+      // Heartbeats end before any terminal report (complete or fail). Once a job is finishing, a
+      // heartbeat could only get LEASE_INVALID from the control plane and log a spurious error.
+      const stopHeartbeat = (): void => {
+        heartbeatStopped = true;
+        if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+      };
       try {
         if (Date.now() - lastHelloAt >= 15_000) {
           await this.client.hello(
@@ -62,11 +71,10 @@ export class WorkerDaemon {
         }
         leasedJobId = job.id;
         leasedJobToken = job.leaseToken;
-        let cancelRequested = false;
         let currentProgress = 0;
         let heartbeatInFlight = false;
         const sendHeartbeat = async (): Promise<void> => {
-          if (heartbeatInFlight) return;
+          if (heartbeatStopped || heartbeatInFlight) return;
           heartbeatInFlight = true;
           try {
             const heartbeat = await this.client.heartbeat(job.id, currentProgress, job.leaseToken);
@@ -90,7 +98,14 @@ export class WorkerDaemon {
           },
         });
         if (gpuPreviewError !== undefined) throw gpuPreviewError;
-        if (result.state === 'completed') {
+        const reportCanceled = async (): Promise<void> => {
+          stopHeartbeat();
+          await this.client.fail(job.id, 'canceled', job.leaseToken);
+        };
+        // A cancel never reaches upload or complete: the control plane rejects completion of a
+        // canceled job, which would mark it FAILED instead of CANCELED.
+        if (result.state !== 'completed' || cancelRequested) await reportCanceled();
+        else {
           // Upload verified bytes for browser-consumable derivatives. Fixture and
           // provider receipts remain Worker-local until their own contracts land.
           if (
@@ -109,11 +124,18 @@ export class WorkerDaemon {
                 : this.runtime.readDerivative(result.result);
             await this.client.uploadDerivative(job.id, result.result, body, job.leaseToken);
           }
-          await this.client.complete(job.id, result.result, job.leaseToken);
-        } else await this.client.fail(job.id, 'canceled', job.leaseToken);
+          // A cancel can land while the derivative uploads; check again before completing.
+          if (cancelRequested) await reportCanceled();
+          else {
+            stopHeartbeat();
+            await this.client.complete(job.id, result.result, job.leaseToken);
+          }
+        }
         leasedJobId = undefined;
         leasedJobToken = undefined;
       } catch (error) {
+        // The job is finished from here on, so its heartbeats stop before anything is reported.
+        stopHeartbeat();
         // A revoked/expired session cannot recover through the current loop:
         // the session store has already been cleared by the client, so keep
         // polling would only produce an endless "not authorized" loop. Exit so
@@ -123,7 +145,12 @@ export class WorkerDaemon {
         this.runtime.log.write(`Worker job failed: ${message.slice(0, 240)}`);
         if (leasedJobId !== undefined) {
           try {
-            await this.client.fail(leasedJobId, message.slice(0, 240), leasedJobToken);
+            // A job whose cancel was requested still ends CANCELED, whatever failure followed it.
+            await this.client.fail(
+              leasedJobId,
+              cancelRequested ? 'canceled' : message.slice(0, 240),
+              leasedJobToken,
+            );
           } catch (failError) {
             this.runtime.log.write(
               `Unable to mark ${leasedJobId} failed: ${
@@ -136,7 +163,7 @@ export class WorkerDaemon {
         }
         await sleep(pollIntervalMs);
       } finally {
-        if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
+        stopHeartbeat();
       }
     }
   }

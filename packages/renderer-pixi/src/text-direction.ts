@@ -1,4 +1,8 @@
-import { resolveLogicalTextAlign, resolveTextDirection } from '@joy-media/render-ir';
+import {
+  resolveLogicalTextAlign,
+  resolveParagraphTextDirections as resolveSharedParagraphTextDirections,
+  resolveTextDirection,
+} from '@joy-media/render-ir';
 
 export type CanvasTextDirection = 'ltr' | 'rtl' | 'auto';
 export type CanvasTextAlignment = 'left' | 'center' | 'right' | 'start' | 'end';
@@ -84,9 +88,7 @@ export function resolveParagraphDirections(
   text: string,
   requested: CanvasTextDirection = 'auto',
 ): readonly ('ltr' | 'rtl')[] {
-  return text
-    .split(/\r\n|\n|\r/u)
-    .map((paragraph) => resolveParagraphDirection(paragraph, requested));
+  return resolveSharedParagraphTextDirections(text, requested);
 }
 
 export function resolveCanvasTextAlign(
@@ -224,4 +226,27 @@ function pushLine(
 ): void {
   lines.push(line);
   directions.push(direction);
+}
+
+/**
+ * Creates the same word-wrap helper's runtime source for Playwright's isolated page context.
+ * The caller supplies a resolved paragraph direction; font measurement still runs in the page.
+ */
+export function serializeTextWrapRuntimeSource(): string {
+  return `(() => {
+    const PERSIAN_SPECIFIC = new RegExp(${JSON.stringify(PERSIAN_SPECIFIC.source)}, ${JSON.stringify(PERSIAN_SPECIFIC.flags)});
+    const segmenterCache = new Map();
+    const getSegmenter = ${getSegmenter.toString()};
+    const fallbackGraphemes = ${fallbackGraphemes.toString()};
+    const resolveParagraphDirection = (_text, requested = 'auto') => {
+      if (requested === 'ltr' || requested === 'rtl') return requested;
+      throw new Error('A resolved direction is required by the GPU text wrapper');
+    };
+    const getLineDirections = ${getLineDirections.toString()};
+    const resolveTextLocale = ${resolveTextLocale.toString()};
+    const segmentWords = ${segmentWords.toString()};
+    const breakLongToken = ${breakLongToken.toString()};
+    const pushLine = ${pushLine.toString()};
+    return ${wrapTextByWords.toString()};
+  })()`;
 }

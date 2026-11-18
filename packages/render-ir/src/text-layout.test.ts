@@ -1,5 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { resolveLogicalTextAlign, resolveTextDirection, textPlateBounds } from './text-layout.js';
+import {
+  resolveLogicalTextAlign,
+  resolveTextDirection,
+  textPlateBounds,
+  resolveTextWrapWidth,
+  TEXT_SAFE_AREA_MARGIN_FRACTION,
+} from './text-layout.js';
+import * as textLayout from './text-layout.js';
+
+describe('resolveTextWrapWidth', () => {
+  it('uses the central 90 percent of the composition by default', () => {
+    expect(TEXT_SAFE_AREA_MARGIN_FRACTION).toBe(0.05);
+    expect(resolveTextWrapWidth(1920)).toBe(1728);
+    expect(resolveTextWrapWidth(1080)).toBe(972);
+  });
+
+  it('uses an explicit maxWidth when supplied', () => {
+    expect(resolveTextWrapWidth(1920, 640)).toBe(640);
+  });
+});
+
+describe('resolveParagraphTextDirections', () => {
+  it('resolves each paragraph separately and carries an explicit direction through all paragraphs', () => {
+    const resolver = Reflect.get(textLayout, 'resolveParagraphTextDirections') as
+      ((text: string, requested: 'ltr' | 'rtl' | 'auto') => readonly ('ltr' | 'rtl')[]) | undefined;
+
+    expect(typeof resolver).toBe('function');
+    expect(resolver?.('日本語\nسلام', 'auto')).toEqual(['ltr', 'rtl']);
+    expect(resolver?.('日本語\nسلام', 'rtl')).toEqual(['rtl', 'rtl']);
+  });
+});
 
 describe('textPlateBounds', () => {
   it('places left, centered, and right-aligned plates around the same text run', () => {
@@ -39,5 +69,20 @@ describe('textPlateBounds', () => {
     expect(resolveTextDirection('\u0661\u0662\u0663', 'auto')).toBe('rtl');
     expect(resolveTextDirection('123 456', 'auto')).toBe('ltr');
     expect(resolveTextDirection('\u06F1\u06F2\u06F3 JOY', 'auto')).toBe('ltr');
+  });
+
+  it('follows UAX #9: CJK letters are strong left-to-right, and the right-to-left script blocks resolve rtl', () => {
+    expect(resolveTextDirection('日本語 سلام', 'auto')).toBe('ltr');
+    for (const [name, sample] of [
+      ['Adlam', '\u{1E900}'],
+      ['Garay', '\u{10D4A}'],
+      ['Hanifi Rohingya', '\u{10D00}'],
+      ['Yezidi', '\u{10E80}'],
+      ['Old Uyghur', '\u{10F70}'],
+      ['Chorasmian', '\u{10FB0}'],
+      ['Rumi numeral', '\u{10E60}'],
+    ] as const) {
+      expect(resolveTextDirection(sample, 'auto'), name).toBe('rtl');
+    }
   });
 });

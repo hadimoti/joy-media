@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { ColorGradeV2, ColorWheels } from '@joy-media/project-schema';
 import { PropertyRow, type PropertyAnimationState } from './components/PropertyRow.js';
 import { colorGradePreview } from './color-grade-preview.js';
@@ -8,11 +8,11 @@ import {
   MAX_WHEEL_AMOUNT,
   nudgeWheelPuck,
   resetWheelColor,
-  WHEEL_FACE_HUES,
   WHEEL_FINE_DRAG_FACTOR,
   WHEEL_KEYBOARD_STEP,
   WHEEL_KEYBOARD_STEP_FINE,
   wheelColorToPuck,
+  wheelFaceHueDegrees,
   wheelHueName,
   wheelPuckFromPointer,
   wheelPuckToColor,
@@ -71,25 +71,54 @@ function formatWheelValue(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
 }
 
-/** The six hue wedges of the wheel face, drawn from the centre outwards. */
-function hueWedges(): { readonly path: string; readonly fill: string }[] {
-  const half = Math.PI / 6;
-  return WHEEL_FACE_HUES.map((stop) => {
-    const start = stop.angle - half;
-    const end = stop.angle + half;
-    const point = (angle: number): string =>
-      `${(FACE_SIZE / 2 + FACE_RADIUS * Math.cos(angle)).toFixed(2)} ${(
-        FACE_SIZE / 2 +
-        FACE_RADIUS * Math.sin(angle)
-      ).toFixed(2)}`;
+/** How many thin wedges make up the spectrum: fine enough to read as one smooth ring of colour. */
+const SPECTRUM_SEGMENTS = 120;
+
+/** The spectrum of the wheel face: one thin wedge per few degrees, each in the hue the puck pushes there. */
+function spectrumWedges(): { readonly path: string; readonly fill: string }[] {
+  const step = (2 * Math.PI) / SPECTRUM_SEGMENTS;
+  const point = (angle: number): string =>
+    `${(FACE_SIZE / 2 + FACE_RADIUS * Math.cos(angle)).toFixed(2)} ${(
+      FACE_SIZE / 2 +
+      FACE_RADIUS * Math.sin(angle)
+    ).toFixed(2)}`;
+  return Array.from({ length: SPECTRUM_SEGMENTS }, (_, index) => {
+    const middle = -Math.PI / 2 + index * step;
+    // A hair of overlap, so no seam shows between neighbouring wedges.
+    const start = middle - step / 2 - step * 0.08;
+    const end = middle + step / 2 + step * 0.08;
     const path = [
       `M ${FACE_SIZE / 2} ${FACE_SIZE / 2}`,
       `L ${point(start)}`,
       `A ${FACE_RADIUS} ${FACE_RADIUS} 0 0 1 ${point(end)}`,
       'Z',
     ].join(' ');
-    return { path, fill: stop.hex };
+    return { path, fill: `hsl(${wheelFaceHueDegrees(middle).toFixed(1)} 78% 54%)` };
   });
+}
+
+const SPECTRUM = spectrumWedges();
+
+/** The twelve ticks around the rim, one every 30 degrees; the four main ones are longer. */
+const RIM_TICKS = Array.from({ length: 12 }, (_, index) => {
+  const angle = (index * Math.PI) / 6;
+  const inner = FACE_RADIUS + 2.6;
+  const outer = FACE_RADIUS + (index % 3 === 0 ? 5.4 : 4.2);
+  return {
+    key: index,
+    x1: FACE_SIZE / 2 + inner * Math.cos(angle),
+    y1: FACE_SIZE / 2 + inner * Math.sin(angle),
+    x2: FACE_SIZE / 2 + outer * Math.cos(angle),
+    y2: FACE_SIZE / 2 + outer * Math.sin(angle),
+  };
+});
+
+/** The colour under the puck, so the puck shows the tint it is pushing (nothing at the centre). */
+function puckTint(puck: WheelPuck): string {
+  const distance = Math.min(MAX_WHEEL_AMOUNT, Math.hypot(puck.x, puck.y));
+  if (distance < 0.02) return 'transparent';
+  const hue = wheelFaceHueDegrees(Math.atan2(puck.y, puck.x));
+  return `hsl(${hue.toFixed(1)} ${(30 + 60 * distance).toFixed(0)}% 54%)`;
 }
 
 function WheelFace({
@@ -115,6 +144,8 @@ function WheelFace({
 }) {
   const x = FACE_SIZE / 2 + (puck.x * FACE_RADIUS) / MAX_WHEEL_AMOUNT;
   const y = FACE_SIZE / 2 + (puck.y * FACE_RADIUS) / MAX_WHEEL_AMOUNT;
+  const core = useId();
+  const centred = Math.hypot(puck.x, puck.y) < 0.02;
   return (
     <svg
       className="cw-face"
@@ -132,27 +163,54 @@ function WheelFace({
       onDoubleClick={onDoubleClick}
       onKeyDown={onKeyDown}
     >
-      {hueWedges().map((wedge) => (
-        <path key={wedge.path} d={wedge.path} fill={wedge.fill} opacity={0.34} />
+      <defs>
+        {/* Colour grows from a neutral centre to full strength at the rim, like the push itself. */}
+        <radialGradient id={core} cx="50%" cy="50%" r="50%">
+          <stop offset="0" className="cw-core-stop" stopOpacity={1} />
+          <stop offset="0.12" className="cw-core-stop" stopOpacity={0.94} />
+          <stop offset="1" className="cw-core-stop" stopOpacity={0} />
+        </radialGradient>
+      </defs>
+      <circle cx={FACE_SIZE / 2} cy={FACE_SIZE / 2} r={FACE_RADIUS + 1.6} className="cw-bezel" />
+      {SPECTRUM.map((wedge, index) => (
+        <path key={index} d={wedge.path} fill={wedge.fill} stroke={wedge.fill} strokeWidth={0.3} />
       ))}
-      <circle
-        cx={FACE_SIZE / 2}
-        cy={FACE_SIZE / 2}
-        r={FACE_RADIUS}
-        fill="none"
-        stroke="#4a4b52"
-        strokeWidth={1}
-      />
+      <circle cx={FACE_SIZE / 2} cy={FACE_SIZE / 2} r={FACE_RADIUS} fill={`url(#${core})`} />
+      <circle cx={FACE_SIZE / 2} cy={FACE_SIZE / 2} r={FACE_RADIUS} className="cw-rim" />
       <circle
         cx={FACE_SIZE / 2}
         cy={FACE_SIZE / 2}
         r={FACE_RADIUS / 2}
-        fill="none"
-        stroke="#3c3d42"
-        strokeWidth={0.6}
+        className="cw-guide cw-guide-ring"
       />
-      <circle cx={FACE_SIZE / 2} cy={FACE_SIZE / 2} r={2} fill="#8f919a" />
-      <circle cx={x} cy={y} r={5.5} fill="#f0bd2d" stroke="#1a1b1e" strokeWidth={1.5} />
+      <line
+        x1={FACE_SIZE / 2 - FACE_RADIUS}
+        y1={FACE_SIZE / 2}
+        x2={FACE_SIZE / 2 + FACE_RADIUS}
+        y2={FACE_SIZE / 2}
+        className="cw-guide"
+      />
+      <line
+        x1={FACE_SIZE / 2}
+        y1={FACE_SIZE / 2 - FACE_RADIUS}
+        x2={FACE_SIZE / 2}
+        y2={FACE_SIZE / 2 + FACE_RADIUS}
+        className="cw-guide"
+      />
+      {RIM_TICKS.map((tick) => (
+        <line
+          key={tick.key}
+          x1={tick.x1}
+          y1={tick.y1}
+          x2={tick.x2}
+          y2={tick.y2}
+          className="cw-tick"
+        />
+      ))}
+      {!centred && <line x1={FACE_SIZE / 2} y1={FACE_SIZE / 2} x2={x} y2={y} className="cw-link" />}
+      <circle cx={FACE_SIZE / 2} cy={FACE_SIZE / 2} r={1.6} className="cw-centre" />
+      <circle cx={x} cy={y} r={6.6} className="cw-puck-shadow" />
+      <circle cx={x} cy={y} r={5} className="cw-puck" style={{ fill: puckTint(puck) }} />
     </svg>
   );
 }

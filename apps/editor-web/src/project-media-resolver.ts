@@ -3,6 +3,7 @@ import type { BrowserAsset, BrowserControlPlaneClient } from './control-plane-cl
 import type { OpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import { sha256OfBlob } from './blob-sha256.js';
 import { isDesktopHost, resolveDesktopAssetUrl } from './desktop-client.js';
+import { MediaUnavailableError } from './media-unavailable-error.js';
 import {
   clearMediaSource,
   revokeDetachedObjectUrl,
@@ -183,7 +184,7 @@ export class ProjectMediaResolver {
         epoch,
       );
     }
-    throw new Error(
+    throw new MediaUnavailableError(
       `Media ${descriptor?.displayName ?? assetId} is unavailable in the local cache`,
     );
   }

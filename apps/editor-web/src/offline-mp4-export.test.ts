@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Output } from 'mediabunny';
+import type { Output, VideoEncodingConfig } from 'mediabunny';
+import { EXPORT_CANVAS_COLOR_SPACE } from '@joy-media/renderer-pixi/browser-export';
 import { validateVideoChunkMetadata } from '../node_modules/mediabunny/dist/modules/src/codec.js';
 import {
   createBlobSink,
@@ -13,6 +14,8 @@ import {
   type OfflineMp4ExportDeps,
   type OfflineMp4ExportSource,
 } from './offline-mp4-export.js';
+
+type ExplicitVideoFrameInit = VideoFrameInit & { readonly colorSpace?: VideoColorSpaceInit };
 
 /** Everything the fakes recorded, reset before every test. */
 const state = {
@@ -52,23 +55,77 @@ const state = {
   targetBytes: 16,
   /** When set, the fake output writes exactly these fragments instead of `targetBytes` zeros. */
   fragments: undefined as Uint8Array[] | undefined,
+  /** VideoFrame init dictionaries passed by the exporter. */
+  videoFrames: [] as ExplicitVideoFrameInit[],
+  /** Color metadata written into each fake encoded packet. */
+  packetColors: [] as (VideoColorSpaceInit | undefined)[],
+  /** Encoder configurations after their explicit output color fields are applied. */
+  encoderConfigs: [] as (VideoEncoderConfig & {
+    readonly colorSpace?: VideoColorSpaceInit;
+    readonly avc?: { readonly format?: string };
+  })[],
 };
 
-class FakeVideoSource {
+class FakeVideoFrame {
   constructor(
-    readonly canvas: unknown,
-    readonly encodingConfig: unknown,
+    readonly source: unknown,
+    readonly init: ExplicitVideoFrameInit,
   ) {
-    state.encodingConfig = encodingConfig;
-    state.log.push('source:new');
+    state.videoFrames.push(init);
   }
 
-  async add(timestamp: number, duration?: number): Promise<void> {
-    state.adds.push({ timestamp, duration });
+  close(): void {}
+}
+
+class FakeVideoSample {
+  readonly timestamp: number;
+  readonly duration: number;
+
+  constructor(
+    readonly frame: FakeVideoFrame,
+    init?: { readonly timestamp?: number; readonly duration?: number },
+  ) {
+    this.timestamp = init?.timestamp ?? (frame.init.timestamp ?? 0) / 1_000_000;
+    this.duration = init?.duration ?? (frame.init.duration ?? 0) / 1_000_000;
+  }
+
+  close(): void {
+    this.frame.close();
+  }
+}
+
+class FakeVideoSampleSource {
+  constructor(readonly encodingConfig: VideoEncodingConfig) {
+    state.encodingConfig = encodingConfig;
+    const encoderConfig = {
+      codec: 'avc1.640028',
+      width: 1920,
+      height: 1080,
+      framerate: 30,
+      avc: { format: 'avc' },
+    } as VideoEncoderConfig & {
+      colorSpace?: VideoColorSpaceInit;
+      avc?: { format?: string };
+    };
+    encodingConfig.onEncoderConfig?.(encoderConfig);
+    state.encoderConfigs.push(encoderConfig);
+  }
+
+  async add(sample: FakeVideoSample): Promise<void> {
+    state.adds.push({ timestamp: sample.timestamp, duration: sample.duration });
     state.log.push('frame:add');
     state.onAdd?.();
     if (state.addError !== undefined) throw state.addError;
     if (state.pendingAdd !== undefined) await state.pendingAdd.promise;
+    const metadata: EncodedVideoChunkMetadata = {
+      decoderConfig: { codec: 'avc1.640028' },
+    };
+    const onEncodedPacket = this.encodingConfig.onEncodedPacket;
+    onEncodedPacket?.(
+      {} as Parameters<NonNullable<VideoEncodingConfig['onEncodedPacket']>>[0],
+      metadata,
+    );
+    state.packetColors.push(metadata.decoderConfig?.colorSpace);
   }
 
   close(): void {
@@ -164,10 +221,12 @@ const deps: Deps = {
   Output: FakeOutput as unknown as Deps['Output'],
   Mp4OutputFormat: FakeOutputFormat as unknown as Deps['Mp4OutputFormat'],
   AppendOnlyStreamTarget: FakeAppendOnlyStreamTarget as unknown as Deps['AppendOnlyStreamTarget'],
-  CanvasSource: FakeVideoSource as unknown as Deps['CanvasSource'],
   // Short, so a test that leaves a frame pending forever does not wait for the real grace period.
   cancelGraceMs: 25,
-};
+  VideoFrame: FakeVideoFrame,
+  VideoSample: FakeVideoSample,
+  VideoSampleSource: FakeVideoSampleSource,
+} as unknown as Deps;
 
 const canvas = { width: 1920, height: 1080 } as unknown as HTMLCanvasElement;
 
@@ -240,9 +299,34 @@ beforeEach(() => {
   state.onFinalize = undefined;
   state.targetBytes = 16;
   state.fragments = undefined;
+  state.videoFrames = [];
+  state.packetColors = [];
+  state.encoderConfigs = [];
 });
 
 describe('exportOfflineMp4', () => {
+  it('gives the first and second export explicit canvas, encoder, and MP4 color fields', async () => {
+    await exportOfflineMp4(baseSource(), deps);
+    await exportOfflineMp4(baseSource(), deps);
+
+    const expectedColorSpace = {
+      primaries: 'bt709',
+      transfer: 'bt709',
+      matrix: 'bt709',
+      fullRange: false,
+    };
+    expect(state.videoFrames).toHaveLength(8);
+    expect(state.videoFrames.map((frame) => frame.colorSpace)).toEqual(
+      Array.from({ length: 8 }, () => EXPORT_CANVAS_COLOR_SPACE),
+    );
+    expect(state.encoderConfigs).toHaveLength(2);
+    expect(state.encoderConfigs.map(({ colorSpace, avc }) => ({ colorSpace, avc }))).toEqual(
+      Array.from({ length: 2 }, () => ({ colorSpace: expectedColorSpace, avc: { format: 'avc' } })),
+    );
+    expect(state.packetColors).toHaveLength(8);
+    expect(state.packetColors).toEqual(Array.from({ length: 8 }, () => expectedColorSpace));
+  });
+
   it('paints and adds every frame in order with exact timestamps', async () => {
     const result = await exportOfflineMp4(baseSource(), deps);
 
@@ -392,6 +476,12 @@ describe('exportOfflineMp4', () => {
         deps,
       ),
     ).rejects.toBeInstanceOf(RangeError);
+    await expect(
+      exportOfflineMp4(
+        { ...baseSource(), manifest: { width: 1921, height: 1080, frameRate: 30, durationUs: 1 } },
+        deps,
+      ),
+    ).rejects.toThrow(/even width and height/u);
     expect(state.outputCreated).toBe(0);
   });
 
@@ -704,7 +794,7 @@ describe('createBlobSink', () => {
 });
 
 describe('createOpfsBlobSink', () => {
-  function fakeOpfs(writeError?: Error, failAfterFirstWrite = false) {
+  function fakeOpfs(writeError?: Error, failAfterFirstWrite = false, abortError?: Error) {
     const files = new Map<string, Uint8Array[]>();
     const removed: string[] = [];
     const directory = {
@@ -723,7 +813,9 @@ describe('createOpfsBlobSink', () => {
                 chunks.push(new Uint8Array(chunk));
               },
               async close() {},
-              async abort() {},
+              async abort() {
+                if (abortError !== undefined) throw abortError;
+              },
             };
           },
           async getFile() {
@@ -742,7 +834,16 @@ describe('createOpfsBlobSink', () => {
         files.delete(name);
       },
       async *entries() {
-        for (const name of files.keys()) yield [name, {} as never] as [string, never];
+        // Every entry was last written long ago, so the stale sweep may remove it.
+        for (const name of files.keys())
+          yield [
+            name,
+            {
+              async getFile() {
+                return { lastModified: 0 };
+              },
+            } as never,
+          ] as [string, never];
       },
     };
     const fakeFileHandleConstructor = function FakeFileHandle() {};
@@ -813,6 +914,17 @@ describe('createOpfsBlobSink', () => {
     expect(opfs.removed).toHaveLength(1);
   });
 
+  it('removes the staged file when aborting the file stream rejects', async () => {
+    const opfs = fakeOpfs(undefined, false, new Error('abort rejected'));
+    const sink = await createOpfsBlobSink();
+    const writer = sink.writable.getWriter();
+    await writer.write(new Uint8Array([1]));
+    await writer.abort(new Error('cancelled')).catch(() => undefined);
+
+    expect(opfs.files.size).toBe(0);
+    expect(opfs.removed).toHaveLength(1);
+  });
+
   it('removes stale staging entries at the next export start', async () => {
     const opfs = fakeOpfs();
     const stageDirectory = await opfs.directory.getDirectoryHandle('export-staging', {
@@ -843,6 +955,35 @@ describe('createOpfsBlobSink', () => {
         yield [
           'export-staged-recent.mp4.part',
           { getFile: async () => ({ lastModified: now - 60_000 }) },
+        ];
+        yield [
+          'export-staged-old.mp4.part',
+          { getFile: async () => ({ lastModified: now - 3 * 3_600_000 }) },
+        ];
+      },
+    };
+    await removeStaleOpfsExportStages(directory as never);
+    expect(removed).toEqual(['export-staged-old.mp4.part']);
+  });
+
+  it('keeps a staging file whose modification time cannot be read (another window may hold it)', async () => {
+    const removed: string[] = [];
+    const now = Date.now();
+    const directory = {
+      async getDirectoryHandle() {
+        return this;
+      },
+      async removeEntry(name: string) {
+        removed.push(name);
+      },
+      async *entries() {
+        yield [
+          'export-staged-locked.mp4.part',
+          {
+            getFile: async () => {
+              throw new DOMException('file is in use', 'NoModificationAllowedError');
+            },
+          },
         ];
         yield [
           'export-staged-old.mp4.part',

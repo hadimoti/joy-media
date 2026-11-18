@@ -5,6 +5,7 @@ import {
   createTimelineQcSampler,
   planTimelineQcSampling,
 } from './qc-sampler.js';
+import type { TimelineQcTextBox } from './qc-sampler.js';
 
 const textBox = {
   id: 'title-main',
@@ -168,6 +169,22 @@ describe('timeline QC sampler', () => {
       id: 'title-outside',
       safeArea: { inside90Percent: false },
     });
+  });
+
+  it('skips the safe-area failure for an empty title measured at the origin', () => {
+    const emptyTitle = {
+      ...textBox,
+      id: 'title-empty',
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      emptyText: true,
+    } as TimelineQcTextBox & { readonly emptyText: true };
+
+    const [analysis] = analyzeTimelineTextBoxes([emptyTitle], []);
+
+    expect(analysis?.safeArea.inside90Percent).toBe(true);
   });
 
   it('blends translucent text against the sampled colored background in sRGB', () => {

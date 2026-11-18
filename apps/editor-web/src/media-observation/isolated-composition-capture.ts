@@ -219,14 +219,18 @@ export function createIsolatedCompositionCapture(
           .filter((node): node is TextNode => node.kind === 'text')
           .map((node) => {
             const bounds = renderer.nodeBounds(node.id) as NodeBounds | undefined;
+            const emptyText = node.text.trim().length === 0;
+            const hasPlate =
+              node.background !== undefined &&
+              !emptyText &&
+              bounds !== undefined &&
+              (bounds.width > 0 || bounds.height > 0);
             return {
               id: node.id,
               ...(bounds === undefined ? {} : { bounds }),
+              ...(emptyText ? { emptyText: true } : {}),
               textColor: node.color,
-              ...(node.background === undefined ? {} : { plateColor: node.background }),
-              ...(node.background === undefined || bounds === undefined
-                ? {}
-                : { plateBounds: bounds }),
+              ...(hasPlate ? { plateColor: node.background, plateBounds: bounds } : {}),
             };
           });
         textBoundsByTime.set(request.outputTimeUs, textBounds);

@@ -47,6 +47,23 @@ afterEach(() => {
 });
 
 describe('Pixi Canvas text direction adapter', () => {
+  it('guards the private Pixi Canvas methods this adapter patches', () => {
+    const members: readonly [string, unknown, number][] = [
+      ['CanvasTextGenerator._renderTextToCanvas', generator._renderTextToCanvas, 5],
+      ['CanvasTextGenerator._drawLetterSpacing', generator._drawLetterSpacing, 5],
+      ['CanvasTextGenerator._getAlignmentOffset', generator._getAlignmentOffset, 3],
+      ['CanvasTextMetrics.measureText', metrics.measureText, 0],
+      ['CanvasTextMetrics._measureText', metrics._measureText, 3],
+    ];
+
+    for (const [name, member, expectedLength] of members) {
+      expect(typeof member, `${name} must exist`).toBe('function');
+      expect(typeof member === 'function' ? member.length : -1, `${name} length`).toBe(
+        expectedLength,
+      );
+    }
+  });
+
   it('sets direction per line and resolves logical alignment per paragraph', () => {
     const offsets: number[] = [];
     const measureDirections: string[] = [];

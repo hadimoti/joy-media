@@ -11,6 +11,7 @@ import {
   runHeadlessRender,
 } from './render-cmd.js';
 import { createDefaultProject } from '../utils/project-loader.js';
+import { NON_FILE_ASSET_KINDS } from '@joy-media/project-schema';
 
 class StringWritable extends Writable {
   public chunks: Buffer[] = [];
@@ -68,6 +69,10 @@ describe('formatRenderTimecode', () => {
 });
 
 describe('missingRenderClips (T-R04 CLI list)', () => {
+  it('uses the shared project-schema set for asset kinds without files', () => {
+    expect([...NON_FILE_ASSET_KINDS]).toEqual(expect.arrayContaining(['lut', 'other']));
+  });
+
   it('lists a clip whose declared file asset is not in the library', () => {
     const missing = missingRenderClips(projectUsingAssetX('p1'), () => false);
 
@@ -110,6 +115,55 @@ describe('missingRenderClips (T-R04 CLI list)', () => {
     root.tracks[0]!.enabled = false;
 
     expect(missingRenderClips(project, () => false)).toEqual([]);
+  });
+
+  it('finds a missing file inside a nested composition at its root-timeline time', () => {
+    const project = projectUsingAssetX('p7');
+    const compositions = project.compositions as unknown as Record<string, Record<string, unknown>>;
+    const root = compositions['root']!;
+    const rootTracks = root['tracks'] as Array<Record<string, unknown>>;
+    const rootTrack = rootTracks[0]!;
+    rootTrack['clips'] = [
+      {
+        id: 'compound',
+        kind: 'composition',
+        compositionId: 'nested',
+        startUs: 2_000_000,
+        durationUs: 5_000_000,
+        childOffsetUs: 1_000_000,
+      },
+    ];
+    const nestedTrack = {
+      id: 'nested-track',
+      kind: 'video',
+      order: 0,
+      enabled: true,
+      clips: [
+        {
+          id: 'nested-x',
+          kind: 'video',
+          assetId: 'x',
+          startUs: 1_000_000,
+          durationUs: 3_000_000,
+          sourceInUs: 0,
+        },
+      ],
+    };
+    compositions['nested'] = {
+      id: 'nested',
+      durationUs: 2_000_000,
+      tracks: [nestedTrack],
+    };
+
+    expect(missingRenderClips(project, () => false)).toMatchObject([
+      {
+        trackId: 'nested-track',
+        clipId: 'nested-x',
+        assetId: 'x',
+        startUs: 2_000_000,
+        endUs: 5_000_000,
+      },
+    ]);
   });
 
   it('never throws on a document that is not a project', () => {

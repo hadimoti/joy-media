@@ -4,6 +4,7 @@ import { layoutTemplatedCaptionNodes, rtlStressCues } from '@joy-media/captions-
 import { visualObjectToRenderNode } from '@joy-media/visual-object-renderer';
 import type { ResolvedObject } from '@joy-media/visual-object-renderer';
 import { createBrowserPixiRenderer } from '@joy-media/renderer-pixi/browser';
+import { pixiTextDirectionOf } from '../../../packages/renderer-pixi/src/pixi-text-direction.js';
 import { withCaptionBurnIn, withCaptionBurnInNodes } from './caption-burn-in.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { TEXT_TEMPLATES } from './text-template-catalog.js';
@@ -122,6 +123,11 @@ function renderedText(id: string): {
   };
 }
 
+/** Pixi 8 has no style.direction: the adapter registers the direction per style object. */
+function directionOfRendered(text: { style: object }): string | undefined {
+  return pixiTextDirectionOf(text.style)?.direction;
+}
+
 function renderedTextContent(id: string): string {
   const stage = harness.stages.at(-1) as FakeContainerBase;
   const text = stage.getChildByLabel(`text:${id}`, true);
@@ -170,7 +176,7 @@ describe('browser text direction', () => {
 
     renderer.render(frame([node]));
 
-    expect(renderedText(node.id).style.direction).toBe('rtl');
+    expect(directionOfRendered(renderedText(node.id))).toBe('rtl');
     expect(harness.fontsAtInit).toEqual([
       '16px "Inter Variable"',
       '16px "Vazirmatn Variable"',
@@ -197,10 +203,10 @@ describe('browser text direction', () => {
 
     renderer.render(frame([node]));
 
-    expect(renderedText(node.id).style).toMatchObject({
-      direction: 'rtl',
-      align: 'right',
-      wordWrap: false,
+    expect(renderedText(node.id).style).toMatchObject({ wordWrap: false });
+    expect(pixiTextDirectionOf(renderedText(node.id).style)).toMatchObject({
+      align: 'start',
+      lineDirections: ['rtl', 'rtl', 'ltr', 'ltr'],
     });
     expect(renderedText(node.id).style.fontFamily).toContain('Vazirmatn Variable');
     expect(renderedTextContent(node.id)).toContain('\n');
@@ -295,17 +301,17 @@ describe('browser text direction', () => {
 
     renderer.render(withBurnIn);
 
-    expect(renderedText('title-template').style.direction).toBe('rtl');
-    expect(renderedText('motion-text-template').style.direction).toBe('rtl');
+    expect(directionOfRendered(renderedText('title-template'))).toBe('rtl');
+    expect(directionOfRendered(renderedText('motion-text-template'))).toBe('rtl');
     expect(regularCaptions.length).toBeGreaterThan(0);
-    expect(renderedText(regularCaptions[0]!.id).style.direction).toBe('rtl');
+    expect(directionOfRendered(renderedText(regularCaptions[0]!.id))).toBe('rtl');
     const burnInNode = withBurnIn.nodes
       .slice(initialFrame.nodes.length)
       .find((node) => node.kind === 'text');
     expect(burnInNode?.kind).toBe('text');
     if (burnInNode?.kind !== 'text') throw new Error('expected a burned-in caption');
     expect(burnInNode).toMatchObject({ direction: 'rtl', text: 'سلام دنیا' });
-    expect(renderedText(burnInNode.id).style.direction).toBe('rtl');
+    expect(directionOfRendered(renderedText(burnInNode.id))).toBe('rtl');
     renderer.destroy();
   });
 });

@@ -1,10 +1,8 @@
 /* global document, navigator */
 /**
- * T-R04 driver cases (the export warns about missing media). They need a running app through the
- * T-A02 driver: call each case with the Playwright `page` of a live session on a fresh project.
- * Not wired into `run.mjs` (that file belongs to T-A02). Not run yet: the app is not launched for
- * this card, because the launch rule's `joy://` hash read was not approved in the session that
- * wrote these cases.
+ * T-R04 driver cases (the export warns about missing media). `EXPORT_MISSING_ROWS` registers them
+ * with the live matrix runner. The row setup starts with a fresh project and removes its imported
+ * source from the scratch profile's media cache before each choice is exercised.
  *
  *   D-R04-1 Cancel: the warning lists the clip with a time code; Cancel closes it; no export starts.
  *   D-R04-2 Relink…: the warning closes and the Media panel opens.
@@ -25,6 +23,12 @@ export async function prepareMissingClip(page, displayName) {
     .getByRole('button', { name: `Add ${displayName} to timeline`, exact: true })
     .first()
     .click();
+  await page.locator('.timeline-clip[data-clip-id]').first().waitFor({ state: 'visible' });
+  await clearCurrentClipMedia(page);
+}
+
+/** Makes the current project's imported source unavailable in the scratch profile. */
+export async function clearCurrentClipMedia(page) {
   await page.locator('.timeline-clip[data-clip-id]').first().waitFor({ state: 'visible' });
   await page.evaluate(async () => {
     const root = await navigator.storage.getDirectory();
@@ -94,3 +98,21 @@ export const EXPORT_MISSING_CASES = {
   'D-R04-2': relinkChoice,
   'D-R04-3': exportAnywayChoice,
 };
+
+export const EXPORT_MISSING_ROWS = Object.freeze(
+  Object.entries(EXPORT_MISSING_CASES).map(([id, run]) => ({
+    id,
+    area: 'missing-media export warning',
+    title: `Missing-media export choice ${id}`,
+    severity: 'major',
+    run: async (page, ctx) => {
+      await ctx.editDocument(page);
+      await clearCurrentClipMedia(page);
+      return run(page);
+    },
+  })),
+);
+
+export const EXPORT_MISSING_ROWS_BY_ID = Object.freeze(
+  Object.fromEntries(EXPORT_MISSING_ROWS.map((row) => [row.id, row])),
+);

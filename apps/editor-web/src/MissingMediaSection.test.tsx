@@ -88,6 +88,17 @@ function buttonNamed(scope: ParentNode, label: string): HTMLButtonElement | unde
   );
 }
 
+async function chooseFiles(files: readonly File[]): Promise<void> {
+  const input = document.querySelector<HTMLInputElement>(
+    'input[aria-label="Match files to missing media"]',
+  );
+  if (input === null) throw new Error('Match files input was not rendered');
+  Object.defineProperty(input, 'files', { configurable: true, value: files });
+  await act(async () => {
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
 const HIDE_LABEL = 'Hide missing media for this session';
 
 afterEach(async () => {
@@ -195,6 +206,77 @@ describe('MissingMediaSection review dialog', () => {
     });
     expect(document.querySelector('[role="dialog"][aria-label="Missing media"]')).toBeNull();
     expect(mounted.querySelector('.missing-media-banner')).not.toBeNull();
+  });
+
+  it('relinks with the current entry returned by matching, even when React state is stale', async () => {
+    const staleEntries = entriesOf(2);
+    const currentEntries = entriesOf(2).map((entry) => ({
+      ...entry,
+      record: { ...entry.record, displayName: `current-${entry.record.displayName}` },
+    }));
+    const file = new File(['clip'], 'current.mp4', { type: 'video/mp4' });
+    const host = {
+      list: async () => staleEntries,
+      matchFiles: async () => ({
+        matches: [
+          {
+            assetId: currentEntries[0]!.assetId,
+            entry: currentEntries[0]!,
+            file,
+            fileName: file.name,
+          },
+        ],
+        unmatchedFileNames: [],
+        unresolvedAssetIds: [currentEntries[1]!.assetId],
+      }),
+      relink: vi.fn(async () => ({ ok: true as const })),
+    } as unknown as MissingMediaHost;
+    const mounted = await mount(host);
+    await act(async () => buttonNamed(mounted, 'Review')?.click());
+
+    await chooseFiles([file]);
+
+    expect(host.relink).toHaveBeenCalledWith(currentEntries[0], file);
+  });
+
+  it('continues a batch when one matched file becomes unreadable during relink', async () => {
+    const entries = entriesOf(2);
+    const first = new File(['first'], 'locked.mp4', { type: 'video/mp4' });
+    const second = new File(['second'], 'readable.mp4', { type: 'video/mp4' });
+    const host = {
+      list: async () => entries,
+      matchFiles: async () => ({
+        matches: [
+          {
+            assetId: entries[0]!.assetId,
+            entry: entries[0]!,
+            file: first,
+            fileName: first.name,
+          },
+          {
+            assetId: entries[1]!.assetId,
+            entry: entries[1]!,
+            file: second,
+            fileName: second.name,
+          },
+        ],
+        unmatchedFileNames: [],
+        unresolvedAssetIds: [],
+      }),
+      relink: vi.fn(async (entry: MissingMediaEntry) => {
+        if (entry.assetId === entries[0]!.assetId)
+          throw new DOMException('The file cannot be read', 'NotReadableError');
+        return { ok: true as const };
+      }),
+    } as unknown as MissingMediaHost;
+    const mounted = await mount(host);
+    await act(async () => buttonNamed(mounted, 'Review')?.click());
+
+    await chooseFiles([first, second]);
+
+    expect(host.relink).toHaveBeenCalledTimes(2);
+    expect(document.body.textContent).toContain('Relinked 1 of 2 matched file(s).');
+    expect(document.body.textContent).toContain('No missing media matches: locked.mp4.');
   });
 
   it('returns focus to the Review button on close, and Escape does not reach other listeners', async () => {

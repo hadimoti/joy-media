@@ -9,11 +9,35 @@ import {
 } from 'node:fs';
 import { basename, join } from 'node:path';
 import { clipsOf } from './matrix-core.mjs';
-import { blockedRow } from './rows.mjs';
-import { newProject } from './steps.mjs';
+import { blockedRow, firstLine } from './rows.mjs';
+import { importThroughLeftPanel, newProject } from './steps.mjs';
 import { ensureTimelineClip } from './ui-steps.mjs';
 
 const DROP_TYPES = ['dragEnter', 'dragOver', 'drop'];
+
+/**
+ * Why a simulated drop cannot prove a drop row. The preload gives import tickets only to the files of the most recent
+ * trusted drop (apps/desktop/src/preload/preload.cjs:62 and 93-102; preload.test.ts:85-126). Whether a drop made with
+ * Input.dispatchDragEvent counts as trusted is not verified in the repo (see REPORT-h04.md).
+ */
+const UNTRUSTED_DROP_REASON =
+  'the preload mints import tickets only for the files of the most recent trusted drop (preload.cjs:62, 93-102), and this simulated drop was not shown to be trusted';
+
+/**
+ * Verdict rule for the drop rows. `blocked` only when the drop provably never reached the app (the wait for a clip timed
+ * out and no new Media card appeared). A new card, a wrong position or a wrong name after the app saw the file is a defect.
+ */
+class ClipWaitTimeout extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ClipWaitTimeout';
+  }
+}
+
+const isClipWaitTimeout = (error) => error instanceof ClipWaitTimeout;
+// A Playwright wait that ran out of time (not an IPC or harness failure, which must stay a failure).
+const isUiTimeout = (error) => error?.name === 'TimeoutError';
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 
 function rowScratch(ctx, id) {
   const path = join(ctx.outDir, id, 'scratch');
@@ -55,7 +79,20 @@ async function readClips(ctx) {
   }));
 }
 
-async function waitForClips(ctx, predicate, description, timeoutMs = 12_000) {
+/** Clips that were not in the baseline: the clips this row's drop created. */
+function clipsAddedSince(before, clips) {
+  const known = new Set(before.map((clip) => clip.id));
+  return clips.filter((clip) => !known.has(clip.id));
+}
+
+/** The Media cards with exactly this name (a card can be left over from an earlier import). */
+function mediaCards(page, name) {
+  return page
+    .locator('.asset-card-name')
+    .filter({ hasText: new RegExp(`^${escapeRegExp(name)}$`, 'u') });
+}
+
+async function waitForClips(ctx, predicate, description, timeoutMs = ctx.clipWaitMs ?? 12_000) {
   const deadline = Date.now() + timeoutMs;
   let clips = [];
   do {
@@ -63,7 +100,9 @@ async function waitForClips(ctx, predicate, description, timeoutMs = 12_000) {
     if (predicate(clips)) return clips;
     await new Promise((resolve) => setTimeout(resolve, 150));
   } while (Date.now() < deadline);
-  throw new Error(`timed out waiting for ${description}; clips: ${JSON.stringify(clips)}`);
+  throw new ClipWaitTimeout(
+    `timed out waiting for ${description}; clips: ${JSON.stringify(clips)}`,
+  );
 }
 
 async function fileDropRow(page, ctx, { filePaths, selector, targetUs, beforeCount = 0 }) {
@@ -129,27 +168,29 @@ export const TIMELINE_DND_H04_ROWS = [
     async run(page, ctx) {
       await fresh(page, ctx, 'D-H02');
       const path = fixture(ctx);
+      const name = basename(path);
       const targetUs = 2_000_000;
+      const before = await readClips(ctx);
+      const cardsBefore = await mediaCards(page, name).count();
       await dropFiles(page, '.timeline-empty-state', [path], targetUs);
       let clips;
       try {
-        clips = await waitForClips(ctx, (rows) => rows.length > 0, 'a dropped clip');
-      } catch {
-        const name = basename(path);
-        const asset = page
-          .locator('.asset-card-name')
-          .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u') })
-          .first();
-        if (await asset.isVisible()) {
-          throw blockedRow(
-            'D-H02',
-            `the simulated drop made no clip; the Media card ${name} may be an older import (the catalog keeps earlier ones), so this needs a real mouse drag from Explorer (attended)`,
+        clips = await waitForClips(ctx, (rows) => rows.length > before.length, 'a dropped clip');
+      } catch (error) {
+        if (!isClipWaitTimeout(error)) throw error;
+        if ((await mediaCards(page, name).count()) > cardsBefore) {
+          throw new Error(
+            `the simulated drop reached Media (a new ${name} card) but made no clip on the timeline`,
           );
         }
-        throw new Error(`file drop created no clip and no Media asset named ${name}`);
+        throw blockedRow(
+          'D-H02',
+          `needs a real mouse drag from Explorer (attended): ${UNTRUSTED_DROP_REASON}, so no clip or Media card appeared`,
+        );
       }
-      const clip = clips[0];
-      if (clip === undefined) throw new Error('the timeline drop created no clip');
+      const [clip] = clipsAddedSince(before, clips);
+      if (clip === undefined)
+        throw new Error('the timeline drop changed the clip count but created no new clip');
       assertNear(clip.startUs, targetUs, 100_000, 'dropped clip start');
       return `clip ${clip.id} started at ${clip.startUs} us (requested ${targetUs} us)`;
     },
@@ -161,34 +202,22 @@ export const TIMELINE_DND_H04_ROWS = [
     severity: 'major',
     async run(page, ctx) {
       await fresh(page, ctx, 'D-H06');
-      const source = join(rowScratch(ctx, 'D-H06'), basename(fixture(ctx)));
+      const name = basename(fixture(ctx));
+      const source = join(rowScratch(ctx, 'D-H06'), name);
       copyFileSync(fixture(ctx), source);
       try {
         chmodSync(source, 0o444);
         const before = statSync(source);
-        await dropFiles(page, '.timeline-empty-state', [source], 2_000_000);
-        const name = basename(source);
-        // A Media card with this name can be an older import: only a new clip proves that this drop worked.
-        try {
-          await waitForClips(
-            ctx,
-            (rows) => rows.length > 0,
-            'a clip from the read-only drop',
-            12_000,
-          );
-        } catch {
-          throw blockedRow(
-            'D-H06',
-            'the simulated drop made no clip, so it is not proven that the read-only file was imported; needs a real mouse drag from Explorer (attended)',
-          );
-        }
+        // The Media import dialog gets the file through DOM.setFileInputFiles: a real file with a real path.
+        // The helper waits for the file's card in Media, so a missing card is a failure here.
+        await importThroughLeftPanel(page, source);
         const after = statSync(source);
         if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
           throw new Error(
             `read-only source changed: size ${before.size}->${after.size}, mtime ${before.mtimeMs}->${after.mtimeMs}`,
           );
         }
-        return `read-only ${name} made a clip; source size and mtime stayed unchanged`;
+        return `read-only ${name} is in Media; its size and modified time stayed unchanged`;
       } finally {
         chmodSync(source, 0o644);
       }
@@ -202,8 +231,10 @@ export const TIMELINE_DND_H04_ROWS = [
     async run(page, ctx) {
       await fresh(page, ctx, 'D-H07');
       const before = await readClips(ctx);
-      const path = join(rowScratch(ctx, 'D-H07'), 'not-a-video.mp4');
+      const name = 'not-a-video.mp4';
+      const path = join(rowScratch(ctx, 'D-H07'), name);
       writeFileSync(path, 'plain text, not an MP4 video');
+      const cardsBefore = await mediaCards(page, name).count();
       await dropFiles(page, '.timeline-empty-state', [path]);
       const message = page
         .locator('.toast-message')
@@ -211,17 +242,14 @@ export const TIMELINE_DND_H04_ROWS = [
         .first();
       try {
         await message.waitFor({ state: 'visible', timeout: 10_000 });
-      } catch {
-        const card = page
-          .locator('.asset-card-name')
-          .filter({ hasText: /^not-a-video\.mp4$/u })
-          .first();
-        if (await card.isVisible()) {
+      } catch (error) {
+        if (!isUiTimeout(error)) throw error;
+        if ((await mediaCards(page, name).count()) > cardsBefore) {
           throw new Error('invalid MP4 was added to Media without a rejection message');
         }
         throw blockedRow(
           'D-H07',
-          'the simulated drop gave the app no message and no card: Electron may get no file path from a CDP-made drop, so the invalid file is skipped before it is read; needs a real mouse drag from Explorer (attended)',
+          `needs a real mouse drag from Explorer (attended): ${UNTRUSTED_DROP_REASON}, so no message and no Media card appeared`,
         );
       }
       const after = await readClips(ctx);
@@ -250,22 +278,30 @@ export const TIMELINE_DND_H04_ROWS = [
         appendFileSync(path, Buffer.from([index + 1]));
         return path;
       });
-      await dropFiles(page, '.timeline-empty-state', files, 2_000_000);
-      await page.waitForTimeout(4_000);
+      // Through the Media import dialog, one file at a time. A name the app mangles never reaches a card, and the
+      // helper's wait for that card times out: that is a defect of this row, not a blocked one.
+      for (const file of files) {
+        try {
+          await importThroughLeftPanel(page, file);
+        } catch (error) {
+          if (!isUiTimeout(error)) throw error;
+          throw new Error(
+            `Media does not show ${basename(file)} after the import: ${firstLine(error)}`,
+          );
+        }
+      }
       const shown = (
         await page
           .locator('.asset-card-name')
           .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ''))
-      ).map((s) => s.trim());
-      const missing = names.filter(
-        (name) => !shown.some((card) => card.startsWith(name.split('.')[0])),
-      );
-      if (missing.length > 0)
-        throw blockedRow(
-          'D-H08',
-          `Media does not show ${missing.join(', ')} (cards: ${JSON.stringify(shown)}): the app keeps Unicode names, so the likely cause is that a CDP-made drop gives Electron no file path; needs a real mouse drag from Explorer (attended)`,
+      ).map((text) => text.trim());
+      const missing = names.filter((name) => !shown.some((card) => card.startsWith(name)));
+      if (missing.length > 0) {
+        throw new Error(
+          `Media does not keep the file name(s) ${missing.join(', ')} (first cards: ${JSON.stringify(shown.slice(0, 8))})`,
         );
-      return `Media preserved both filenames: ${names.join(', ')} (cards: ${JSON.stringify(shown)})`;
+      }
+      return `Media preserved both filenames: ${names.join(', ')}`;
     },
   },
   {

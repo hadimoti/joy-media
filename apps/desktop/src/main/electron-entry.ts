@@ -324,12 +324,16 @@ if (!app.requestSingleInstanceLock()) {
     waitMs: CALLBACK_TIMEOUT_MS,
     openExternal: (url) => shell.openExternal(url),
   });
-  const storageFlush = createStorageFlushController(() =>
-    session.defaultSession.flushStorageData(),
+  const storageFlush = createStorageFlushController(
+    () => session.defaultSession.flushStorageData(),
+    (error) => console.error('[joy-desktop] storage flush failed', error),
   );
   const storageFlushInterval = setInterval(() => storageFlush.flushIfDirty(), 3000);
   storageFlushInterval.unref?.();
-  app.on('before-quit', () => clearInterval(storageFlushInterval));
+  app.on('before-quit', () => {
+    clearInterval(storageFlushInterval);
+    storageFlush.flushNow();
+  });
   const ipcHandlers = createIpcHandlers({
     agentRequests,
     fileRegistry,
@@ -382,7 +386,8 @@ if (!app.requestSingleInstanceLock()) {
     // Opens the asset library folder in the OS file browser. shell.openPath
     // resolves with the reason it failed, or an empty string when it worked.
     openDirectory: async (directory) => shell.openPath(directory),
-    // Works out whether the library sits on a drive that is always there.
+    // Works out whether the library sits on a drive that is always there. The settings reply waits for it only a
+    // moment (ipc-handlers DRIVE_TYPE_WAIT_MS); the app asks once at start so the answer is already cached.
     classifyDrive: async (directory) => classifyDriveOfDirectory(directory),
     secretStore,
     providerBroker,
@@ -404,6 +409,8 @@ if (!app.requestSingleInstanceLock()) {
           else win.maximize();
           return win.isMaximized();
         case 'close':
+          // Write the renderer's DOM storage out before the window is destroyed.
+          storageFlush.flushNow();
           win.close();
           return true;
         case 'is-maximized':
@@ -471,6 +478,7 @@ if (!app.requestSingleInstanceLock()) {
       await workerSupervisor.stopAndWait();
     },
     discardUploads: () => originals.abortAllOriginalUploads(),
+    flushStorage: () => storageFlush.flushNow(),
     flush: async () => {
       await localJobApi?.close().catch(() => undefined);
       localDatabase.close();
@@ -508,6 +516,11 @@ if (!app.requestSingleInstanceLock()) {
     // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
     // Keys are read only after ready: safeStorage is not guaranteed to work before it.
     void checkProfileCredentials(localDatabase, secretStore).catch(() => undefined);
+    // The drive-type question (a Windows query that can take seconds) is asked once now, in the background, so the
+    // Asset Library Storage dialog finds the answer cached and opens with the folder shown at once.
+    void classifyDriveOfDirectory(localDatabase.getAssetLibraryInfo().directory).catch(
+      () => undefined,
+    );
     try {
       localJobApiStart = startLocalJobApi({
         orchestrator: jobOrchestrator,
@@ -630,6 +643,8 @@ if (!app.requestSingleInstanceLock()) {
       },
     });
     mainWindow = win;
+    // Alt+F4 and the taskbar close button skip the window control, so every close flushes too.
+    win.on('close', () => storageFlush.flushNow());
     cancelWhenPageGoes(agentRequests, win);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));

@@ -199,8 +199,8 @@ async function assembleUnpacked() {
       `${stagedPackages.map((workspacePackage) => workspacePackage.name).join(', ')}\n`,
   );
 
-  // The third-party packages that the staged code imports at runtime (the Worker's playwright-core),
-  // with their own third-party dependencies, copied from the installed pnpm store. The packaged app
+  // The third-party packages that the staged code needs at runtime (including the Worker's fonts and
+  // playwright-core), with their dependencies, copied from the installed pnpm store. The packaged app
   // has no pnpm install of its own, so nothing else provides them. Without them the Worker exits at
   // start, and an export waits forever for it.
   const thirdPartyPackages = thirdPartyRuntimeClosure(

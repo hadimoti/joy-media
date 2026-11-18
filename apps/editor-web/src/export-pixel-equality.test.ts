@@ -17,12 +17,19 @@ afterEach(() => {
 });
 
 describe('offline MP4 export metadata', () => {
-  it('does not pass incomplete decoder metadata to mediabunny for the first and later exports', async () => {
+  it('keeps the same track metadata for the first and later offline exports', async () => {
     const capturedMetadata: unknown[] = [];
     const stopBeforeEncoding = new Error('stop before frame encoding');
 
     class TestCanvas {}
     vi.stubGlobal('HTMLCanvasElement', TestCanvas);
+    vi.stubGlobal(
+      'VideoFrame',
+      class FakeVideoFrame {
+        constructor(_source: unknown, _init: VideoFrameInit) {}
+        close(): void {}
+      },
+    );
 
     class InspectingOutput extends Output {
       override addVideoTrack(
@@ -81,12 +88,10 @@ describe('recorder export canvas setup', () => {
         data: new Uint8ClampedArray(width * height * 4),
       })),
     };
-    const track = { stop: vi.fn(), requestFrame: vi.fn() };
-    const stream = {
-      getVideoTracks: () => [track],
-      addTrack: vi.fn(),
-      removeTrack: vi.fn(),
-    };
+    const videoFrames: (VideoFrameInit & {
+      readonly colorSpace?: VideoColorSpaceInit;
+      readonly format?: VideoPixelFormat;
+    })[] = [];
     const canvas = {
       width,
       height,
@@ -94,7 +99,6 @@ describe('recorder export canvas setup', () => {
         requestedContexts.push({ kind, options });
         return context;
       }),
-      captureStream: vi.fn(() => stream),
     } as unknown as HTMLCanvasElement;
 
     class FakeImageData {
@@ -103,6 +107,66 @@ describe('recorder export canvas setup', () => {
         readonly width: number,
         readonly height: number,
       ) {}
+    }
+
+    class FakeVideoFrame {
+      readonly width: number;
+      readonly height: number;
+      readonly codedWidth: number;
+      readonly codedHeight: number;
+
+      constructor(
+        source: unknown,
+        readonly init: VideoFrameInit & {
+          readonly colorSpace?: VideoColorSpaceInit;
+          readonly format?: VideoPixelFormat;
+          readonly codedWidth?: number;
+          readonly codedHeight?: number;
+        },
+      ) {
+        videoFrames.push(init);
+        const sourceSize = source as { readonly width?: number; readonly height?: number };
+        this.width = init.codedWidth ?? sourceSize.width ?? width;
+        this.height = init.codedHeight ?? sourceSize.height ?? height;
+        this.codedWidth = this.width;
+        this.codedHeight = this.height;
+      }
+
+      allocationSize(): number {
+        return this.width * this.height * 4;
+      }
+
+      async copyTo(destination: AllowSharedBufferSource): Promise<PlaneLayout[]> {
+        const bytes = new Uint8Array(destination as ArrayBuffer);
+        for (let offset = 0; offset < bytes.length; offset += 4) {
+          bytes.set([200, 50, 50, 255], offset);
+        }
+        return [{ offset: 0, stride: this.width * 4 }];
+      }
+
+      close(): void {}
+    }
+
+    class FakeMediaStream {
+      constructor(readonly tracks: unknown[] = []) {}
+      addTrack = vi.fn();
+      removeTrack = vi.fn();
+      getVideoTracks(): unknown[] {
+        return this.tracks;
+      }
+    }
+
+    class FakeTrackGenerator {
+      readonly kind = 'video';
+      readonly stop = vi.fn();
+      readonly writable = {
+        getWriter: () => ({
+          ready: Promise.resolve(),
+          write: vi.fn(async () => {}),
+          close: vi.fn(async () => {}),
+          abort: vi.fn(async () => {}),
+        }),
+      } as unknown as WritableStream<VideoFrame>;
     }
 
     class FakeMediaRecorder extends EventTarget {
@@ -136,6 +200,9 @@ describe('recorder export canvas setup', () => {
     });
     vi.stubGlobal('ImageData', FakeImageData);
     vi.stubGlobal('MediaRecorder', FakeMediaRecorder);
+    vi.stubGlobal('MediaStream', FakeMediaStream);
+    vi.stubGlobal('MediaStreamTrackGenerator', FakeTrackGenerator);
+    vi.stubGlobal('VideoFrame', FakeVideoFrame);
 
     const source: BrowserMp4ExportSource = {
       manifest: { width, height, frameRate: 30, durationUs: 33_333 },
@@ -156,5 +223,17 @@ describe('recorder export canvas setup', () => {
     for (const request of requestedContexts) {
       expect(request).toEqual({ kind: '2d', options: { colorSpace: 'srgb' } });
     }
+    expect(videoFrames.filter((frame) => frame.format === 'I420')).toHaveLength(2);
+    expect(
+      videoFrames
+        .filter((frame) => frame.format === 'I420')
+        .every(
+          (frame) =>
+            frame.colorSpace?.primaries === 'bt709' &&
+            frame.colorSpace.transfer === 'bt709' &&
+            frame.colorSpace.matrix === 'bt709' &&
+            frame.colorSpace.fullRange === false,
+        ),
+    ).toBe(true);
   });
 });

@@ -29,6 +29,10 @@ export function MissingExportDialog({
   const titleId = useId();
   const messageId = useId();
   const count = clips.length;
+  const hasMissingVideo = clips.some((clip) => clip.missingVisualSource);
+  const hasAudioOnlyMissing = clips.some(
+    (clip) => clip.missingAudioSource && !clip.missingVisualSource,
+  );
 
   useModalKeys({
     dialogRef,
@@ -55,7 +59,11 @@ export function MissingExportDialog({
           {count === 1
             ? 'One clip uses a file that is not on this PC.'
             : `${count} clips use files that are not on this PC.`}{' '}
-          Export anyway draws the missing parts black and silent. Relink first to keep them.
+          {hasMissingVideo &&
+            'Clips with missing video stay black and silent if you export anyway. '}
+          {hasAudioOnlyMissing &&
+            'A clip with only its configured audio missing stays visible and silent. '}
+          Relink first to keep the affected picture and sound.
         </p>
         <ul className="app-dialog-message" aria-label="Clips with missing media">
           {clips.map((clip) => (

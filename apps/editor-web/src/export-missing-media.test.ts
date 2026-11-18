@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetRecordV1, JoyProjectV1, TransitionV1 } from '@joy-media/project-schema';
-import { emptySpikeProject, makeVideoClip, SECOND_US, withClips } from '@joy-media/test-fixtures';
+import {
+  emptySpikeProject,
+  makeCompositionClip,
+  makeVideoClip,
+  SECOND_US,
+  withClips,
+} from '@joy-media/test-fixtures';
 import type { MissingMediaEntry } from './missing-media.js';
 import {
   exportLacksVisualSource,
   formatMissingExportRange,
+  missingExportAudioClipIds,
   missingExportClipIds,
   missingExportClips,
+  missingExportVisualClipIds,
   transitionsWithoutMissingClips,
 } from './export-missing-media.js';
 import { activePreparedExportClipsAt } from './export-media-readiness.js';
@@ -38,6 +46,8 @@ describe('missingExportClips (T-R04 pre-export list)', () => {
         clipId: 'clip-missing',
         assetId: 'asset-missing',
         name: 'intro.mp4',
+        missingVisualSource: true,
+        missingAudioSource: true,
         startUs: 2 * SECOND_US,
         endUs: 5 * SECOND_US,
       },
@@ -64,6 +74,78 @@ describe('missingExportClips (T-R04 pre-export list)', () => {
     expect(missingExportClips(project, [entry('asset-elsewhere')])).toEqual([]);
   });
 
+  it('warns for a missing configured audio source on an enabled root clip', () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-with-voiceover', 0, SECOND_US, { assetId: 'asset-video' }),
+    ]);
+
+    const missing = missingExportClips(project, [entry('asset-audio', 'voiceover.wav')], {
+      'clip-with-voiceover': { sourceAssetId: 'asset-audio' },
+    });
+
+    expect(missing).toMatchObject([
+      {
+        clipId: 'clip-with-voiceover',
+        assetId: 'asset-audio',
+        name: 'voiceover.wav',
+        missingVisualSource: false,
+        missingAudioSource: true,
+        startUs: 0,
+        endUs: SECOND_US,
+      },
+    ]);
+    expect([...missingExportVisualClipIds(missing)]).toEqual([]);
+    expect([...missingExportAudioClipIds(missing)]).toEqual(['clip-with-voiceover']);
+  });
+
+  it('ignores a missing asset on a disabled root track', () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('disabled-clip', 0, SECOND_US, { assetId: 'asset-missing' }),
+    ]);
+    const root = project.compositions[project.rootCompositionId]!;
+    const disabledProject = {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [root.id]: {
+          ...root,
+          tracks: root.tracks.map((track) => ({ ...track, enabled: false })),
+        },
+      },
+    };
+
+    expect(missingExportClips(disabledProject, [entry('asset-missing')])).toEqual([]);
+  });
+
+  it('finds a missing clip inside a nested composition in root-timeline time', () => {
+    const childBase = emptySpikeProject({ durationUs: 4 * SECOND_US, trackCount: 1 });
+    const childProject = {
+      ...childBase,
+      id: 'child-project',
+      rootCompositionId: 'child',
+      compositions: {
+        child: { ...childBase.compositions.root!, id: 'child' },
+      },
+    };
+    const child = withClips(childProject, 'track-0', [
+      makeVideoClip('nested-missing', 0, 4 * SECOND_US, { assetId: 'asset-missing' }),
+    ]).compositions.child!;
+    const root = withClips(
+      emptySpikeProject({ durationUs: 10 * SECOND_US, trackCount: 1 }),
+      'track-0',
+      [makeCompositionClip('compound', SECOND_US, 3 * SECOND_US, 'child')],
+    );
+    const project = { ...root, compositions: { ...root.compositions, child } };
+
+    expect(missingExportClips(project, [entry('asset-missing')])).toMatchObject([
+      {
+        clipId: 'nested-missing',
+        startUs: SECOND_US,
+        endUs: 4 * SECOND_US,
+      },
+    ]);
+  });
+
   it('exposes the clip ids, so the export can leave those clips out of its sources', () => {
     const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
       makeVideoClip('clip-a', 0, SECOND_US, { assetId: 'asset-missing' }),
@@ -79,6 +161,8 @@ describe('missingExportClips (T-R04 pre-export list)', () => {
       clipId: 'clip-1',
       assetId: 'asset-missing',
       name: 'intro.mp4',
+      missingVisualSource: false,
+      missingAudioSource: false,
       startUs: 3 * SECOND_US,
       endUs: 3 * SECOND_US + 500_000,
     };

@@ -186,7 +186,7 @@ describe('ProjectLibrary project cards', () => {
       storeWith([entry('Gone', { trashedAt: '2026-11-14T11:30:00.000Z', durationUs: 1_000_000 })]),
     );
     const trashTab = all<HTMLButtonElement>('.project-library-tabs button').find((button) =>
-      button.textContent?.startsWith('Trash'),
+      button.getAttribute('aria-label')?.startsWith('Trash'),
     );
     await act(async () => trashTab?.click());
     expect(all('.project-library-new-tile')).toHaveLength(0);

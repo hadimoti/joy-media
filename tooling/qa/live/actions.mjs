@@ -545,8 +545,17 @@ export const ACTION_CHECKS = {
     await t.fire();
     const dialog = t.page.getByRole('dialog').first();
     await dialog.waitFor({ state: 'visible' });
-    const value = await dialog.getByRole('textbox').first().inputValue();
-    if (value.trim() === '') throw new Error('the Asset Library Folder dialog shows no path');
+    // The dialog opens first and fills the folder in when the desktop answers (a moment later), so wait for it.
+    const field = dialog.getByRole('textbox').first();
+    let value = '';
+    const waitedUntil = Date.now() + 5_000;
+    while (Date.now() < waitedUntil) {
+      value = await field.inputValue();
+      if (value.trim() !== '') break;
+      await t.page.waitForTimeout(100);
+    }
+    if (value.trim() === '')
+      throw new Error('the Asset Library Folder dialog shows no path after 5 s');
     if (
       t.ctx.libraryDir &&
       !value.toLowerCase().includes(resolve(t.ctx.libraryDir).toLowerCase())

@@ -776,6 +776,7 @@ export function AssetLibraryPanel({
       }}
       search={{ value: query, onChange: setQuery, placeholder: 'Search media…' }}
       note={status}
+      onDismissNote={() => setStatus(undefined)}
       leadingActions={
         <>
           {isDesktopHost() && onOpenAssetSettings && (

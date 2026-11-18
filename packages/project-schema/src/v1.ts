@@ -375,6 +375,9 @@ export interface AssetRecordV1 {
   readonly generationProvenance?: GenerationProvenanceV1;
 }
 
+/** Asset kinds that describe metadata or color controls rather than source files. */
+export const NON_FILE_ASSET_KINDS: ReadonlySet<AssetRecordV1['kind']> = new Set(['lut', 'other']);
+
 export interface AssetDescriptorV1 {
   readonly mimeType: string;
   readonly durationUs?: number;
@@ -1381,6 +1384,8 @@ function validateTextStyle(value: unknown, path: string, diagnostics: ProjectDia
     !isContentFontFamily(value.fontFamily) ||
     !Number.isFinite(value.fontSizePx) ||
     (value.fontSizePx as number) <= 0 ||
+    (value.maxWidth !== undefined &&
+      (!Number.isFinite(value.maxWidth) || (value.maxWidth as number) <= 0)) ||
     !Number.isSafeInteger(value.fontWeight) ||
     (value.fontWeight as number) < 100 ||
     (value.fontWeight as number) > 1000 ||

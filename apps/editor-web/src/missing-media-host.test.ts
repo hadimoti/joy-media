@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetRecordV1, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { applyTransaction, type CommandTransaction } from '@joy-media/commands';
-import { emptySpikeProject, makeVideoClip, SECOND_US, withClips } from '@joy-media/test-fixtures';
+import {
+  emptySpikeProject,
+  makeCompositionClip,
+  makeVideoClip,
+  SECOND_US,
+  withClips,
+} from '@joy-media/test-fixtures';
 import { createMissingMediaHost, type MissingMediaSession } from './missing-media-host.js';
 import type { RelinkCache } from './media-relink.js';
 import type { OriginalAssetDescriptor } from './opfs-original-asset-cache.js';
@@ -25,30 +31,68 @@ async function recordFor(id: string, bytes: Uint8Array<ArrayBuffer>): Promise<As
   };
 }
 
-function memoryCache(cached: readonly string[]): RelinkCache & { readonly stored: Set<string> } {
+function memoryCache(cached: readonly string[]): RelinkCache & {
+  readonly stored: Set<string>;
+  readonly removed: string[];
+  remove(assetId: string): Promise<void>;
+} {
   const stored = new Set(cached);
+  const removed: string[] = [];
   return {
     stored,
+    removed,
     async get(assetId) {
       return stored.has(assetId) ? new Blob(['cached']) : undefined;
     },
     async put(descriptor: OriginalAssetDescriptor) {
       stored.add(descriptor.assetId);
     },
+    async remove(assetId) {
+      removed.push(assetId);
+      stored.delete(assetId);
+    },
   };
 }
 
-/** A session that really applies timeline transactions, and keeps the visual asset map. */
+/**
+ * A session that really applies timeline transactions, keeps the visual asset map, and keeps a
+ * linear history like the editor's: a dispatch adds an entry and drops every redo entry; undo and
+ * redo move the cursor and swap the document and timeline between the two states of an entry.
+ */
 function fakeSession(
   timeline: SpikeProject,
   assets: Record<string, AssetRecordV1>,
 ): MissingMediaSession & {
   readonly state: { timeline: SpikeProject; visual: JoyProjectV1; dispatches: string[] };
+  undo(): void;
+  redo(): void;
+  /** An unrelated edit: a new history entry, which discards every redo entry. */
+  unrelatedEdit(): void;
+  failNextDispatch(): void;
 } {
   const state = {
     timeline,
     visual: { assets } as unknown as JoyProjectV1,
     dispatches: [] as string[],
+  };
+  const entries: {
+    sequence: number;
+    before: { timeline: SpikeProject; visual: JoyProjectV1 };
+    after: { timeline: SpikeProject; visual: JoyProjectV1 };
+  }[] = [];
+  let cursor = 0; // entries[0..cursor) are applied; the rest are redoable
+  let sequence = 0;
+  let failing = false;
+  const push = (next: { timeline: SpikeProject; visual: JoyProjectV1 }): void => {
+    entries.length = cursor;
+    entries.push({
+      sequence: ++sequence,
+      before: { timeline: state.timeline, visual: state.visual },
+      after: next,
+    });
+    cursor = entries.length;
+    state.timeline = next.timeline;
+    state.visual = next.visual;
   };
   return {
     state,
@@ -58,13 +102,41 @@ function fakeSession(
     get visualProject() {
       return state.visual;
     },
+    get historyEntries() {
+      return entries.map((entry) => ({ sequence: entry.sequence }));
+    },
+    get historyCursorSequence() {
+      return cursor === 0 ? 0 : entries[cursor - 1]!.sequence;
+    },
     dispatchCompound(label, parts) {
-      state.dispatches.push(label);
-      if (parts.document !== undefined) state.visual = parts.document;
-      if (parts.timeline !== undefined) {
-        const tx: CommandTransaction = parts.timeline;
-        state.timeline = applyTransaction(state.timeline, tx).project;
+      if (failing) {
+        failing = false;
+        throw new Error('persistence failed');
       }
+      state.dispatches.push(label);
+      push({
+        visual: parts.document ?? state.visual,
+        timeline:
+          parts.timeline === undefined
+            ? state.timeline
+            : applyTransaction(state.timeline, parts.timeline as CommandTransaction).project,
+      });
+    },
+    undo() {
+      const entry = entries[--cursor]!;
+      state.timeline = entry.before.timeline;
+      state.visual = entry.before.visual;
+    },
+    redo() {
+      const entry = entries[cursor++]!;
+      state.timeline = entry.after.timeline;
+      state.visual = entry.after.visual;
+    },
+    unrelatedEdit() {
+      push({ timeline: state.timeline, visual: { ...state.visual } });
+    },
+    failNextDispatch() {
+      failing = true;
     },
   };
 }
@@ -85,6 +157,82 @@ describe('missing media host', () => {
     });
     const host = createMissingMediaHost(session, async () => memoryCache(['asset-cached']));
     expect((await host.list()).map((entry) => entry.assetId)).toEqual(['asset-used']);
+  });
+
+  it('lists only enabled, root-reachable clips, including nested compositions and configured audio sources', async () => {
+    const nested = await recordFor('asset-nested', encode('nested'));
+    const disabled = await recordFor('asset-disabled', encode('disabled'));
+    const orphan = await recordFor('asset-orphan', encode('orphan'));
+    const audio = await recordFor('asset-audio', encode('audio'));
+    const childBase = emptySpikeProject({ durationUs: 4 * SECOND_US, trackCount: 1 });
+    const childProject = {
+      ...childBase,
+      id: 'child-project',
+      rootCompositionId: 'child',
+      compositions: { child: { ...childBase.compositions.root!, id: 'child' } },
+    };
+    const child = withClips(childProject, 'track-0', [
+      makeVideoClip('nested-clip', 0, 4 * SECOND_US, { assetId: 'asset-nested' }),
+    ]).compositions.child!;
+    const orphanProject = {
+      ...childProject,
+      id: 'orphan-project',
+      rootCompositionId: 'orphan',
+      compositions: { orphan: { ...childBase.compositions.root!, id: 'orphan' } },
+    };
+    const orphanComposition = withClips(orphanProject, 'track-0', [
+      makeVideoClip('orphan-clip', 0, SECOND_US, { assetId: 'asset-orphan' }),
+    ]).compositions.orphan!;
+    const base = emptySpikeProject({ durationUs: 10 * SECOND_US, trackCount: 2 });
+    const withCompound = withClips(base, 'track-0', [
+      makeCompositionClip('compound', 0, 4 * SECOND_US, 'child'),
+    ]);
+    const withDisabledClip = withClips(withCompound, 'track-1', [
+      makeVideoClip('disabled-clip', 0, SECOND_US, { assetId: 'asset-disabled' }),
+    ]);
+    const root = withDisabledClip.compositions[withDisabledClip.rootCompositionId]!;
+    const timeline = {
+      ...withDisabledClip,
+      compositions: {
+        ...withDisabledClip.compositions,
+        [root.id]: {
+          ...root,
+          tracks: root.tracks.map((track) =>
+            track.id === 'track-1' ? { ...track, enabled: false } : track,
+          ),
+        },
+        child,
+        orphan: orphanComposition,
+      },
+    };
+    const session = fakeSession(timeline, {
+      'asset-nested': nested,
+      'asset-disabled': disabled,
+      'asset-orphan': orphan,
+      'asset-audio': audio,
+    });
+    session.state.visual = {
+      ...session.state.visual,
+      audio: {
+        clips: {
+          'nested-clip': {
+            sourceAssetId: 'asset-audio',
+            gain: 1,
+            pan: 0,
+            mute: false,
+            solo: false,
+          },
+        },
+        buses: [],
+        effects: [],
+      },
+    };
+    const host = createMissingMediaHost(session, async () => memoryCache([]));
+
+    expect((await host.list()).map((entry) => entry.assetId).sort()).toEqual([
+      'asset-audio',
+      'asset-nested',
+    ]);
   });
 
   it('waits for the sample media copy: a sample asset is never listed as missing, even briefly (T-R01)', async () => {
@@ -184,6 +332,248 @@ describe('missing media host', () => {
     expect(cache.stored.has(replacementId)).toBe(true);
     expect(cache.stored.has('asset-1')).toBe(false);
     // Nothing references the original now, so it leaves the missing list.
+    expect(await host.list()).toEqual([]);
+  });
+
+  it('use-different-file replaces a missing configured audio source', async () => {
+    const video = await recordFor('asset-video', encode('video'));
+    const audioBase = await recordFor('asset-audio', encode('original voiceover'));
+    const audio: AssetRecordV1 = {
+      ...audioBase,
+      kind: 'audio',
+      displayName: 'voiceover.wav',
+      descriptor: { mimeType: 'audio/wav' },
+    };
+    const timeline = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-1', 0, SECOND_US, { assetId: 'asset-video' }),
+    ]);
+    const session = fakeSession(timeline, { 'asset-video': video, 'asset-audio': audio });
+    session.state.visual = {
+      ...session.state.visual,
+      audio: {
+        clips: {
+          'clip-1': {
+            sourceAssetId: 'asset-audio',
+            gain: 1,
+            pan: 0,
+            mute: false,
+            solo: false,
+          },
+        },
+        buses: [],
+        effects: [],
+      },
+    };
+    const cache = memoryCache(['asset-video']);
+    const host = createMissingMediaHost(session, async () => cache);
+    const [missingAudio] = await host.list();
+    expect(missingAudio?.assetId).toBe('asset-audio');
+
+    const outcome = await host.useDifferentFile(missingAudio!, new Blob([encode('new voiceover')]));
+    expect(outcome).toMatchObject({ ok: true, clipCount: 1 });
+    const replacementId = (outcome as { replacementId: string }).replacementId;
+    expect(session.state.visual.audio?.clips['clip-1']?.sourceAssetId).toBe(replacementId);
+    expect(await host.list()).toEqual([]);
+  });
+
+  it('removes a partial replacement when the cache write fails', async () => {
+    const original = await recordFor('asset-1', encode('original clip'));
+    const timeline = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-1', 0, SECOND_US, { assetId: 'asset-1' }),
+    ]);
+    const cache = memoryCache([]);
+    const putError = new Error('cache write failed');
+    const partialIds: string[] = [];
+    cache.put = async (descriptor) => {
+      partialIds.push(descriptor.assetId);
+      cache.stored.add(descriptor.assetId);
+      throw putError;
+    };
+    const session = fakeSession(timeline, { 'asset-1': original });
+    const host = createMissingMediaHost(session, async () => cache);
+    const [entry] = await host.list();
+
+    await expect(
+      host.useDifferentFile(entry!, new Blob([encode('a different file')])),
+    ).rejects.toBe(putError);
+
+    expect(partialIds).toHaveLength(1);
+    expect(cache.removed).toEqual(partialIds);
+    expect(cache.stored.size).toBe(0);
+  });
+
+  it('preserves the cache write error if removing its partial replacement also fails', async () => {
+    const original = await recordFor('asset-1', encode('original clip'));
+    const timeline = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-1', 0, SECOND_US, { assetId: 'asset-1' }),
+    ]);
+    const cache = memoryCache([]);
+    const putError = new Error('cache write failed');
+    const cleanupError = new Error('cache cleanup failed');
+    cache.put = async () => {
+      throw putError;
+    };
+    cache.remove = async (assetId) => {
+      cache.removed.push(assetId);
+      throw cleanupError;
+    };
+    const session = fakeSession(timeline, { 'asset-1': original });
+    const host = createMissingMediaHost(session, async () => cache);
+    const [entry] = await host.list();
+
+    await expect(
+      host.useDifferentFile(entry!, new Blob([encode('a different file')])),
+    ).rejects.toBe(putError);
+    expect(cache.removed).toHaveLength(1);
+  });
+
+  describe('the replacement copy in the original cache follows the Undo history', () => {
+    async function withReplacement() {
+      const original = await recordFor('asset-1', encode('original clip'));
+      const timeline = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+        makeVideoClip('clip-1', 0, SECOND_US, { assetId: 'asset-1' }),
+      ]);
+      const cache = memoryCache([]);
+      const session = fakeSession(timeline, { 'asset-1': original });
+      const host = createMissingMediaHost(session, async () => cache);
+      const [entry] = await host.list();
+      const outcome = await host.useDifferentFile(entry!, new Blob([encode('a different file')]));
+      const replacementId = (outcome as { replacementId: string }).replacementId;
+      return { cache, session, host, replacementId };
+    }
+
+    it('keeps the copy while the edit is applied', async () => {
+      const { cache, host, replacementId } = await withReplacement();
+      await host.list();
+      expect(cache.stored.has(replacementId)).toBe(true);
+      expect(cache.removed).toEqual([]);
+    });
+
+    it('keeps the copy after Undo, because Redo needs it, and after Redo too', async () => {
+      const { cache, session, host, replacementId } = await withReplacement();
+      session.undo();
+      await host.list();
+      expect(cache.stored.has(replacementId)).toBe(true);
+      session.redo();
+      await host.list();
+      expect(cache.stored.has(replacementId)).toBe(true);
+      expect(session.state.visual.assets[replacementId]).toBeDefined();
+      expect(cache.removed).toEqual([]);
+    });
+
+    it('removes the copy once the undone edit can no longer be redone', async () => {
+      const { cache, session, host, replacementId } = await withReplacement();
+      session.undo();
+      session.unrelatedEdit();
+      await host.list();
+      expect(cache.removed).toEqual([replacementId]);
+      expect(cache.stored.has(replacementId)).toBe(false);
+      // A second list does not remove it again.
+      await host.list();
+      expect(cache.removed).toEqual([replacementId]);
+    });
+
+    it('continues cleaning other orphans and retries a removal that failed', async () => {
+      const originalA = await recordFor('asset-a', encode('original a'));
+      const originalB = await recordFor('asset-b', encode('original b'));
+      const timeline = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+        makeVideoClip('clip-a', 0, SECOND_US, { assetId: 'asset-a' }),
+        makeVideoClip('clip-b', SECOND_US, SECOND_US, { assetId: 'asset-b' }),
+      ]);
+      const cache = memoryCache([]);
+      const session = fakeSession(timeline, { 'asset-a': originalA, 'asset-b': originalB });
+      const host = createMissingMediaHost(session, async () => cache);
+      const [entryA, entryB] = await host.list();
+      const outcomeA = await host.useDifferentFile(entryA!, new Blob([encode('replacement a')]));
+      const outcomeB = await host.useDifferentFile(entryB!, new Blob([encode('replacement b')]));
+      const replacementA = (outcomeA as { replacementId: string }).replacementId;
+      const replacementB = (outcomeB as { replacementId: string }).replacementId;
+      session.undo();
+      session.undo();
+      session.unrelatedEdit();
+
+      const remove = cache.remove.bind(cache);
+      const firstError = new Error('disk refused first removal');
+      const attempts: string[] = [];
+      cache.remove = async (assetId) => {
+        attempts.push(assetId);
+        if (attempts.length === 1) throw firstError;
+        await remove(assetId);
+      };
+
+      await expect(host.list()).rejects.toBe(firstError);
+      expect(attempts).toEqual([replacementA, replacementB]);
+      expect(cache.stored.has(replacementA)).toBe(true);
+      expect(cache.stored.has(replacementB)).toBe(false);
+
+      cache.remove = remove;
+      await host.list();
+      expect(cache.stored.has(replacementA)).toBe(false);
+      expect(cache.removed).toEqual([replacementB, replacementA]);
+    });
+
+    it('keeps the copy after later edits when the edit is still in the Undo history', async () => {
+      const { cache, session, host, replacementId } = await withReplacement();
+      session.unrelatedEdit();
+      await host.list();
+      expect(cache.stored.has(replacementId)).toBe(true);
+    });
+
+    it('does not remove a copy before its edit is on the history (the write comes first)', async () => {
+      const original = await recordFor('asset-1', encode('original clip'));
+      const timeline = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+        makeVideoClip('clip-1', 0, SECOND_US, { assetId: 'asset-1' }),
+      ]);
+      const cache = memoryCache([]);
+      const session = fakeSession(timeline, { 'asset-1': original });
+      const host = createMissingMediaHost(session, async () => cache);
+      const [entry] = await host.list();
+      // A list that runs while the file is being written must not take it away.
+      const realPut = cache.put.bind(cache);
+      let listedDuringWrite: Promise<unknown> | undefined;
+      cache.put = async (descriptor, file) => {
+        await realPut(descriptor, file);
+        listedDuringWrite = host.list();
+        await listedDuringWrite;
+      };
+      await host.useDifferentFile(entry!, new Blob([encode('a different file')]));
+      expect(cache.removed).toEqual([]);
+    });
+
+    it('removes the copy again when the edit could not be applied', async () => {
+      const original = await recordFor('asset-1', encode('original clip'));
+      const timeline = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+        makeVideoClip('clip-1', 0, SECOND_US, { assetId: 'asset-1' }),
+      ]);
+      const cache = memoryCache([]);
+      const session = fakeSession(timeline, { 'asset-1': original });
+      const host = createMissingMediaHost(session, async () => cache);
+      const [entry] = await host.list();
+      session.failNextDispatch();
+      await expect(
+        host.useDifferentFile(entry!, new Blob([encode('a different file')])),
+      ).rejects.toThrow('persistence failed');
+      expect(cache.stored.size).toBe(0);
+      expect(session.state.visual.assets['asset-1']).toEqual(original);
+    });
+  });
+
+  it('lists nothing when the original cache cannot be read (OPFS unavailable), not every asset', async () => {
+    const record = await recordFor('asset-1', encode('clip'));
+    const timeline = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-1', 0, SECOND_US, { assetId: 'asset-1' }),
+    ]);
+    const unreadable: RelinkCache = {
+      isAvailable: () => false,
+      async get() {
+        return undefined;
+      },
+      async put() {},
+    };
+    const host = createMissingMediaHost(
+      fakeSession(timeline, { 'asset-1': record }),
+      async () => unreadable,
+    );
     expect(await host.list()).toEqual([]);
   });
 

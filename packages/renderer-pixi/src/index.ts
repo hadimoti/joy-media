@@ -27,7 +27,7 @@ import {
   flattenRenderNodes,
   frameToLocalPoint,
   isRotated,
-  resolveTextDirection,
+  resolveParagraphTextDirections,
   textPlateBounds,
   validateRenderFrameIR,
 } from '@joy-media/render-ir';
@@ -159,7 +159,7 @@ function paintText(
   effects: readonly EffectInstanceIR[] | undefined,
 ): void {
   const textWidth = node.text.length * 4;
-  const direction = resolveTextDirection(node.text, node.direction ?? 'ltr');
+  const direction = resolveParagraphTextDirections(node.text, node.direction ?? 'ltr')[0] ?? 'ltr';
   const textBounds = textPlateBounds(textWidth, 5, node.align, 0, direction);
   const plateBounds = textPlateBounds(textWidth, 5, node.align, 1, direction);
   // The drawn box (rotation origin): the plate when there is one, else the run.

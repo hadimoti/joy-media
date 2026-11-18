@@ -10,6 +10,7 @@ import type {
 } from './composition-observer.js';
 import { createCompositionObserver } from './composition-observer.js';
 import type { EvidenceFrameArtifactCoverage } from './evidence-store.js';
+import { TEXT_SAFE_AREA_MARGIN_FRACTION } from '@joy-media/render-ir';
 
 export const MAX_TIMELINE_QC_FRAMES = 64;
 export const DEFAULT_TIMELINE_QC_FRAME_WIDTH = 480;
@@ -35,6 +36,8 @@ export interface TimelineQcTextBox {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  /** Empty or whitespace-only text has no safe-area placement to check. */
+  readonly emptyText?: boolean;
   readonly textColor: TimelineQcRgba;
   /** When present, use the authored plate instead of sampling video behind it. */
   readonly backgroundColor?: TimelineQcRgba;
@@ -605,8 +608,10 @@ function normalizeTextBoxes(
         box.endUs <= box.startUs ||
         box.endUs > durationUs ||
         ![box.x, box.y, box.width, box.height].every(Number.isFinite) ||
-        box.width <= 0 ||
-        box.height <= 0
+        (box.emptyText !== undefined && typeof box.emptyText !== 'boolean') ||
+        box.width < 0 ||
+        box.height < 0 ||
+        (box.emptyText !== true && (box.width <= 0 || box.height <= 0))
       )
         throw new TimelineQcSamplerError('invalid-plan');
       ids.add(box.id);
@@ -622,6 +627,7 @@ function normalizeTextBoxes(
         y: box.y,
         width: box.width,
         height: box.height,
+        ...(box.emptyText === true ? { emptyText: true } : {}),
         textColor,
         ...(backgroundColor === undefined ? {} : { backgroundColor }),
       });
@@ -650,8 +656,14 @@ function analyzeTextBoxOnFrame(
   frame:
     Pick<CapturedCompositionEvidence, 'outputTimeUs' | 'width' | 'height' | 'rgba'> | undefined,
 ): TimelineQcTextAnalysis {
+  const safeMin = TEXT_SAFE_AREA_MARGIN_FRACTION;
+  const safeMax = 1 - TEXT_SAFE_AREA_MARGIN_FRACTION;
   const inside90Percent =
-    box.x >= 0.05 && box.y >= 0.05 && box.x + box.width <= 0.95 && box.y + box.height <= 0.95;
+    box.emptyText === true ||
+    (box.x >= safeMin &&
+      box.y >= safeMin &&
+      box.x + box.width <= safeMax &&
+      box.y + box.height <= safeMax);
   if (frame === undefined) {
     return Object.freeze({
       id: box.id,

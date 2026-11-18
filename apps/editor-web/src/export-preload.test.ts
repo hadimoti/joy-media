@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createExportClipSourcePreflight,
+  ExportMissingMediaError,
+  formatMissingExportMediaMessage,
   loadDetachedVideo,
   preflightExportClipSources,
   runExportPreloadStage,
 } from './export-preload.js';
+import { MediaUnavailableError } from './media-unavailable-error.js';
 
 class FakeVideo extends EventTarget {
   preload = '';
@@ -31,6 +35,37 @@ class FakeVideo extends EventTarget {
 afterEach(() => vi.useRealTimers());
 
 describe('export preload stages', () => {
+  it('prefers asset display names, then clip names, then clip ids for preflight labels', () => {
+    expect(
+      createExportClipSourcePreflight({
+        clipId: 'clip-uuid',
+        clipName: 'Clip name',
+        visualAssetId: 'visual-id',
+        visualAssetDisplayName: 'Main take',
+        audioAssetId: 'audio-id',
+        audioAssetDisplayName: 'Voiceover',
+      }),
+    ).toEqual({
+      clipId: 'clip-uuid',
+      clipLabel: 'Main take',
+      visualAssetId: 'visual-id',
+      visualAssetLabel: 'Main take',
+      audioAssetId: 'audio-id',
+      audioAssetLabel: 'Voiceover',
+    });
+    expect(
+      createExportClipSourcePreflight({
+        clipId: 'clip-uuid',
+        clipName: 'Clip name',
+        visualAssetId: 'visual-id',
+      }).clipLabel,
+    ).toBe('Clip name');
+    expect(
+      createExportClipSourcePreflight({ clipId: 'clip-uuid', visualAssetId: 'visual-id' })
+        .clipLabel,
+    ).toBe('clip-uuid');
+  });
+
   it('preflights clip sources in timeline order and reports the first offending clip with recovery', async () => {
     const resolve = vi.fn(async (assetId: string) => {
       if (assetId === 'asset-intro')
@@ -112,6 +147,81 @@ describe('export preload stages', () => {
       ),
     ).rejects.toThrow(
       'Clip "Voiceover Clip" (clip-voiceover) cannot resolve audio asset "Voiceover stem" (voiceover-1). Restore the original media in Project Assets, reconnect owner storage if needed, or replace the clip audio before exporting. Authenticated media session is not ready',
+    );
+  });
+
+  it('names every clip whose media is missing in plain words, without the internal asset text', async () => {
+    const resolve = vi.fn(async (assetId: string) => {
+      if (assetId === 'asset-b-roll-a' || assetId === 'asset-b-roll-b')
+        throw new MediaUnavailableError(`Media ${assetId} is unavailable in the local cache`);
+      return { url: `blob:${assetId}` };
+    });
+
+    const failure = await preflightExportClipSources(
+      [
+        { clipId: 'intro', visualAssetId: 'asset-intro', audioAssetId: 'asset-intro' },
+        { clipId: 'b-roll-a', visualAssetId: 'asset-b-roll-a', audioAssetId: 'asset-b-roll-a' },
+        { clipId: 'b-roll-b', visualAssetId: 'asset-b-roll-b', audioAssetId: 'asset-b-roll-b' },
+      ],
+      resolve,
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(ExportMissingMediaError);
+    expect((failure as ExportMissingMediaError).message).toBe(
+      'Missing media in this export: b-roll-a, b-roll-b. Relink or replace the clips.',
+    );
+    expect((failure as ExportMissingMediaError).clipNames).toEqual(['b-roll-a', 'b-roll-b']);
+    expect((failure as Error).message).not.toMatch(/cannot resolve|asset-/u);
+  });
+
+  it('still refuses a missing clip when the resolver error reaches the preflight through a preload stage', async () => {
+    const resolve = vi.fn((assetId: string) =>
+      runExportPreloadStage(
+        'resolving source',
+        () => Promise.reject(new MediaUnavailableError(`Media ${assetId} is unavailable`)),
+        new AbortController().signal,
+      ),
+    );
+
+    await expect(
+      preflightExportClipSources(
+        [
+          {
+            clipId: 'clip-missing',
+            clipLabel: 'Missing Clip',
+            visualAssetId: 'asset-missing',
+            audioAssetId: 'asset-missing',
+          },
+        ],
+        resolve,
+      ),
+    ).rejects.toThrow('Missing media in this export: Missing Clip. Relink or replace the clip.');
+  });
+
+  it('keeps the detailed message for a resolve failure that is not a missing file', async () => {
+    const resolve = vi.fn(async () => {
+      throw new Error('Authenticated media session is not ready');
+    });
+
+    await expect(
+      preflightExportClipSources(
+        [{ clipId: 'clip-1', visualAssetId: 'asset-1', audioAssetId: 'asset-1' }],
+        resolve,
+      ),
+    ).rejects.toThrow(
+      'Clip clip-1 cannot resolve visual asset "asset-1" (asset-1). Restore the original media in Project Assets, reconnect owner storage if needed, or replace the clip before exporting. Authenticated media session is not ready',
+    );
+  });
+
+  it('formats the missing-media refusal for one clip and for several', () => {
+    expect(formatMissingExportMediaMessage(['b-roll-a'])).toBe(
+      'Missing media in this export: b-roll-a. Relink or replace the clip.',
+    );
+    expect(formatMissingExportMediaMessage(['b-roll-a', 'b-roll-b'])).toBe(
+      'Missing media in this export: b-roll-a, b-roll-b. Relink or replace the clips.',
     );
   });
 

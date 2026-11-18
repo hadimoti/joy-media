@@ -15,6 +15,8 @@ export interface ShutdownDeps {
   readonly stopWorker: () => void | Promise<void>;
   /** Drops unfinished chunked uploads and their temporary files. */
   readonly discardUploads: () => void | Promise<void>;
+  /** Final flush of renderer DOM storage. Synchronous, so it runs before any Worker wait. */
+  readonly flushStorage?: () => void;
   readonly flush: () => void | Promise<void>;
   readonly quit: () => void;
   readonly onQuitRequested?: () => void;
@@ -39,7 +41,15 @@ export function registerShutdownHooks(deps: ShutdownDeps): () => Promise<void> {
       });
       const work = (async () => {
         const errors: unknown[] = [];
-        for (const step of [deps.stopWorker, deps.discardUploads, deps.flush]) {
+        // The storage flush is independent of the Worker and cannot block, so it runs first and a
+        // slow Worker stop cannot skip it.
+        const steps = [
+          ...(deps.flushStorage === undefined ? [] : [deps.flushStorage]),
+          deps.stopWorker,
+          deps.discardUploads,
+          deps.flush,
+        ];
+        for (const step of steps) {
           if (timedOut) return;
           try {
             await step();

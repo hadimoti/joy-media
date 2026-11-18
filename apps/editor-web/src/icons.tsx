@@ -329,6 +329,18 @@ export function GridUiIcon() {
   return <PngMaskIcon src={UI_ICONS.grid} />;
 }
 
+/** Four squares: large previews (the Projects page Grid view). */
+export function GridLargeIcon() {
+  return (
+    <Svg>
+      <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="0.5" />
+      <rect x="9" y="2.5" width="4.5" height="4.5" rx="0.5" />
+      <rect x="2.5" y="9" width="4.5" height="4.5" rx="0.5" />
+      <rect x="9" y="9" width="4.5" height="4.5" rx="0.5" />
+    </Svg>
+  );
+}
+
 /** Nine small squares: the compact grid. */
 export function GridDenseIcon() {
   return (

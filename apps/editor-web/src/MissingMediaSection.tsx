@@ -131,16 +131,20 @@ export function MissingMediaSection({
   const matchMany = async (files: readonly File[]) => {
     if (files.length === 0) return;
     const result = await host.matchFiles(files.map((file) => ({ file, fileName: file.name })));
+    const unmatchedFileNames = [...result.unmatchedFileNames];
     let relinked = 0;
     for (const match of result.matches) {
-      const entry = entries.find((candidate) => candidate.assetId === match.assetId);
-      if (entry === undefined) continue;
-      const verdict = await host.relink(entry, match.file);
-      if (verdict.ok) relinked += 1;
+      try {
+        const verdict = await host.relink(match.entry, match.file);
+        if (verdict.ok) relinked += 1;
+      } catch {
+        // A file can become unreadable after batch matching; keep later files moving.
+        unmatchedFileNames.push(match.fileName);
+      }
     }
     const parts = [`Relinked ${relinked} of ${result.matches.length} matched file(s).`];
-    if (result.unmatchedFileNames.length > 0)
-      parts.push(`No missing media matches: ${result.unmatchedFileNames.join(', ')}.`);
+    if (unmatchedFileNames.length > 0)
+      parts.push(`No missing media matches: ${unmatchedFileNames.join(', ')}.`);
     setMessage(parts.join(' '));
     await reload();
     if (relinked > 0) onChanged?.();

@@ -68,6 +68,7 @@ import {
   waitForCanvasTextFonts,
   wrapTextByWords,
 } from './text-direction.js';
+import { createImageDataWriter } from './image-data-writer.js';
 
 export { dualTextureBitmapsReady } from './transition-bitmaps.js';
 
@@ -302,6 +303,7 @@ export async function createBrowserPixiRenderer(
 
   const spriteMap = new Map<string, LayerContainer>();
   const canvasFonts = typeof document === 'undefined' ? undefined : document.fonts;
+  const writeBitmapToCanvas = createImageDataWriter();
   let frameWidth = options.width ?? 320;
   let frameHeight = options.height ?? 180;
   let frameResolution = options.resolution ?? 1;
@@ -414,7 +416,7 @@ export async function createBrowserPixiRenderer(
     const sprite = new Sprite(texture);
     sprite.label = `video-frame:${node.id}`;
     const layer = { visual: sprite, videoCanvas: canvas, videoTexture: texture };
-    updateVideoTexture(layer, node, bitmap);
+    updateVideoTexture(layer, node, bitmap, writeBitmapToCanvas);
     return layer;
   };
 
@@ -422,6 +424,7 @@ export async function createBrowserPixiRenderer(
     layer: Pick<LayerContainer, 'visual' | 'videoCanvas' | 'videoTexture'>,
     node: VideoFrameNode,
     bitmap: BrowserVideoFrameBitmap,
+    writePixels: ReturnType<typeof createImageDataWriter>,
   ): void => {
     const canvas = layer.videoCanvas;
     const texture = layer.videoTexture;
@@ -433,9 +436,7 @@ export async function createBrowserPixiRenderer(
     const context = canvas.getContext('2d');
     if (context === null)
       throw new Error(`${BROWSER_PACKAGE_ENTRY}: unable to create video texture canvas`);
-    const image = context.createImageData(bitmap.width, bitmap.height);
-    image.data.set(bitmap.data);
-    context.putImageData(image, 0, 0);
+    writePixels(context, bitmap.width, bitmap.height, bitmap.data);
     texture.source.update();
     layer.visual.width = node.width;
     layer.visual.height = node.height;
@@ -449,16 +450,17 @@ export async function createBrowserPixiRenderer(
   };
 
   const updateTextVisual = (text: Text, node: TextNode): void => {
-    const paragraphDirections = resolveParagraphDirections(node.text, node.direction ?? 'ltr');
+    const direction = node.direction ?? 'ltr';
+    const paragraphDirections = resolveParagraphDirections(node.text, direction);
     const usesRtlRendering =
       node.direction === 'rtl' || paragraphDirections.some((direction) => direction === 'rtl');
     const wrapped =
       usesRtlRendering && node.maxWidth !== undefined
         ? wrapTextByWords(
             node.text,
-            node.maxWidth,
+            node.maxWidth / (Math.abs(node.transform.scaleX) || 1),
             createTextMeasurement(node, canvasFontFamilyStack(node.text, node.fontFamily)),
-            node.direction ?? 'auto',
+            direction,
           )
         : undefined;
     const renderedText = wrapped?.text ?? node.text;
@@ -508,6 +510,7 @@ export async function createBrowserPixiRenderer(
               distance: Math.hypot(node.shadow.offsetX, node.shadow.offsetY),
               angle: Math.atan2(node.shadow.offsetY, node.shadow.offsetX),
             };
+    const horizontalScale = Math.abs(node.transform.scaleX);
     text.style = {
       fill,
       fontSize: node.fontSizePx ?? 16,
@@ -526,7 +529,11 @@ export async function createBrowserPixiRenderer(
       ...(node.tracking === undefined ? {} : { letterSpacing: node.tracking }),
       align: resolveCanvasTextAlign(node.align ?? 'left', baseDirection),
       ...(node.maxWidth !== undefined && !usesRtlRendering
-        ? { wordWrap: true, wordWrapWidth: node.maxWidth }
+        ? {
+            wordWrap: true,
+            wordWrapWidth: node.maxWidth / (horizontalScale || 1),
+            breakWords: true,
+          }
         : usesRtlRendering
           ? { wordWrap: false }
           : {}),
@@ -541,10 +548,8 @@ export async function createBrowserPixiRenderer(
       ...(dropShadow === undefined ? {} : { dropShadow }),
     };
     if (usesRtlRendering) {
-      const style = text.style as unknown as { direction?: 'ltr' | 'rtl' };
-      style.direction = baseDirection;
       registerPixiTextDirection(text.style, {
-        direction: node.direction ?? 'auto',
+        direction,
         align: node.align ?? 'left',
         lineDirections,
       });
@@ -571,12 +576,18 @@ export async function createBrowserPixiRenderer(
   const textPlatePadding = (node: TextNode): number =>
     Math.max(2, Math.round((node.fontSizePx ?? 16) * 0.12));
 
+  const hasTextContent = (node: TextNode): boolean => node.text.trim().length > 0;
+
   const syncTextBackground = (layer: LayerContainer, node: TextNode): void => {
     if (node.background === undefined || !(layer.visual instanceof Text)) {
       clearTextBackground(layer);
       return;
     }
     const text = layer.visual;
+    if (!hasTextContent(node) || (text.width === 0 && text.height === 0)) {
+      clearTextBackground(layer);
+      return;
+    }
     const padding = textPlatePadding(node);
     const direction = resolveParagraphDirections(node.text, node.direction ?? 'ltr')[0] ?? 'ltr';
     const bounds = textPlateBounds(text.width, text.height, node.align, padding, direction);
@@ -627,9 +638,12 @@ export async function createBrowserPixiRenderer(
       if (!(layer.visual instanceof Text)) return { x: 0, y: 0, width: 0, height: 0 };
       const text = layer.visual;
       const direction = resolveParagraphDirections(node.text, node.direction ?? 'ltr')[0] ?? 'ltr';
-      return node.background === undefined
-        ? textPlateBounds(text.width, text.height, node.align, 0, direction)
-        : textPlateBounds(text.width, text.height, node.align, textPlatePadding(node), direction);
+      const hasBackgroundPlate =
+        node.background !== undefined &&
+        hasTextContent(node) &&
+        !(text.width === 0 && text.height === 0);
+      const padding = hasBackgroundPlate ? textPlatePadding(node) : 0;
+      return textPlateBounds(text.width, text.height, node.align, padding, direction);
     }
     return { x: 0, y: 0, width: node.width, height: node.height };
   };
@@ -793,7 +807,8 @@ export async function createBrowserPixiRenderer(
             );
           existing.kind = node.kind;
         } else if (node.kind === 'video-frame' && videoBitmap !== undefined) {
-          if (existing.visual instanceof Sprite) updateVideoTexture(existing, node, videoBitmap);
+          if (existing.visual instanceof Sprite)
+            updateVideoTexture(existing, node, videoBitmap, writeBitmapToCanvas);
           else {
             const video = paintVideoVisual(node, videoBitmap);
             replaceVisual(existing, video.visual);
@@ -840,10 +855,10 @@ export async function createBrowserPixiRenderer(
       const existing = transitionLayer.getChildByName(`transition:${node.id}`) as
         TransitionLayerContainer | null | undefined;
       if (existing === null || existing === undefined) {
-        const container = createTransitionLayer(node, videoBitmaps);
+        const container = createTransitionLayer(node, videoBitmaps, writeBitmapToCanvas);
         transitionLayer.addChild(container);
       } else {
-        updateTransitionLayer(existing, node, videoBitmaps);
+        updateTransitionLayer(existing, node, videoBitmaps, writeBitmapToCanvas);
       }
       drawCalls += 1;
     }
@@ -1043,11 +1058,12 @@ interface TransitionLayerContainer extends Container {
 function createTransitionLayer(
   node: TransitionNode,
   videoBitmaps: ReadonlyMap<string, BrowserVideoFrameBitmap>,
+  writePixels: ReturnType<typeof createImageDataWriter>,
 ): TransitionLayerContainer {
   const container = new Container() as TransitionLayerContainer;
   container.name = `transition:${node.id}`;
   container.zIndex = node.zIndex;
-  updateTransitionLayer(container, node, videoBitmaps);
+  updateTransitionLayer(container, node, videoBitmaps, writePixels);
   return container;
 }
 
@@ -1062,6 +1078,7 @@ function ensureBitmapTexture(
   canvas: HTMLCanvasElement | undefined,
   texture: Texture | undefined,
   bitmap: BrowserVideoFrameBitmap,
+  writePixels: ReturnType<typeof createImageDataWriter>,
 ): { canvas: HTMLCanvasElement; texture: Texture } {
   const nextCanvas = canvas ?? document.createElement('canvas');
   if (nextCanvas.width !== bitmap.width || nextCanvas.height !== bitmap.height) {
@@ -1071,9 +1088,7 @@ function ensureBitmapTexture(
   const context = nextCanvas.getContext('2d');
   if (context === null)
     throw new Error(`${BROWSER_PACKAGE_ENTRY}: transition canvas 2d unavailable`);
-  const image = context.createImageData(bitmap.width, bitmap.height);
-  image.data.set(bitmap.data);
-  context.putImageData(image, 0, 0);
+  writePixels(context, bitmap.width, bitmap.height, bitmap.data);
   const nextTexture = texture ?? Texture.from(nextCanvas, true);
   nextTexture.source.update();
   return { canvas: nextCanvas, texture: nextTexture };
@@ -1083,6 +1098,7 @@ function updateTransitionLayer(
   container: TransitionLayerContainer,
   node: TransitionNode,
   videoBitmaps: ReadonlyMap<string, BrowserVideoFrameBitmap>,
+  writePixels: ReturnType<typeof createImageDataWriter>,
 ): void {
   const fromBitmap = videoBitmaps.get(node.leftClipId);
   const toBitmap = videoBitmaps.get(node.rightClipId);
@@ -1111,10 +1127,15 @@ function updateTransitionLayer(
     container.overlay = undefined;
   }
 
-  const from = ensureBitmapTexture(container.fromCanvas, container.fromTexture, fromBitmap);
+  const from = ensureBitmapTexture(
+    container.fromCanvas,
+    container.fromTexture,
+    fromBitmap,
+    writePixels,
+  );
   container.fromCanvas = from.canvas;
   container.fromTexture = from.texture;
-  const to = ensureBitmapTexture(container.toCanvas, container.toTexture, toBitmap);
+  const to = ensureBitmapTexture(container.toCanvas, container.toTexture, toBitmap, writePixels);
   container.toCanvas = to.canvas;
   container.toTexture = to.texture;
 

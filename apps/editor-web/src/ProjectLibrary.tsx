@@ -18,6 +18,9 @@ import {
   CloseIcon,
   DuplicateIcon,
   EditIcon,
+  FolderIcon,
+  GridLargeIcon,
+  ListIcon,
   MoreVerticalIcon,
   PlusIcon,
   TrashIcon,
@@ -296,6 +299,8 @@ export function ProjectLibrary({
             <button
               type="button"
               aria-pressed={!showTrash}
+              aria-label={`Projects (${projectCount})`}
+              title={`Projects (${projectCount})`}
               className={!showTrash ? 'is-active' : undefined}
               onClick={() => {
                 setShowTrash(false);
@@ -304,11 +309,16 @@ export function ProjectLibrary({
                 setNotice(undefined);
               }}
             >
-              Projects ({projectCount})
+              <FolderIcon />
+              <span className="project-library-tab-count" aria-hidden="true">
+                {projectCount}
+              </span>
             </button>
             <button
               type="button"
               aria-pressed={showTrash}
+              aria-label={`Trash (${trashedCount})`}
+              title={`Trash (${trashedCount})`}
               className={showTrash ? 'is-active' : undefined}
               onClick={() => {
                 setShowTrash((active) => !active);
@@ -317,7 +327,10 @@ export function ProjectLibrary({
                 setNotice(undefined);
               }}
             >
-              Trash ({trashedCount})
+              <TrashIcon />
+              <span className="project-library-tab-count" aria-hidden="true">
+                {trashedCount}
+              </span>
             </button>
           </div>
           <WindowControls />
@@ -371,18 +384,20 @@ export function ProjectLibrary({
               <button
                 type="button"
                 aria-label="Grid view"
+                title="Grid view"
                 aria-pressed={view === 'grid'}
                 onClick={() => setView('grid')}
               >
-                Grid
+                <GridLargeIcon />
               </button>
               <button
                 type="button"
                 aria-label="List view"
+                title="List view"
                 aria-pressed={view === 'list'}
                 onClick={() => setView('list')}
               >
-                List
+                <ListIcon />
               </button>
             </div>
           </div>

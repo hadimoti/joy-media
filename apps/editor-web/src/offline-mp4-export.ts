@@ -10,15 +10,28 @@
  * manifest frame rate, so a 10 minute timeline encodes in as long as the encoder needs.
  */
 
-import { AppendOnlyStreamTarget, CanvasSource, Mp4OutputFormat, Output } from 'mediabunny';
+import {
+  AppendOnlyStreamTarget,
+  Mp4OutputFormat,
+  Output,
+  VideoSample,
+  VideoSampleSource,
+} from 'mediabunny';
 import type { VideoEncodingConfig } from 'mediabunny';
-import type {
-  BrowserExportManifest,
-  BrowserExportResult,
+import {
+  isAbandonedExportStage,
+  createCanvasExportVideoFrame,
+  EXPORT_BT709_COLOR_SPACE,
+  setBt709EncoderColorSpace,
+  type BrowserExportVideoFrameConstructor,
+  type BrowserExportManifest,
+  type BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
 import { validateH264ExportDimensions } from '@joy-media/job-protocol';
 import { avcCodecString, selectAvcLevels, type AvcProfile } from './avc-level.js';
 import { OFFLINE_AAC_CODEC } from './offline-aac-track.js';
+
+export { EXPORT_BT709_COLOR_SPACE };
 
 /**
  * Implemented elsewhere (offline-aac-track.ts, another worker). Your code only calls it.
@@ -87,8 +100,12 @@ export interface OfflineMp4ExportDeps {
   readonly Mp4OutputFormat?: typeof Mp4OutputFormat;
   /** Defaults to mediabunny's `AppendOnlyStreamTarget`. */
   readonly AppendOnlyStreamTarget?: typeof AppendOnlyStreamTarget;
-  /** Defaults to mediabunny's `CanvasSource`. */
-  readonly CanvasSource?: typeof CanvasSource;
+  /** Defaults to mediabunny's `VideoSampleSource`. */
+  readonly VideoSampleSource?: typeof VideoSampleSource;
+  /** Defaults to mediabunny's `VideoSample`. */
+  readonly VideoSample?: typeof VideoSample;
+  /** Defaults to the browser's `VideoFrame`. */
+  readonly VideoFrame?: BrowserExportVideoFrameConstructor;
   /**
    * How long a cancelled export waits for a frame or audio chunk that is still being encoded
    * before it cancels the output. Defaults to `CANCEL_GRACE_MS`.
@@ -175,17 +192,17 @@ export async function detectOfflineMp4Capability(
     const levels = selectAvcLevels(width, height, frameRate, bitrate, profile);
     for (const level of levels) {
       const codec = avcCodecString(profile, level);
-      const outcome = await querySupport(() =>
-        videoEncoder.isConfigSupported({
-          codec,
-          width,
-          height,
-          framerate: frameRate,
-          bitrate,
-          hardwareAcceleration: 'prefer-hardware',
-          latencyMode: 'quality',
-        }),
-      );
+      const videoConfig: VideoEncoderConfig = {
+        codec,
+        width,
+        height,
+        framerate: frameRate,
+        bitrate,
+        hardwareAcceleration: 'prefer-hardware',
+        latencyMode: 'quality',
+      };
+      setBt709EncoderColorSpace(videoConfig);
+      const outcome = await querySupport(() => videoEncoder.isConfigSupported(videoConfig));
       if (outcome.kind === 'timeout')
         return {
           ok: false,
@@ -324,9 +341,6 @@ interface OpfsFile {
   getFile(): Promise<File>;
 }
 
-/** A staging file younger than this may belong to another window's running export. */
-const STALE_STAGE_AGE_MS = 2 * 60 * 60 * 1000;
-
 /** Removes abandoned staging entries before a new export starts. */
 export async function removeStaleOpfsExportStages(root?: OpfsDirectory): Promise<void> {
   const opfsRoot = root ?? (await getOpfsRoot());
@@ -335,15 +349,13 @@ export async function removeStaleOpfsExportStages(root?: OpfsDirectory): Promise
     const directory = await opfsRoot.getDirectoryHandle('export-staging', { create: true });
     if (directory.entries === undefined) return;
     for await (const [name, handle] of directory.entries()) {
-      if (name.startsWith('export-staged-') && name.endsWith('.mp4.part')) {
-        // A file another window is still writing or uploading is recent: only remove abandoned ones.
-        const modified = await Promise.resolve()
-          .then(() => handle.getFile())
-          .then((file) => file.lastModified)
-          .catch(() => undefined);
-        if (typeof modified === 'number' && Date.now() - modified < STALE_STAGE_AGE_MS) continue;
+      // Only an entry with a readable, aged modification time is abandoned; another window's file is kept.
+      if (
+        name.startsWith('export-staged-') &&
+        name.endsWith('.mp4.part') &&
+        (await isAbandonedExportStage(handle))
+      )
         await directory.removeEntry(name).catch(() => undefined);
-      }
     }
   } catch {
     // Staging cleanup is best-effort; it must not make exports unavailable.
@@ -418,7 +430,8 @@ export async function createOpfsBlobSink(): Promise<AsyncBlobSink> {
     },
     async abort() {
       discarded = true;
-      await fileWritable!.abort?.();
+      // The removal below must run even when the file stream refuses to abort.
+      await fileWritable!.abort?.().catch(() => undefined);
       await directory!.removeEntry(fileName).catch(() => undefined);
       removed = true;
     },
@@ -489,14 +502,6 @@ export function createBlobSink(): BlobSink {
   };
 }
 
-/** BT.709 color space tags enforced on all MP4 exports so first and later exports remain identical. */
-export const EXPORT_BT709_COLOR_SPACE = Object.freeze({
-  primaries: 'bt709' as const,
-  transfer: 'bt709' as const,
-  matrix: 'bt709' as const,
-  fullRange: false,
-});
-
 /**
  * Encodes every painted frame into an MP4, as fast as the encoder allows.
  *
@@ -515,6 +520,8 @@ export async function exportOfflineMp4(
     throw new RangeError('manifest.width must be a positive integer');
   if (!Number.isSafeInteger(height) || height < 1)
     throw new RangeError('manifest.height must be a positive integer');
+  const dimensions = validateH264ExportDimensions(width, height);
+  if (!dimensions.ok) throw new RangeError(dimensions.reason);
   if (!Number.isFinite(frameRate) || frameRate <= 0)
     throw new RangeError('manifest.frameRate must be a positive finite number');
   if (source.signal?.aborted) throw createAbortError();
@@ -522,7 +529,9 @@ export async function exportOfflineMp4(
   const OutputCtor = deps.Output ?? Output;
   const Mp4OutputFormatCtor = deps.Mp4OutputFormat ?? Mp4OutputFormat;
   const AppendOnlyStreamTargetCtor = deps.AppendOnlyStreamTarget ?? AppendOnlyStreamTarget;
-  const CanvasSourceCtor = deps.CanvasSource ?? CanvasSource;
+  const VideoSampleSourceCtor = deps.VideoSampleSource ?? VideoSampleSource;
+  const VideoSampleCtor = deps.VideoSample ?? VideoSample;
+  const VideoFrameCtor = deps.VideoFrame ?? VideoFrame;
 
   const signal = source.signal;
   // Frame and audio-chunk encoding the export may have stopped waiting for because of an abort
@@ -547,13 +556,13 @@ export async function exportOfflineMp4(
   const sink = await createOpfsBlobSink();
   const target = new AppendOnlyStreamTargetCtor(sink.writable);
   let output: Output | undefined;
-  let videoSource: CanvasSource | undefined;
+  let videoSource: VideoSampleSource | undefined;
   try {
     output = new OutputCtor({
       format: new Mp4OutputFormatCtor({ fastStart: 'fragmented' }),
       target,
     });
-    videoSource = new CanvasSourceCtor(source.canvas, {
+    videoSource = new VideoSampleSourceCtor({
       codec: 'avc',
       bitrate: source.capability.bitrate,
       fullCodecString: source.capability.codec,
@@ -561,6 +570,9 @@ export async function exportOfflineMp4(
       latencyMode: 'quality',
       bitrateMode: 'variable',
       keyFrameInterval: 2,
+      onEncoderConfig: (config) => {
+        setBt709EncoderColorSpace(config);
+      },
       onEncodedPacket: (_packet, metadata) => {
         // The encoder supplies the complete decoder config, including the AVC description, on
         // its first packet. Tag that metadata before mediabunny hands it to the MP4 muxer.
@@ -582,7 +594,20 @@ export async function exportOfflineMp4(
       throwIfAborted(signal);
       await source.paintFrame(index);
       throwIfAborted(signal);
-      await raceAbort(videoSource.add(index / frameRate, frameDuration), abortPromise, inFlight);
+      const frame = createCanvasExportVideoFrame(
+        source.canvas,
+        {
+          timestamp: Math.round((index / frameRate) * 1_000_000),
+          duration: Math.round(frameDuration * 1_000_000),
+        },
+        VideoFrameCtor,
+      );
+      const sample = new VideoSampleCtor(frame, {
+        timestamp: index / frameRate,
+        duration: frameDuration,
+      });
+      const addAndClose = videoSource.add(sample).finally(() => sample.close());
+      await raceAbort(addAndClose, abortPromise, inFlight);
       throwIfAborted(signal);
       source.onProgress?.(index + 1, frameCount);
       if (source.audio !== undefined)

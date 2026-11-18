@@ -60,6 +60,148 @@ export interface BrowserExportResult {
 // bounding its lifetime if the click is ignored.
 export const BROWSER_DOWNLOAD_URL_RETENTION_MS = 10_000;
 
+/** The color description shared by WebCodecs frames and browser MP4 metadata. */
+export const EXPORT_BT709_COLOR_SPACE = Object.freeze({
+  primaries: 'bt709' as const,
+  transfer: 'bt709' as const,
+  matrix: 'bt709' as const,
+  fullRange: false,
+});
+
+/** HTML canvas pixels use sRGB, which shares BT.709 primaries but not its transfer/range. */
+export const EXPORT_CANVAS_COLOR_SPACE = Object.freeze({
+  primaries: 'bt709' as const,
+  transfer: 'iec61966-2-1' as const,
+  matrix: 'rgb' as const,
+  fullRange: true,
+});
+
+export type BrowserExportVideoFrameConstructor = new (
+  source: CanvasImageSource,
+  init: VideoFrameInit,
+) => VideoFrame;
+
+/** Creates a canvas frame with explicit sRGB color metadata. */
+export function createCanvasExportVideoFrame(
+  source: CanvasImageSource,
+  init: Omit<VideoFrameInit, 'colorSpace'>,
+  VideoFrameConstructor: BrowserExportVideoFrameConstructor = VideoFrame,
+): VideoFrame {
+  return new VideoFrameConstructor(source, {
+    ...init,
+    colorSpace: { ...EXPORT_CANVAS_COLOR_SPACE },
+  } as VideoFrameInit);
+}
+
+function requireEvenI420Dimensions(width: number, height: number): void {
+  if (width % 2 !== 0 || height % 2 !== 0)
+    throw new RangeError('BT.709 I420 export frames need an even width and height.');
+}
+
+/** Materializes canvas pixels as limited-range BT.709 YUV before MediaRecorder sees them. */
+export async function createBt709YuvExportVideoFrame(
+  source: CanvasImageSource,
+  init: Omit<VideoFrameInit, 'colorSpace'>,
+): Promise<VideoFrame> {
+  const sourceFrame = createCanvasExportVideoFrame(source, init);
+  try {
+    const copyableFrame = sourceFrame as VideoFrame & {
+      allocationSize?: (options?: { readonly format?: VideoPixelFormat }) => number;
+      copyTo?: (
+        destination: AllowSharedBufferSource,
+        options?: { readonly format?: VideoPixelFormat },
+      ) => Promise<PlaneLayout[]>;
+    };
+    requireEvenI420Dimensions(sourceFrame.codedWidth, sourceFrame.codedHeight);
+    if (copyableFrame.allocationSize === undefined || copyableFrame.copyTo === undefined)
+      throw new Error('This browser cannot produce color-tagged BT.709 video frames.');
+
+    const rgbaFormat = 'RGBA';
+    const rgba = new Uint8Array(copyableFrame.allocationSize({ format: rgbaFormat }));
+    const [rgbaLayout] = await copyableFrame.copyTo(rgba, { format: rgbaFormat });
+    if (rgbaLayout === undefined) throw new Error('Browser returned no RGBA frame layout.');
+    const data = convertSrgbRgbaToBt709I420(
+      rgba,
+      sourceFrame.codedWidth,
+      sourceFrame.codedHeight,
+      rgbaLayout.offset,
+      rgbaLayout.stride,
+    );
+    const RawVideoFrameConstructor = VideoFrame as unknown as new (
+      source: AllowSharedBufferSource,
+      init: VideoFrameInit,
+    ) => VideoFrame;
+    return new RawVideoFrameConstructor(data, {
+      format: 'I420',
+      codedWidth: sourceFrame.codedWidth,
+      codedHeight: sourceFrame.codedHeight,
+      timestamp: init.timestamp,
+      duration: init.duration,
+      colorSpace: { ...EXPORT_BT709_COLOR_SPACE },
+    } as VideoFrameInit);
+  } finally {
+    sourceFrame.close();
+  }
+}
+
+function convertSrgbRgbaToBt709I420(
+  rgba: Uint8Array,
+  width: number,
+  height: number,
+  offset: number,
+  stride: number,
+): Uint8Array {
+  const chromaWidth = Math.ceil(width / 2);
+  const chromaHeight = Math.ceil(height / 2);
+  const lumaSize = width * height;
+  const chromaSize = chromaWidth * chromaHeight;
+  const output = new Uint8Array(lumaSize + chromaSize * 2);
+  const clampByte = (value: number): number => Math.min(255, Math.max(0, Math.round(value)));
+
+  for (let pixel = 0; pixel < lumaSize; pixel += 1) {
+    const row = Math.floor(pixel / width);
+    const column = pixel % width;
+    const sourceOffset = offset + row * stride + column * 4;
+    const r = rgba[sourceOffset]! / 255;
+    const g = rgba[sourceOffset + 1]! / 255;
+    const b = rgba[sourceOffset + 2]! / 255;
+    const yPrime = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    output[pixel] = clampByte(16 + 219 * yPrime);
+  }
+
+  for (let y = 0; y < height; y += 2) {
+    for (let x = 0; x < width; x += 2) {
+      let cbTotal = 0;
+      let crTotal = 0;
+      let sampleCount = 0;
+      for (let dy = 0; dy < 2 && y + dy < height; dy += 1) {
+        for (let dx = 0; dx < 2 && x + dx < width; dx += 1) {
+          const sourceOffset = offset + (y + dy) * stride + (x + dx) * 4;
+          const r = rgba[sourceOffset]! / 255;
+          const g = rgba[sourceOffset + 1]! / 255;
+          const b = rgba[sourceOffset + 2]! / 255;
+          const yPrime = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          cbTotal += 128 + (224 * (b - yPrime)) / (2 * (1 - 0.0722));
+          crTotal += 128 + (224 * (r - yPrime)) / (2 * (1 - 0.2126));
+          sampleCount += 1;
+        }
+      }
+      const chromaPixel = (y / 2) * chromaWidth + x / 2;
+      output[lumaSize + chromaPixel] = clampByte(cbTotal / sampleCount);
+      output[lumaSize + chromaSize + chromaPixel] = clampByte(crTotal / sampleCount);
+    }
+  }
+
+  return output;
+}
+
+/** Sets the BT.709 output hint for engines that accept the Chromium extension. */
+export function setBt709EncoderColorSpace(config: VideoEncoderConfig): void {
+  (config as VideoEncoderConfig & { colorSpace?: VideoColorSpaceInit }).colorSpace = {
+    ...EXPORT_BT709_COLOR_SPACE,
+  };
+}
+
 /** Preferred native MP4 profile for Chromium's H.264/AAC MediaRecorder. */
 export const BROWSER_MP4_MIME_TYPE = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
 
@@ -78,7 +220,7 @@ export const BROWSER_MP4_MIME_CANDIDATES = [
 export type BrowserMp4MimeType = (typeof BROWSER_MP4_MIME_CANDIDATES)[number];
 export type BrowserMp4MimeSupport = (mimeType: BrowserMp4MimeType) => boolean;
 
-interface BrowserMp4Sink {
+export interface BrowserMp4Sink {
   append(chunk: Blob): void;
   finish(type: string): Promise<Blob>;
   discard(): Promise<void>;
@@ -100,7 +242,39 @@ interface BrowserOpfsFile {
   getFile(): Promise<File>;
 }
 
-async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
+/** A staging file younger than this may belong to another window's running export. */
+export const STALE_EXPORT_STAGE_AGE_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Whether a staging entry may be removed as abandoned. A file whose modification time cannot be
+ * read is kept: it may be another window's open writable, and removing it would break that export.
+ */
+export async function isAbandonedExportStage(handle: {
+  readonly getFile?: () => Promise<{ readonly lastModified?: number }>;
+}): Promise<boolean> {
+  const modified = await Promise.resolve()
+    .then(() => handle.getFile?.())
+    .then((file) => file?.lastModified)
+    .catch(() => undefined);
+  return typeof modified === 'number' && Date.now() - modified >= STALE_EXPORT_STAGE_AGE_MS;
+}
+
+/**
+ * Removes a staged file. Reports `true` only when the file is really gone: removed now, or already
+ * missing. A removal the browser refuses (the file is still in use) reports `false`, so a later
+ * discard can try again.
+ */
+async function removeStagedFile(directory: BrowserOpfsDirectory, name: string): Promise<boolean> {
+  try {
+    await directory.removeEntry(name);
+    return true;
+  } catch (error) {
+    return (error as { readonly name?: unknown } | null)?.name === 'NotFoundError';
+  }
+}
+
+/** Stages the recorder's chunks in OPFS, or in memory when OPFS is unavailable. Exported for the staging tests. */
+export async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
   const parts: Blob[] = [];
   let discarded = false;
   const fallback: BrowserMp4Sink = {
@@ -136,17 +310,12 @@ async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
     directory = await root.getDirectoryHandle('export-staging', { create: true });
     if (directory.entries !== undefined) {
       for await (const [staleName, staleHandle] of directory.entries()) {
-        if (staleName.startsWith('export-staged-') && staleName.endsWith('.mp4.part')) {
-          // A file younger than two hours may belong to another window's running export.
-          const modified = await Promise.resolve()
-            .then(() =>
-              (staleHandle as { getFile?: () => Promise<{ lastModified?: number }> }).getFile?.(),
-            )
-            .then((staleFile) => staleFile?.lastModified)
-            .catch(() => undefined);
-          if (typeof modified === 'number' && Date.now() - modified < 2 * 60 * 60 * 1000) continue;
+        if (
+          staleName.startsWith('export-staged-') &&
+          staleName.endsWith('.mp4.part') &&
+          (await isAbandonedExportStage(staleHandle))
+        )
           await directory.removeEntry(staleName).catch(() => undefined);
-        }
       }
     }
     name = `export-staged-${crypto.randomUUID()}.mp4.part`;
@@ -180,8 +349,7 @@ async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
           } catch (error) {
             if (size !== 0) throw error;
             await writable.abort?.().catch(() => undefined);
-            await directory!.removeEntry(name).catch(() => undefined);
-            removed = true;
+            removed = await removeStagedFile(directory!, name);
             fallbackMode = true;
             parts.push(chunk);
           }
@@ -200,12 +368,13 @@ async function createBrowserMp4Sink(): Promise<BrowserMp4Sink> {
       return blob.type === type ? blob : new Blob([blob], { type });
     },
     async discard() {
-      if (discarded) return;
       discarded = true;
+      // A chunk already being written (the recorder's final `dataavailable`) settles before the
+      // stream is aborted and the file removed. Appends after this point are skipped.
+      await queue;
       if (fallbackMode) parts.length = 0;
       else if (!closed) await writable.abort?.().catch(() => undefined);
-      if (!removed) await directory!.removeEntry(name).catch(() => undefined);
-      removed = true;
+      if (!removed) removed = await removeStagedFile(directory!, name);
     },
   };
 }
@@ -239,6 +408,41 @@ export function selectBrowserMp4MimeType(
   throw new UnsupportedBrowserMp4Error();
 }
 
+interface FrameTrackGenerator extends MediaStreamTrack {
+  readonly writable: WritableStream<VideoFrame>;
+}
+
+interface VideoTrackGeneratorContainer {
+  readonly track: MediaStreamTrack;
+  readonly writable: WritableStream<VideoFrame>;
+}
+
+type MediaStreamTrackGeneratorConstructor = new (options: {
+  readonly kind: 'video';
+}) => FrameTrackGenerator;
+type VideoTrackGeneratorConstructor = new () => VideoTrackGeneratorContainer;
+
+function createVideoFrameTrack(): {
+  readonly track: MediaStreamTrack;
+  readonly writer: WritableStreamDefaultWriter<VideoFrame>;
+} {
+  const globals = globalThis as typeof globalThis & {
+    MediaStreamTrackGenerator?: MediaStreamTrackGeneratorConstructor;
+    VideoTrackGenerator?: VideoTrackGeneratorConstructor;
+  };
+  const mediaStreamTrackGenerator = globals.MediaStreamTrackGenerator;
+  if (mediaStreamTrackGenerator !== undefined) {
+    const generator = new mediaStreamTrackGenerator({ kind: 'video' });
+    return { track: generator, writer: generator.writable.getWriter() };
+  }
+  const videoTrackGenerator = globals.VideoTrackGenerator;
+  if (videoTrackGenerator === undefined)
+    throw new Error('This browser cannot provide color-managed video frames for MP4 export.');
+  const generator = new videoTrackGenerator();
+  const track = generator.track;
+  return { track, writer: generator.writable.getWriter() };
+}
+
 /**
  * Streaming source for a real browser MP4 export. Keeping rendering lazy is
  * important: a 30 s 1920x1080 RGBA export is about 7 GiB if every frame is
@@ -249,8 +453,14 @@ export interface BrowserMp4ExportSource {
   readonly frameCount: number;
   /** Draws one frame into `canvas`; this preserves the GPU preview path. */
   readonly paintFrame?: (index: number) => void | Promise<void>;
-  /** CPU fallback that writes RGBA pixels into the recorder canvas. */
-  readonly renderFrame?: (index: number) => Uint8Array | Promise<Uint8Array>;
+  /**
+   * CPU fallback that fills the borrowed RGBA destination (or returns pixels for compatibility).
+   * The destination may be reused after this call resolves and must not be retained by the caller.
+   */
+  readonly renderFrame?: (
+    index: number,
+    destination?: Uint8ClampedArray,
+  ) => Uint8Array | Uint8ClampedArray | Promise<Uint8Array | Uint8ClampedArray>;
   /** Optional canvas already owned by the preview renderer. */
   readonly canvas?: HTMLCanvasElement;
   /** Authored/program audio supplied by the caller, when available. */
@@ -287,6 +497,7 @@ export async function downloadBrowserMp4(
     throw new RangeError('manifest.width must be a positive integer');
   if (!Number.isSafeInteger(height) || height < 1)
     throw new RangeError('manifest.height must be a positive integer');
+  requireEvenI420Dimensions(width, height);
   if (!Number.isFinite(frameRate) || frameRate <= 0)
     throw new RangeError('manifest.frameRate must be a positive finite number');
   if (source.paintFrame === undefined && source.renderFrame === undefined)
@@ -305,7 +516,8 @@ export async function downloadBrowserMp4(
     canvas.height = height;
   }
   let stream: MediaStream | undefined;
-  let videoTrack: (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
+  let videoTrack: MediaStreamTrack | undefined;
+  let frameWriter: WritableStreamDefaultWriter<VideoFrame> | undefined;
   let fallbackAudio: AudioContext | undefined;
   let fallbackAudioTrack: MediaStreamTrack | undefined;
   let oscillator: OscillatorNode | undefined;
@@ -314,38 +526,22 @@ export async function downloadBrowserMp4(
   let stopped: Promise<void> | undefined;
   let sink: BrowserMp4Sink | undefined;
   const bytesPerFrame = width * height * 4;
+  const renderPixels =
+    source.renderFrame === undefined ? undefined : new Uint8ClampedArray(bytesPerFrame);
+  const renderImage =
+    source.renderFrame === undefined ? undefined : new ImageData(renderPixels!, width, height);
   const frameDurationMs = 1_000 / frameRate;
   try {
+    const generatedVideo = createVideoFrameTrack();
+    videoTrack = generatedVideo.track;
+    frameWriter = generatedVideo.writer;
+    stream = new MediaStream([videoTrack]);
     const context =
       source.renderFrame === undefined
         ? undefined
         : canvas.getContext('2d', { colorSpace: 'srgb' });
     if (source.renderFrame !== undefined && context === null)
       throw new Error('2D canvas is unavailable for browser MP4 export');
-    let manualFrameCapture = false;
-    try {
-      const candidateStream = canvas.captureStream(0);
-      const candidateTrack = candidateStream.getVideoTracks()[0] as
-        (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
-      if (typeof candidateTrack?.requestFrame === 'function') {
-        stream = candidateStream;
-        videoTrack = candidateTrack;
-        manualFrameCapture = true;
-      } else {
-        candidateTrack?.stop();
-      }
-    } catch {
-      // Older capture implementations reject a zero frame rate. The timed
-      // stream below retains compatibility, but modern Chromium uses manual
-      // capture so every authored frame is explicitly handed to the encoder.
-    }
-    if (stream === undefined) {
-      stream = canvas.captureStream(frameRate);
-      videoTrack = stream.getVideoTracks()[0] as
-        (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
-    }
-    if (videoTrack === undefined) throw new Error('canvas capture did not produce a video track');
-    const captureVideoTrack = videoTrack;
 
     fallbackAudio = source.audioTrack === undefined ? new AudioContext() : undefined;
     const audioDestination = fallbackAudio?.createMediaStreamDestination();
@@ -394,47 +590,44 @@ export async function downloadBrowserMp4(
       if (source.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
       if (source.paintFrame !== undefined) await source.paintFrame(index);
       else {
-        const frame = await source.renderFrame!(index);
-        if (frame.length !== bytesPerFrame) {
+        const returned = await source.renderFrame!(index, renderPixels);
+        if (returned !== renderPixels && returned.byteLength !== bytesPerFrame) {
           throw new RangeError(
-            `frame ${index} length ${frame.length} does not match ${bytesPerFrame} bytes (${width}x${height} RGBA)`,
+            `frame ${index} length ${returned.byteLength} does not match ${bytesPerFrame} bytes (${width}x${height} RGBA)`,
           );
         }
-        const pixels = new Uint8ClampedArray(frame.length);
-        pixels.set(frame);
-        context!.putImageData(new ImageData(pixels, width, height), 0, 0);
+        if (returned !== renderPixels) renderPixels!.set(returned);
+        context!.putImageData(renderImage!, 0, 0);
       }
       // A requestAnimationFrame boundary lets a 2D/WebGL paint commit before
-      // the capture track samples it. Manual mode then submits exactly one
-      // frame per authored timeline frame instead of racing an automatic
-      // wall-clock sampler on a cold or software-rendered GPU.
+      // the frame is copied to the generated video track.
       await waitForBrowserPaint(source.signal);
     };
 
-    let firstPendingIndex = 0;
-    if (manualFrameCapture) {
-      // Chromium may defer MediaRecorder's `start` event until the manual
-      // canvas track supplies its first frame. Paint that authored frame
-      // before start(), then request it immediately after start() to avoid a
-      // blank kick frame and the resulting start/request deadlock.
-      await paintExportFrame(0);
-      firstPendingIndex = 1;
-    }
-    await startMediaRecorder(
-      recorder,
-      source.signal,
-      manualFrameCapture ? () => captureVideoTrack.requestFrame?.() : undefined,
-    );
+    const writeExportFrame = async (index: number): Promise<void> => {
+      const frame = await createBt709YuvExportVideoFrame(canvas, {
+        timestamp: Math.round((index * 1_000_000) / frameRate),
+        duration: Math.round(1_000_000 / frameRate),
+      });
+      try {
+        await frameWriter!.write(frame);
+      } finally {
+        frame.close();
+      }
+    };
+
+    // Queue the initial frame before recorder start, but await both together:
+    // the generated track may apply backpressure until the recorder consumes it.
+    await paintExportFrame(0);
+    await Promise.all([writeExportFrame(0), startMediaRecorder(recorder, source.signal)]);
     source.onRecordingStart?.();
+    source.onProgress?.(1, frameCount);
     let nextFrameAt = performance.now();
-    if (manualFrameCapture) {
-      source.onProgress?.(1, frameCount);
-      nextFrameAt += frameDurationMs;
-      await waitForBrowserExportFrame(Math.max(0, nextFrameAt - performance.now()), source.signal);
-    }
-    for (let index = firstPendingIndex; index < frameCount; index++) {
+    nextFrameAt += frameDurationMs;
+    await waitForBrowserExportFrame(Math.max(0, nextFrameAt - performance.now()), source.signal);
+    for (let index = 1; index < frameCount; index++) {
       await paintExportFrame(index);
-      if (manualFrameCapture) captureVideoTrack.requestFrame?.();
+      await writeExportFrame(index);
       source.onProgress?.(index + 1, frameCount);
       nextFrameAt += frameDurationMs;
       await waitForBrowserExportFrame(Math.max(0, nextFrameAt - performance.now()), source.signal);
@@ -442,6 +635,7 @@ export async function downloadBrowserMp4(
     }
     recorder.stop();
     await stopped;
+    await frameWriter.close();
 
     const blob = await sink.finish(recorderMimeType);
     if (blob.size === 0)
@@ -461,6 +655,7 @@ export async function downloadBrowserMp4(
       recorder.stop();
       await stopped?.catch(() => undefined);
     }
+    if (frameWriter !== undefined) await frameWriter.abort().catch(() => undefined);
     await sink?.discard();
     throw error;
   } finally {
@@ -475,6 +670,11 @@ export async function downloadBrowserMp4(
       videoTrack?.stop();
     } catch {
       // Continue cleanup if the capture implementation already stopped this track.
+    }
+    try {
+      frameWriter?.releaseLock();
+    } catch {
+      // The writer may already be released after a failed stream write.
     }
     try {
       fallbackAudioTrack?.stop();
@@ -497,11 +697,7 @@ export async function downloadBrowserMp4(
   }
 }
 
-function startMediaRecorder(
-  recorder: MediaRecorder,
-  signal?: AbortSignal,
-  afterStartCall?: () => void,
-): Promise<void> {
+function startMediaRecorder(recorder: MediaRecorder, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(new DOMException('Export cancelled', 'AbortError'));
   return new Promise<void>((resolve, reject) => {
     const cleanup = (): void => {
@@ -526,7 +722,6 @@ function startMediaRecorder(
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
       recorder.start();
-      afterStartCall?.();
     } catch (error) {
       cleanup();
       reject(error);

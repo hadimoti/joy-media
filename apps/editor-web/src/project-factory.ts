@@ -7,6 +7,7 @@ import {
 import { INITIAL_EDITOR_PROJECT, DEFAULT_COMPOSITION_SIZE } from './editor-project.js';
 import { exportPresetForCanvas, type CanvasSize } from './export-presets.js';
 import type { ProjectCatalogEntry } from './project-catalog.js';
+import { SAMPLE_MEDIA } from './sample-media-cache.js';
 import {
   buildTimelineElementsShowcase,
   TIMELINE_ELEMENTS_SHOWCASE,
@@ -106,6 +107,30 @@ function blankProjectDocuments(
 }
 
 /**
+ * The Local editor project's timeline: the reference edit without the video clips whose media the app
+ * does not ship (b-roll-a and b-roll-b have no file anywhere, so the export could never read them). The
+ * clips with shipped media stay, and the titles, captions and product still are project objects that
+ * show for the whole sample.
+ */
+function localEditorSampleTimeline(): SpikeProject {
+  const reference = buildReferenceSpikeProject();
+  const shipped = new Set(SAMPLE_MEDIA.map((media) => media.assetId));
+  const compositions = Object.fromEntries(
+    Object.entries(reference.compositions).map(([id, composition]) => [
+      id,
+      {
+        ...composition,
+        tracks: composition.tracks.map((track) => ({
+          ...track,
+          clips: track.clips.filter((clip) => clip.kind !== 'video' || shipped.has(clip.assetId)),
+        })),
+      },
+    ]),
+  );
+  return { ...reference, compositions };
+}
+
+/**
  * Seeds passed to EditorSession for recover-or-initialize. Existing store data
  * wins; seeds only materialize on first open.
  */
@@ -125,7 +150,7 @@ export function seedsForCatalogEntry(entry: ProjectCatalogEntry): {
     entry.visualProjectId === INITIAL_EDITOR_PROJECT.id
   ) {
     return {
-      timeline: { ...buildReferenceSpikeProject(), id: entry.timelineProjectId },
+      timeline: { ...localEditorSampleTimeline(), id: entry.timelineProjectId },
       visual: {
         ...INITIAL_EDITOR_PROJECT,
         id: entry.visualProjectId,

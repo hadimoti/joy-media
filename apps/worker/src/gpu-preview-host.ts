@@ -6,7 +6,10 @@ import {
   resolveTextDirection,
   type RenderNode,
 } from '@joy-media/render-ir';
-import { canvasFontFamilyStack } from '@joy-media/renderer-pixi/text-direction';
+import {
+  canvasFontFamilyStack,
+  serializeTextWrapRuntimeSource,
+} from '@joy-media/renderer-pixi/text-direction';
 import {
   WORKER_PROTOCOL_VERSION,
   type GpuPreviewFrameRequest,
@@ -15,6 +18,7 @@ import {
 
 const SOFTWARE_RENDERER = /swiftshader|software|llvmpipe|softpipe|mesa offscreen/i;
 const nodeRequire = createRequire(import.meta.url);
+const TEXT_WRAP_RUNTIME_SOURCE = serializeTextWrapRuntimeSource();
 const GPU_TEXT_FONT_FILES = [
   {
     family: 'Inter Variable',
@@ -192,6 +196,7 @@ export class GpuPreviewHost {
       quality: request.quality,
       bitmaps: request.bitmaps ?? [],
       textStyles: collectGpuTextStyles(request.frame.nodes),
+      textWrapRuntimeSource: TEXT_WRAP_RUNTIME_SOURCE,
     });
     return {
       protocolVersion: WORKER_PROTOCOL_VERSION,
@@ -233,8 +238,15 @@ async function renderGpuFrame(input: {
   quality: GpuPreviewFrameRequest['quality'];
   bitmaps: NonNullable<GpuPreviewFrameRequest['bitmaps']>;
   textStyles: Readonly<Record<string, GpuTextStyle>>;
+  textWrapRuntimeSource: string;
 }): Promise<{ width: number; height: number; pngBase64: string }> {
   const scale = input.quality === 'quarter' ? 0.25 : input.quality === 'half' ? 0.5 : 1;
+  const wrapTextByWords = new Function(`return ${input.textWrapRuntimeSource};`)() as (
+    text: string,
+    maxWidth: number,
+    measure: (candidate: string, direction: 'ltr' | 'rtl') => number,
+    direction: 'ltr' | 'rtl',
+  ) => { text: string; lineDirections: readonly ('ltr' | 'rtl')[] };
   const width = Math.max(1, Math.round(input.frame.viewport.width * scale));
   const height = Math.max(1, Math.round(input.frame.viewport.height * scale));
   const canvas = document.createElement('canvas');
@@ -363,9 +375,10 @@ async function renderGpuFrame(input: {
       const fontSize = Math.max(1, (node.fontSizePx ?? 16) * scale);
       const textStyle = input.textStyles[node.id];
       if (textStyle === undefined) throw new Error(`GPU text styles are missing for ${node.id}`);
-      const lines = node.text.split(/\r\n|\n|\r/u);
-      const lineDirections = textStyle.lineDirections;
-      const lineAlignments = textStyle.lineAlignments;
+      const paragraphs = node.text.split(/\r\n|\n|\r/u);
+      const lines: string[] = [];
+      const lineDirections: ('ltr' | 'rtl')[] = [];
+      const lineAlignments: ('left' | 'center' | 'right')[] = [];
       const family = textStyle.fontFamilyStack
         .map((fontFamily) => JSON.stringify(fontFamily))
         .join(', ');
@@ -374,8 +387,36 @@ async function renderGpuFrame(input: {
       context.globalAlpha = node.opacity;
       context.textBaseline = 'top';
       context.font = `${node.italic ? 'italic ' : ''}${node.fontWeight ?? 400} ${fontSize}px ${family}`;
+      if ('letterSpacing' in context) {
+        (context as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing =
+          `${(node.tracking ?? 0) * scale}px`;
+      }
       const x = node.transform.translateX * scale;
       const y = node.transform.translateY * scale;
+      paragraphs.forEach((paragraph, paragraphIndex) => {
+        const direction = textStyle.lineDirections[paragraphIndex] ?? 'ltr';
+        const alignment = textStyle.lineAlignments[paragraphIndex] ?? 'left';
+        context.direction = direction;
+        context.textAlign = alignment;
+        const wrapped =
+          node.maxWidth === undefined
+            ? { text: paragraph, lineDirections: [direction] }
+            : wrapTextByWords(
+                paragraph,
+                node.maxWidth * scale,
+                (candidate, measuredDirection) => {
+                  context.direction = measuredDirection;
+                  return context.measureText(candidate).width;
+                },
+                direction,
+              );
+        const wrappedLines = wrapped.text.split('\n');
+        wrappedLines.forEach((line, lineIndex) => {
+          lines.push(line);
+          lineDirections.push(wrapped.lineDirections[lineIndex] ?? direction);
+          lineAlignments.push(alignment);
+        });
+      });
       const lineMetrics = lines.map((line, index) => {
         context.direction = lineDirections[index] ?? 'ltr';
         context.textAlign = lineAlignments[index] ?? 'left';
@@ -417,23 +458,13 @@ async function renderGpuFrame(input: {
         lines.forEach((line, index) => {
           context.direction = lineDirections[index] ?? 'ltr';
           context.textAlign = lineAlignments[index] ?? 'left';
-          context.strokeText(
-            line,
-            x,
-            y + index * lineHeightPx,
-            node.maxWidth === undefined ? undefined : node.maxWidth * scale,
-          );
+          context.strokeText(line, x, y + index * lineHeightPx);
         });
       }
       lines.forEach((line, index) => {
         context.direction = lineDirections[index] ?? 'ltr';
         context.textAlign = lineAlignments[index] ?? 'left';
-        context.fillText(
-          line,
-          x,
-          y + index * lineHeightPx,
-          node.maxWidth === undefined ? undefined : node.maxWidth * scale,
-        );
+        context.fillText(line, x, y + index * lineHeightPx);
       });
       context.restore();
       continue;

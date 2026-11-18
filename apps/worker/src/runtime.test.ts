@@ -1,4 +1,5 @@
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -24,6 +25,7 @@ import {
 } from './runtime.js';
 import type { RealThumbnailReceipt, UnsupportedWorkerJobError } from './runtime.js';
 import { ffmpegFilterPath, gpuDerivativeLocalRef, rnnoiseFilter } from './local-gpu.js';
+import { renderFixture } from '@joy-media/export-core';
 
 // Counts reads of the legacy provider file, which the Worker must never open. Every call passes through unchanged.
 vi.mock('node:fs', async (importOriginal) => {
@@ -288,6 +290,59 @@ describe('Worker runtime', () => {
       rmSync(derivativeDirectory, { recursive: true, force: true });
     }
   });
+
+  it('returns canceled, not completed, when a cancel lands after the export is encoded', async () => {
+    const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-late-cancel-'));
+    const stagingDirectory = mkdtempSync(join(tmpdir(), 'joy-media-late-cancel-stage-'));
+    const stagedSource = join(stagingDirectory, 'staged.mp4');
+    const manifest = {
+      projectId: 'project-late-cancel',
+      revision: 1,
+      width: 64,
+      height: 36,
+      frameRate: 30,
+      durationUs: 100_000,
+      preset: 'social-h264-aac',
+    } as const;
+    renderFixture(manifest, stagedSource);
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiBroker: false },
+      {
+        derivativeDirectory,
+        downloadJobAsset: async (_jobId, _leaseToken, destinationPath) => {
+          copyFileSync(stagedSource, destinationPath);
+        },
+      },
+    );
+    // The export payload is typed loosely on the runtime job, so it is cast once here.
+    const job = {
+      id: 'job-late-cancel',
+      type: 'render.export',
+      assetId: 'asset-export',
+      payload: {
+        schemaVersion: 1,
+        producer: 'browser-staged-preview-export',
+        frameCount: 3,
+        manifest,
+      },
+    } as unknown as Parameters<WorkerRuntime['run']>[0];
+    let canceled = false;
+    try {
+      const result = await runtime.run(job, {
+        cancelled: () => canceled,
+        // Progress 80 is reported right after FFmpeg returns, before hashing and staging.
+        progress: async (progress) => {
+          if (progress === 80) canceled = true;
+        },
+      });
+      expect(result).toEqual({ state: 'canceled' });
+      expect(readdirSync(derivativeDirectory)).toEqual([]);
+    } finally {
+      rmSync(derivativeDirectory, { recursive: true, force: true });
+      rmSync(stagingDirectory, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it('runs the Jobs-panel fixture thumbnail without FFmpeg or a local asset', async () => {
     const runtime = new WorkerRuntime(

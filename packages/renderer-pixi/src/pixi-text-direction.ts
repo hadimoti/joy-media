@@ -61,6 +61,11 @@ function canvasTextAlign(align: CanvasTextAlignment): CanvasTextContext['textAli
   return align === 'start' || align === 'end' ? align : 'left';
 }
 
+/** The direction options registered for a Pixi text style, for tests and diagnostics. */
+export function pixiTextDirectionOf(style: object): PixiTextDirectionOptions | undefined {
+  return styleOptions.get(style);
+}
+
 export function registerPixiTextDirection(style: object, options: PixiTextDirectionOptions): void {
   styleOptions.set(style, options);
   installCanvasTextDirectionAdapter();

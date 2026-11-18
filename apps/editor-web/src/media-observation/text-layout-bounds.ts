@@ -23,6 +23,8 @@ export interface TextLayoutBoundsRecord {
   readonly corners: readonly [NodePoint, NodePoint, NodePoint, NodePoint];
   /** Corners of the plate behind the text, when it has one. The box then covers the plate too. */
   readonly plateCorners?: readonly [NodePoint, NodePoint, NodePoint, NodePoint];
+  /** True when the renderer measured an empty or whitespace-only text node. */
+  readonly emptyText?: boolean;
   readonly textColor: TimelineQcRgba;
   readonly plateColor?: TimelineQcRgba;
 }
@@ -115,7 +117,10 @@ export function projectTextLayoutBounds(
     }
     const text = extent(record.corners);
     const covered = plate === undefined ? text : extent([...record.corners, ...plate]);
-    if (covered.right <= covered.left || covered.bottom <= covered.top) {
+    if (
+      (covered.right <= covered.left || covered.bottom <= covered.top) &&
+      record.emptyText !== true
+    ) {
       unavailable.push({ id: record.id, reason: 'invalid-corners' });
       continue;
     }
@@ -128,6 +133,7 @@ export function projectTextLayoutBounds(
       y: covered.top / height,
       width: (covered.right - covered.left) / width,
       height: (covered.bottom - covered.top) / height,
+      ...(record.emptyText === true ? { emptyText: true } : {}),
       textColor: record.textColor,
       ...(record.plateColor === undefined ? {} : { backgroundColor: record.plateColor }),
     });

@@ -26,6 +26,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { NON_FILE_ASSET_KINDS, type AssetRecordV1 } from '@joy-media/project-schema';
 import type { CliFlags } from '../cli.js';
 import { FlagValidationError, parseIntFlag } from '../utils/flags.js';
 import {
@@ -333,6 +334,22 @@ function finiteOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function effectiveCompositionDurationUs(composition: Record<string, unknown>): number {
+  let endUs = Math.max(1, finiteOrNull(composition['durationUs']) ?? 0);
+  const tracks = composition['tracks'];
+  if (!Array.isArray(tracks)) return endUs;
+  for (const track of tracks) {
+    if (!isRecord(track) || !Array.isArray(track['clips'])) continue;
+    for (const clip of track['clips']) {
+      if (!isRecord(clip)) continue;
+      const startUs = finiteOrNull(clip['startUs']) ?? 0;
+      const durationUs = finiteOrNull(clip['durationUs']) ?? 0;
+      endUs = Math.max(endUs, startUs + durationUs);
+    }
+  }
+  return endUs;
+}
+
 /**
  * Turn a (possibly hand-written or agent-generated) project document into an
  * ordered list of clips with frame counts. Never throws: structural problems
@@ -483,17 +500,11 @@ export interface MissingRenderClip {
   readonly endUs: number;
 }
 
-/** Asset kinds that are not files, so they are never missing (the editor's rule too). */
-const NON_FILE_ASSET_KINDS: ReadonlySet<unknown> = new Set(['lut', 'other']);
-
 /**
- * The root-track clips whose file is missing. Only a clip whose project asset is a file asset
- * counts: a clip with no declared asset, or a text-like asset, is not checked. `hasFile` says
- * whether the asset library holds the file. Never throws.
- *
- * Scope differs from the editor on purpose: this checks only the direct clips of enabled root
- * tracks. The editor's missing list also follows clips inside nested compositions
- * (flattenRootTimelineVideoClips), so a nested clip with a missing file is reported there only.
+ * The enabled root-timeline clips whose file is missing. It follows composition clips into their
+ * enabled child tracks, bounded by each compound's visible range. A clip with no declared file
+ * asset, or a text-like asset, is not checked. `hasFile` says whether the library holds the file.
+ * Never throws.
  */
 export function missingRenderClips(
   project: unknown,
@@ -508,28 +519,65 @@ export function missingRenderClips(
   if (!isRecord(root) || !Array.isArray(root['tracks'])) return [];
 
   const missing: MissingRenderClip[] = [];
-  for (const rawTrack of root['tracks']) {
-    if (!isRecord(rawTrack) || typeof rawTrack['id'] !== 'string') continue;
-    if (rawTrack['enabled'] === false || !Array.isArray(rawTrack['clips'])) continue;
-    for (const rawClip of rawTrack['clips']) {
-      if (!isRecord(rawClip) || typeof rawClip['id'] !== 'string') continue;
-      const assetId = rawClip['assetId'];
-      if (typeof assetId !== 'string') continue;
-      const record = assets[assetId];
-      if (!isRecord(record) || NON_FILE_ASSET_KINDS.has(record['kind'])) continue;
-      if (hasFile(assetId)) continue;
-      const startUs = finiteOrNull(rawClip['startUs']) ?? 0;
-      const durationUs = finiteOrNull(rawClip['durationUs']) ?? 0;
-      missing.push({
-        trackId: rawTrack['id'],
-        clipId: rawClip['id'],
-        assetId,
-        name: typeof record['displayName'] === 'string' ? record['displayName'] : assetId,
-        startUs,
-        endUs: startUs + durationUs,
-      });
+  const visiting = new Set<string>();
+  const visitComposition = (
+    compositionId: string,
+    baseUs: number,
+    visibleStartUs: number,
+    visibleEndUs: number,
+  ): void => {
+    if (!isRecord(compositions) || visiting.has(compositionId)) return;
+    const composition = compositions[compositionId];
+    if (!isRecord(composition) || !Array.isArray(composition['tracks'])) return;
+    visiting.add(compositionId);
+    for (const rawTrack of composition['tracks']) {
+      if (!isRecord(rawTrack) || typeof rawTrack['id'] !== 'string') continue;
+      if (rawTrack['enabled'] === false || !Array.isArray(rawTrack['clips'])) continue;
+      for (const rawClip of rawTrack['clips']) {
+        if (!isRecord(rawClip) || typeof rawClip['id'] !== 'string') continue;
+        const localStartUs = finiteOrNull(rawClip['startUs']) ?? 0;
+        const durationUs = finiteOrNull(rawClip['durationUs']) ?? 0;
+        const absoluteStartUs = baseUs + localStartUs;
+        const absoluteEndUs = absoluteStartUs + durationUs;
+        const startUs = Math.max(absoluteStartUs, visibleStartUs);
+        const endUs = Math.min(absoluteEndUs, visibleEndUs);
+        if (endUs <= startUs) continue;
+        if (rawClip['kind'] === 'composition') {
+          const childId = rawClip['compositionId'];
+          if (typeof childId !== 'string' || visiting.has(childId)) continue;
+          const childOffsetUs = finiteOrNull(rawClip['childOffsetUs']) ?? 0;
+          const childBaseUs = absoluteStartUs - childOffsetUs;
+          const child = isRecord(compositions) ? compositions[childId] : undefined;
+          const childDurationUs = isRecord(child) ? effectiveCompositionDurationUs(child) : 0;
+          visitComposition(
+            childId,
+            childBaseUs,
+            startUs,
+            Math.min(endUs, childBaseUs + childDurationUs),
+          );
+          continue;
+        }
+        if (rawClip['kind'] !== 'video') continue;
+        const assetId = rawClip['assetId'];
+        if (typeof assetId !== 'string') continue;
+        const record = assets[assetId];
+        if (!isRecord(record) || NON_FILE_ASSET_KINDS.has(record['kind'] as AssetRecordV1['kind']))
+          continue;
+        if (hasFile(assetId)) continue;
+        missing.push({
+          trackId: rawTrack['id'],
+          clipId: rawClip['id'],
+          assetId,
+          name: typeof record['displayName'] === 'string' ? record['displayName'] : assetId,
+          startUs,
+          endUs,
+        });
+      }
     }
-  }
+    visiting.delete(compositionId);
+  };
+  const rootDurationUs = effectiveCompositionDurationUs(root);
+  visitComposition(rootId as string, 0, 0, rootDurationUs);
   return missing.sort((left, right) => left.startUs - right.startUs);
 }
 

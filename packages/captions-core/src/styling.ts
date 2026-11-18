@@ -188,11 +188,15 @@ export function layoutTemplatedCaptionNodes(
     const displayText = segmentDisplayText(cue.document, cue.segment);
     if (displayText.length === 0) continue;
     // Karaoke needs intact source tokens; an override breaks word mapping.
+    const sourceWordIds =
+      cue.segment.textOverride === undefined
+        ? cue.segment.wordIds.filter(
+            (wordId) => (cue.document.words[wordId]?.text ?? '').length > 0,
+          )
+        : [];
     const sourceTokens =
       cue.segment.textOverride === undefined
-        ? cue.segment.wordIds
-            .map((wordId) => cue.document.words[wordId]?.text ?? '')
-            .filter((token) => token.length > 0)
+        ? sourceWordIds.map((wordId) => cue.document.words[wordId]!.text)
         : displayText.split(/\s+/);
 
     // Responsive sizing: shrink until the wrap fits the template's line budget.
@@ -213,10 +217,10 @@ export function layoutTemplatedCaptionNodes(
       template.karaoke && cue.segment.textOverride === undefined
         ? activeCaptionWord(cue.document, cue.segment, cue.documentTimeUs)
         : undefined;
-    const activeIndex = activeWord === undefined ? -1 : cue.segment.wordIds.indexOf(activeWord.id);
+    const activeIndex = activeWord === undefined ? -1 : sourceWordIds.indexOf(activeWord.id);
 
     for (const [lineIndex, line] of [...lines].reverse().entries()) {
-      const lineDirection = resolveCaptionTextDirection(line.text, 'auto');
+      const lineDirection = resolveCaptionTextDirection(line.text, cue.document.direction);
       const lineAlignment = resolveLogicalTextAlign(align, lineDirection);
       const anchorX =
         lineAlignment === 'left'

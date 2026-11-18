@@ -135,8 +135,10 @@ describe('GpuPreviewHost text setup', () => {
       y: number;
       direction: string;
       align: string;
+      letterSpacing: string;
+      maxWidth?: number;
     }> = [];
-    const strokes: Array<{ text: string; x: number; y: number }> = [];
+    const strokes: Array<{ text: string; x: number; y: number; maxWidth?: number }> = [];
     const gl = {
       ARRAY_BUFFER: 1,
       BLEND: 2,
@@ -190,6 +192,7 @@ describe('GpuPreviewHost text setup', () => {
       globalAlpha: number;
       textBaseline: string;
       font: string;
+      letterSpacing: string;
       fillStyle: string;
       strokeStyle: string;
       lineWidth: number;
@@ -197,8 +200,8 @@ describe('GpuPreviewHost text setup', () => {
       restore: () => void;
       drawImage: () => void;
       measureText: (text: string) => { width: number };
-      fillText: (text: string, x: number, y: number) => void;
-      strokeText: (text: string, x: number, y: number) => void;
+      fillText: (text: string, x: number, y: number, maxWidth?: number) => void;
+      strokeText: (text: string, x: number, y: number, maxWidth?: number) => void;
     };
     const context: PreviewCanvasContext = {
       direction: 'ltr',
@@ -207,16 +210,30 @@ describe('GpuPreviewHost text setup', () => {
       globalAlpha: 1,
       textBaseline: 'top',
       font: '',
+      letterSpacing: '0px',
       fillStyle: '',
       strokeStyle: '',
       lineWidth: 0,
       save: () => undefined,
       restore: () => undefined,
       drawImage: () => undefined,
-      measureText: (text) => ({ width: [...text].length * 10 }),
-      fillText: (text, x, y) =>
-        draws.push({ text, x, y, direction: context.direction, align: context.textAlign }),
-      strokeText: (text, x, y) => strokes.push({ text, x, y }),
+      measureText: (text) => {
+        const length = [...text].length;
+        const tracking = Number.parseFloat(context.letterSpacing) || 0;
+        return { width: length * 10 + Math.max(0, length - 1) * tracking };
+      },
+      fillText: (text, x, y, maxWidth) =>
+        draws.push({
+          text,
+          x,
+          y,
+          direction: context.direction,
+          align: context.textAlign,
+          letterSpacing: context.letterSpacing,
+          ...(maxWidth === undefined ? {} : { maxWidth }),
+        }),
+      strokeText: (text, x, y, maxWidth) =>
+        strokes.push({ text, x, y, ...(maxWidth === undefined ? {} : { maxWidth }) }),
     };
     vi.stubGlobal('document', {
       createElement: () => ({
@@ -250,7 +267,10 @@ describe('GpuPreviewHost text setup', () => {
         nodes: [
           {
             ...textNode('mixed-lines', '\u0633\u0644\u0627\u0645\nJOY', 'Vazirmatn Variable'),
+            text: '\u0633\u0644\u0627\u0645\nJOY Media',
             lineHeight: 1.5,
+            maxWidth: 60,
+            tracking: 2,
             stroke: { widthPx: 1, color: { r: 0, g: 0, b: 0, a: 255 } },
           },
         ],
@@ -260,12 +280,35 @@ describe('GpuPreviewHost text setup', () => {
     await host.render(request);
 
     expect(draws).toEqual([
-      { text: '\u0633\u0644\u0627\u0645', x: 20, y: 30, direction: 'rtl', align: 'right' },
-      { text: 'JOY', x: 20, y: 66, direction: 'ltr', align: 'left' },
+      {
+        text: '\u0633\u0644\u0627\u0645',
+        x: 20,
+        y: 30,
+        direction: 'rtl',
+        align: 'right',
+        letterSpacing: '2px',
+      },
+      {
+        text: 'JOY',
+        x: 20,
+        y: 66,
+        direction: 'ltr',
+        align: 'left',
+        letterSpacing: '2px',
+      },
+      {
+        text: 'Media',
+        x: 20,
+        y: 102,
+        direction: 'ltr',
+        align: 'left',
+        letterSpacing: '2px',
+      },
     ]);
     expect(strokes).toEqual([
       { text: '\u0633\u0644\u0627\u0645', x: 20, y: 30 },
       { text: 'JOY', x: 20, y: 66 },
+      { text: 'Media', x: 20, y: 102 },
     ]);
     await host.destroy();
   });
