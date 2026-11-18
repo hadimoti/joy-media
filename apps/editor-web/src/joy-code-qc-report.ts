@@ -82,6 +82,7 @@ const GROUP_NAMES: Readonly<Record<string, string>> = {
   clipping: 'Clipping',
   exposure: 'Exposure',
   'colour-cast': 'Colour cast',
+  'av-length-mismatch': 'Video and sound length',
   'safe-area': 'Safe area',
   'text-legibility': 'Text legibility',
 };
@@ -93,6 +94,7 @@ const GROUP_ORDER: readonly string[] = [
   'scene-cut',
   'exposure',
   'colour-cast',
+  'av-length-mismatch',
   'silence',
   'clipping',
   'loudness',
@@ -432,6 +434,9 @@ const MEASUREMENT_NAMES: Readonly<Record<string, string>> = {
   truePeakDbfs: 'True peak',
   insideSafeArea: 'Inside safe area',
   contrastRatio: 'Contrast ratio',
+  videoDurationUs: 'Video duration',
+  audioDurationUs: 'Sound duration',
+  differenceUs: 'Length difference',
 };
 
 function measurementName(key: string): string {
@@ -449,7 +454,7 @@ function measurementValue(key: string, value: QcMeasurementValue): string {
   if (value === null) return 'Unavailable';
   if (typeof value === 'string') return value;
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (/(?:duration|length)(?:Us|Microseconds)$/i.test(key))
+  if (/(?:duration|length|difference)(?:Us|Microseconds)$/i.test(key))
     return `${trimDecimal(value / 1_000_000)} s`;
   if (/(?:duration|length)(?:Ms|Milliseconds)$/i.test(key))
     return `${trimDecimal(value / 1_000)} s`;

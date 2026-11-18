@@ -46,7 +46,7 @@ What the code actually does today (read 12 Nov 2026, revised against `integratio
 
 Joy Code's quality check is **two layers that produce one report**.
 
-**Layer 1 — the technical check.** No model, no network, no cost. The Worker runs ffmpeg and ffprobe filters and returns numbers: black frames, frozen frames, scene cuts, loudness, silence, clipping, exposure, colour cast. For a timeline, the editor samples composed frames and measures safe areas and text legibility locally. **Layer 1 works with no model connected at all**, and its numbers are the same for every provider.
+**Layer 1 — the technical check.** No model, no network, no cost. The Worker runs ffmpeg and ffprobe filters and returns numbers: black frames, frozen frames, scene cuts, loudness, silence, clipping, exposure, colour cast, and video and sound lengths. For a timeline, the editor samples composed frames and measures safe areas and text legibility locally. **Layer 1 works with no model connected at all**, and its numbers are the same for every provider.
 
 **Layer 2 — the seeing check.** Only for providers whose probe says `image: supported`. A **host-run one-shot call** hands a bounded set of chosen frames to a model that can see and takes back **bounded analysis text**. Section 4 fixes the route. Layer 2 never re-measures what Layer 1 measured, and it never sees more frames than the budget allows.
 
@@ -150,33 +150,35 @@ Why B and not A: under A the model can never react to what it sees, so it cannot
 
 ### 6. Finding types
 
-Fourteen types, in three groups. Each finding carries: `id`, `type`, `severity`, `startUs`, `endUs`, `label` (one plain sentence for the owner), `measured` (the numbers, when the type has them), `state` (`measured` / `model-observed` / `unconfirmed`), `fixable` (section 7), and `evidenceIds` (the frames or samples behind it).
+Fifteen types, in three groups. Each finding carries: `id`, `type`, `severity`, `startUs`, `endUs`, `label` (one plain sentence for the owner), `measured` (the numbers, when the type has them), `state` (`measured` / `model-observed` / `unconfirmed`), `fixable` (section 7), and `evidenceIds` (the frames or samples behind it).
 
 **Severity** is three words and nothing else: `blocker` (data loss, crash, wrong export, install failure), `major`, `minor`. The word list is the same one the defect log already uses (`03-TASK-CARDS.md:203`), so a QC finding and a test defect speak the same language.
 
-#### 6a. The ten Layer 1 types
+#### 6a. The eleven Layer 1 types
 
-| Type              | What it is                                | Where the number comes from                                                   | Target            | Fixable               |
-| ----------------- | ----------------------------------------- | ----------------------------------------------------------------------------- | ----------------- | --------------------- |
-| `black`           | A run of black frames                     | ffmpeg `blackdetect`                                                          | file + timeline   | no (advice)           |
-| `frozen`          | A run of still frames                     | ffmpeg `freezedetect`                                                         | file + timeline   | no (advice)           |
-| `scene-cut`       | A hard cut                                | ffmpeg `scdet`                                                                | file + timeline   | no (advice)           |
-| `loudness`        | The loudness of the whole cut             | ffmpeg `ebur128`                                                              | file + timeline   | yes (gain)            |
-| `silence`         | A silent stretch                          | ffmpeg `silencedetect`, or `detectSilence` (`audio-core/src/analysis.ts:121`) | file + timeline   | yes (trim or music)   |
-| `clipping`        | The loud samples that distort             | ffmpeg `astats`, or `detectClipping` (`:28`)                                  | file + timeline   | yes (gain)            |
-| `exposure`        | Too dark or too bright                    | ffmpeg `signalstats`                                                          | file + timeline   | no (advice)           |
-| `colour-cast`     | The picture leans one way                 | ffmpeg `signalstats` on the U and V planes                                    | file + timeline   | no (advice)           |
-| `safe-area`       | A title or caption outside the safe area  | the title and caption boxes in the project                                    | **timeline only** | yes (move)            |
-| `text-legibility` | Text too close in value to its background | a contrast measure against the sampled frame                                  | **timeline only** | yes (move or restyle) |
+| Type                 | What it is                                                        | Where the number comes from                                                   | Target            | Fixable               |
+| -------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------- | --------------------- |
+| `black`              | A run of black frames                                             | ffmpeg `blackdetect`                                                          | file + timeline   | no (advice)           |
+| `frozen`             | A run of still frames                                             | ffmpeg `freezedetect`                                                         | file + timeline   | no (advice)           |
+| `scene-cut`          | A hard cut                                                        | ffmpeg `scdet`                                                                | file + timeline   | no (advice)           |
+| `loudness`           | The loudness of the whole cut                                     | ffmpeg `ebur128`                                                              | file + timeline   | yes (gain)            |
+| `silence`            | A silent stretch                                                  | ffmpeg `silencedetect`, or `detectSilence` (`audio-core/src/analysis.ts:121`) | file + timeline   | yes (trim or music)   |
+| `clipping`           | The loud samples that distort                                     | ffmpeg `astats`, or `detectClipping` (`:28`)                                  | file + timeline   | yes (gain)            |
+| `exposure`           | Too dark or too bright                                            | ffmpeg `signalstats`                                                          | file + timeline   | no (advice)           |
+| `colour-cast`        | The picture leans one way                                         | ffmpeg `signalstats` on the U and V planes                                    | file + timeline   | no (advice)           |
+| `av-length-mismatch` | The video and sound lengths differ by more than the default 0.5 s | ffprobe stream durations                                                      | **file only**     | no (adjust by hand)   |
+| `safe-area`          | A title or caption outside the safe area                          | the title and caption boxes in the project                                    | **timeline only** | yes (move)            |
+| `text-legibility`    | Text too close in value to its background                         | a contrast measure against the sampled frame                                  | **timeline only** | yes (move or restyle) |
 
-**The check × target matrix.** Two of the ten are timeline-only, because they read the project document. The other eight read a stream of samples and work on both targets.
+**The check × target matrix.** Two of the eleven Layer 1 checks are timeline-only, because they read the project document. Eight read samples and work on both targets; the length check reads ffprobe stream durations and applies to files only.
 
 |                                                                                              | file (an export) | timeline (the current project) |
 | -------------------------------------------------------------------------------------------- | ---------------- | ------------------------------ |
 | `black`, `frozen`, `scene-cut`, `loudness`, `silence`, `clipping`, `exposure`, `colour-cast` | yes              | yes                            |
+| `av-length-mismatch`                                                                         | yes              | **no**                         |
 | `safe-area`, `text-legibility`                                                               | **no**           | yes                            |
 
-For a timeline, the eight stream checks run over **sampled composed frames**, and the two document checks run over the document. For a file, only the eight apply.
+For a timeline, the eight shared checks run over **sampled composed frames**, and the two document checks run over the document. The audio and video length check applies only to files.
 
 #### 6b. The four types added on review
 
@@ -213,6 +215,7 @@ A note never becomes a finding, never counts towards a severity, and never block
 | `unfitted`                       | yes      | fit, fill or reframe the clip                | the model proposes, the owner approves |
 | `black`, `frozen`, `scene-cut`   | **no**   | advice only. The owner decides what to cut.  | nobody                                 |
 | `exposure`, `colour-cast`        | **no**   | advice only. The grade is a taste decision.  | nobody                                 |
+| `av-length-mismatch`             | **no**   | adjust the video and sound lengths by hand   | nobody                                 |
 | `audio-dropout`                  | **no**   | advice only. It points at the source.        | nobody                                 |
 | `missing-media`                  | **no**   | the owner must find or relink the file       | nobody                                 |
 | any note                         | **no**   | advice only                                  | nobody                                 |

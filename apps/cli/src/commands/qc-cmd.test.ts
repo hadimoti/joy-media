@@ -52,6 +52,7 @@ describe('joy-media qc: pure helpers', () => {
     expect(isFault({ type: 'scene-cut' } as Finding)).toBe(false);
     expect(isFault({ type: 'black' } as Finding)).toBe(true);
     expect(isFault({ type: 'frozen' } as Finding)).toBe(true);
+    expect(isFault({ type: 'av-length-mismatch' } as Finding)).toBe(true);
   });
 
   it('exits 0 for a clean report and with hard cuts only, 1 with a fault', () => {

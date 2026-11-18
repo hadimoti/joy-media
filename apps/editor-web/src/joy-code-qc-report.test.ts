@@ -234,6 +234,7 @@ describe('formatting and files', () => {
 
   it('names an unknown type from its own words', () => {
     expect(qcGroupName('black')).toBe('Black frames');
+    expect(qcGroupName('av-length-mismatch')).toBe('Video and sound length');
     expect(qcGroupName('lens-flare')).toBe('Lens flare');
     expect(qcGroupName('***')).toBe('Other');
   });

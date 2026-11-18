@@ -340,6 +340,8 @@ function notRepairableReason(type: string): string {
       return 'JOY has no text backing to add; change the text colour or its place by hand.';
     case 'scene-cut':
       return 'A hard cut is a choice of the editor, not a fault to remove.';
+    case 'av-length-mismatch':
+      return 'The video and sound are different lengths; adjust them by hand.';
     case 'exposure':
     case 'colour-cast':
       return 'The grade is a taste decision; JOY does not change it on its own.';

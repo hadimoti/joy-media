@@ -6,7 +6,7 @@
  * sentences, so the report can be shown to the owner, stored with a project, or handed to a model as is.
  */
 
-/** The eight check types that read a stream of samples. The two document-only checks are not Worker jobs. */
+/** The nine file check types. The two document-only checks are not Worker jobs. */
 export type QcFileFindingType =
   | 'black'
   | 'frozen'
@@ -15,7 +15,8 @@ export type QcFileFindingType =
   | 'silence'
   | 'clipping'
   | 'exposure'
-  | 'colour-cast';
+  | 'colour-cast'
+  | 'av-length-mismatch';
 
 export const QC_FILE_FINDING_TYPES: readonly QcFileFindingType[] = [
   'black',
@@ -26,6 +27,7 @@ export const QC_FILE_FINDING_TYPES: readonly QcFileFindingType[] = [
   'clipping',
   'exposure',
   'colour-cast',
+  'av-length-mismatch',
 ] as const;
 
 /** `blocker` is data loss or a wrong export; the file checks only ever produce `major` and `minor`. */
@@ -71,12 +73,14 @@ export interface QcThresholds {
   readonly exposureMinRunSec: number;
   /** Median chroma distance from neutral (0 to 128 scale) above which the picture leans one way. */
   readonly colourCastMax: number;
+  /** Length difference above which a file with video and sound is reported, seconds. */
+  readonly avLengthMismatchToleranceSec: number;
 }
 
-/** The payload of a `media.qc` job. Every field is optional: an empty payload runs all eight checks. */
+/** The payload of a `media.qc` job. Every field is optional: an empty payload runs all nine checks. */
 export interface MediaQcJobPayload {
   readonly schemaVersion?: 1;
-  /** Checks to run; omitted means all eight. */
+  /** Checks to run; omitted means all nine. */
   readonly checks?: readonly QcFileFindingType[];
   readonly thresholds?: Partial<QcThresholds>;
   /** Whole-run time cap, milliseconds. The Worker clamps it to its own maximum. */

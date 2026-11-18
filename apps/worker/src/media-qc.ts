@@ -22,7 +22,7 @@ import type {
   QcThresholds,
 } from '@joy-media/job-protocol';
 
-/** The eight file checks. Kept here as well as in job-protocol so this file needs no rebuilt package. */
+/** The nine file checks. Kept here as well as in job-protocol so this file needs no rebuilt package. */
 const ALL_CHECKS: readonly QcFileFindingType[] = [
   'black',
   'frozen',
@@ -32,6 +32,7 @@ const ALL_CHECKS: readonly QcFileFindingType[] = [
   'clipping',
   'exposure',
   'colour-cast',
+  'av-length-mismatch',
 ];
 
 export const DEFAULT_QC_THRESHOLDS: QcThresholds = {
@@ -51,6 +52,7 @@ export const DEFAULT_QC_THRESHOLDS: QcThresholds = {
   overexposedYavg: 205,
   exposureMinRunSec: 1,
   colourCastMax: 12,
+  avLengthMismatchToleranceSec: 0.5,
 };
 
 /** The lowest and highest value a payload may give each threshold. Anything outside is refused, not clamped. */
@@ -71,6 +73,7 @@ const THRESHOLD_RANGES: Readonly<Record<keyof QcThresholds, readonly [number, nu
   overexposedYavg: [150, 235],
   exposureMinRunSec: [0.2, 600],
   colourCastMax: [1, 128],
+  avLengthMismatchToleranceSec: [0, 60],
 };
 
 /** Whole-run time cap. A payload may lower it; it may not raise it past the maximum. */
@@ -528,6 +531,11 @@ export interface QcMeasurements {
   readonly audioStats?: QcAudioStats;
   readonly picture?: QcPictureAnalysis;
   readonly sampleIntervalUs?: number;
+  readonly avStreamDurations?: {
+    readonly videoDurationUs: number;
+    readonly audioDurationUs: number;
+    readonly hasStreamDurations: boolean;
+  };
   /** True when a pass hit its time cap, so what it looked at is not the whole file. */
   readonly incomplete: boolean;
   readonly truncated: readonly string[];
@@ -700,6 +708,34 @@ export function qcFindings(measurements: QcMeasurements, thresholds: QcThreshold
           wholeFile,
           'The picture leans toward one colour through most of the cut.',
           { medianChromaDistance: Math.round(picture.medianChromaDistance * 10) / 10 },
+          false,
+        ),
+      );
+    }
+  }
+  const avStreamDurations = measurements.avStreamDurations;
+  if (
+    measurements.hasVideo &&
+    measurements.hasAudio &&
+    avStreamDurations !== undefined &&
+    avStreamDurations.hasStreamDurations
+  ) {
+    const differenceUs = Math.abs(
+      avStreamDurations.videoDurationUs - avStreamDurations.audioDurationUs,
+    );
+    if (differenceUs > thresholds.avLengthMismatchToleranceSec * 1_000_000) {
+      const videoIsLonger = avStreamDurations.videoDurationUs > avStreamDurations.audioDurationUs;
+      drafts.push(
+        measuredFinding(
+          'av-length-mismatch',
+          differenceUs >= 2_000_000 ? 'major' : 'minor',
+          wholeFile,
+          `The ${videoIsLonger ? 'video' : 'sound'} is ${secondsText(differenceUs)} longer than the ${videoIsLonger ? 'sound' : 'video'}.`,
+          {
+            videoDurationUs: avStreamDurations.videoDurationUs,
+            audioDurationUs: avStreamDurations.audioDurationUs,
+            differenceUs,
+          },
           false,
         ),
       );
@@ -929,6 +965,8 @@ interface ProbeResult {
   readonly durationUs: number;
   readonly hasVideo: boolean;
   readonly hasAudio: boolean;
+  readonly videoDurationUs?: number;
+  readonly audioDurationUs?: number;
 }
 
 /** Reads `ffprobe -of json` output. A cover-art picture inside an audio file is not a video stream. */
@@ -945,11 +983,13 @@ export function parseProbe(json: string): ProbeResult {
       : {};
   const root = record(value);
   const streams = Array.isArray(root['streams']) ? (root['streams'] as unknown[]).map(record) : [];
-  const hasVideo = streams.some(
+  const videoStream = streams.find(
     (stream) =>
       stream['codec_type'] === 'video' && record(stream['disposition'])['attached_pic'] !== 1,
   );
-  const hasAudio = streams.some((stream) => stream['codec_type'] === 'audio');
+  const audioStream = streams.find((stream) => stream['codec_type'] === 'audio');
+  const hasVideo = videoStream !== undefined;
+  const hasAudio = audioStream !== undefined;
   const formatSeconds = Number(record(root['format'])['duration']);
   const streamSeconds = streams
     .map((stream) => Number(stream['duration']))
@@ -960,7 +1000,23 @@ export function parseProbe(json: string): ProbeResult {
       : streamSeconds.length > 0
         ? Math.max(...streamSeconds)
         : 0;
-  return { durationUs: Math.round(seconds * 1_000_000), hasVideo, hasAudio };
+  const durationUs = Math.round(seconds * 1_000_000);
+  const streamDurationUs = (stream: Record<string, unknown> | undefined): number | undefined => {
+    if (stream === undefined) return undefined;
+    const streamSeconds = Number(stream['duration']);
+    return Number.isFinite(streamSeconds) && streamSeconds > 0
+      ? Math.round(streamSeconds * 1_000_000)
+      : undefined;
+  };
+  const videoDurationUs = streamDurationUs(videoStream);
+  const audioDurationUs = streamDurationUs(audioStream);
+  return {
+    durationUs,
+    hasVideo,
+    hasAudio,
+    ...(videoDurationUs === undefined ? {} : { videoDurationUs }),
+    ...(audioDurationUs === undefined ? {} : { audioDurationUs }),
+  };
 }
 
 export interface MediaQcReceipt {
@@ -1138,6 +1194,21 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
   }
   if (wantSceneCuts && !sceneCutsUnavailable) checksRun.push('scene-cut');
 
+  // Container lengths can hide a shorter sound or picture stream. Only compare actual stream lengths.
+  const checkAvLengthMismatch =
+    checks.has('av-length-mismatch') && probe.hasVideo && probe.hasAudio;
+  if (checkAvLengthMismatch) checksRun.push('av-length-mismatch');
+  const videoDurationUs = probe.videoDurationUs ?? durationUs;
+  const audioDurationUs = probe.audioDurationUs ?? durationUs;
+  const avStreamDurations = checkAvLengthMismatch
+    ? {
+        videoDurationUs,
+        audioDurationUs,
+        hasStreamDurations:
+          probe.videoDurationUs !== undefined && probe.audioDurationUs !== undefined,
+      }
+    : undefined;
+
   // Audio pass: silence, clipping, loudness. audioFilterChain keeps ebur128 last.
   const audioChain = probe.hasAudio ? audioFilterChain(checks, thresholds) : [];
   if (probe.hasAudio) {
@@ -1225,6 +1296,7 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
     ...(audioStats === undefined ? {} : { audioStats }),
     ...(picture === undefined ? {} : { picture }),
     ...(sampleIntervalUs === undefined ? {} : { sampleIntervalUs }),
+    ...(avStreamDurations === undefined ? {} : { avStreamDurations }),
     incomplete,
     truncated,
     elapsedMs: Date.now() - started,

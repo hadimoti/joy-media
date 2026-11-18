@@ -168,7 +168,12 @@ describe('ffmpeg output parsers', () => {
           format: { duration: '12.480000' },
         }),
       ),
-    ).toEqual({ durationUs: 12_480_000, hasVideo: false, hasAudio: true });
+    ).toEqual({
+      durationUs: 12_480_000,
+      hasVideo: false,
+      hasAudio: true,
+      audioDurationUs: 12_500_000,
+    });
     expect(
       parseProbe(
         JSON.stringify({
@@ -176,8 +181,61 @@ describe('ffmpeg output parsers', () => {
           format: {},
         }),
       ),
-    ).toEqual({ durationUs: 3 * SECOND, hasVideo: true, hasAudio: false });
+    ).toEqual({
+      durationUs: 3 * SECOND,
+      hasVideo: true,
+      hasAudio: false,
+      videoDurationUs: 3 * SECOND,
+    });
     expect(() => parseProbe('not json')).toThrow('unreadable');
+  });
+
+  it('keeps both stream lengths from ffprobe', () => {
+    expect(
+      parseProbe(
+        JSON.stringify({
+          streams: [
+            { codec_type: 'video', disposition: { attached_pic: 0 }, duration: '8' },
+            { codec_type: 'audio', duration: '5' },
+          ],
+          format: { duration: '8' },
+        }),
+      ),
+    ).toEqual({
+      durationUs: 8 * SECOND,
+      hasVideo: true,
+      hasAudio: true,
+      videoDurationUs: 8 * SECOND,
+      audioDurationUs: 5 * SECOND,
+    });
+  });
+
+  it('uses the container length when a stream length is missing and skips the mismatch finding', () => {
+    const probe = parseProbe(
+      JSON.stringify({
+        streams: [
+          { codec_type: 'video', disposition: { attached_pic: 0 } },
+          { codec_type: 'audio', duration: '5' },
+        ],
+        format: { duration: '8' },
+      }),
+    );
+    const avStreamDurations = {
+      videoDurationUs: probe.videoDurationUs ?? probe.durationUs,
+      audioDurationUs: probe.audioDurationUs ?? probe.durationUs,
+      hasStreamDurations:
+        probe.videoDurationUs !== undefined && probe.audioDurationUs !== undefined,
+    };
+    expect(avStreamDurations).toEqual({
+      videoDurationUs: 8 * SECOND,
+      audioDurationUs: 5 * SECOND,
+      hasStreamDurations: false,
+    });
+    expect(
+      qcFindings(measurements({ avStreamDurations }), DEFAULT_QC_THRESHOLDS).some(
+        (finding) => finding.type === 'av-length-mismatch',
+      ),
+    ).toBe(false);
   });
 });
 
@@ -483,14 +541,126 @@ describe('QC report', () => {
     });
     expect(findings.find((finding) => finding.type === 'colour-cast')?.severity).toBe('major');
   });
+
+  it('reports a major video and sound length mismatch at three seconds', () => {
+    const findings = qcFindings(
+      measurements({
+        avStreamDurations: {
+          videoDurationUs: 8 * SECOND,
+          audioDurationUs: 5 * SECOND,
+          hasStreamDurations: true,
+        },
+      }),
+      DEFAULT_QC_THRESHOLDS,
+    );
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        type: 'av-length-mismatch',
+        severity: 'major',
+        measured: {
+          videoDurationUs: 8 * SECOND,
+          audioDurationUs: 5 * SECOND,
+          differenceUs: 3 * SECOND,
+        },
+        label: 'The video is 3.0 s longer than the sound.',
+      }),
+    );
+  });
+
+  it('does not report a video and sound length difference under the tolerance', () => {
+    const findings = qcFindings(
+      measurements({
+        avStreamDurations: {
+          videoDurationUs: 5_300_000,
+          audioDurationUs: 5 * SECOND,
+          hasStreamDurations: true,
+        },
+      }),
+      DEFAULT_QC_THRESHOLDS,
+    );
+    expect(findings.some((finding) => finding.type === 'av-length-mismatch')).toBe(false);
+  });
+
+  it('reports a minor video and sound length mismatch below two seconds', () => {
+    const findings = qcFindings(
+      measurements({
+        avStreamDurations: {
+          videoDurationUs: 6 * SECOND,
+          audioDurationUs: 5 * SECOND,
+          hasStreamDurations: true,
+        },
+      }),
+      DEFAULT_QC_THRESHOLDS,
+    );
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        type: 'av-length-mismatch',
+        severity: 'minor',
+        measured: {
+          videoDurationUs: 6 * SECOND,
+          audioDurationUs: 5 * SECOND,
+          differenceUs: SECOND,
+        },
+      }),
+    );
+  });
+
+  it('does not report a video and sound length mismatch for audio-only or video-only files', () => {
+    const durations = {
+      videoDurationUs: 8 * SECOND,
+      audioDurationUs: 5 * SECOND,
+      hasStreamDurations: true,
+    };
+    expect(
+      qcFindings(
+        measurements({ hasVideo: false, avStreamDurations: durations }),
+        DEFAULT_QC_THRESHOLDS,
+      ),
+    ).toEqual([]);
+    expect(
+      qcFindings(
+        measurements({ hasAudio: false, avStreamDurations: durations }),
+        DEFAULT_QC_THRESHOLDS,
+      ),
+    ).toEqual([]);
+  });
+
+  it('does not report cover art as a video and sound length mismatch', () => {
+    const probe = parseProbe(
+      JSON.stringify({
+        streams: [
+          { codec_type: 'video', disposition: { attached_pic: 1 }, duration: '8' },
+          { codec_type: 'audio', duration: '5' },
+        ],
+        format: { duration: '8' },
+      }),
+    );
+    expect(probe.hasVideo).toBe(false);
+    expect(
+      qcFindings(
+        measurements({
+          hasVideo: probe.hasVideo,
+          hasAudio: probe.hasAudio,
+          avStreamDurations: {
+            videoDurationUs: probe.videoDurationUs ?? probe.durationUs,
+            audioDurationUs: probe.audioDurationUs ?? probe.durationUs,
+            hasStreamDurations:
+              probe.videoDurationUs !== undefined && probe.audioDurationUs !== undefined,
+          },
+        }),
+        DEFAULT_QC_THRESHOLDS,
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe('job payload', () => {
   it('runs every check with the defaults when there is no payload', () => {
     for (const payload of [undefined, null, {}]) {
       const parsed = parseMediaQcPayload(payload);
-      expect(parsed.checks.size).toBe(8);
+      expect(parsed.checks.size).toBe(9);
       expect(parsed.thresholds).toEqual(DEFAULT_QC_THRESHOLDS);
+      expect(parsed.thresholds.avLengthMismatchToleranceSec).toBe(0.5);
       expect(parsed.maxRunMs).toBe(10 * 60 * 1000);
     }
   });
@@ -503,6 +673,9 @@ describe('job payload', () => {
       maxRunMs: 5_000,
     });
     expect([...parsed.checks]).toEqual(['black', 'frozen']);
+    expect(parseMediaQcPayload({ checks: ['av-length-mismatch'] }).checks).toEqual(
+      new Set(['av-length-mismatch']),
+    );
     expect(parsed.thresholds.blackMinDurationSec).toBe(0.5);
     expect(parsed.thresholds.freezeMinDurationSec).toBe(1);
     expect(parsed.maxRunMs).toBe(5_000);
