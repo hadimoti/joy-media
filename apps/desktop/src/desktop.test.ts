@@ -1,9 +1,14 @@
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createFileBoundary } from './file-boundary.js';
 import { parseProjectDeepLink } from './deep-link.js';
 import { isAllowedEditorOrigin } from './origin-policy.js';
 import { isAllowedIpcRequest } from './ipc.js';
 import { canSubmitWorkerJob, normalizeStartupPreference } from './worker-status.js';
+
+const selectedMediaPath = path.join(tmpdir(), 'joy-media-desktop-test', 'Media', 'clip.mp4');
+
 describe('desktop shell boundaries', () => {
   it('allows only explicit editor origins and IPC channels', () => {
     expect(isAllowedEditorOrigin('joy-media-app://renderer')).toBe(true);
@@ -27,7 +32,7 @@ describe('desktop shell boundaries', () => {
   });
   it('keeps paths behind revocable opaque references', () => {
     const files = createFileBoundary(() => 'local-1');
-    const ref = files.registerSelection('C:\\Media\\clip.mp4');
+    const ref = files.registerSelection(selectedMediaPath);
     expect(ref).toEqual({ kind: 'local-file', id: 'local-1', displayName: 'clip.mp4' });
     expect(files.requestDerivative(ref, 'thumbnail')).toEqual({
       refId: 'local-1',
@@ -36,20 +41,30 @@ describe('desktop shell boundaries', () => {
     files.revoke(ref);
     expect(() => files.requestDerivative(ref, 'proxy')).toThrow();
   });
-  it.each([
-    ['a UNC path', '\\\\server\\share\\clip.mp4'],
-    ['a Win32 device path', '\\\\.\\C:\\clip.mp4'],
-    ['a Win32 extended path', '\\\\?\\C:\\clip.mp4'],
-    ['the CON device name', 'C:\\Media\\CON.mp4'],
-    ['the NUL device name', 'C:\\Media\\NUL.txt'],
-    ['a COM device name', 'C:\\Media\\COM1.wav'],
-  ])('rejects %s before exposing a local file reference', (_description, path) => {
-    const files = createFileBoundary(() => 'unsafe-ref');
-    expect(() => files.registerSelection(path)).toThrow();
-  });
+  it.skipIf(process.platform !== 'win32')(
+    'rejects Win32 UNC, device, extended, and reserved-name paths before exposing a local file reference',
+    () => {
+      const files = createFileBoundary(() => 'unsafe-ref');
+      for (const unsafePath of [
+        '\\\\server\\share\\clip.mp4',
+        '\\\\.\\C:\\clip.mp4',
+        '\\\\?\\C:\\clip.mp4',
+        'C:\\Media\\CON.mp4',
+        'C:\\Media\\NUL.txt',
+        'C:\\Media\\COM1.wav',
+      ]) {
+        expect(() => files.registerSelection(unsafePath)).toThrow();
+      }
+    },
+  );
   it('normalizes caller-provided local display names before exposing them', () => {
     const files = createFileBoundary(() => 'local-2');
-    expect(files.registerSelection('C:\\Media\\clip.mp4', 'C:\\private\\secret.mp4')).toEqual({
+    expect(
+      files.registerSelection(
+        selectedMediaPath,
+        path.join(tmpdir(), 'joy-media-desktop-test', 'private', 'secret.mp4'),
+      ),
+    ).toEqual({
       kind: 'local-file',
       id: 'local-2',
       displayName: 'secret.mp4',

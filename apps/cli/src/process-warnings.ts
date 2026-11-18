@@ -2,7 +2,7 @@
 /**
  * Side-effect module: MUST be the first import of the CLI entry point (`bin.ts`).
  *
- * `node:sqlite` prints "ExperimentalWarning: SQLite is an experimental feature"
+ * `node:sqlite` prints an `ExperimentalWarning` whose wording varies by Node version.
  * on every run. AI callers treat any stderr as a problem signal, so this one
  * known, harmless warning is dropped. Every other warning still prints.
  *
@@ -22,7 +22,7 @@ export function isSqliteExperimentalWarning(warning: unknown): boolean {
   return (
     warning instanceof Error &&
     warning.name === 'ExperimentalWarning' &&
-    /SQLite is an experimental feature/.test(warning.message)
+    /sqlite/i.test(warning.message)
   );
 }
 
