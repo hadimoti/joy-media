@@ -15,7 +15,10 @@ describe('resolveDefaultSqliteLocation', () => {
       defaultHome: DEFAULT_HOME,
     });
 
-    expect(location).toEqual({ path: join(JOY_HOME, 'desktop', DB), source: 'JOY_MEDIA_HOME' });
+    expect(location).toEqual({
+      path: join(resolve(JOY_HOME), 'desktop', DB),
+      source: 'JOY_MEDIA_HOME',
+    });
   });
 
   it('resolves a relative JOY_MEDIA_HOME against the working directory', () => {
