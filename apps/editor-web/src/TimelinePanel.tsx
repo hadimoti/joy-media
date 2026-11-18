@@ -48,6 +48,8 @@ import {
   SkipForwardIcon,
   SoloIcon,
   SpeakerOnIcon,
+  TrackAddIcon,
+  AudioTrackAddIcon,
   TrashIcon,
   ZoomInIcon,
   ZoomOutIcon,
@@ -4313,6 +4315,29 @@ export function TimelinePanel({
                 onActivate={handleAddFromLibrary}
               />
             )}
+
+            <div className="timeline-add-track-row" role="group" aria-label="Add an empty track">
+              <button
+                type="button"
+                className="icon-button timeline-add-track-button"
+                aria-label="Add track"
+                data-guide="Add empty visual track"
+                title="Add an empty track for pictures, overlays and clips: drag assets into it"
+                onClick={() => addTrack('visual')}
+              >
+                <TrackAddIcon />
+              </button>
+              <button
+                type="button"
+                className="icon-button timeline-add-track-button"
+                aria-label="Add audio track"
+                data-guide="Add empty audio track"
+                title="Add an empty audio track: drag sounds into it"
+                onClick={() => addTrack('audio')}
+              >
+                <AudioTrackAddIcon />
+              </button>
+            </div>
 
             {fileDropIndicator?.newTrack && (
               <div

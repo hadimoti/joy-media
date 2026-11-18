@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { TimelineContextMenu, type TimelineContextMenuState } from './TimelineContextMenu.js';
+import { buildReadOnlyTextMenuItems, buildTextFieldMenuItems } from './text-field-menu.js';
 import type { SpikeProject } from '@joy-media/project-schema';
 import type {
   AgentEditPlan,
@@ -704,6 +706,7 @@ export function AgentPanel({
     if (composerCapability !== 'looks') setLooksActivityOpen(false);
   }, [composerCapability]);
   const [draft, setDraft] = useState('');
+  const [textMenu, setTextMenu] = useState<TimelineContextMenuState | undefined>(undefined);
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
   const engineStatus = joyAgentEngineClient?.getStatus();
@@ -4074,6 +4077,14 @@ export function AgentPanel({
             className={`joy-code-messages${activeThread?.messages.length === 0 ? ' is-empty' : ''}`}
             aria-live="polite"
             hidden={composerCapability === 'creative-brief' || composerCapability === 'recipes'}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setTextMenu({
+                x: event.clientX,
+                y: event.clientY,
+                items: buildReadOnlyTextMenuItems(event.currentTarget),
+              });
+            }}
           >
             {activeThread?.messages.length === 0 && (
               <div className="joy-code-welcome">
@@ -4523,6 +4534,14 @@ export function AgentPanel({
                   aria-label="Message Joy Code"
                   placeholder="Describe the timeline edit you want…"
                   onChange={(event) => setDraft(event.currentTarget.value)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setTextMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      items: buildTextFieldMenuItems(event.currentTarget),
+                    });
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
@@ -4554,6 +4573,9 @@ export function AgentPanel({
           )}
         </section>
       </div>
+      {textMenu !== undefined && (
+        <TimelineContextMenu menu={textMenu} onClose={() => setTextMenu(undefined)} />
+      )}
     </PanelShell>
   );
 }

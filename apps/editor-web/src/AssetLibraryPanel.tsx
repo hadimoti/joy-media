@@ -1361,17 +1361,13 @@ export function AssetLibraryPanel({
                 })}
               </ul>
               {rendered.length < visible.length && (
-                <button
-                  type="button"
-                  className="asset-library-load-more"
-                  onClick={() =>
+                <AssetListEnd
+                  onReached={() =>
                     setRenderLimit((current) =>
                       Math.min(visible.length, current + ASSET_RENDER_PAGE_SIZE),
                     )
                   }
-                >
-                  Load {Math.min(ASSET_RENDER_PAGE_SIZE, visible.length - rendered.length)} more
-                </button>
+                />
               )}
             </>
           )}
@@ -1379,6 +1375,27 @@ export function AssetLibraryPanel({
       </div>
     </PanelShell>
   );
+}
+
+/**
+ * An invisible marker after the last card shown. When scrolling brings it into view the next page of cards is
+ * drawn, so a long library reads as one list and needs no "Load more" button.
+ */
+function AssetListEnd({ onReached }: { readonly onReached: () => void }) {
+  const markerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const marker = markerRef.current;
+    if (marker === null || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onReached();
+      },
+      { rootMargin: '600px 0px' },
+    );
+    observer.observe(marker);
+    return () => observer.disconnect();
+  }, [onReached]);
+  return <div ref={markerRef} className="asset-list-end" aria-hidden="true" />;
 }
 
 function AssetLocateOriginalButton({

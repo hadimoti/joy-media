@@ -217,9 +217,9 @@ describe('the transform box', () => {
     expect(steps[0]!.patches.get('shape')).toEqual({ ...LOCAL, x: 120, y: 210 });
   });
 
-  it('a corner with Shift scales in proportion from the opposite corner', () => {
+  it('a corner scales in proportion from the opposite corner, and Shift frees the two sides', () => {
     const { steps } = mount([target()]);
-    dragHandle('se', 10, 0, { shiftKey: true });
+    dragHandle('se', 10, 0);
     expect(steps).toHaveLength(1);
     expect(steps[0]!.label).toBe('Scale on the Monitor');
     const next = steps[0]!.patches.get('shape')!;
@@ -229,14 +229,30 @@ describe('the transform box', () => {
     expect(next.y).toBeCloseTo(200, 9);
   });
 
-  it('an edge with Alt scales one axis about the centre', () => {
+  it('with Shift held an edge stretches one axis alone', () => {
     const { steps } = mount([target()]);
-    dragHandle('e', 10, 0, { altKey: true });
+    dragHandle('e', 10, 0, { shiftKey: true });
+    const next = steps[0]!.patches.get('shape')!;
+    expect(next.scaleX).toBeCloseTo(1.2, 9);
+    expect(next.scaleY).toBe(1);
+  });
+
+  it('an edge with Alt and Shift scales one axis about the centre', () => {
+    const { steps } = mount([target()]);
+    dragHandle('e', 10, 0, { altKey: true, shiftKey: true });
     const next = steps[0]!.patches.get('shape')!;
     expect(next.scaleX).toBeCloseTo(1.4, 9);
     expect(next.scaleY).toBe(1);
     expect(next.x).toBeCloseTo(80, 9);
     expect(next.y).toBe(200);
+  });
+
+  it('an edge keeps the proportions by default', () => {
+    const { steps } = mount([target()]);
+    dragHandle('e', 10, 0);
+    const next = steps[0]!.patches.get('shape')!;
+    expect(next.scaleX).toBeCloseTo(next.scaleY, 9);
+    expect(next.scaleX).toBeGreaterThan(1);
   });
 
   it('the rotate handle with Shift snaps to 15 degrees', () => {

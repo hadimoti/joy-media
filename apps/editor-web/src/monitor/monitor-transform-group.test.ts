@@ -330,7 +330,7 @@ describe('group gestures on the selected targets', () => {
     expect(steps).toEqual([{ label: 'Rotate on the Monitor', size: 2 }]);
   });
 
-  it('a group scale writes position and scale of every element, one step on release', () => {
+  it('a group scale with Shift held writes position and scale of every element, one step on release', () => {
     const { recorder, steps } = host();
     const drag = startTransformDrag(
       pair,
@@ -339,8 +339,8 @@ describe('group gestures on the selected targets', () => {
       recorder,
     );
     if ('blocked' in drag) throw new Error('blocked');
-    drag.update({ x: 500, y: 200 }, { shift: false, alt: false });
-    drag.update({ x: 800, y: 225 }, { shift: false, alt: false });
+    drag.update({ x: 500, y: 200 }, { shift: true, alt: false });
+    drag.update({ x: 800, y: 225 }, { shift: true, alt: false });
     drag.end(true);
     expect(steps).toEqual([{ label: 'Scale on the Monitor', size: 2 }]);
     const patches = gesturePatches(
@@ -348,7 +348,7 @@ describe('group gestures on the selected targets', () => {
       { kind: 'group-scale', handle: 'se' },
       { x: 400, y: 150 },
       { x: 800, y: 225 },
-      { shift: false, alt: false },
+      { shift: true, alt: false },
     )!;
     expect(patches.get('b')).toEqual({ x: 600, y: 75, scaleX: 1, scaleY: 1.5, rotationDeg: 0 });
   });

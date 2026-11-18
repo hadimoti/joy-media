@@ -20705,3 +20705,45 @@ body:not([data-editor-pointer-dragging])
 .monitor-gradient-layer.passive .monitor-gradient-anchor {
   pointer-events: none;
 }
+
+/* A labelled place to add an empty track under the track list; assets are dragged into it afterwards. */
+.timeline-add-track-row {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem var(--space-3, 0.75rem);
+}
+.timeline-add-track-button {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 1px dashed color-mix(in srgb, var(--joy-accent) 55%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--joy-accent);
+  cursor: pointer;
+}
+.timeline-add-track-button:hover,
+.timeline-add-track-button:focus-visible {
+  background: color-mix(in srgb, var(--joy-accent) 14%, transparent);
+  outline: none;
+}
+
+/* The invisible marker that draws the next page of cards when scrolling reaches it. */
+.asset-list-end {
+  height: 1px;
+}
+
+/* The chat can be selected and copied: every message, the plan and the notes are plain selectable text. */
+.joy-code-messages,
+.joy-code-messages * {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-app-region: no-drag;
+}
+.joy-code-messages button,
+.joy-code-messages [role='button'] {
+  -webkit-user-select: none;
+  user-select: none;
+}

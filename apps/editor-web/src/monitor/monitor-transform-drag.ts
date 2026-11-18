@@ -121,6 +121,15 @@ interface GestureContext {
   readonly group?: TransformBoxGeometry;
 }
 
+/**
+ * A scale drag keeps the proportions by default (width and height grow and shrink together); holding Shift
+ * frees them so each side can be pulled on its own. The scale maths names the proportional mode "shift", so the
+ * key is turned over here, for every scale drag, and Alt keeps its meaning (scale about the centre).
+ */
+function keepProportions(modifiers: ScaleModifiers): ScaleModifiers {
+  return { ...modifiers, shift: !modifiers.shift };
+}
+
 function drawnAfter(
   target: MonitorTransformTarget,
   gesture: MonitorTransformGesture,
@@ -134,7 +143,7 @@ function drawnAfter(
     case 'move':
       return moveTransform(geometry.transform, { x: now.x - start.x, y: now.y - start.y });
     case 'scale':
-      return scaleTransform(geometry, gesture.handle, start, now, modifiers);
+      return scaleTransform(geometry, gesture.handle, start, now, keepProportions(modifiers));
     case 'rotate':
       return rotateTransform(geometry, start, now, { shift: modifiers.shift });
     case 'anchor':
@@ -144,7 +153,7 @@ function drawnAfter(
         ? undefined
         : scaleMemberAbout(
             geometry,
-            groupScaleOf(context.group, gesture.handle, start, now, modifiers),
+            groupScaleOf(context.group, gesture.handle, start, now, keepProportions(modifiers)),
           );
     case 'group-rotate':
       return context.group === undefined

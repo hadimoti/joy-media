@@ -855,6 +855,16 @@ export function ColorWheelIcon() {
   );
 }
 
+/** A speaker with a plus: add an audio track. */
+export function AudioTrackAddIcon() {
+  return (
+    <Svg>
+      <path d="M1.8 6.2H4L7.2 3.6v8.8L4 9.8H1.8Z" />
+      <path d="M11.5 5.5v5M9 8h5" />
+    </Svg>
+  );
+}
+
 export function TrackAddIcon() {
   return (
     <Svg>

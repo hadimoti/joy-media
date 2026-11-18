@@ -33,14 +33,14 @@ import {
 const PRIMARY_BUTTON = 0;
 
 const HANDLE_LABELS: Readonly<Record<MonitorHandle, string>> = {
-  nw: 'Scale from the top-left corner',
-  n: 'Scale from the top edge',
-  ne: 'Scale from the top-right corner',
-  e: 'Scale from the right edge',
-  se: 'Scale from the bottom-right corner',
-  s: 'Scale from the bottom edge',
-  sw: 'Scale from the bottom-left corner',
-  w: 'Scale from the left edge',
+  nw: 'Scale from the top-left corner (hold Shift to stretch freely)',
+  n: 'Scale from the top edge (hold Shift to stretch freely)',
+  ne: 'Scale from the top-right corner (hold Shift to stretch freely)',
+  e: 'Scale from the right edge (hold Shift to stretch freely)',
+  se: 'Scale from the bottom-right corner (hold Shift to stretch freely)',
+  s: 'Scale from the bottom edge (hold Shift to stretch freely)',
+  sw: 'Scale from the bottom-left corner (hold Shift to stretch freely)',
+  w: 'Scale from the left edge (hold Shift to stretch freely)',
   rotate: 'Rotate (Shift snaps to 15 degrees)',
 };
 
