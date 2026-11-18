@@ -152,7 +152,19 @@ export const TIMELINE_DND_H04_ROWS = [
         .locator('.toast-message')
         .filter({ hasText: /track is locked/iu })
         .first();
-      await toast.waitFor({ state: 'visible', timeout: 8_000 });
+      // The preload mints import tickets only for a trusted drop (see D-H02). A simulated drop that never shows the
+      // refusal toast did not reach the app as a drop: that is a simulation limit, not a locked-track defect.
+      const refused = await toast
+        .waitFor({ state: 'visible', timeout: 8_000 })
+        .then(() => true)
+        .catch(() => false);
+      const afterDrop = await readClips(ctx);
+      if (!refused && afterDrop.length === before.length) {
+        throw blockedRow(
+          'D-H01',
+          'needs a real mouse drag from Explorer (attended): the simulated drop was not shown to be trusted, so neither the refusal message nor a new clip appeared',
+        );
+      }
       await page.waitForTimeout(500);
       const after = await readClips(ctx);
       if (after.length !== before.length)
