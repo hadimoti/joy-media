@@ -15662,12 +15662,21 @@ label {
 }
 /* The section tab shows its name as well as its glyph (T-D09): the label is
    what tells the sections apart, and the count alone does not. */
+/* The count is a small, dim number set apart from the name, so a long count (3216) never reads as part of the next tab. */
 .asset-library > .joy-panel-tabs .joy-panel-tab-count {
   flex: none;
+  margin-inline-start: 0.3rem;
   color: var(--joy-text-secondary);
-  font-size: var(--joy-type-xs);
+  font-size: calc(var(--joy-type-xs) * 0.78);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  opacity: 0.72;
+}
+.asset-library > .joy-panel-tabs .joy-panel-tab {
+  /* Each tab is as wide as its glyph, name and count, so a long count is never cut off or run into the next tab. */
+  flex: 0 1 auto;
+  white-space: nowrap;
 }
 .asset-library > .joy-panel-tabs .joy-panel-tab:focus-visible {
   outline: 2px solid var(--joy-accent);

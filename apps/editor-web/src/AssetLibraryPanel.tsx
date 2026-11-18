@@ -592,6 +592,9 @@ export function AssetLibraryPanel({
 
   const openPreview = useCallback(
     async (asset: BrowserAsset, assetDerivatives: readonly BrowserDerivative[]) => {
+      // A picture already shows on its card, and a big copy above the grid only pushes the cards down.
+      // Sound and video keep their player here so they can be heard and watched before use.
+      if (asset.kind === 'image') return;
       const requestId = ++previewSeqRef.current;
       clearPreview();
       const sourceKind =
@@ -1261,11 +1264,7 @@ export function AssetLibraryPanel({
                       onClick={(event) => {
                         if ((event.target as HTMLElement).closest('button, input, label') !== null)
                           return;
-                        if (
-                          asset.kind === 'image' ||
-                          asset.kind === 'video' ||
-                          asset.kind === 'audio'
-                        ) {
+                        if (asset.kind === 'video' || asset.kind === 'audio') {
                           void openPreview(asset, derivatives);
                         }
                       }}
@@ -1289,9 +1288,7 @@ export function AssetLibraryPanel({
                           projectId={projectId}
                           resolverPromise={resolver}
                           originalCachePromise={originalAssetCache}
-                          {...(asset.kind === 'image' ||
-                          asset.kind === 'video' ||
-                          asset.kind === 'audio'
+                          {...(asset.kind === 'video' || asset.kind === 'audio'
                             ? { onOpenDerivative: () => void openPreview(asset, derivatives) }
                             : {})}
                         />

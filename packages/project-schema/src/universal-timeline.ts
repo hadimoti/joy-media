@@ -402,6 +402,23 @@ function legacyClipItem(
   }
   const assetId = clip.assetId;
   const asset = project.schemaVersion === 1 ? project.assets[assetId] : undefined;
+  // A picture placed on the timeline is a video-schema clip that points at an image object. It is an
+  // image element drawn from that object; read as a video of the asset it would never be drawn at all.
+  if (project.schemaVersion === 1 && asset?.kind === 'image') {
+    const objectId = readClipObjectMap(project)[clip.id];
+    if (objectId !== undefined && project.visualObjects[objectId]?.kind === 'image') {
+      return {
+        id: clip.id,
+        compositionId,
+        trackId,
+        elementKind: 'image',
+        startUs: clip.startUs,
+        durationUs: clip.durationUs,
+        source: { kind: 'object', id: objectId },
+        withinTrackOrder,
+      };
+    }
+  }
   const elementKind: TimelineElementKind = asset?.kind === 'audio' ? 'audio' : 'video';
   return {
     id: clip.id,

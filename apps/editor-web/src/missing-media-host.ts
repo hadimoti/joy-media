@@ -1,5 +1,6 @@
 import type { AssetRecordV1, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import type { CommandTransaction } from '@joy-media/commands';
+import { withoutLibraryServedEntries } from './library-media-available.js';
 import {
   deriveMissingMedia,
   matchReplacementFiles,
@@ -120,7 +121,7 @@ export function createMissingMediaHost(
     ) as Readonly<Record<string, AssetRecordV1>>;
     const store = await cache();
     await removeDiscardedReplacements(store);
-    return deriveMissingMedia(assets, store);
+    return withoutLibraryServedEntries(await deriveMissingMedia(assets, store));
   };
   return {
     list,

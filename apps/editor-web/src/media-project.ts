@@ -114,7 +114,8 @@ export function bindMediaClipToProject(
     template === undefined
       ? {
           id: controllerId,
-          kind: 'null',
+          // A picture is drawn by the Monitor only when its object is an image object.
+          kind: asset.kind === 'image' ? 'image' : 'null',
           assetId: asset.id,
           transform: {
             x: fitted?.x ?? 0,

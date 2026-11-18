@@ -248,7 +248,9 @@ export function createIsolatedCompositionCapture(
     const objectsById = visualProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
     const hidden = hiddenClipIds(timelineProject);
     const resolved: ResolvedObject[] = Object.values(objectsById)
-      .filter((object) => isBoundObjectActive(visualProject, object.id, timeUs, hidden))
+      .filter((object) =>
+        isBoundObjectActive(visualProject, object.id, timeUs, hidden, timelineProject),
+      )
       .map((object) => ({
         object,
         transform: evaluateCameraExpressionTransform(

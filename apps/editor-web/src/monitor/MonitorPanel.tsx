@@ -845,6 +845,7 @@ function MonitorPanelContent({
           object.id,
           state.playheadUs,
           hiddenClipIds(timelineProject),
+          timelineProject,
         ),
       )
       .map((object) => ({

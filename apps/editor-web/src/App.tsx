@@ -416,7 +416,6 @@ import {
   readClipMediaKindMap,
   readImageMatteMap,
   resolveObjectIdForSelection,
-  writeClipMediaKind,
   writeImageMatte,
 } from './sticker-bindings.js';
 import {
@@ -4664,7 +4663,13 @@ function EditorWorkspace({
         const buildFrame = (timeUs: number) => {
           const resolved: ResolvedObject[] = Object.values(exportVisualProject.visualObjects)
             .filter((object) =>
-              isBoundObjectActive(exportVisualProject, object.id, timeUs, exportHiddenClipIds),
+              isBoundObjectActive(
+                exportVisualProject,
+                object.id,
+                timeUs,
+                exportHiddenClipIds,
+                session.timelineProject,
+              ),
             )
             .map((object) => ({
               object,
@@ -6241,64 +6246,31 @@ function EditorWorkspace({
         );
       }
       const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
-      const controllerId = `media-controller-${clipId}`;
-      const fitted =
-        asset.kind === 'audio' ||
-        asset.descriptor.width === undefined ||
-        asset.descriptor.height === undefined
-          ? undefined
-          : calculateMediaFitTransform({
-              sourceWidth: asset.descriptor.width,
-              sourceHeight: asset.descriptor.height,
-              frameWidth: composition.width,
-              frameHeight: composition.height,
-              mode: 'fit',
-            });
-      context.replaceVisualProject(
-        writeClipMediaKind(
-          bindClipToObject(
-            {
-              ...projectWithImportedAsset(context.visualProject, {
-                id: asset.assetId,
-                kind: asset.kind,
-                displayName: asset.displayName,
-                sha256: asset.sha256,
-                bytes: asset.bytes,
-                descriptor: asset.descriptor,
-              }),
-              visualObjects: {
-                ...context.visualProject.visualObjects,
-                [controllerId]: {
-                  id: controllerId,
-                  kind: 'null',
-                  assetId: asset.assetId,
-                  transform: {
-                    x: fitted?.x ?? 0,
-                    y: fitted?.y ?? 0,
-                    scaleX: fitted?.scaleX ?? 1,
-                    scaleY: fitted?.scaleY ?? 1,
-                    rotationDeg: 0,
-                    opacity: 1,
-                    crop: { left: 0, top: 0, right: 0, bottom: 0 },
-                  },
-                },
-              },
+      // The shared media placement writes the clip into the timeline, the project's own composition (the
+      // Monitor and the export read the clip's time range from there) and the media binding as one Undo step.
+      const transaction = buildTimelineMediaImportTransaction(
+        composition,
+        [{ id: asset.assetId, ...asset }],
+        state.playheadUs,
+        new Set(),
+        () => clipId,
+      );
+      context.dispatchMediaPlacement(
+        [
+          {
+            asset: {
+              id: asset.assetId,
+              kind: asset.kind,
+              displayName: asset.displayName,
+              sha256: asset.sha256,
+              bytes: asset.bytes,
+              descriptor: asset.descriptor,
             },
             clipId,
-            controllerId,
-          ),
-          clipId,
-          asset.kind,
-        ),
-      );
-      context.dispatchTimeline(
-        buildTimelineMediaImportTransaction(
-          composition,
-          [{ id: asset.assetId, ...asset }],
-          state.playheadUs,
-          new Set(),
-          () => clipId,
-        ),
+            frame: { width: composition.width, height: composition.height },
+          },
+        ],
+        transaction,
       );
     };
     const selectedTimelineEntry = state.selectedIds
@@ -7101,7 +7073,8 @@ function EditorWorkspace({
                   ...nextVisualProject.visualObjects,
                   [controllerId]: {
                     id: controllerId,
-                    kind: 'null',
+                    // A picture is drawn by the Monitor only when its object is an image object.
+                    kind: asset.kind === 'image' ? 'image' : 'null',
                     assetId: asset.id,
                     transform: {
                       x: fitted?.x ?? 0,

@@ -608,6 +608,11 @@ export function isBoundObjectActive(
   timeUs: TimeUs,
   /** Clips on a hidden track (the eye button): an object bound only to hidden clips is not drawn. */
   hiddenClipIds: ReadonlySet<string> = new Set(),
+  /**
+   * The editor's timeline. A picture or sticker placed from the library or dropped in is a timeline clip that the
+   * project's own composition may not list, so the clip's time range is read from both.
+   */
+  timeline?: { readonly compositions: Readonly<Record<string, BoundClipComposition>> },
 ): boolean {
   const raw = project.pluginData?.['joy.clipObjects'];
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return true;
@@ -615,7 +620,7 @@ export function isBoundObjectActive(
     .filter(([, candidate]) => candidate === objectId)
     .map(([clipId]) => clipId);
   if (boundClipIds.length === 0) return true;
-  return Object.values(project.compositions).some((candidate) =>
+  const plays = (candidate: BoundClipComposition): boolean =>
     candidate.tracks.some((track) =>
       track.clips.some(
         (clip) =>
@@ -624,8 +629,22 @@ export function isBoundObjectActive(
           timeUs >= clip.startUs &&
           timeUs < clip.startUs + clip.durationUs,
       ),
-    ),
+    );
+  return (
+    Object.values(project.compositions).some(plays) ||
+    (timeline !== undefined && Object.values(timeline.compositions).some(plays))
   );
+}
+
+/** The part of a composition that decides when a bound clip plays. */
+interface BoundClipComposition {
+  readonly tracks: readonly {
+    readonly clips: readonly {
+      readonly id: string;
+      readonly startUs: number;
+      readonly durationUs: number;
+    }[];
+  }[];
 }
 
 function textDocumentText(document: TextDocumentV1): string {

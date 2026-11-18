@@ -239,7 +239,7 @@ describe('attachGeneratedJob', () => {
     });
     expect(expectedFit).toBeDefined();
     expect(session.visualProject.visualObjects[`media-controller-${result.clipId}`]).toMatchObject({
-      kind: 'null',
+      kind: 'image',
       assetId: fixture.assetId,
       transform: { ...expectedFit, rotationDeg: 0, opacity: 1 },
     });
