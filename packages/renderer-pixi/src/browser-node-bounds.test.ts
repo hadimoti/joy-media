@@ -48,6 +48,7 @@ vi.mock('pixi.js', async (importOriginal) => {
       },
     };
     private get lines(): string[] {
+      if (this.text.trim().length === 0) return [];
       const style = this.style as {
         readonly wordWrap?: boolean;
         readonly wordWrapWidth?: number;
@@ -401,6 +402,50 @@ describe('nodeBounds and drawing with rotation', () => {
     renderer.destroy();
   });
 
+  it.each([
+    {
+      scaleX: 2,
+      scaleY: 4,
+      rotationDeg: 90,
+      text: 'This title uses several words',
+      expectedLocalWrapWidth: 40,
+      expectedHeightAbove: LINE_HEIGHT,
+    },
+    {
+      scaleX: 0.5,
+      scaleY: 2,
+      rotationDeg: 0,
+      text: 'A clear title',
+      expectedLocalWrapWidth: 160,
+      expectedHeightAbove: 0,
+    },
+  ])(
+    'keeps the frame wrap limit at horizontal scale $scaleX',
+    async ({ scaleX, scaleY, rotationDeg, text, expectedLocalWrapWidth, expectedHeightAbove }) => {
+      const renderer = await createBrowserPixiRenderer();
+      const node = {
+        ...kinds.text,
+        id: `wrapped-scale-${scaleX}`,
+        text,
+        maxWidth: 80,
+        transform: { ...kinds.text.transform, scaleX, scaleY, rotationDeg },
+      };
+      renderer.render(frame([node]));
+
+      const textVisual = layerOf(node.id).getChildByLabel(`text:${node.id}`, true) as Pixi.Text;
+      expect(textVisual.style).toMatchObject({
+        wordWrap: true,
+        wordWrapWidth: expectedLocalWrapWidth,
+      });
+      const bounds = renderer.nodeBounds(node.id)!;
+      expect(bounds.width).toBeLessThanOrEqual(80);
+      if (expectedHeightAbove > 0)
+        expect(bounds.height).toBeGreaterThan(expectedHeightAbove * scaleY);
+      else expect(bounds.height).toBe(LINE_HEIGHT * scaleY);
+      renderer.destroy();
+    },
+  );
+
   it('reports the wrapped text extent used by Monitor selection bounds', async () => {
     const renderer = await createBrowserPixiRenderer();
     const node = {
@@ -414,6 +459,29 @@ describe('nodeBounds and drawing with rotation', () => {
     const bounds = renderer.nodeBounds(node.id)!;
     expect(bounds.width).toBeLessThanOrEqual(80);
     expect(bounds.height).toBeGreaterThan(LINE_HEIGHT);
+    renderer.destroy();
+  });
+
+  it.each(['', '   '])('draws no text plate or padding for blank title %j', async (text) => {
+    const renderer = await createBrowserPixiRenderer();
+    const node = {
+      ...kinds.text,
+      id: `blank-${text.length}`,
+      text,
+      background: { r: 0, g: 0, b: 0, a: 255 },
+    };
+    renderer.render(frame([{ ...node, text: 'Visible title' }]));
+    const layer = layerOf(node.id);
+    expect(layer.getChildByLabel(`text-background:${node.id}`, true)).not.toBeNull();
+    renderer.render(frame([node]));
+
+    expect(layer.getChildByLabel(`text-background:${node.id}`, true)).toBeNull();
+    expect(renderer.nodeBounds(node.id)!.aabb).toMatchObject({
+      x: 540,
+      y: 300,
+      width: 0,
+      height: 0,
+    });
     renderer.destroy();
   });
 

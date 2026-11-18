@@ -554,7 +554,13 @@ describe('isolated composition capture', () => {
             { translateX: 0, translateY: 10, scaleX: 1, scaleY: 1 },
             { x: -2, y: 0, width: 20, height: 10 },
           )
-        : undefined,
+        : id === 'blank-title'
+          ? nodeBoundsFromBox(
+              id,
+              { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+              { x: 0, y: 0, width: 0, height: 0 },
+            )
+          : undefined,
     );
     const title: VisualObjectV1 = {
       id: 'title',
@@ -562,7 +568,13 @@ describe('isolated composition capture', () => {
       text: 'Title',
       transform: transform(),
     };
-    const fixtureProject = visualProject({ title });
+    const blankTitle: VisualObjectV1 = {
+      id: 'blank-title',
+      kind: 'text',
+      text: '   \n ',
+      transform: transform(),
+    };
+    const fixtureProject = visualProject({ title, 'blank-title': blankTitle });
     const root = fixtureProject.compositions.root!;
     const project = {
       ...fixtureProject,
@@ -576,8 +588,15 @@ describe('isolated composition capture', () => {
     });
     try {
       const measured = await capture.collectTextBoxes();
-      expect(measured.boxes).toHaveLength(1);
-      expect(measured.boxes[0]?.x).toBeLessThan(0);
+      expect(measured.boxes).toHaveLength(2);
+      expect(measured.boxes.find((box) => box.id === 'title')?.x).toBeLessThan(0);
+      expect(measured.boxes.find((box) => box.id === 'blank-title')).toMatchObject({
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        emptyText: true,
+      });
       expect(measured.notMeasured).toBe(false);
     } finally {
       capture.release();

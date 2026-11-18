@@ -17,6 +17,7 @@ export interface TextLayoutCandidate {
 export interface TextLayoutNodeMeasurement {
   readonly id: string;
   readonly bounds?: NodeBounds;
+  readonly emptyText?: boolean;
   readonly textColor?: TimelineQcRgba;
   readonly plateColor?: TimelineQcRgba;
   readonly plateBounds?: NodeBounds;
@@ -73,6 +74,7 @@ export function collectTextLayoutBounds(
       composition: frame.composition,
       corners: node.bounds.corners,
       ...(node.plateBounds === undefined ? {} : { plateCorners: node.plateBounds.corners }),
+      ...(node.emptyText === true ? { emptyText: true } : {}),
       textColor: node.textColor,
       ...(node.plateColor === undefined ? {} : { plateColor: node.plateColor }),
     });
