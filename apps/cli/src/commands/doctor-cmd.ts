@@ -1,6 +1,7 @@
 /* global process, fetch, AbortSignal */
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { getJoyMediaHome } from '@joy-media/project-persistence/joy-media-home';
 import type { CliFlags } from '../cli.js';
 import {
   c,
@@ -12,6 +13,7 @@ import {
   printBanner,
   printJson,
 } from '../utils/logger.js';
+import { describeProjectDatabase, type DataLocation } from '../utils/sqlite-location.js';
 import { powershellOptions } from '../utils/windows-powershell.js';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail' | 'skip';
@@ -28,7 +30,17 @@ export interface DoctorReport {
   readonly ok: boolean;
   readonly summary: Readonly<Record<DoctorStatus, number>>;
   readonly checks: readonly DoctorCheck[];
+  /** The project database in use and where it comes from. Read from the environment and flags only. */
+  readonly dataLocation: DataLocation;
 }
+
+const DATA_LOCATION_LABELS: Readonly<Record<DataLocation['source'], string>> = {
+  '--sqlite-path': 'from --sqlite-path',
+  JOY_MEDIA_SQLITE_PATH: 'from JOY_MEDIA_SQLITE_PATH',
+  JOY_MEDIA_HOME: 'from JOY_MEDIA_HOME',
+  APPDATA: 'default, in APPDATA',
+  default: 'default, in the JOY Media home folder',
+};
 
 export const EDGE_TIMEOUT_MS = 3000;
 
@@ -147,11 +159,18 @@ async function checkEdge(): Promise<DoctorCheck> {
   }
 }
 
-export async function runDoctorChecks(): Promise<DoctorReport> {
+export async function runDoctorChecks(sqlitePathFlag?: string): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [checkNode(), checkSqlite(), checkGpu(), await checkEdge()];
   const summary: Record<DoctorStatus, number> = { pass: 0, warn: 0, fail: 0, skip: 0 };
   for (const check of checks) summary[check.status]++;
-  return { ok: summary.fail === 0, summary, checks };
+  // Environment and flags only. This must not read or create a file, so it never calls getDefaultSqlitePath().
+  const dataLocation = describeProjectDatabase({
+    flagPath: sqlitePathFlag,
+    env: process.env,
+    platform: process.platform,
+    defaultHome: getJoyMediaHome(),
+  });
+  return { ok: summary.fail === 0, summary, checks, dataLocation };
 }
 
 export async function handleDoctorCommand(args: string[] = [], flags?: CliFlags): Promise<number> {
@@ -162,7 +181,7 @@ export async function handleDoctorCommand(args: string[] = [], flags?: CliFlags)
     logLine(`  ${c('JOY Media System Diagnostic & Health Check (Doctor)', 'bold')}\n`);
   }
 
-  const report = await runDoctorChecks();
+  const report = await runDoctorChecks(flags?.sqlitePath);
   const exitCode = report.ok ? 0 : 1;
   const idsWith = (status: DoctorStatus): string[] =>
     report.checks.filter((check) => check.status === status).map((check) => check.id);
@@ -178,6 +197,10 @@ export async function handleDoctorCommand(args: string[] = [], flags?: CliFlags)
     return exitCode;
   }
 
+  logInfo(
+    `Data location: ${report.dataLocation.path} (${DATA_LOCATION_LABELS[report.dataLocation.source]})`,
+  );
+  logLine();
   for (const check of report.checks) {
     const line = `${check.label}: ${check.message}`;
     if (check.status === 'pass') logSuccess(line);

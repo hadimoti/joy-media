@@ -10,7 +10,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { getJoyMediaHome } from '@joy-media/project-persistence/joy-media-home';
 import {
   createCredentialStore,
@@ -18,6 +18,7 @@ import {
   type CredentialStore,
 } from './credential-store.js';
 import { createDpapiProtector, createRestrictedFileProtector } from './dpapi-protector.js';
+import { resolveDefaultSqliteLocation } from './sqlite-location.js';
 
 /** One agent slot as the config file keeps it. Nothing here is secret: the key stays in the credential store. */
 export interface SavedAgentSlot {
@@ -528,15 +529,16 @@ export function getDefaultSqlitePath(): string {
   if (cliCfg.sqlitePath) {
     return cliCfg.sqlitePath;
   }
-  if (process.platform === 'win32' && process.env.APPDATA) {
-    const parent = join(process.env.APPDATA, '@joy-media', 'desktop');
-    try {
-      mkdirSync(parent, { recursive: true, mode: PRIVATE_DIR_MODE });
-    } catch {
-      // Keep the path stable; opening the database reports a structured error
-      // if this Windows profile cannot create or access its default directory.
-    }
-    return join(parent, 'joy-media.sqlite3');
+  const location = resolveDefaultSqliteLocation({
+    env: process.env,
+    platform: process.platform,
+    defaultHome: getJoyMediaHome(),
+  });
+  try {
+    mkdirSync(dirname(location.path), { recursive: true, mode: PRIVATE_DIR_MODE });
+  } catch {
+    // Keep the path stable; opening the database reports a structured error
+    // if this profile cannot create or access its default directory.
   }
-  return join(getJoyMediaDir(), 'joy-media.sqlite3');
+  return location.path;
 }
