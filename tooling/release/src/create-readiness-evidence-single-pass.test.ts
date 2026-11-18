@@ -17,6 +17,7 @@ const CANDIDATE_SHA = 'a'.repeat(40);
 const RUN_ID = '555';
 const ATTEMPT = '1';
 const SINGLE_LANES = [
+  'validate-candidate',
   'hosted-verify',
   'node-contracts',
   'editor-web-bundle',

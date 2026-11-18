@@ -62,6 +62,7 @@ const SINGLE_PASS_WINDOWS_PATHS = [
 // The single-pass gate's lanes (release-candidate-v3). The gate's `needs` list must equal this list
 // (release-candidate-v3.test.ts).
 export const SINGLE_PASS_LANES = [
+  'validate-candidate',
   'hosted-verify',
   'node-contracts',
   'editor-web-bundle',

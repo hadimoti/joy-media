@@ -366,6 +366,9 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # The self-hosted runner must provide the candidate release files at
+  # $JOY_MEDIA_CI_EVIDENCE_ROOT/<candidate sha>/candidate-files (the release files and SHA256SUMS.txt). The job does not
+  # build or fetch them. It fails closed when that folder is missing or the files do not match the committed sums.
   checksums:
     name: verify candidate release files
     runs-on: [self-hosted, linux, x64, joy-media-ci]
@@ -408,11 +411,16 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # Windows is not run here: the attended and Sandbox receipts are read from the dispatch checkout. The local-only release gate
+  # then evaluates the candidate with its real inputs (builds, tests, static checks, receipts). The dispatch checkout holds the
+  # receipts, which are committed after the candidate, so the gate binds the candidate with --candidate= and allows only
+  # receipt and release-tooling changes after it (gate.ts resolveAttendedCandidate).
   windows-candidate:
-    name: attended and Sandbox receipts (Linux, receipt-only)
+    name: attended and Sandbox receipts plus the local release gate (Linux)
     runs-on: [self-hosted, linux, x64, joy-media-ci]
     needs: [validate-candidate, checksums]
-    timeout-minutes: 15
+    # The gate runs typecheck, lint, format, the full Vitest suite, the editor and Worker builds and the goldens.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -422,54 +430,44 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
+      - name: Verify the dispatch checkout and pinned pnpm
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          node --version
+          corepack enable pnpm
+          test "$(pnpm --version)" = '11.15.0'
       - name: Download verified candidate files
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: joy-media-candidate-files-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
           path: apps/desktop/dist/releases
-      - name: Evaluate committed attended and Sandbox receipts with the local-only gate
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run the local release gate on the candidate (this step fails when the gate exits non-zero)
         shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           set -euo pipefail
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
-          node --experimental-strip-types --input-type=module <<'NODE'
-          import { execFileSync } from 'node:child_process';
-          import {
-            evaluateReleaseGate,
-            readAttendedEvidence,
-            resolveAttendedCandidate,
-          } from './tooling/release/src/gate.ts';
-
-          const root = process.cwd();
-          const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-          const binding = resolveAttendedCandidate(root, headSha, process.env.CANDIDATE_SHA);
-          const evidence = readAttendedEvidence(root, binding.candidateSha, binding.problems);
-          const result = evaluateReleaseGate({
-            profile: 'local-only',
-            attendedEvidence: evidence,
-            testSummary: { collected: 1, failed: 0 },
-            dirtyGeneratedArtifacts: [],
-            fixtureHandlers: [],
-            deploymentManifests: [],
-            builds: { editor: true, worker: true },
-            staticAssetPackaging: [],
-            manifestGenerated: true,
-            sbomGenerated: true,
-            browserJourneys: [],
-            featureStatus: { auditedOn: new Date().toISOString().slice(0, 10), statuses: [] },
-          });
-          const required = ['attended-journey', 'lifecycle-evidence'];
-          const checks = new Map(result.checks.map((check) => [check.id, check]));
-          const failures = required
-            .map((id) => checks.get(id))
-            .filter((check) => check?.status !== 'passed');
-          if (failures.length > 0) {
-            for (const check of failures) {
-              console.error((check?.id ?? 'receipt-check') + ': ' + (check?.message ?? 'check is missing'));
-            }
-            process.exitCode = 1;
-          } else {
-            console.log('attended and Sandbox receipts passed for ' + binding.candidateSha);
+          pnpm release:gate:local --candidate="$CANDIDATE_SHA"
+      - name: Print the gate report (a waived Sandbox lifecycle is listed as WAIVED, never passed)
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          report='test-output/release-gate/report.json'
+          if [ ! -s "$report" ]; then echo 'the release gate wrote no report' >&2; exit 0; fi
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const { result } = JSON.parse(readFileSync('test-output/release-gate/report.json', 'utf8'));
+          console.log('release gate passed: ' + result.passed);
+          for (const check of result.checks) {
+            console.log(check.status.toUpperCase() + ' ' + check.id + ': ' + check.message);
           }
           NODE
 
@@ -609,7 +607,6 @@ jobs:
           # UI-journey specs that exercise import, decode/seek and the encode/export Worker path against the shipped artifact. The
           # dev-server-only white-box decoder specs stay in the desktop-primary and real-service lanes.
           pnpm exec playwright test --retries=0 \
-            tests/e2e/authenticated-smoke.spec.ts \
             tests/e2e/wp32-real-project-journey.spec.ts \
             tests/e2e/wp30-animated-timeline-export.spec.ts \
             tests/e2e/golden-path.spec.ts \

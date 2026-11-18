@@ -31,6 +31,7 @@ export const GATE_CHECKS = [
 // The lanes of the topology, as the gate's needs list names them: the release-candidate-v3 lanes.
 // ci-v3-run-summary.test.ts pins them against the gate.
 export const SINGLE_PASS_LANES = [
+  'validate-candidate',
   'hosted-verify',
   'node-contracts',
   'editor-web-bundle',

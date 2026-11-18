@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { SHAPES } from './create-readiness-evidence.mjs';
 import { SINGLE_PASS_LANES } from './ci-v3-run-summary.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -39,7 +40,8 @@ type Workflow = {
 const V3 = readFileSync(V3_PATH, 'utf8');
 const v3 = yaml.load(V3) as Workflow;
 const RETIRED_LANES = ['linux-real-services', 'real-service-acceptance', 'p3-real-services'];
-const FINAL_NEEDS = ['validate-candidate', ...SINGLE_PASS_LANES];
+// The gate-summary needs list is the single lane list. Both readiness modules take their copy from SINGLE_PASS_LANES.
+const FINAL_NEEDS = [...SINGLE_PASS_LANES];
 
 function needsOf(job: Job | undefined): string[] {
   return ([] as string[]).concat(job?.needs ?? []);
@@ -66,6 +68,7 @@ describe('release-candidate-v3 workflow', () => {
       expect(V3).not.toContain(`${lane},`);
     }
     expect(SINGLE_PASS_LANES).toEqual([
+      'validate-candidate',
       'hosted-verify',
       'node-contracts',
       'editor-web-bundle',
@@ -81,6 +84,25 @@ describe('release-candidate-v3 workflow', () => {
     expect(v3.jobs['gate-summary'].steps?.map((step) => step.run ?? '').join('\n')).toContain(
       "'validate-candidate,hosted-verify,node-contracts,editor-web-bundle,windows-candidate,checksums,offline-packaged-smoke,fixture-acceptance,acceptance-responsive,site-build'",
     );
+  });
+
+  it('keeps the readiness modules lane lists equal to the gate-summary needs, in the workflow order', () => {
+    // The workflow's needs list is written in this order; the two readiness modules must name the same lanes in it.
+    const workflowOrder = [
+      'validate-candidate',
+      'hosted-verify',
+      'node-contracts',
+      'editor-web-bundle',
+      'windows-candidate',
+      'checksums',
+      'offline-packaged-smoke',
+      'fixture-acceptance',
+      'acceptance-responsive',
+      'site-build',
+    ];
+    expect(needsOf(v3.jobs['gate-summary'])).toEqual(workflowOrder);
+    expect(SINGLE_PASS_LANES).toEqual(workflowOrder);
+    expect(SHAPES['single-pass'].lanes).toEqual(workflowOrder);
   });
 
   it('uses only repository-approved self-hosted Linux labels', () => {
@@ -145,18 +167,33 @@ describe('release-candidate-v3 workflow', () => {
     expect(upload?.with?.name).toContain('${{ inputs.candidate_sha }}');
   });
 
-  it('validates committed attended and Sandbox receipts with the local-only gate, without running the app', () => {
+  it('runs the real local-only release gate on the candidate, without launching the app', () => {
     const job = v3.jobs['windows-candidate'];
     expect(needsOf(job)).toEqual(['validate-candidate', 'checksums']);
-    const run = (job.steps ?? []).map((step) => step.run ?? '').join('\n');
-    expect(run).toContain('resolveAttendedCandidate');
-    expect(run).toContain('readAttendedEvidence');
-    expect(run).toContain('evaluateReleaseGate');
-    expect(run).toContain("profile: 'local-only'");
-    expect(run).toContain("'attended-journey'");
-    expect(run).toContain("'lifecycle-evidence'");
-    expect(run).not.toMatch(/pnpm\s+(?:install|build)|release:gate|Start-Process|electron\s/u);
-    expect(run).toContain("check?.status !== 'passed'");
+    const steps = job.steps ?? [];
+    const checkout = steps.find((step) => step.uses?.startsWith('actions/checkout@'));
+    expect(checkout?.with?.['fetch-depth']).toBe(0);
+    expect(checkout?.with?.ref).toBe('${{ github.sha }}');
+    const gateStep = steps.find((step) => step.run?.includes('pnpm release:gate:local'));
+    expect(gateStep?.name).toBe(
+      'Run the local release gate on the candidate (this step fails when the gate exits non-zero)',
+    );
+    expect(gateStep?.run).toContain('set -euo pipefail');
+    expect(gateStep?.run).toContain('pnpm release:gate:local --candidate="$CANDIDATE_SHA"');
+    // The candidate reaches the script only through the quoted shell variable, never as ${{ inputs.* }} in the script text.
+    expect(gateStep?.env?.CANDIDATE_SHA).toBe('${{ inputs.candidate_sha }}');
+    expect(gateStep?.run).not.toContain('${{');
+    expect(steps.some((step) => step.run?.includes('pnpm install --frozen-lockfile'))).toBe(true);
+    const install = steps.findIndex((step) => step.run?.includes('pnpm install --frozen-lockfile'));
+    expect(install).toBeLessThan(steps.indexOf(gateStep as Step));
+    const report = steps.find((step) => step.run?.includes('test-output/release-gate/report.json'));
+    expect(report?.if).toBe('always()');
+    // The report step prints each check's status in upper case, so a waived lifecycle shows as WAIVED.
+    expect(report?.run).toContain('check.status.toUpperCase()');
+    const run = steps.map((step) => step.run ?? '').join('\n');
+    expect(run).not.toMatch(/Start-Process|electron\s/u);
+    expect(run).not.toContain('testSummary: { collected: 1');
+    expect(run).not.toContain("profile: 'local-only'");
   });
 
   it('verifies the evidence file list and binds the checksums to the committed receipt', () => {
@@ -166,6 +203,10 @@ describe('release-candidate-v3 workflow', () => {
     expect(run).toContain('tooling/release/src/checksums.ts verify --dir');
     expect(run).toContain('docs/release/attended/$CANDIDATE_SHA/SHA256SUMS.txt');
     expect(run).toContain('cmp "$candidate_files_dir/SHA256SUMS.txt"');
+    // The runner's duty is stated in the workflow, and the job fails closed without it.
+    expect(V3).toContain('$JOY_MEDIA_CI_EVIDENCE_ROOT/<candidate sha>/candidate-files');
+    expect(V3).toContain('fails closed when that folder is missing');
+    expect(run).toContain('candidate files are missing from the evidence store');
     expect(job.steps?.some((step) => step.uses?.startsWith('actions/upload-artifact@'))).toBe(true);
     expect(
       v3.jobs['windows-candidate'].steps?.some((step) =>
@@ -203,7 +244,10 @@ describe('release-candidate-v3 workflow', () => {
     expect(needsOf(v3.jobs['fixture-acceptance'])).toEqual(['validate-candidate']);
     expect(run).toContain('pnpm exec playwright test --retries=0');
     expect(run).toContain('measure-entry-bundle.mjs');
-    expect(run).toContain('authenticated-smoke.spec.ts');
+    // The production-bundle smoke names only specs that exist; the deleted authenticated-smoke spec must not come back.
+    expect(run).not.toContain('authenticated-smoke.spec.ts');
+    expect(run).toContain('tests/e2e/wp32-real-project-journey.spec.ts');
+    expect(run).toContain('tests/e2e/golden-path.spec.ts');
     expect(
       v3.jobs['fixture-acceptance'].steps?.some(
         (step) => step.name === 'Verify fixture-acceptance teardown',
@@ -231,6 +275,14 @@ describe('release-candidate-v3 workflow', () => {
         (step) => step.name === 'Verify acceptance teardown',
       ),
     ).toBe(true);
+  });
+
+  it('names only Playwright spec files that exist in the repository', () => {
+    const named = [...V3.matchAll(/tests\/e2e\/[\w.-]+\.spec\.ts/gu)].map((match) => match[0]);
+    expect(named.length).toBeGreaterThan(0);
+    for (const spec of new Set(named)) {
+      expect(existsSync(join(resolve(HERE, '../../..'), spec)), spec).toBe(true);
+    }
   });
 
   it('does not include publishing, tagging, deployment or merge commands', () => {
