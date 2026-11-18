@@ -537,9 +537,13 @@ These rows exist in the driver code (`tooling/qa/live`) and are not in sections 
 | D-094 (code) | Quality check                    | Planted fault: a title pushed past the bottom edge of the safe area                     | scripted live | The check reports a finding                                                                                                            | T-B06 |
 | D-H01        | Timeline file drops              | A file drop is rejected by a locked track                                               | scripted live | A locked track shows its toast and no clip is added                                                                                    | T-H04 |
 | D-H02        | Timeline file drops              | A file dropped on the empty timeline lands at the requested time                        | scripted live | The clip starts within 0.1 s of the 2 s drop point                                                                                     | T-H04 |
+| D-H03        | Timeline file drops              | Drop onto a missing-media clip; report the missing source safely                        | scripted live | The missing source is reported safely                                                                                                  | T-H04 |
+| D-H04        | Timeline file drops              | Drop a ten-minute clip; preserve its full duration                                      | scripted live | The new clip keeps a duration within 0.1 s of 600 s                                                                                    | T-H04 |
+| D-H05        | Timeline file drops              | Drop a file while it is being copied                                                    | scripted live | A retry message is shown                                                                                                               | T-H04 |
 | D-H06        | Timeline file drops              | A read-only source imports without changing the file                                    | scripted live | The file appears in Media; its size and modified time stay the same                                                                    | T-H04 |
 | D-H07        | Timeline file drops              | A non-video file named .mp4 is rejected by content                                      | scripted live | A rejection message shows and no clip is added                                                                                         | T-H04 |
 | D-H08        | Timeline file drops              | Persian and Arabic filenames remain intact in Media                                     | scripted live | Both file names show in Media after the drop                                                                                           | T-H04 |
+| D-H09        | Timeline file drops              | Drop a file from a very long path                                                       | scripted live | Import completes, or the app reports a clear error                                                                                     | T-H04 |
 | D-H10        | Timeline file drops              | Dropping the same file twice creates distinct timeline clips                            | scripted live | Two clips with different ids; one catalog entry for the identical bytes                                                                | T-H04 |
 
 **Notes on this table.**
@@ -547,7 +551,7 @@ These rows exist in the driver code (`tooling/qa/live`) and are not in sections 
 1. D-A05-06 to D-A05-14 test the same fixtures as D-046 to D-048 in section 3.1, under the driver's own IDs. Both stay.
 2. **D-092 to D-094 are used twice.** Section 4 uses them for timeline commands (D-092 `insertClip`, D-093 `removeClip`, D-094 `moveClip`). The driver uses them for the quality check (rows marked "(code)" above, T-B06). One set needs new IDs; CC should decide.
 3. D-F23-01: the title says "first and later exports", but the code's pixel message compares a preview with an export. It is not clear which check the row makes. To be read again by CC.
-4. D-H03, D-H04, D-H05 and D-H09 are not written yet (tracker T-H04).
+4. D-H03, D-H04, D-H05 and D-H09 are registered in the scripted-row table. D-H03, D-H05 and D-H09 require attended OS file drags; D-H04 can verify duration if its ten-minute fixture reaches the app. D-H01 now waits for the target track's lock control and locked state before the drop.
 
 ---
 

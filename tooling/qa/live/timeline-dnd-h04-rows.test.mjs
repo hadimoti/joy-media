@@ -31,7 +31,7 @@ test('T-H04 live rows cover Explorer and desktop drops on every requested surfac
 });
 
 test('the implemented T-H04 rows are registered in the desktop runner in task-card order', () => {
-  const ids = ['D-H01', 'D-H02', 'D-H06', 'D-H07', 'D-H08', 'D-H10'];
+  const ids = Array.from({ length: 10 }, (_, index) => `D-H${String(index + 1).padStart(2, '0')}`);
   assert.deepEqual(
     TIMELINE_DND_H04_ROWS.map(({ id }) => id),
     ids,
@@ -81,6 +81,7 @@ function makeH04Fake(t, id, options = {}) {
     mutateOnImport = false,
     readError,
     readErrorAfterDrop = false,
+    clipDurationUs = 0,
   } = options;
   const clips = seedClips.map((clip) => ({ ...clip }));
   const cardNames = [...cards];
@@ -127,6 +128,7 @@ function makeH04Fake(t, id, options = {}) {
       return {
         async send(method, payload) {
           if (method !== 'Input.dispatchDragEvent') return {};
+          page.calls.push(`CDP.${method}(${payload.type})`);
           drops.push(payload);
           if (payload.type !== 'drop') return {};
           dropped = true;
@@ -141,6 +143,7 @@ function makeH04Fake(t, id, options = {}) {
                 assetId: `asset-${basename(file)}`,
                 trackId: 'track-1',
                 startUs: targetUs + index * 1_000_000,
+                durationUs: clipDurationUs,
               });
             }
           }
@@ -345,4 +348,71 @@ test('D-H07 rethrows a read failure instead of reporting blocked', async (t) => 
     assert.equal(error.message, 'document unreadable');
     return true;
   });
+});
+
+test('D-H01 waits for the visible lock control and confirmed locked state before dropping', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H01');
+  await run('D-H01', page, ctx);
+
+  const headerHover = page.calls.findIndex(
+    (call) => call.includes('timeline-track-header') && call.includes('.hover('),
+  );
+  const lockVisibleWait = page.calls.findIndex(
+    (call) => call.includes('Lock ') && call.includes('.waitFor('),
+  );
+  const lockClick = page.calls.findIndex(
+    (call) => call.includes('Lock ') && call.includes('.click('),
+  );
+  const pressedWait = page.calls.findIndex((call) => call.includes('.waitForFunction('));
+  const dropIndex = page.calls.findIndex((call) => call.includes('Input.dispatchDragEvent'));
+
+  assert.ok(headerHover >= 0, 'the row did not hover the seeded track header');
+  assert.ok(lockVisibleWait > headerHover, 'the row did not wait for the lock control after hover');
+  assert.ok(pressedWait > lockClick, 'the row did not wait for aria-pressed after locking');
+  assert.ok(dropIndex > pressedWait, 'the row dispatched the file drop before confirming the lock');
+});
+
+test('D-H01 is blocked only when the simulated drop shows neither the refusal nor a card/clip', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H01', { noToast: true, dropEffect: 'none' });
+  await assert.rejects(run('D-H01', page, ctx), (error) => {
+    assert.match(
+      error.message,
+      /^BLOCKED D-H01: needs a real mouse drag from Explorer \(attended\)/u,
+    );
+    return true;
+  });
+});
+
+test('D-H04 checks the full ten-minute duration when the drop reaches the app', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H04', {
+    dropEffect: 'clip',
+    clipDurationUs: 600_000_000,
+  });
+  const message = await run('D-H04', page, ctx);
+  assert.match(message, /600000000 us/u);
+});
+
+test('D-H04 is blocked when the synthetic drop reaches neither Media nor the timeline', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H04', { dropEffect: 'none' });
+  await assert.rejects(run('D-H04', page, ctx), (error) => {
+    assert.match(
+      error.message,
+      /^BLOCKED D-H04: needs a real mouse drag from Explorer \(attended\)/u,
+    );
+    return true;
+  });
+});
+
+test('D-H03, D-H05, and D-H09 report their attended-drop limits as BLOCKED', async (t) => {
+  for (const id of ['D-H03', 'D-H05', 'D-H09']) {
+    const { page, ctx } = makeH04Fake(t, id);
+    await assert.rejects(
+      () => run(id, page, ctx),
+      (error) => {
+        assert.match(error.message, new RegExp(`^BLOCKED ${id}:`, 'u'));
+        assert.match(error.message, /Explorer|being copied|missing-media/iu);
+        return true;
+      },
+    );
+  }
 });

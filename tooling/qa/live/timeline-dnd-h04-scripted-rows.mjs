@@ -1,3 +1,4 @@
+/* global document */
 import {
   appendFileSync,
   chmodSync,
@@ -76,6 +77,7 @@ async function readClips(ctx) {
     assetId: clip.assetId,
     trackId,
     startUs: clip.startUs,
+    durationUs: clip.durationUs,
   }));
 }
 
@@ -128,6 +130,18 @@ function assertNear(actual, expected, tolerance, label) {
   }
 }
 
+function attendedFileDropRow(id, title, reason) {
+  return {
+    id,
+    area: 'timeline file drops',
+    title,
+    severity: 'major',
+    run() {
+      throw blockedRow(id, `needs a real mouse drag from Explorer (attended): ${reason}`);
+    },
+  };
+}
+
 export const TIMELINE_DND_H04_ROWS = [
   {
     id: 'D-H01',
@@ -137,16 +151,34 @@ export const TIMELINE_DND_H04_ROWS = [
     async run(page, ctx) {
       await fresh(page, ctx, 'D-H01');
       const seeded = await ensureTimelineClip(page, ctx, 'D-H01');
-      const lock = page.getByRole('button', { name: /^Lock /u }).first();
-      await lock
-        .locator('xpath=ancestor::*[contains(@class,"timeline-track-header")][1]')
-        .hover({ timeout: 8_000 });
-      if ((await lock.getAttribute('aria-pressed')) !== 'true') await lock.click();
-      if ((await lock.getAttribute('aria-pressed')) !== 'true')
-        throw new Error('track did not lock');
+      const trackId = seeded.clips[0].trackId;
+      const track = page.locator(`.timeline-track[data-track-id=${JSON.stringify(trackId)}]`);
+      const header = track.locator('.timeline-track-header');
+      await header.waitFor({ state: 'visible', timeout: 8_000 });
+      await header.hover({ timeout: 8_000 });
+      const lock = header.getByRole('button', { name: /^Lock /u });
+      await lock.waitFor({ state: 'visible', timeout: 8_000 });
+      if ((await lock.getAttribute('aria-pressed')) !== 'true') {
+        await lock.click();
+        await page.waitForFunction(
+          (wantedTrackId) => {
+            const row = [...document.querySelectorAll('.timeline-track')].find(
+              (candidate) => candidate.getAttribute('data-track-id') === wantedTrackId,
+            );
+            return (
+              row?.querySelector('button[aria-label^="Lock "]')?.getAttribute('aria-pressed') ===
+              'true'
+            );
+          },
+          trackId,
+          { timeout: 8_000 },
+        );
+      }
       const before = await readClips(ctx);
       const added = join(rowScratch(ctx, 'D-H01'), basename(fixture(ctx)));
       copyFileSync(fixture(ctx), added);
+      const name = basename(added);
+      const cardsBefore = await mediaCards(page, name).count();
       await dropFiles(page, `.timeline-track[data-track-id="${seeded.clips[0].trackId}"]`, [added]);
       const toast = page
         .locator('.toast-message')
@@ -154,21 +186,32 @@ export const TIMELINE_DND_H04_ROWS = [
         .first();
       // The preload mints import tickets only for a trusted drop (see D-H02). A simulated drop that never shows the
       // refusal toast did not reach the app as a drop: that is a simulation limit, not a locked-track defect.
-      const refused = await toast
-        .waitFor({ state: 'visible', timeout: 8_000 })
-        .then(() => true)
-        .catch(() => false);
+      let refused = false;
+      try {
+        await toast.waitFor({ state: 'visible', timeout: 8_000 });
+        refused = true;
+      } catch (error) {
+        if (!isUiTimeout(error)) throw error;
+      }
       const afterDrop = await readClips(ctx);
-      if (!refused && afterDrop.length === before.length) {
+      const cardsAfterDrop = await mediaCards(page, name).count();
+      if (
+        !refused &&
+        clipsAddedSince(before, afterDrop).length === 0 &&
+        cardsAfterDrop === cardsBefore
+      ) {
         throw blockedRow(
           'D-H01',
           'needs a real mouse drag from Explorer (attended): the simulated drop was not shown to be trusted, so neither the refusal message nor a new clip appeared',
         );
       }
+      if (!refused)
+        throw new Error('the locked-track drop reached the app without a refusal message');
       await page.waitForTimeout(500);
       const after = await readClips(ctx);
-      if (after.length !== before.length)
-        throw new Error(`locked drop added a clip (${before.length} -> ${after.length})`);
+      const cardsAfter = await mediaCards(page, name).count();
+      if (clipsAddedSince(before, after).length > 0) throw new Error('locked drop added a clip');
+      if (cardsAfter !== cardsBefore) throw new Error('locked drop imported the file into Media');
       return `locked track ${seeded.clips[0].trackId} refused the file; no clip was added`;
     },
   },
@@ -207,6 +250,50 @@ export const TIMELINE_DND_H04_ROWS = [
       return `clip ${clip.id} started at ${clip.startUs} us (requested ${targetUs} us)`;
     },
   },
+  attendedFileDropRow(
+    'D-H03',
+    'A file drop onto a missing-media clip reports the missing source safely',
+    'the missing-media project state and trusted OS file drop need an attended setup; the simulated file event cannot prove either',
+  ),
+  {
+    id: 'D-H04',
+    area: 'timeline file drops',
+    title: 'A ten-minute file drop preserves its full duration',
+    severity: 'major',
+    async run(page, ctx) {
+      await fresh(page, ctx, 'D-H04');
+      const path = ctx.media;
+      if (!path) throw blockedRow('D-H04', 'needs --media <ten-minute video fixture>');
+      const name = basename(path);
+      const before = await readClips(ctx);
+      const cardsBefore = await mediaCards(page, name).count();
+      await dropFiles(page, '.timeline-empty-state', [path], 0);
+      let clips;
+      try {
+        clips = await waitForClips(ctx, (rows) => rows.length > before.length, 'a dropped clip');
+      } catch (error) {
+        if (!isClipWaitTimeout(error)) throw error;
+        if ((await mediaCards(page, name).count()) > cardsBefore) {
+          throw new Error(`the simulated drop reached Media (a new ${name} card) but made no clip`);
+        }
+        throw blockedRow(
+          'D-H04',
+          `needs a real mouse drag from Explorer (attended): ${UNTRUSTED_DROP_REASON}, so no clip or Media card appeared`,
+        );
+      }
+      const [clip] = clipsAddedSince(before, clips);
+      if (clip === undefined)
+        throw new Error('the drop changed the clip count but created no new clip');
+      const expectedUs = 600_000_000;
+      assertNear(clip.durationUs, expectedUs, 100_000, 'ten-minute clip duration');
+      return `clip ${clip.id} kept its full duration (${clip.durationUs} us)`;
+    },
+  },
+  attendedFileDropRow(
+    'D-H05',
+    'A file drop during copy shows a retry message',
+    'the file must be dragged from Explorer while its copy is still in progress; a synthetic event cannot reproduce that OS state',
+  ),
   {
     id: 'D-H06',
     area: 'timeline file drops',
@@ -316,6 +403,11 @@ export const TIMELINE_DND_H04_ROWS = [
       return `Media preserved both filenames: ${names.join(', ')}`;
     },
   },
+  attendedFileDropRow(
+    'D-H09',
+    'A file drop from a very long path completes or reports a clear error',
+    'a real Explorer drag is needed to prove that Windows transfers the long source path to Electron',
+  ),
   {
     id: 'D-H10',
     area: 'timeline file drops',
