@@ -94,7 +94,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Plain Left and Right now move a selected clip by one pixel, and step the playhead when nothing is selected.
 - Dragging an effect or filter card onto a clip no longer starts the browser's picture drag.
 - The Monitor zoom keys Ctrl+0, Ctrl+1, Ctrl++ and Ctrl+- did not work. Fixed.
-- On a large screen a one-second clip next to a cut could not be clicked. Fixed.
+- A short clip next to a cut could not be clicked, because an invisible drop target sat over it. Fixed.
 
 ### Menus and panels
 
@@ -131,11 +131,11 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 
 ### Saving and export
 
-- The project is saved to disk soon after every change, when a window closes, and when the app quits. A crash or power cut loses almost nothing.
-- Temporary export files in the browser storage are cleaned up reliably after a cancel or a failure. They are not deleted while another window still uses them.
-- The sample project "Local editor project" now exports. It had two clips with no media behind them. An export that is refused for missing media now names the clips.
+- Changes are written to the app's storage within about half a second, and flushed to disk when a window closes and when the app quits.
+- Temporary export files in the browser storage are cleaned up at the next export or app start. Files younger than two hours are left alone, so another window's export is not interrupted.
+- The sample project "Local editor project" no longer carries the two clips that had no media behind them. An export that is refused for missing media now names the clips.
 - The colour of an exported video no longer changes when you export a second time in the browser version.
-- The export quality is higher. The final video is encoded with almost no loss: a 10-minute export takes about the same time, and the file is about 390 MB instead of 220 MB.
+- The export quality is higher. In the desktop app the final video is encoded with almost no loss. Measured on a 10-minute 1080p export: it takes about the same time (about 14 minutes), and the file is about 390 MB instead of 220 MB.
 - The export helper no longer reports false errors after a job ends. A cancel during the last steps is honoured: the job shows cancelled, not failed. If a needed video tool is missing, the message gives the real reason.
 
 ## Known limits
