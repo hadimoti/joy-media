@@ -342,7 +342,6 @@ import {
   type TimelineMediaAsset,
 } from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
-import { calculateMediaFitTransform } from './media-fit-transform.js';
 import { nextProfessionalTrackId, professionalTrackLabel } from './timeline-track-family.js';
 import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
 import { findFirstPartyScene } from '@joy-media/html-scene-runtime/first-party';
@@ -411,7 +410,6 @@ import { FiltersPanel } from './FiltersPanel.js';
 import { ColorPanel } from './ColorPanel.js';
 import { TransitionsPanel } from './TransitionsPanel.js';
 import {
-  bindClipToObject,
   clearImageMatte,
   readClipMediaKindMap,
   readImageMatteMap,
@@ -7047,54 +7045,29 @@ function EditorWorkspace({
           const alreadyInLibrary = importedAssets.filter(
             (asset) => context.visualProject.assets[asset.id] !== undefined,
           ).length;
-          let nextVisualProject = context.visualProject;
           const timelineAssets: TimelineMediaAsset[] = [];
           const clipIds: string[] = [];
+          const placements: TimelineMediaPlacement[] = [];
           const composition = activeTimelineView.composition;
           const shouldPlace = target.surface !== 'media' && composition !== undefined;
           const batchToken = Date.now();
+          if (!shouldPlace) {
+            context.replaceVisualProject(
+              importedAssets.reduce(
+                (project, asset) => projectWithImportedAsset(project, asset),
+                context.visualProject,
+              ),
+            );
+          }
           for (const [index, asset] of importedAssets.entries()) {
-            nextVisualProject = projectWithImportedAsset(nextVisualProject, asset);
             if (!shouldPlace) continue;
             const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${batchToken}-${index}`;
-            const controllerId = `media-controller-${clipId}`;
-            const fitted =
-              asset.kind === 'audio' ||
-              asset.descriptor.width === undefined ||
-              asset.descriptor.height === undefined
-                ? undefined
-                : calculateMediaFitTransform({
-                    sourceWidth: asset.descriptor.width,
-                    sourceHeight: asset.descriptor.height,
-                    frameWidth: composition.width,
-                    frameHeight: composition.height,
-                    mode: 'fit',
-                  });
-            nextVisualProject = bindClipToObject(
-              {
-                ...nextVisualProject,
-                visualObjects: {
-                  ...nextVisualProject.visualObjects,
-                  [controllerId]: {
-                    id: controllerId,
-                    // A picture is drawn by the Monitor only when its object is an image object.
-                    kind: asset.kind === 'image' ? 'image' : 'null',
-                    assetId: asset.id,
-                    transform: {
-                      x: fitted?.x ?? 0,
-                      y: fitted?.y ?? 0,
-                      scaleX: fitted?.scaleX ?? 1,
-                      scaleY: fitted?.scaleY ?? 1,
-                      rotationDeg: 0,
-                      opacity: 1,
-                      crop: { left: 0, top: 0, right: 0, bottom: 0 },
-                    },
-                  },
-                },
-              },
+            // The shared placement binds this clip's controller to the asset and fits it to this frame.
+            placements.push({
+              asset,
               clipId,
-              controllerId,
-            );
+              frame: { width: composition.width, height: composition.height },
+            });
             timelineAssets.push({
               id: asset.id,
               kind: asset.kind,
@@ -7114,7 +7087,6 @@ function EditorWorkspace({
             });
             clipIds.push(clipId);
           }
-          context.replaceVisualProject(nextVisualProject);
           if (shouldPlace && composition !== undefined) {
             const lockedTrackIds = new Set(
               composition.tracks
@@ -7135,7 +7107,9 @@ function EditorWorkspace({
                     ...(target.trackId === undefined ? {} : { targetTrackId: target.trackId }),
                   }
                 : { mode: 'first-free' as const, startUs };
-            context.dispatchTimeline(
+            // One Undo step: the timeline entry, the clip's media binding and the asset registration.
+            context.dispatchMediaPlacement(
+              placements,
               buildTimelineMediaImportTransaction(
                 composition,
                 timelineAssets,
