@@ -84,8 +84,29 @@ export function listMp4(dir) {
 export async function trimTimelineToSeconds(page, seconds, rowId) {
   await blurFocus(page);
   await page.keyboard.press('Home');
-  for (let step = 0; step < seconds; step += 1) await page.keyboard.press('ArrowRight');
   const edge = 3;
+  const homeX = (await page.evaluate(readTimelineBoxes)).playheadX;
+  for (let step = 0; step < seconds; step += 1) await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(200);
+  if (homeX !== null && seconds > 0) {
+    // A playhead that did not move (focus was still in a field) would make every clip a "tail" and delete them all.
+    let movedX = (await page.evaluate(readTimelineBoxes)).playheadX;
+    if (movedX === null || movedX <= homeX + edge) {
+      const hh = String(Math.floor(seconds / 3600)).padStart(2, '0');
+      const mm = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+      const ss = String(seconds % 60).padStart(2, '0');
+      const timecode = page.getByLabel('Timecode', { exact: true }).first();
+      await timecode.fill(`${hh}:${mm}:${ss}:00`).catch(() => undefined);
+      await timecode.press('Enter').catch(() => undefined);
+      await page.waitForTimeout(300);
+      movedX = (await page.evaluate(readTimelineBoxes)).playheadX;
+    }
+    if (movedX === null || movedX <= homeX + edge) {
+      throw new Error(
+        `${rowId}: the playhead did not move to ${seconds} s, so the timeline was not cut (nothing was deleted)`,
+      );
+    }
+  }
   for (let round = 0; round < 12; round += 1) {
     const { clips, playheadX } = await page.evaluate(readTimelineBoxes);
     if (playheadX === null) {

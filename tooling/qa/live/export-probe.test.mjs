@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkExportProbe, EXPORT_SECONDS, ffprobeJson } from './export-probe.mjs';
+import {
+  checkExportProbe,
+  EXPORT_SECONDS,
+  ffprobeJson,
+  trimTimelineToSeconds,
+} from './export-probe.mjs';
 
 const validProbe = {
   format: { duration: '2.00' },
@@ -34,4 +39,25 @@ test('ffprobe command errors include the failing tool result', () => {
     () => ffprobeJson('export.mp4', { run: () => ({ status: 1, stderr: 'bad media' }) }),
     /ffprobe failed on export\.mp4: bad media/u,
   );
+});
+
+test('the cut refuses to delete anything when the playhead did not move', async () => {
+  const deleted = [];
+  const page = {
+    keyboard: { press: async () => undefined },
+    evaluate: async () => ({
+      clips: [{ id: 'clip-a', left: 100, right: 400 }],
+      playheadX: 100,
+    }),
+    waitForTimeout: async () => undefined,
+    getByLabel: () => ({
+      first: () => ({ fill: async () => undefined, press: async () => undefined }),
+    }),
+    locator: () => {
+      deleted.push('locator');
+      throw new Error('a clip was touched');
+    },
+  };
+  await assert.rejects(() => trimTimelineToSeconds(page, 2, 'D-X'), /playhead did not move/u);
+  assert.deepEqual(deleted, []);
 });
