@@ -12,6 +12,7 @@ import { createBridge, createBridgeLog, FIXTURE_ROOT, readDocument } from './mat
 import { PROJECTS_IMPORT_ROWS_BY_ID } from './desktop-projects-import-steps.mjs';
 import { PERSISTENCE_ROWS_BY_ID } from './desktop-persistence-steps.mjs';
 import { LIBRARY_THUMB_ROWS_BY_ID } from './desktop-library-thumb-steps.mjs';
+import { MONITOR_SNAP_ROWS_BY_ID } from './desktop-monitor-snap-steps.mjs';
 import {
   TIMELINE_ROWS_BY_ID,
   redoThroughMenu,
@@ -29,6 +30,7 @@ export const MATRIX_ROWS = Object.freeze({
   ...EXPORT_MISSING_ROWS_BY_ID,
   ...TIMELINE_DND_H04_ROWS_BY_ID,
   ...LIBRARY_THUMB_ROWS_BY_ID,
+  ...MONITOR_SNAP_ROWS_BY_ID,
 });
 export const MATRIX_IDS = Object.freeze(Object.keys(MATRIX_ROWS));
 export { EXPORT_MATRIX_IDS };
