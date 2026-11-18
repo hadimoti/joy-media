@@ -10,6 +10,7 @@ import {
   canvasFontFamilyStack,
   serializeTextWrapRuntimeSource,
 } from '@joy-media/renderer-pixi/text-direction';
+import { layoutTextSpanOffsets } from '@joy-media/renderer-pixi';
 import {
   WORKER_PROTOCOL_VERSION,
   type GpuPreviewFrameRequest,
@@ -247,6 +248,27 @@ async function renderGpuFrame(input: {
     measure: (candidate: string, direction: 'ltr' | 'rtl') => number,
     direction: 'ltr' | 'rtl',
   ) => { text: string; lineDirections: readonly ('ltr' | 'rtl')[] };
+  const spanRunsForRange = (
+    spans: NonNullable<Extract<RenderNode, { kind: 'text' }>['spans']>,
+    start: number,
+    end: number,
+  ) => {
+    const runs: Array<{ text: string; color: (typeof spans)[number]['color'] }> = [];
+    let spanStart = 0;
+    for (const span of spans) {
+      const spanEnd = spanStart + span.text.length;
+      const overlapStart = Math.max(start, spanStart);
+      const overlapEnd = Math.min(end, spanEnd);
+      if (overlapStart < overlapEnd) {
+        runs.push({
+          text: span.text.slice(overlapStart - spanStart, overlapEnd - spanStart),
+          color: span.color,
+        });
+      }
+      spanStart = spanEnd;
+    }
+    return runs;
+  };
   const width = Math.max(1, Math.round(input.frame.viewport.width * scale));
   const height = Math.max(1, Math.round(input.frame.viewport.height * scale));
   const canvas = document.createElement('canvas');
@@ -455,16 +477,67 @@ async function renderGpuFrame(input: {
       if (node.stroke !== undefined) {
         context.lineWidth = node.stroke.widthPx * scale;
         context.strokeStyle = `rgba(${node.stroke.color.r},${node.stroke.color.g},${node.stroke.color.b},${node.stroke.color.a / 255})`;
+        let sourceCursor = 0;
         lines.forEach((line, index) => {
           context.direction = lineDirections[index] ?? 'ltr';
-          context.textAlign = lineAlignments[index] ?? 'left';
-          context.strokeText(line, x, y + index * lineHeightPx);
+          const align = lineAlignments[index] ?? 'left';
+          const lineY = y + index * lineHeightPx;
+          if (node.spans === undefined || node.spans.length <= 1) {
+            context.textAlign = align;
+            context.strokeText(line, x, lineY);
+            if (node.spans?.length === 1) sourceCursor += line.length;
+            return;
+          }
+          const sourceStart = node.text.indexOf(line, sourceCursor);
+          if (sourceStart < 0)
+            throw new Error(`GPU text span line could not be matched for ${node.id}`);
+          const runs = spanRunsForRange(node.spans, sourceStart, sourceStart + line.length);
+          sourceCursor = sourceStart + line.length;
+          const offsets = layoutTextSpanOffsets(
+            runs,
+            align,
+            context.direction,
+            (prefix, direction) => {
+              context.direction = direction;
+              return context.measureText(prefix).width;
+            },
+          );
+          context.textAlign = 'left';
+          runs.forEach((run, runIndex) => {
+            context.strokeText(run.text, x + (offsets[runIndex] ?? 0), lineY);
+          });
         });
       }
+      let sourceCursor = 0;
       lines.forEach((line, index) => {
         context.direction = lineDirections[index] ?? 'ltr';
-        context.textAlign = lineAlignments[index] ?? 'left';
-        context.fillText(line, x, y + index * lineHeightPx);
+        const align = lineAlignments[index] ?? 'left';
+        const lineY = y + index * lineHeightPx;
+        if (node.spans === undefined || node.spans.length <= 1) {
+          context.textAlign = align;
+          if (node.spans?.length === 1) sourceCursor += line.length;
+          context.fillText(line, x, lineY);
+          return;
+        }
+        const sourceStart = node.text.indexOf(line, sourceCursor);
+        if (sourceStart < 0)
+          throw new Error(`GPU text span line could not be matched for ${node.id}`);
+        const runs = spanRunsForRange(node.spans, sourceStart, sourceStart + line.length);
+        sourceCursor = sourceStart + line.length;
+        const offsets = layoutTextSpanOffsets(
+          runs,
+          align,
+          context.direction,
+          (prefix, direction) => {
+            context.direction = direction;
+            return context.measureText(prefix).width;
+          },
+        );
+        context.textAlign = 'left';
+        runs.forEach((run, runIndex) => {
+          context.fillStyle = `rgba(${run.color.r},${run.color.g},${run.color.b},${run.color.a / 255})`;
+          context.fillText(run.text, x + (offsets[runIndex] ?? 0), lineY);
+        });
       });
       context.restore();
       continue;

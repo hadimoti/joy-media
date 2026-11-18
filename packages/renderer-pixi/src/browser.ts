@@ -69,6 +69,7 @@ import {
 import { createGlTransitionFilter, type GlTransitionFilterHandle } from './gl-transition-filter.js';
 import { dualTextureBitmapsReady } from './transition-bitmaps.js';
 import { registerPixiTextDirection } from './pixi-text-direction.js';
+import { layoutTextSpanOffsets } from './text-span-layout.js';
 import {
   canvasFontFamilyStack,
   countTextGraphemes,
@@ -87,9 +88,28 @@ export const BROWSER_PACKAGE_ENTRY = '@joy-media/renderer-pixi/browser' as const
 
 const textMeasurementContexts = new WeakMap<Document, CanvasRenderingContext2D | null>();
 
+function isSpanTextContainer(value: unknown): value is SpanTextContainer {
+  return value instanceof Container && Array.isArray((value as SpanTextContainer).spanTexts);
+}
+
+function isBrowserTextVisual(value: unknown): value is BrowserTextVisual {
+  return value instanceof Text || isSpanTextContainer(value);
+}
+
+/**
+ * The canvas font weight of a text node. Left-to-right text keeps the mapping it always had (700 and above is
+ * bold, everything else normal); right-to-left text carries the numeric weight (CSS accepts 1 to 1000, so a
+ * variable font gets 850 as 850) because the Persian and Arabic fonts are variable fonts that ship real weights.
+ */
+export function canvasFontWeight(weight: number | undefined, rtl: boolean): string {
+  if (!rtl) return (weight ?? 400) >= 700 ? 'bold' : 'normal';
+  return String(Math.min(1000, Math.max(1, Math.round(weight ?? 400))));
+}
+
 function createTextMeasurement(
   node: TextNode,
   fontFamilies: readonly string[],
+  rtlWeight = false,
 ): (candidate: string, direction: 'ltr' | 'rtl') => number {
   const ownerDocument = typeof document === 'undefined' ? undefined : document;
   let context: CanvasRenderingContext2D | null = null;
@@ -105,7 +125,7 @@ function createTextMeasurement(
   const fontSize = node.fontSizePx ?? 16;
   const tracking = node.tracking ?? 0;
   const fontStyle = node.italic ? 'italic' : 'normal';
-  const fontWeight = node.fontWeight ?? 400;
+  const fontWeight = canvasFontWeight(node.fontWeight, rtlWeight);
   const fontFamily = fontFamilies.map((family) => JSON.stringify(family)).join(', ');
   const font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
 
@@ -178,9 +198,16 @@ export interface BrowserVideoFrameBitmap {
   readonly data: Uint8ClampedArray;
 }
 
+interface SpanTextContainer extends Container {
+  /** Retained Pixi Text objects, one for each styled Render IR span. */
+  spanTexts: Text[];
+}
+
+type BrowserTextVisual = Text | SpanTextContainer;
+
 interface LayerContainer extends Container {
-  /** Backing child: a `Graphics` for rects, a `Sprite` for decoded video, or `Text`. */
-  visual: Graphics | Sprite | Text;
+  /** Backing child: a `Graphics`, a decoded-video `Sprite`, or a text visual. */
+  visual: Graphics | Sprite | BrowserTextVisual;
   /** Last kind observed for this layer — used to avoid reallocating on kind change. */
   kind: VisualRenderNode['kind'];
   /** Last applied effect stack signature (skip filter rebuild when unchanged). */
@@ -400,8 +427,8 @@ export async function createBrowserPixiRenderer(
     fontTextureGeneration += 1;
     let refreshed = false;
     for (const layer of spriteMap.values()) {
-      if (layer.visual instanceof Text && layer.node?.kind === 'text') {
-        updateTextVisual(layer.visual, layer.node, fontTextureGeneration);
+      if (isBrowserTextVisual(layer.visual) && layer.node?.kind === 'text') {
+        updateTextLayerVisual(layer.visual, layer.node, fontTextureGeneration);
         syncTextBackground(layer, layer.node);
         setTextFontVisibility(layer, layer.pendingTextFontKey === undefined);
         refreshed = true;
@@ -474,6 +501,7 @@ export async function createBrowserPixiRenderer(
     text: Text,
     node: TextNode,
     textureGeneration = fontTextureGeneration,
+    fillOverride?: Rgba,
   ): void => {
     const direction = node.direction ?? 'auto';
     const paragraphDirections = resolveParagraphDirections(node.text, direction);
@@ -484,7 +512,7 @@ export async function createBrowserPixiRenderer(
         ? wrapTextByWords(
             node.text,
             node.maxWidth / (Math.abs(node.transform.scaleX) || 1),
-            createTextMeasurement(node, canvasFontFamilyStack(node.text, node.fontFamily)),
+            createTextMeasurement(node, canvasFontFamilyStack(node.text, node.fontFamily), true),
             direction,
           )
         : undefined;
@@ -494,29 +522,31 @@ export async function createBrowserPixiRenderer(
     const baseDirection = lineDirections[0] ?? paragraphDirections[0] ?? 'ltr';
     text.text = renderedText;
     const fill =
-      node.fill?.kind === 'linear-gradient' && node.fill.stops.length > 1
-        ? (() => {
-            const radians = (node.fill.angleDeg * Math.PI) / 180;
-            const dx = Math.cos(radians) * 0.5;
-            const dy = Math.sin(radians) * 0.5;
-            // Saved anchors win; without them the angle draws through the centre (older projects).
-            const anchored = node.fill.start !== undefined && node.fill.end !== undefined;
-            return new FillGradient({
-              type: 'linear',
-              start: anchored ? { ...node.fill.start! } : { x: 0.5 - dx, y: 0.5 - dy },
-              end: anchored ? { ...node.fill.end! } : { x: 0.5 + dx, y: 0.5 + dy },
-              textureSpace: 'local',
-              colorStops: node.fill.stops.map((stop) => ({
-                offset: stop.offset,
-                color: rgbaToHexString(stop.color),
-              })),
-            });
-          })()
-        : node.fill?.kind === 'solid'
-          ? rgbaToHexString(node.fill.color)
-          : node.fill?.stops[0] === undefined
-            ? rgbaToHexString(node.color)
-            : rgbaToHexString(node.fill.stops[0].color);
+      fillOverride !== undefined
+        ? rgbaToHexString(fillOverride)
+        : node.fill?.kind === 'linear-gradient' && node.fill.stops.length > 1
+          ? (() => {
+              const radians = (node.fill.angleDeg * Math.PI) / 180;
+              const dx = Math.cos(radians) * 0.5;
+              const dy = Math.sin(radians) * 0.5;
+              // Saved anchors win; without them the angle draws through the centre (older projects).
+              const anchored = node.fill.start !== undefined && node.fill.end !== undefined;
+              return new FillGradient({
+                type: 'linear',
+                start: anchored ? { ...node.fill.start! } : { x: 0.5 - dx, y: 0.5 - dy },
+                end: anchored ? { ...node.fill.end! } : { x: 0.5 + dx, y: 0.5 + dy },
+                textureSpace: 'local',
+                colorStops: node.fill.stops.map((stop) => ({
+                  offset: stop.offset,
+                  color: rgbaToHexString(stop.color),
+                })),
+              });
+            })()
+          : node.fill?.kind === 'solid'
+            ? rgbaToHexString(node.fill.color)
+            : node.fill?.stops[0] === undefined
+              ? rgbaToHexString(node.color)
+              : rgbaToHexString(node.fill.stops[0].color);
     const dropShadow =
       node.shadow === undefined && node.glow !== undefined
         ? {
@@ -564,11 +594,13 @@ export async function createBrowserPixiRenderer(
         : cacheBustedFontFamilies === undefined
           ? {}
           : { fontFamily: cacheBustedFontFamilies }),
-      // Only the right-to-left path carries the weight (the Persian font is a variable font, and a heavy title must
-      // load and draw that weight); the left-to-right output stays exactly as before.
-      ...(node.fontWeight === undefined || !usesRtlRendering
+      ...(node.fontWeight === undefined
         ? {}
-        : { fontWeight: String(node.fontWeight) as NonNullable<TextStyleOptions['fontWeight']> }),
+        : {
+            fontWeight: canvasFontWeight(node.fontWeight, usesRtlRendering) as NonNullable<
+              TextStyleOptions['fontWeight']
+            >,
+          }),
       ...(node.italic === undefined ? {} : { fontStyle: node.italic ? 'italic' : 'normal' }),
       ...(node.lineHeight === undefined || node.fontSizePx === undefined
         ? {}
@@ -606,9 +638,83 @@ export async function createBrowserPixiRenderer(
     applyTextAlignment(text, node, baseDirection);
   };
 
-  const paintTextVisual = (node: TextNode): Text => {
+  const updateTextSpanVisual = (
+    container: SpanTextContainer,
+    node: TextNode,
+    textureGeneration = fontTextureGeneration,
+  ): void => {
+    const spans = node.spans ?? [];
+    const direction = resolveParagraphDirections(node.text, node.direction ?? 'auto')[0] ?? 'ltr';
+    const usesRtlRendering =
+      node.direction === 'rtl' ||
+      resolveParagraphDirections(node.text, node.direction ?? 'auto').some(
+        (lineDirection) => lineDirection === 'rtl',
+      );
+    const fontFamilies = usesRtlRendering
+      ? canvasFontFamilyStack(node.text, node.fontFamily)
+      : [node.fontFamily ?? 'Arial'];
+    const offsets = layoutTextSpanOffsets(
+      spans,
+      node.align ?? 'left',
+      direction,
+      createTextMeasurement(node, fontFamilies, usesRtlRendering),
+    );
+    const { maxWidth: _maxWidth, spans: _spans, fill: _fill, ...baseNode } = node;
+
+    while (container.spanTexts.length < spans.length) {
+      const text = new Text();
+      container.spanTexts.push(text);
+      container.addChild(text);
+    }
+
+    for (const [index, text] of container.spanTexts.entries()) {
+      const span = spans[index];
+      if (span === undefined) {
+        text.text = '';
+        text.position.set(0, 0);
+        text.visible = false;
+        continue;
+      }
+      const spanNode: TextNode = {
+        ...baseNode,
+        text: span.text,
+        color: span.color,
+        fill: { kind: 'solid', color: span.color },
+        align: 'left',
+      };
+      updateTextVisual(text, spanNode, textureGeneration, span.color);
+      text.label = `text:${node.id}:span:${index}`;
+      text.position.set(offsets[index] ?? 0, 0);
+      text.visible = true;
+    }
+    container.label = `text:${node.id}`;
+  };
+
+  const updateTextLayerVisual = (
+    visual: BrowserTextVisual,
+    node: TextNode,
+    textureGeneration = fontTextureGeneration,
+  ): void => {
+    if (node.spans !== undefined && node.spans.length > 1) {
+      if (!isSpanTextContainer(visual))
+        throw new Error(`${BROWSER_PACKAGE_ENTRY}: karaoke text container is missing`);
+      updateTextSpanVisual(visual, node, textureGeneration);
+      return;
+    }
+    if (isSpanTextContainer(visual))
+      throw new Error(`${BROWSER_PACKAGE_ENTRY}: single-run text visual is not a Pixi Text`);
+    updateTextVisual(visual, node, textureGeneration);
+  };
+
+  const paintTextVisual = (node: TextNode): BrowserTextVisual => {
+    if (node.spans !== undefined && node.spans.length > 1) {
+      const container = new Container() as SpanTextContainer;
+      container.spanTexts = [];
+      updateTextSpanVisual(container, node);
+      return container;
+    }
     const text = new Text();
-    updateTextVisual(text, node);
+    updateTextLayerVisual(text, node);
     return text;
   };
 
@@ -638,7 +744,7 @@ export async function createBrowserPixiRenderer(
 
   const ensureTextFontsReady = (layer: LayerContainer, node: TextNode): void => {
     const text = layer.visual;
-    if (!(text instanceof Text)) return;
+    if (!isBrowserTextVisual(text)) return;
     const request = textFontRequest(node);
     const key = JSON.stringify(request);
     if (layer.textFontKey === key && layer.pendingTextFontKey === key) return;
@@ -673,7 +779,7 @@ export async function createBrowserPixiRenderer(
         return;
       const currentNode = layer.node;
       layer.pendingTextFontKey = undefined;
-      updateTextVisual(text, currentNode, fontTextureGeneration);
+      updateTextLayerVisual(text, currentNode, fontTextureGeneration);
       syncTextBackground(layer, currentNode);
       updateLayerTransform(layer, currentNode);
       syncCropMask(layer, currentNode);
@@ -698,7 +804,7 @@ export async function createBrowserPixiRenderer(
   const hasTextContent = (node: TextNode): boolean => node.text.trim().length > 0;
 
   const syncTextBackground = (layer: LayerContainer, node: TextNode): void => {
-    if (node.background === undefined || !(layer.visual instanceof Text)) {
+    if (node.background === undefined || !isBrowserTextVisual(layer.visual)) {
       clearTextBackground(layer);
       return;
     }
@@ -754,7 +860,7 @@ export async function createBrowserPixiRenderer(
   /** The layer's drawn box in its own (unscaled) pixels: what bounds and the origin use. */
   const layerLocalBox = (layer: LayerContainer, node: VisualRenderNode): NodeRect => {
     if (node.kind === 'text') {
-      if (!(layer.visual instanceof Text)) return { x: 0, y: 0, width: 0, height: 0 };
+      if (!isBrowserTextVisual(layer.visual)) return { x: 0, y: 0, width: 0, height: 0 };
       const text = layer.visual;
       const direction = resolveParagraphDirections(node.text, node.direction ?? 'auto')[0] ?? 'ltr';
       const hasBackgroundPlate =
@@ -871,7 +977,10 @@ export async function createBrowserPixiRenderer(
     return container;
   };
 
-  const replaceVisual = (layer: LayerContainer, visual: Graphics | Sprite | Text): void => {
+  const replaceVisual = (
+    layer: LayerContainer,
+    visual: Graphics | Sprite | BrowserTextVisual,
+  ): void => {
     clearTextBackground(layer);
     layer.visual.destroy();
     layer.mask = null;
@@ -935,9 +1044,16 @@ export async function createBrowserPixiRenderer(
             existing.videoCanvas = video.videoCanvas;
             existing.videoTexture = video.videoTexture;
           }
-        } else if (node.kind === 'text' && existing.visual instanceof Text) {
-          updateTextVisual(existing.visual, node, fontTextureGeneration);
-        } else if (node.kind !== 'text' && existing.visual instanceof Graphics) {
+        } else if (node.kind === 'text') {
+          const wantsSpanContainer = node.spans !== undefined && node.spans.length > 1;
+          if (wantsSpanContainer && isSpanTextContainer(existing.visual)) {
+            updateTextSpanVisual(existing.visual, node, fontTextureGeneration);
+          } else if (!wantsSpanContainer && existing.visual instanceof Text) {
+            updateTextLayerVisual(existing.visual, node, fontTextureGeneration);
+          } else {
+            replaceVisual(existing, paintTextVisual(node));
+          }
+        } else if (existing.visual instanceof Graphics) {
           updateRectVisual(existing.visual, node);
         }
         if (node.kind === 'text') syncTextBackground(existing, node);

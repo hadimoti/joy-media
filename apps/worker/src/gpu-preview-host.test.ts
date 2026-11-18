@@ -145,6 +145,14 @@ describe('GpuPreviewHost text setup', () => {
       letterSpacing: string;
       maxWidth?: number;
     }> = [];
+    const styledDraws: Array<{
+      text: string;
+      x: number;
+      y: number;
+      fillStyle: string;
+      direction: string;
+      align: string;
+    }> = [];
     const strokes: Array<{ text: string; x: number; y: number; maxWidth?: number }> = [];
     const gl = {
       ARRAY_BUFFER: 1,
@@ -229,8 +237,8 @@ describe('GpuPreviewHost text setup', () => {
         const tracking = Number.parseFloat(context.letterSpacing) || 0;
         return { width: length * 10 + Math.max(0, length - 1) * tracking };
       },
-      fillText: (text, x, y, maxWidth) =>
-        draws.push({
+      fillText: (text, x, y, maxWidth) => {
+        const draw = {
           text,
           x,
           y,
@@ -238,7 +246,17 @@ describe('GpuPreviewHost text setup', () => {
           align: context.textAlign,
           letterSpacing: context.letterSpacing,
           ...(maxWidth === undefined ? {} : { maxWidth }),
-        }),
+        };
+        draws.push(draw);
+        styledDraws.push({
+          text,
+          x,
+          y,
+          fillStyle: context.fillStyle,
+          direction: context.direction,
+          align: context.textAlign,
+        });
+      },
       strokeText: (text, x, y, maxWidth) =>
         strokes.push({ text, x, y, ...(maxWidth === undefined ? {} : { maxWidth }) }),
     };
@@ -316,6 +334,195 @@ describe('GpuPreviewHost text setup', () => {
       { text: '\u0633\u0644\u0627\u0645', x: 20, y: 30 },
       { text: 'JOY', x: 20, y: 66 },
       { text: 'Media', x: 20, y: 102 },
+    ]);
+
+    styledDraws.length = 0;
+    strokes.length = 0;
+    const ltrSpans = [
+      { text: 'JOY ', color: { r: 230, g: 40, b: 50, a: 255 } },
+      { text: 'sings ', color: { r: 40, g: 210, b: 70, a: 255 } },
+      { text: 'now', color: { r: 40, g: 80, b: 230, a: 255 } },
+    ];
+    const karaokeLtrRequest = {
+      ...request,
+      requestId: 'karaoke-ltr',
+      frame: {
+        ...request.frame,
+        nodes: [
+          {
+            ...textNode('karaoke-ltr', 'JOY sings now', 'Inter Variable', 'ltr'),
+            align: 'center',
+            spans: ltrSpans,
+            stroke: { widthPx: 1, color: { r: 0, g: 0, b: 0, a: 255 } },
+          },
+        ],
+      },
+    } as unknown as Parameters<GpuPreviewHost['render']>[0];
+    await host.render(karaokeLtrRequest);
+    expect(styledDraws).toEqual([
+      {
+        text: 'JOY ',
+        x: -45,
+        y: 30,
+        fillStyle: 'rgba(230,40,50,1)',
+        direction: 'ltr',
+        align: 'left',
+      },
+      {
+        text: 'sings ',
+        x: -5,
+        y: 30,
+        fillStyle: 'rgba(40,210,70,1)',
+        direction: 'ltr',
+        align: 'left',
+      },
+      {
+        text: 'now',
+        x: 55,
+        y: 30,
+        fillStyle: 'rgba(40,80,230,1)',
+        direction: 'ltr',
+        align: 'left',
+      },
+    ]);
+    expect(strokes).toEqual([
+      { text: 'JOY ', x: -45, y: 30 },
+      { text: 'sings ', x: -5, y: 30 },
+      { text: 'now', x: 55, y: 30 },
+    ]);
+
+    styledDraws.length = 0;
+    strokes.length = 0;
+    const rtlSpans = [
+      { text: '\u0633\u0644\u0627\u0645 ', color: { r: 230, g: 40, b: 50, a: 255 } },
+      { text: '\u062f\u0646\u06cc\u0627 ', color: { r: 40, g: 210, b: 70, a: 255 } },
+      { text: '\u062e\u0648\u0628', color: { r: 40, g: 80, b: 230, a: 255 } },
+    ];
+    const karaokeRtlRequest = {
+      ...request,
+      requestId: 'karaoke-rtl',
+      frame: {
+        ...request.frame,
+        nodes: [
+          {
+            ...textNode(
+              'karaoke-rtl',
+              '\u0633\u0644\u0627\u0645 \u062f\u0646\u06cc\u0627 \u062e\u0648\u0628',
+              'Vazirmatn Variable',
+              'rtl',
+            ),
+            align: 'start',
+            spans: rtlSpans,
+          },
+        ],
+      },
+    } as unknown as Parameters<GpuPreviewHost['render']>[0];
+    await host.render(karaokeRtlRequest);
+    expect(styledDraws).toEqual([
+      {
+        text: '\u0633\u0644\u0627\u0645 ',
+        x: -30,
+        y: 30,
+        fillStyle: 'rgba(230,40,50,1)',
+        direction: 'rtl',
+        align: 'left',
+      },
+      {
+        text: '\u062f\u0646\u06cc\u0627 ',
+        x: -80,
+        y: 30,
+        fillStyle: 'rgba(40,210,70,1)',
+        direction: 'rtl',
+        align: 'left',
+      },
+      {
+        text: '\u062e\u0648\u0628',
+        x: -110,
+        y: 30,
+        fillStyle: 'rgba(40,80,230,1)',
+        direction: 'rtl',
+        align: 'left',
+      },
+    ]);
+
+    styledDraws.length = 0;
+    const karaokeWrappedRequest = {
+      ...request,
+      requestId: 'karaoke-wrapped',
+      frame: {
+        ...request.frame,
+        nodes: [
+          {
+            ...textNode('karaoke-wrapped', 'JOY makes captions sing', 'Inter Variable', 'ltr'),
+            maxWidth: 100,
+            spans: [
+              { text: 'JOY', color: { r: 233, g: 185, b: 73, a: 255 } },
+              { text: ' makes captions sing', color: { r: 255, g: 255, b: 255, a: 255 } },
+            ],
+          },
+        ],
+      },
+    } as unknown as Parameters<GpuPreviewHost['render']>[0];
+    await host.render(karaokeWrappedRequest);
+    expect(styledDraws).toEqual([
+      {
+        text: 'JOY',
+        x: 20,
+        y: 30,
+        fillStyle: 'rgba(233,185,73,1)',
+        direction: 'ltr',
+        align: 'left',
+      },
+      {
+        text: ' makes',
+        x: 50,
+        y: 30,
+        fillStyle: 'rgba(255,255,255,1)',
+        direction: 'ltr',
+        align: 'left',
+      },
+      {
+        text: 'captions',
+        x: 20,
+        y: 60,
+        fillStyle: 'rgba(255,255,255,1)',
+        direction: 'ltr',
+        align: 'left',
+      },
+      {
+        text: 'sing',
+        x: 20,
+        y: 90,
+        fillStyle: 'rgba(255,255,255,1)',
+        direction: 'ltr',
+        align: 'left',
+      },
+    ]);
+
+    styledDraws.length = 0;
+    const oneSpanRequest = {
+      ...request,
+      requestId: 'one-span-noop',
+      frame: {
+        ...request.frame,
+        nodes: [
+          {
+            ...textNode('one-span-noop', 'JOY', 'Inter Variable', 'ltr'),
+            spans: [{ text: 'JOY', color: { r: 230, g: 40, b: 50, a: 255 } }],
+          },
+        ],
+      },
+    } as unknown as Parameters<GpuPreviewHost['render']>[0];
+    await host.render(oneSpanRequest);
+    expect(styledDraws).toEqual([
+      {
+        text: 'JOY',
+        x: 20,
+        y: 30,
+        fillStyle: 'rgba(255,255,255,1)',
+        direction: 'ltr',
+        align: 'left',
+      },
     ]);
     await host.destroy();
   });

@@ -138,7 +138,8 @@ function drawTextRaw(
     const textX = Math.floor(u - textBounds.x);
     const glyphColumn = textX % 4;
     const characterIndex = Math.floor(textX / 4);
-    if (bitmap(node.text[characterIndex] ?? ' ', glyphColumn, Math.floor(v))) return node.color;
+    if (bitmap(node.text[characterIndex] ?? ' ', glyphColumn, Math.floor(v)))
+      return spanColor(node, characterIndex);
     if (
       node.background !== undefined &&
       u >= plateBounds.x &&
@@ -150,6 +151,19 @@ function drawTextRaw(
     }
     return undefined;
   });
+}
+
+function spanColor(
+  node: Extract<VisualRenderNode, { kind: 'text' }>,
+  characterIndex: number,
+): Rgba {
+  if (node.spans === undefined || node.spans.length <= 1) return node.color;
+  let offset = 0;
+  for (const span of node.spans) {
+    if (characterIndex < offset + span.text.length) return span.color;
+    offset += span.text.length;
+  }
+  return node.color;
 }
 
 function rasterizeRaw(

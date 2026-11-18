@@ -37,8 +37,25 @@ vi.mock('pixi.js', async (importOriginal) => {
     destroy(): void {}
   }
   class FakeText extends actual.Container {
-    text = '';
-    style: unknown = {};
+    private textValue = '';
+    private styleValue: unknown = {};
+    get text(): string {
+      return this.textValue;
+    }
+    set text(value: string) {
+      this.textValue = value;
+      this.syncBoundsArea();
+    }
+    get style(): unknown {
+      return this.styleValue;
+    }
+    set style(value: unknown) {
+      this.styleValue = value;
+      this.syncBoundsArea();
+    }
+    private syncBoundsArea(): void {
+      this.boundsArea = new actual.Rectangle(0, 0, this.width, this.height);
+    }
     readonly anchor = {
       x: 0,
       y: 0,
@@ -261,6 +278,121 @@ describe('nodeBounds without rotation', () => {
     renderer.setView({ zoom: 3, panX: -500, panY: 40 }, { width: 600, height: 400 });
     renderer.render(frame([kinds.shape]));
     expect(renderer.nodeBounds(kinds.shape.id)!.aabb).toEqual(expected.shape);
+    renderer.destroy();
+  });
+});
+
+describe('inline text spans', () => {
+  it('renders LTR and Persian RTL runs in measured order and reuses their Text children', async () => {
+    const renderer = await createBrowserPixiRenderer();
+    const colors = [
+      { r: 230, g: 40, b: 50, a: 255 },
+      { r: 40, g: 210, b: 70, a: 255 },
+      { r: 40, g: 80, b: 230, a: 255 },
+    ] as const;
+    const ltr = {
+      ...kinds.text,
+      id: 'karaoke-ltr',
+      align: 'left' as const,
+      direction: 'ltr' as const,
+      text: 'JOY sings now',
+      fontSizePx: 50 / 3,
+      background: { r: 10, g: 20, b: 30, a: 200 },
+      spans: [
+        { text: 'JOY ', color: colors[0] },
+        { text: 'sings ', color: colors[1] },
+        { text: 'now', color: colors[2] },
+      ],
+    };
+    renderer.render(frame([ltr]));
+
+    const ltrLayer = layerOf(ltr.id);
+    const ltrVisual = ltrLayer.getChildByLabel(`text:${ltr.id}`, true) as Pixi.Container;
+    expect(ltrVisual.children).toHaveLength(3);
+    const ltrChildren = ltrVisual.children as Pixi.Text[];
+    expect(ltrChildren.map((child) => child.text)).toEqual(['JOY ', 'sings ', 'now']);
+    expect(ltrChildren.map((child) => child.style)).toMatchObject([
+      { fill: '#e62832' },
+      { fill: '#28d246' },
+      { fill: '#2850e6' },
+    ]);
+    expect(ltrChildren[0]!.position.x).toBeLessThan(ltrChildren[1]!.position.x);
+    expect(ltrChildren[1]!.position.x).toBeLessThan(ltrChildren[2]!.position.x);
+    expect(ltrLayer.getChildByLabel(`text-background:${ltr.id}`, true)).not.toBeNull();
+    expect(renderer.nodeBounds(ltr.id)!.aabb).toEqual({ x: 538, y: 298, width: 134, height: 24 });
+
+    const updated = {
+      ...ltr,
+      spans: [
+        { text: 'JOY s', color: colors[2] },
+        { text: 'ings ', color: colors[0] },
+        { text: 'now', color: colors[1] },
+      ],
+    };
+    renderer.render(frame([updated]));
+    const reusedVisual = layerOf(ltr.id).getChildByLabel(`text:${ltr.id}`, true) as Pixi.Container;
+    expect(reusedVisual).toBe(ltrVisual);
+    expect(reusedVisual.children).toEqual(ltrChildren);
+    expect(ltrChildren.map((child) => child.text)).toEqual(['JOY s', 'ings ', 'now']);
+    ltrChildren.forEach((child, index) =>
+      expect(child.position.x).toBeCloseTo([0, 50, 100][index]!),
+    );
+    expect(ltrChildren.map((child) => child.style)).toMatchObject([
+      { fill: '#2850e6' },
+      { fill: '#e62832' },
+      { fill: '#28d246' },
+    ]);
+
+    const rtl = {
+      ...kinds.text,
+      id: 'karaoke-rtl',
+      align: 'start' as const,
+      direction: 'rtl' as const,
+      text: '\u0633\u0644\u0627\u0645 \u062f\u0646\u06cc\u0627 \u062e\u0648\u0628',
+      spans: [
+        { text: '\u0633\u0644\u0627\u0645 ', color: colors[0] },
+        { text: '\u062f\u0646\u06cc\u0627 ', color: colors[1] },
+        { text: '\u062e\u0648\u0628', color: colors[2] },
+      ],
+    };
+    renderer.render(frame([rtl]));
+    const rtlLayer = layerOf(rtl.id);
+    const rtlVisual = rtlLayer.getChildByLabel(`text:${rtl.id}`, true) as Pixi.Container;
+    expect(rtlVisual.children).toHaveLength(3);
+    const rtlChildren = rtlVisual.children as Pixi.Text[];
+    expect(rtlChildren.map((child) => child.text)).toEqual(rtl.spans.map((span) => span.text));
+    expect(rtlChildren.map((child) => child.style)).toMatchObject([
+      { fill: '#e62832' },
+      { fill: '#28d246' },
+      { fill: '#2850e6' },
+    ]);
+    expect(rtlChildren[0]!.position.x).toBeGreaterThan(rtlChildren[1]!.position.x);
+    expect(rtlChildren[1]!.position.x).toBeGreaterThan(rtlChildren[2]!.position.x);
+    renderer.destroy();
+  });
+
+  it('keeps a single span on the existing Text path with matching single-colour geometry', async () => {
+    const renderer = await createBrowserPixiRenderer();
+    const red = { r: 230, g: 40, b: 50, a: 255 };
+    const plain = { ...kinds.text, id: 'plain-single', color: WHITE };
+    const singleSpan = {
+      ...kinds.text,
+      id: 'single-span-red',
+      spans: [{ text: 'Hello', color: red }],
+    };
+    renderer.render(frame([plain, singleSpan]));
+
+    const plainText = layerOf(plain.id).getChildByLabel(`text:${plain.id}`, true) as Pixi.Text;
+    const oneSpanText = layerOf(singleSpan.id).getChildByLabel(
+      `text:${singleSpan.id}`,
+      true,
+    ) as Pixi.Text;
+    expect(oneSpanText.style).toEqual(plainText.style);
+    expect(renderer.nodeBounds(singleSpan.id)).toMatchObject({
+      width: renderer.nodeBounds(plain.id)!.width,
+      height: renderer.nodeBounds(plain.id)!.height,
+      aabb: renderer.nodeBounds(plain.id)!.aabb,
+    });
     renderer.destroy();
   });
 });
