@@ -137,6 +137,35 @@ describe('saveProjectCard', () => {
     expect(saved?.updatedAt).toBe(NOW);
   });
 
+  it('persists a successfully captured cover as an optional catalog field', () => {
+    const storage = storeWithProject();
+    vi.stubGlobal(
+      'ImageData',
+      class {
+        constructor(
+          readonly data: Uint8ClampedArray,
+          readonly width: number,
+          readonly height: number,
+        ) {}
+      },
+    );
+    const context = {
+      putImageData: vi.fn(),
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillStyle: '',
+    };
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as never);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(COVER);
+
+    expect(saveProjectCard(storage, { ...base, readFrame: () => PICTURE })).toBe(true);
+    expect(getCatalogProject(storage, 'alpha')?.coverDataUrl).toBe(COVER);
+    const persisted = JSON.parse(storage.getItem(PROJECT_CATALOG_KEY) ?? '{}') as {
+      projects: Record<string, { coverDataUrl?: string }>;
+    };
+    expect(persisted.projects.alpha?.coverDataUrl).toBe(COVER);
+  });
+
   it('writes nothing when nothing changed', () => {
     const storage = storeWithProject();
     saveProjectCard(storage, base);

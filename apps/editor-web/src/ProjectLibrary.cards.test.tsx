@@ -47,7 +47,11 @@ const noop = () => undefined;
 let container: HTMLDivElement | undefined;
 let root: Root | undefined;
 
-async function render(storage: BrowserKeyValueStore, onCreate: () => void = noop) {
+async function render(
+  storage: BrowserKeyValueStore,
+  onCreate: () => void = noop,
+  onOpen: (entry: ProjectCatalogEntry) => void = noop,
+) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -56,7 +60,7 @@ async function render(storage: BrowserKeyValueStore, onCreate: () => void = noop
       <PopupProvider>
         <ProjectLibrary
           storage={storage}
-          onOpen={noop}
+          onOpen={onOpen}
           onCreate={onCreate}
           onRename={noop}
           onDuplicate={noop}
@@ -137,6 +141,7 @@ describe('ProjectLibrary project cards', () => {
     expect(card.querySelector('.project-library-card-meta')?.textContent).toBe(
       '9:16 · 0:24 · edited 2 h ago',
     );
+    expect(card.getAttribute('aria-label')).toBe('Alpha, 9:16 · 0:24 · edited 2 h ago');
     const body = card.querySelector('.project-library-card-body');
     expect([...(body?.children ?? [])].map((child) => child.className)).toEqual([
       'project-library-card-title',
@@ -155,6 +160,7 @@ describe('ProjectLibrary project cards', () => {
     expect(placeholder?.textContent).toBe('16:9');
     expect(placeholder?.classList.contains('is-wide')).toBe(true);
     expect(placeholder?.style.aspectRatio).toBe(String(16 / 9));
+    expect(placeholder?.querySelector('svg')).not.toBeNull();
   });
 
   it('sizes a portrait placeholder by its height', async () => {
@@ -171,6 +177,42 @@ describe('ProjectLibrary project cards', () => {
     const card = cardFor('Old');
     expect(card.querySelector('.project-library-card-meta')?.textContent).toBe('edited 2 h ago');
     expect(card.querySelector('.project-library-card-placeholder')).not.toBeNull();
+  });
+
+  it('does not show an empty metadata line when the edit time is missing', async () => {
+    await render(storeWith([entry('No edit time', { updatedAt: '' })]));
+    const card = cardFor('No edit time');
+    expect(card.querySelector('.project-library-card-meta')).toBeNull();
+    expect(card.getAttribute('aria-label')).toBe('No edit time');
+  });
+
+  it('keeps the full title available when a long card title is truncated', async () => {
+    const title = 'A long project title that must not be lost when the card is narrow';
+    await render(storeWith([entry('Long', { title })]));
+    const card = cardFor(title);
+    expect(card.querySelector('.project-library-card-title strong')?.getAttribute('title')).toBe(
+      title,
+    );
+  });
+
+  it('opens a focused card on keyboard activation', async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
+    const onOpen = vi.fn();
+    const project = entry('Keyboard project');
+    await render(storeWith([project]), noop, onOpen);
+    const card = cardFor('Keyboard project') as HTMLButtonElement;
+    expect(card.tagName).toBe('BUTTON');
+    expect(card.type).toBe('button');
+    expect(card.getAttribute('aria-label')).toBe('Keyboard project, edited 2 h ago');
+
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    // JSDOM does not synthesize a button's native keyboard click, so model the
+    // browser's Enter activation after confirming the focused button receives it.
+    card.click();
+
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'Keyboard project' }));
   });
 
   it('never loads a cover that is not a small image data URL', async () => {

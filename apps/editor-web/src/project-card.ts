@@ -8,8 +8,8 @@ export interface ProjectCardView {
   readonly aspect: number;
   /** "0:24" or "1:02:03". Undefined while unknown. */
   readonly duration: string | undefined;
-  /** "edited 2 h ago". */
-  readonly edited: string;
+  /** "edited 2 h ago", absent when the catalog has no valid edit time. */
+  readonly edited: string | undefined;
   /** A valid `data:image/…` cover, or undefined to show the placeholder. */
   readonly coverUrl: string | undefined;
   /** "9:16 · 0:24 · edited 2 h ago": the known parts only. */
@@ -31,9 +31,16 @@ export function projectCardView(
   const canvas = validCanvas(entry.canvas);
   const format = canvas === undefined ? undefined : formatLabel(canvas.width, canvas.height);
   const duration = validDuration(entry.durationUs);
-  const edited = trashed
-    ? `moved to Trash ${relativeTime(entry.trashedAt ?? entry.updatedAt, now)}`
-    : `edited ${relativeTime(entry.updatedAt, now)}`;
+  const editedAt = relativeTime(
+    trashed ? (entry.trashedAt ?? entry.updatedAt) : entry.updatedAt,
+    now,
+  );
+  const edited =
+    editedAt === undefined
+      ? undefined
+      : trashed
+        ? `moved to Trash ${editedAt}`
+        : `edited ${editedAt}`;
   return {
     format,
     aspect: canvas === undefined ? UNKNOWN_ASPECT : canvas.width / canvas.height,
@@ -96,8 +103,9 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
-/** "just now", "5 min ago", "2 h ago", "3 d ago"; a date after 30 days. */
-export function relativeTime(iso: string, now: Date): string {
+/** "just now", "5 min ago", "2 h ago", "3 days ago"; a date after 30 days. */
+export function relativeTime(iso: string | undefined, now: Date): string | undefined {
+  if (iso === undefined || iso.trim().length === 0) return undefined;
   const then = new Date(iso);
   if (Number.isNaN(then.getTime())) return 'at an unknown time';
   const elapsed = now.getTime() - then.getTime();
@@ -105,6 +113,9 @@ export function relativeTime(iso: string, now: Date): string {
   if (elapsed < MINUTE_MS) return 'just now';
   if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)} min ago`;
   if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)} h ago`;
-  if (elapsed < 30 * DAY_MS) return `${Math.floor(elapsed / DAY_MS)} d ago`;
+  if (elapsed < 30 * DAY_MS) {
+    const days = Math.floor(elapsed / DAY_MS);
+    return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  }
   return `on ${then.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`;
 }

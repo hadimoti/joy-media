@@ -14,6 +14,7 @@ import {
   type EditorUiPreferencesV2,
 } from './ui-preferences.js';
 import {
+  AspectRatioIcon,
   CheckIcon,
   CloseIcon,
   DuplicateIcon,
@@ -572,6 +573,9 @@ export function ProjectLibrary({
                   <button
                     type="button"
                     className="project-library-card"
+                    aria-label={
+                      card.meta.length === 0 ? entry.title : `${entry.title}, ${card.meta}`
+                    }
                     disabled={busy}
                     onClick={() => {
                       if (!showTrash) onOpen(entry);
@@ -591,15 +595,20 @@ export function ProjectLibrary({
                           className={`project-library-card-placeholder ${card.aspect >= PLACEHOLDER_WIDE_ASPECT ? 'is-wide' : 'is-tall'}`}
                           style={{ aspectRatio: String(card.aspect) }}
                         >
-                          {card.format}
+                          <AspectRatioIcon />
+                          {card.format !== undefined && <span>{card.format}</span>}
                         </span>
                       )}
                     </span>
                     <span className="project-library-card-body">
                       <span className="project-library-card-title">
-                        <strong dir="auto">{entry.title}</strong>
+                        <strong dir="auto" title={entry.title}>
+                          {entry.title}
+                        </strong>
                       </span>
-                      <span className="project-library-card-meta">{card.meta}</span>
+                      {card.meta.length > 0 && (
+                        <span className="project-library-card-meta">{card.meta}</span>
+                      )}
                     </span>
                   </button>
                   <button
