@@ -7227,7 +7227,9 @@ function EditorWorkspace({
             rememberImportedAsset(asset);
             return asset;
           }}
-          {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
+          {...(context.droppedImportProgress === undefined
+            ? {}
+            : { droppedImportProgress: context.droppedImportProgress })}
           onCancelDroppedImport={cancelDroppedImport}
           assetDisplayNames={Object.fromEntries(
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
@@ -7402,7 +7404,9 @@ function EditorWorkspace({
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onAddToTimeline={addAssetToTimeline}
           onImportFiles={(files) => handleDroppedFiles(files, { surface: 'media' })}
-          {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
+          {...(context.droppedImportProgress === undefined
+            ? {}
+            : { droppedImportProgress: context.droppedImportProgress })}
           onCancelDroppedImport={cancelDroppedImport}
           onEditWithAi={(asset) => {
             context.attachJoyAgentAsset(asset);
@@ -7498,7 +7502,9 @@ function EditorWorkspace({
           onFilesDrop={(files) =>
             handleDroppedFiles(files, { surface: 'monitor', timeUs: activeTimelinePlayheadUs })
           }
-          {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
+          {...(context.droppedImportProgress === undefined
+            ? {}
+            : { droppedImportProgress: context.droppedImportProgress })}
           onCancelDroppedImport={cancelDroppedImport}
           formatMenu={formatMenu}
           missingAssetIds={missingAssetIds}
@@ -8103,6 +8109,9 @@ function EditorWorkspace({
             value={{
               storage,
               state,
+              // Read by the panels through the context, not from a closure: the dock panels keep the
+              // closure of their first render, so a workspace state value would never update there (defect 208).
+              droppedImportProgress,
               previewVideoFrame,
               clipFrameCache: clipFrameCacheRef.current,
               clipFrameTick,
