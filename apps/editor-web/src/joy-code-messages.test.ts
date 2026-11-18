@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { USAGE_LIMIT_REACHED } from '@joy-media/provider-sdk';
 import { CREATIVE_SKILL_BLOCK_REASONS } from './joy-agent/skill-runner.js';
 import { CREATIVE_SKILL_HOST_FAILURE_CODES } from './joy-agent/creative-skill-host-adapter.js';
 import { JOY_AGENT_RUN_ERROR_CODES } from './joy-agent/run-events.js';
@@ -177,11 +178,35 @@ describe('Joy Code plain messages', () => {
     expect(JOY_CODE_MESSAGES['stale-authority'].sentence).toBe(
       'The project changed while Joy Code was working. No edits were applied.',
     );
-    expect(JOY_CODE_MESSAGES.JOY_AGENT_CORS_OR_NETWORK.title).toBe('You are offline');
+    expect(JOY_CODE_MESSAGES.JOY_AGENT_CORS_OR_NETWORK.title).toBe(
+      'The model could not be reached',
+    );
+    expect(JOY_CODE_MESSAGES.JOY_AGENT_CORS_OR_NETWORK.sentence).toBe(
+      'The model could not be reached, or sent a reply the app could not read. No edits were applied.',
+    );
     expect(JOY_CODE_MESSAGES.JOY_AGENT_CORS_OR_NETWORK.action.label).toBe('Retry');
     expect(JOY_CODE_MESSAGES.JOY_AGENT_AUTH_FAILED.action.label).toBe('Sign in again');
     expect(JOY_CODE_MESSAGES['audio-not-prepared'].sentence).toBe(
       'Joy Code could not read the audio in this composition. No edits were applied.',
     );
+  });
+
+  it('shows a provider usage limit as its own plain message with a try-again action', () => {
+    const message = JOY_CODE_MESSAGES.JOY_AGENT_RATE_LIMITED;
+    expect(message.title).toBe('Usage limit reached');
+    expect(message.sentence).toBe(
+      'The provider says the usage limit is reached. No edits were applied.',
+    );
+    expect(message.sentence.startsWith(USAGE_LIMIT_REACHED)).toBe(true);
+    expect(message.action).toEqual({ label: 'Try again', kind: 'retry' });
+  });
+
+  it('names an empty answer that ran out of room, not an offline model, with a try-again action', () => {
+    const message = JOY_CODE_MESSAGES.JOY_AGENT_EMPTY_ANSWER;
+    expect(message.title).toBe('The model ran out of room');
+    expect(message.sentence).toBe(
+      'The model used all its room thinking and sent no answer. No edits were applied.',
+    );
+    expect(message.action).toEqual({ label: 'Try again', kind: 'retry' });
   });
 });

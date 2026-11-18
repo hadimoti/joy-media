@@ -484,6 +484,24 @@ describe('provider broker: replies and failures', () => {
     });
   });
 
+  it('reports HTTP 429 as a usage limit, not as an incompatible model', async () => {
+    const profile = bound('p1', 'openai', 'https://api.openai.com/v1');
+    const { broker } = harness({
+      profiles: [profile],
+      keys: { [profile.secretHandleId]: KEY },
+      reply: () => new Response('secret upstream detail', { status: 429 }),
+    });
+
+    const result = await broker.complete({ profileId: profile.id, body: CHAT_BODY });
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'RATE_LIMITED',
+      message: 'The provider says the usage limit is reached. Try again later.',
+    });
+    expect(JSON.stringify(result)).not.toContain('secret upstream detail');
+  });
+
   it('keeps HTTP 500 classified as a provider HTTP error', async () => {
     const profile = bound('p1', 'openai', 'https://api.openai.com/v1');
     const { broker } = harness({
@@ -752,6 +770,25 @@ describe('provider broker: probe and model lists', () => {
       errorCode: 'BILLING_REQUIRED',
       message: 'The provider account needs credit to complete this request.',
     });
+  });
+
+  it('maps HTTP 429 to RATE_LIMITED in the settings probe, not PROVIDER_INCOMPATIBLE', async () => {
+    const profile = bound('p1', 'deepseek', 'https://api.deepseek.com', 'fixture-model');
+    const { broker } = harness({
+      profiles: [profile],
+      keys: { [profile.secretHandleId]: KEY },
+      reply: () => new Response('secret upstream detail', { status: 429 }),
+    });
+
+    const report = await broker.probe(profile.id);
+
+    expect(report).toEqual({
+      ok: false,
+      modelId: 'fixture-model',
+      errorCode: 'RATE_LIMITED',
+      message: 'The provider says the usage limit is reached. Try again later.',
+    });
+    expect(JSON.stringify(report)).not.toContain('secret upstream detail');
   });
 
   it('lists models for an unsaved draft, sent once and never returned', async () => {

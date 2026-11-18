@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { USAGE_LIMIT_MESSAGE } from '@joy-media/provider-sdk';
 import type { LocalAiRequest } from '../../jobs/local-job-api.js';
-import { createWorkerCompletion } from './worker-completion.js';
+import { createWorkerCompletion, statusFor } from './worker-completion.js';
 import { MAX_WORKER_REQUEST_BYTES, type ProviderBroker } from './provider-broker.js';
 
 const REQUEST: LocalAiRequest = {
@@ -47,6 +48,16 @@ describe('the Worker route adapter', () => {
       status: 502,
       message: 'The provider reply was not understood.',
     });
+  });
+
+  it('answers a provider usage limit with 429 and the shared usage-limit sentence', async () => {
+    const broker = refusingBroker('RATE_LIMITED', USAGE_LIMIT_MESSAGE);
+
+    const result = await createWorkerCompletion(broker)(REQUEST);
+
+    expect(result).toEqual({ ok: false, status: 429, message: USAGE_LIMIT_MESSAGE });
+    expect(statusFor('RATE_LIMITED')).toBe(429);
+    expect(statusFor('PROVIDER_HTTP_ERROR')).toBe(502);
   });
 
   it('gives the broker the Worker-route size limit and the signal that ends the call', async () => {

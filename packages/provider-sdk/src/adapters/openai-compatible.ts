@@ -17,6 +17,7 @@
 export type DirectProviderErrorCode =
   | 'AUTH_FAILED'
   | 'BILLING_REQUIRED'
+  | 'RATE_LIMITED'
   | 'NETWORK_ERROR'
   | 'TIMEOUT'
   | 'RESPONSE_TOO_LARGE'

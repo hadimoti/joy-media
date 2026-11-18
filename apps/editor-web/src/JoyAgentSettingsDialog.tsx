@@ -11,7 +11,7 @@ import {
   QualityCheckPrivacyNotice,
   qualityCheckPrivacyNoticeInput,
 } from './QualityCheckPrivacyNotice.js';
-import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
+import { isUsageLimitRejection, type JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type {
   ByokSessionStatus,
   JoyAgentMediaCapabilityReport,
@@ -43,9 +43,11 @@ import { sessionProviderFor } from './joy-agent/provider-call.js';
 import {
   evaluateEndpoint,
   findRegistryProvider,
+  findRegistryRegion,
   generationSupport,
   PROVIDER_REGISTRY,
   signInProviders,
+  USAGE_LIMIT_MESSAGE,
   type ProviderRegionId,
   type RegistryProviderId,
 } from '@joy-media/provider-sdk';
@@ -113,6 +115,17 @@ type DesktopProviderProfileState = DesktopProviderProfile & {
 type DialogProvider = 'openrouter' | 'openai-compatible' | RegistryProviderId;
 
 const SIGN_IN_PROVIDER_IDS = new Set(signInProviders());
+
+/**
+ * A saved profile counts as signed in when its provider can only be signed in to (ChatGPT), or when its
+ * base URL is a sign-in (OAuth) region of its provider. An API-key profile of the same provider never does.
+ * Caveat: xAI's OAuth and API-key regions share one base URL, so the first matching region (API key) wins
+ * and an xAI sign-in is not recognised here. Recognising it needs the desktop to report the route per profile.
+ */
+function isSignInProfile(profile: DesktopProviderProfile): boolean {
+  if (findRegistryProvider(profile.provider)?.signInOnly === true) return true;
+  return findRegistryRegion(profile.provider, profile.baseUrl)?.route === 'oauth';
+}
 
 /** The engine runs every registry provider on the chat transport, so its status names that transport. */
 function statusProviderFor(provider: DialogProvider): 'openrouter' | 'openai-compatible' {
@@ -878,26 +891,27 @@ export function JoyAgentSettingsDialog({
           ? SETTINGS_MESSAGES.connectedReady
           : next.capability === 'plan-only'
             ? SETTINGS_MESSAGES.connectedBriefOnly
-            : connectionFailedMessage(safeStatus.message ?? SETTINGS_MESSAGES.connectionFailed);
+            : next.reason === 'rate-limited'
+              ? USAGE_LIMIT_MESSAGE
+              : connectionFailedMessage(safeStatus.message ?? SETTINGS_MESSAGES.connectionFailed);
       const kind = next.capability === 'incompatible' ? 'error' : 'success';
       setConnectionNotice({ kind, message });
       onNotice?.(message, kind);
     } catch (error) {
+      // A usage limit keeps its own wording and reason, with no "Connection failed:" prefix.
+      const rateLimited = isUsageLimitRejection(error);
       const rawMessage = error instanceof Error ? error.message : SETTINGS_MESSAGES.configureFailed;
-      const safeMessage = redactProviderError(rawMessage, key);
-      const message = connectionFailedMessage(safeMessage);
-      setConnectionStatus({
+      const safeMessage = rateLimited ? USAGE_LIMIT_MESSAGE : redactProviderError(rawMessage, key);
+      const message = rateLimited ? USAGE_LIMIT_MESSAGE : connectionFailedMessage(safeMessage);
+      const failedStatus: ByokSessionStatus = {
         provider: statusProviderFor(provider),
         modelId: normalizedModelId,
         capability: 'incompatible',
         message: safeMessage,
-      });
-      onStatusChange?.({
-        provider: statusProviderFor(provider),
-        modelId: normalizedModelId,
-        capability: 'incompatible',
-        message: safeMessage,
-      });
+        ...(rateLimited ? { reason: 'rate-limited' as const } : {}),
+      };
+      setConnectionStatus(failedStatus);
+      onStatusChange?.(failedStatus);
       setConnectionNotice({ kind: 'error', message });
       onNotice?.(message, 'error');
     } finally {
@@ -1147,7 +1161,9 @@ export function JoyAgentSettingsDialog({
                       : connectionStatus?.capability === 'plan-only'
                         ? SETTINGS_MODELS.briefOnly
                         : connectionStatus?.capability === 'incompatible'
-                          ? SETTINGS_MODELS.connectionFailed
+                          ? connectionStatus.reason === 'rate-limited'
+                            ? SETTINGS_MODELS.usageLimitReached
+                            : SETTINGS_MODELS.connectionFailed
                           : SETTINGS_MODELS.connectBelow}
                   </span>
                   {connectionStatus?.modelId && (
@@ -1322,6 +1338,9 @@ export function JoyAgentSettingsDialog({
                         <ProviderSignInPanel
                           onSignedIn={() => void loadProfiles()}
                           onSaved={() => void loadProfiles()}
+                          signedInProviderIds={profiles
+                            .filter((p) => (p.state ?? 'active') === 'active' && isSignInProfile(p))
+                            .map((p) => p.provider)}
                         />
 
                         {/* Your own API key: the add form. */}

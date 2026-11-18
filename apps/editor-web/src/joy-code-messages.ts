@@ -20,6 +20,7 @@ import {
   type CreativeSkillHostFailureCode,
 } from './joy-agent/creative-skill-host-adapter.js';
 import { JOY_AGENT_RUN_ERROR_CODES, type JoyAgentRunErrorCode } from './joy-agent/run-events.js';
+import { USAGE_LIMIT_REACHED } from '@joy-media/provider-sdk';
 
 export type JoyCodeActionKind = 'retry' | 'open-settings' | 'dismiss';
 
@@ -128,8 +129,8 @@ export const JOY_CODE_MESSAGES: Readonly<Record<JoyCodeMessageKey, JoyCodeMessag
     action: TRY_AGAIN,
   },
   JOY_AGENT_CORS_OR_NETWORK: {
-    title: 'You are offline',
-    sentence: `You appear to be offline, or the model cannot be reached. ${NOTHING_APPLIED}`,
+    title: 'The model could not be reached',
+    sentence: `The model could not be reached, or sent a reply the app could not read. ${NOTHING_APPLIED}`,
     action: { label: 'Retry', kind: 'retry' },
   },
   JOY_AGENT_AUTH_FAILED: {
@@ -166,6 +167,16 @@ export const JOY_CODE_MESSAGES: Readonly<Record<JoyCodeMessageKey, JoyCodeMessag
     title: 'This model cannot run Joy Code',
     sentence: `This model cannot run Joy Code's edit tools. ${NOTHING_APPLIED}`,
     action: { label: 'Choose another model', kind: 'open-settings' },
+  },
+  JOY_AGENT_RATE_LIMITED: {
+    title: 'Usage limit reached',
+    sentence: `${USAGE_LIMIT_REACHED} ${NOTHING_APPLIED}`,
+    action: TRY_AGAIN,
+  },
+  JOY_AGENT_EMPTY_ANSWER: {
+    title: 'The model ran out of room',
+    sentence: `The model used all its room thinking and sent no answer. ${NOTHING_APPLIED}`,
+    action: TRY_AGAIN,
   },
   JOY_AGENT_INTERRUPTED: {
     title: 'The run was interrupted',

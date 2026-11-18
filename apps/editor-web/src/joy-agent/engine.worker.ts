@@ -1,5 +1,6 @@
 import { listModelVisibleJoyEditorOperations } from './editor-operation-registry.js';
 import { createModelVisibleJoyCodeProposalParameters } from '@joy-media/agent-tools';
+import { USAGE_LIMIT_MESSAGE } from '@joy-media/provider-sdk';
 import {
   createBrowserAgentToolCatalog,
   runBoundedToolExchange,
@@ -38,6 +39,7 @@ import {
   MAX_MULTIMODAL_RESPONSE_BYTES,
 } from './multimodal-transport.js';
 import { jsonUtf8Size } from './json-bytes.js';
+import { outputTokenBudget } from './output-budget.js';
 import { issueObservationConsent } from './observation-consent.js';
 import {
   isPrivateObservationMainToWorkerMessage,
@@ -609,12 +611,14 @@ function bindObservationPort(event: MessageEvent<unknown>): boolean {
 function currentStatus(
   capability: ByokSessionStatus['capability'] = providerCapability,
   message?: string,
+  reason?: ByokSessionStatus['reason'],
 ): ByokSessionStatus {
   return {
     provider: session?.provider ?? 'openai-compatible',
     modelId: session?.modelId ?? '',
     capability,
     ...(message === undefined ? {} : { message }),
+    ...(reason === undefined ? {} : { reason }),
   };
 }
 
@@ -746,6 +750,8 @@ function providerErrorCode(code: string): JoyAgentErrorCode {
   if (code === 'RESPONSE_TOO_LARGE' || code === 'JOY_AGENT_RESPONSE_TOO_LARGE') {
     return 'JOY_AGENT_RESPONSE_TOO_LARGE';
   }
+  // HTTP 429 from the provider: its usage limit, which is not a refusal of the request.
+  if (code === 'RATE_LIMITED') return 'JOY_AGENT_RATE_LIMITED';
   // A refusal by the endpoint policy, the key binding or the request itself is not a network failure.
   if (PROVIDER_REFUSAL_CODES.has(code)) return 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
   return 'JOY_AGENT_CORS_OR_NETWORK';
@@ -778,6 +784,31 @@ function firstProviderMessage(
   if (!Array.isArray(choices) || choices.length === 0 || !isRecord(choices[0])) return undefined;
   const message = choices[0].message;
   return isRecord(message) ? message : undefined;
+}
+
+/**
+ * A reply with no text, no tool calls and finish_reason "length" ran out of output room: a thinking
+ * model spent its budget reasoning and sent no answer. That is not a network failure, so it gets its
+ * own code. Any other empty reply keeps its existing path.
+ */
+function assertNotOutOfRoom(text: string): void {
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(text) as unknown;
+  } catch {
+    return;
+  }
+  if (!isRecord(envelope) || !Array.isArray(envelope.choices) || !isRecord(envelope.choices[0]))
+    return;
+  const choice = envelope.choices[0];
+  const message = firstProviderMessage(envelope);
+  if (message === undefined || choice.finish_reason !== 'length') return;
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return;
+  if (typeof message.content === 'string' && message.content.trim().length > 0) return;
+  throw new JoyAgentWorkerError(
+    'JOY_AGENT_EMPTY_ANSWER',
+    'The model used its output budget without sending an answer',
+  );
 }
 
 function isEmptyObject(value: unknown): boolean {
@@ -920,10 +951,13 @@ async function testConnection(): Promise<void> {
               ? 'The provider account needs credit to complete this request.'
               : errorCode === 'JOY_AGENT_RESPONSE_TOO_LARGE'
                 ? 'Provider response too large'
-                : errorCode === 'JOY_AGENT_PROVIDER_INCOMPATIBLE' &&
-                    error instanceof JoyAgentWorkerError
-                  ? error.message.slice(0, 180)
-                  : 'CORS or network error',
+                : errorCode === 'JOY_AGENT_RATE_LIMITED'
+                  ? USAGE_LIMIT_MESSAGE
+                  : errorCode === 'JOY_AGENT_PROVIDER_INCOMPATIBLE' &&
+                      error instanceof JoyAgentWorkerError
+                    ? error.message.slice(0, 180)
+                    : 'CORS or network error',
+        errorCode === 'JOY_AGENT_RATE_LIMITED' ? 'rate-limited' : undefined,
       ),
     });
   }
@@ -1312,6 +1346,9 @@ function failureMessage(
   if (code === 'JOY_AGENT_BILLING_REQUIRED') {
     return { code, message: 'The provider account needs credit to complete this request.' };
   }
+  if (code === 'JOY_AGENT_RATE_LIMITED') return { code, message: USAGE_LIMIT_MESSAGE };
+  if (code === 'JOY_AGENT_EMPTY_ANSWER')
+    return { code, message: 'The model used its output room without sending an answer' };
   if (code === 'JOY_AGENT_RESPONSE_TOO_LARGE')
     return { code, message: 'Provider response too large' };
   if (code === 'JOY_AGENT_TIMEOUT') return { code, message: 'Provider request timed out' };
@@ -1517,12 +1554,13 @@ async function run(request: JoyAgentRunRequest): Promise<void> {
           model: connection.modelId,
           messages: providerMessages,
           ...(toolCatalog === undefined ? {} : { tools: toolCatalog.tools }),
-          max_tokens: 2048,
+          max_tokens: outputTokenBudget(connection),
         },
         controller.signal,
         remaining,
       );
       consumeBudget(active, { outputBytes: response.bytes });
+      assertNotOutOfRoom(response.text);
       return response.text;
     };
     if (structured) {

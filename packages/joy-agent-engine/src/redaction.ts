@@ -74,6 +74,8 @@ export function classifyJoyAgentError(error: unknown): JoyAgentErrorCode {
   ) {
     return 'JOY_AGENT_BILLING_REQUIRED';
   }
+  if (status === 429 || normalized.includes('429') || normalized.includes('rate limit'))
+    return 'JOY_AGENT_RATE_LIMITED';
   if (normalized.includes('cors') || normalized.includes('network') || normalized.includes('fetch'))
     return 'JOY_AGENT_CORS_OR_NETWORK';
   if (normalized.includes('too large') || normalized.includes('oversize'))

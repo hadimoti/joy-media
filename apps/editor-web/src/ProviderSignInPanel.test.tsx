@@ -61,10 +61,20 @@ describe('ProviderSignInPanel', () => {
     return invoke;
   }
 
-  async function mount(onSignedIn = vi.fn(), onSaved = vi.fn()): Promise<void> {
+  async function mount(
+    onSignedIn = vi.fn(),
+    onSaved = vi.fn(),
+    signedInProviderIds?: readonly string[],
+  ): Promise<void> {
     root = createRoot(container);
     await act(async () => {
-      root?.render(<ProviderSignInPanel onSignedIn={onSignedIn} onSaved={onSaved} />);
+      root?.render(
+        <ProviderSignInPanel
+          onSignedIn={onSignedIn}
+          onSaved={onSaved}
+          signedInProviderIds={signedInProviderIds}
+        />,
+      );
     });
   }
 
@@ -176,6 +186,49 @@ describe('ProviderSignInPanel', () => {
         (paragraph) => paragraph.textContent === RISK_NOTICE,
       ),
     ).toHaveLength(3);
+  });
+
+  it('shows "Signed in." and "Sign in again" only on the route whose provider has a saved profile', async () => {
+    installDesktopBridge();
+    await mount(vi.fn(), vi.fn(), ['kimi']);
+
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) await openAccordion(provider);
+
+    const kimiRoute = route('Kimi', 'OAuth');
+    expect(kimiRoute.querySelector('.joy-provider-signed-in')?.textContent).toBe('Signed in.');
+    expect(kimiRoute.querySelector('button')?.textContent?.trim()).toBe('Sign in again');
+    expect(route('ChatGPT', 'OAuth').querySelector('.joy-provider-signed-in')).toBeNull();
+    expect(route('ChatGPT', 'OAuth').querySelector('button')?.textContent?.trim()).toBe(
+      'Sign in with ChatGPT',
+    );
+    expect(route('xAI', 'OAuth').querySelector('button')?.textContent?.trim()).toBe(
+      'Sign in with xAI',
+    );
+    expect(container.textContent?.match(/Signed in\./g)).toHaveLength(1);
+  });
+
+  it('keeps the sign-in button and its risk notice in place when the provider is signed in', async () => {
+    installDesktopBridge();
+    await mount(vi.fn(), vi.fn(), ['xai']);
+    await openAccordion('xAI');
+
+    const signInButton = route('xAI', 'OAuth').querySelector('button');
+    expect(signInButton?.className).toContain('button-secondary');
+    expect(signInButton?.disabled).toBe(false);
+    expect(signInButton?.nextElementSibling?.textContent).toBe(RISK_NOTICE);
+  });
+
+  it('starts the sign-in from "Sign in again" with the same action as before', async () => {
+    const invoke = installDesktopBridge();
+    const onSignedIn = vi.fn();
+    await mount(onSignedIn, vi.fn(), ['kimi']);
+    await openAccordion('Kimi');
+
+    const button = route('Kimi', 'OAuth').querySelector<HTMLButtonElement>('button');
+    await act(async () => button?.click());
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.sign-in', { provider: 'kimi' });
+    expect(onSignedIn).toHaveBeenCalledTimes(1);
   });
 
   it('says on the ChatGPT card that an OpenAI API key is billed separately (T-F09)', async () => {

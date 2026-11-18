@@ -257,6 +257,8 @@ export const SETTINGS_MODELS = {
   briefOnly: 'Ready for a creative brief only',
   connectBelow: 'Connect a model below to start.',
   connectionFailed: 'Connection failed. See the details below.',
+  /** The status banner when the provider's usage limit was reached, in place of connectionFailed. */
+  usageLimitReached: 'Usage limit reached',
   savedConnections: 'Saved connections',
   legacyProfile: 'Old connection, no longer used',
   keyUnreadable: 'Saved key could not be read. Enter it again.',
@@ -407,6 +409,10 @@ export const SETTINGS_PROVIDER_SIGN_IN = {
   oauthRouteTitle: 'Sign-in',
   signInButton: 'Sign in with {provider}',
   signInButtonBusy: 'Sign in with {provider}…',
+  /** Shown on the sign-in route once a saved profile for the provider exists. */
+  signedInLine: 'Signed in.',
+  /** The sign-in button's label once a saved profile for the provider exists. Same action as "Sign in with". */
+  signInAgainButton: 'Sign in again',
   apiKeyRouteLabel: '{provider} API-key route',
   apiKeyRouteTitle: 'API key',
   noApiKeyEndpoint:

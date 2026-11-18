@@ -26,12 +26,14 @@ export function createWorkerCompletion(
   };
 }
 
-export function statusFor(code: BrokerErrorCode): 413 | 422 | 502 {
+export function statusFor(code: BrokerErrorCode): 413 | 422 | 429 | 502 {
   switch (code) {
     case 'REQUEST_TOO_LARGE':
       return 413;
     case 'REQUEST_INVALID':
       return 422;
+    case 'RATE_LIMITED':
+      return 429;
     default:
       return 502;
   }

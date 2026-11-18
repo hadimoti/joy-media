@@ -46,6 +46,16 @@ describe('Joy Code capability panel contract', () => {
     expect(appCss).toContain('.joy-code-settings-trigger-btn:focus-visible');
   });
 
+  it('draws the Settings trigger with the real gear icon, not the sun-like cog', () => {
+    const triggerStart = panelSource.indexOf('className="joy-code-settings-trigger-btn"');
+    const triggerEnd = panelSource.indexOf('</button>', triggerStart);
+    expect(triggerStart).toBeGreaterThanOrEqual(0);
+    const triggerBlock = panelSource.slice(triggerStart, triggerEnd);
+    expect(triggerBlock).toContain('<SettingsGearIcon />');
+    expect(triggerBlock).not.toContain('<GearIcon');
+    expect(panelSource).not.toMatch(/\bGearIcon\b/);
+  });
+
   it('requires the terminal catch paths to use the shared Joy Code failure table', () => {
     // Each catch block in the four error paths must pick its failure from the
     // shared table, so that every failure card carries the plain message and

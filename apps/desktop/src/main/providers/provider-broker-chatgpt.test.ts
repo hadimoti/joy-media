@@ -201,7 +201,9 @@ describe('provider broker: other providers keep their own failures', () => {
       now: () => NOW,
     });
     const result = await broker.complete({ profileId: profile.id, body: CHAT });
-    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_HTTP_ERROR' });
+    // HTTP 429 is the usage limit for every provider. It is not a ChatGPT plan limit for this one.
+    expect(result).toMatchObject({ ok: false, code: 'RATE_LIMITED' });
+    expect(result).not.toMatchObject({ code: 'PLAN_LIMIT_REACHED' });
   });
 });
 

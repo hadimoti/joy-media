@@ -2,7 +2,7 @@
 import { act, Fragment } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { findRegistryProvider } from '@joy-media/provider-sdk';
+import { findRegistryProvider, USAGE_LIMIT_MESSAGE } from '@joy-media/provider-sdk';
 import { DEFAULT_AGENT_POLICY } from './agent-policy-settings.js';
 import { AppDialogHost } from './AppDialogs.js';
 import { getAppDialogQueue, settleAppDialog } from './app-dialogs.js';
@@ -388,6 +388,75 @@ describe('JOY Agent Settings connection status', () => {
     );
     expect(rendered.textContent).not.toContain('connection-test-key');
     expect(key.value).toBe('');
+  });
+
+  it('shows a usage limit as the plain usage-limit notice, not as a connection failure', async () => {
+    const limited: ByokSessionStatus = {
+      provider: 'openrouter',
+      modelId: 'openrouter/verified-model',
+      capability: 'incompatible',
+      message: USAGE_LIMIT_MESSAGE,
+      reason: 'rate-limited',
+    };
+    const rendered = await render(
+      client({ testConnection: vi.fn().mockResolvedValue(limited) }),
+      undefined,
+    );
+
+    await selectCustomPreset(rendered);
+    await connectWithKey(rendered);
+
+    const notice = rendered.querySelector('[role="alert"]');
+    expect(notice?.textContent).toContain(USAGE_LIMIT_MESSAGE);
+    expect(rendered.textContent).not.toContain('Connection failed');
+    expect(rendered.querySelector('.joy-settings-active-state')?.textContent).toBe(
+      SETTINGS_MODELS.usageLimitReached,
+    );
+  });
+
+  it('keeps the usage-limit notice when the connection check rejects with a usage-limit error', async () => {
+    const onStatusChange = vi.fn();
+    const limitError = Object.assign(new Error(USAGE_LIMIT_MESSAGE), {
+      code: 'JOY_AGENT_RATE_LIMITED',
+    });
+    const rendered = await render(
+      client({ testConnection: vi.fn().mockRejectedValue(limitError) }),
+      undefined,
+      onStatusChange,
+    );
+
+    await selectCustomPreset(rendered);
+    await connectWithKey(rendered);
+
+    const notice = rendered.querySelector('[role="alert"]');
+    expect(notice?.textContent).toContain(USAGE_LIMIT_MESSAGE);
+    expect(rendered.textContent).not.toContain('Connection failed:');
+    expect(onStatusChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ capability: 'incompatible', reason: 'rate-limited' }),
+    );
+  });
+
+  it('keeps the Connection failed prefix for a rejection that is not a usage limit', async () => {
+    const onStatusChange = vi.fn();
+    const rendered = await render(
+      client({
+        testConnection: vi
+          .fn()
+          .mockRejectedValue(new Error('The provider responded with an error.')),
+      }),
+      undefined,
+      onStatusChange,
+    );
+
+    await selectCustomPreset(rendered);
+    await connectWithKey(rendered);
+
+    expect(rendered.querySelector('[role="alert"]')?.textContent).toContain(
+      'Connection failed: The provider responded with an error.',
+    );
+    expect(onStatusChange).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ reason: 'rate-limited' }),
+    );
   });
 
   it('refuses model discovery in the browser build without sending the key', async () => {
@@ -2249,5 +2318,137 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     });
     expect(rendered.textContent).toContain('ChatGPT could not confirm sign-out');
     expect(rendered.textContent).toContain('gpt-4o-mini');
+  });
+});
+
+describe('JOY Agent Settings sign-in state', () => {
+  afterEach(() => {
+    delete (window as { joyDesktop?: unknown }).joyDesktop;
+  });
+
+  it('shows Signed in. on the sign-in route whose provider has a saved profile', async () => {
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke: vi.fn().mockImplementation(async (channel: string) => {
+        if (channel === 'desktop.provider-profile.list') {
+          return [
+            {
+              id: 'kimi-oauth-profile',
+              provider: 'kimi',
+              baseUrl: 'https://api.kimi.ai/coding/v1',
+              modelId: 'kimi-coding-model',
+              bound: true,
+              createdAt: '2026-11-18T00:00:00.000Z',
+              updatedAt: '2026-11-18T00:00:00.000Z',
+            },
+            {
+              id: 'chatgpt-oauth-profile',
+              provider: 'chatgpt',
+              baseUrl: 'https://api.openai.com/v1',
+              modelId: 'gpt-chatgpt-model',
+              bound: true,
+              createdAt: '2026-11-18T00:00:00.000Z',
+              updatedAt: '2026-11-18T00:00:00.000Z',
+            },
+          ];
+        }
+        return undefined;
+      }),
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+
+    const rendered = await render(client());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // The connection and sign-in section is open when the dialog opens.
+    expect(rendered.textContent).toContain(SETTINGS_MODELS.connectionTitle);
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) {
+      const toggle = rendered.querySelector<HTMLButtonElement>(
+        'button[aria-label="Toggle ' + provider + ' connection routes"]',
+      );
+      if (toggle === null) throw new Error('Expected the ' + provider + ' route toggle');
+      await act(async () => {
+        toggle.click();
+        await Promise.resolve();
+      });
+    }
+
+    const kimiRoute = rendered.querySelector<HTMLElement>('section[aria-label="Kimi OAuth route"]');
+    expect(kimiRoute?.querySelector('.joy-provider-signed-in')?.textContent).toBe('Signed in.');
+    expect(kimiRoute?.querySelector('button')?.textContent?.trim()).toBe('Sign in again');
+    const chatGptRoute = rendered.querySelector<HTMLElement>(
+      'section[aria-label="ChatGPT OAuth route"]',
+    );
+    expect(chatGptRoute?.querySelector('.joy-provider-signed-in')?.textContent).toBe('Signed in.');
+    expect(chatGptRoute?.querySelector('button')?.textContent?.trim()).toBe('Sign in again');
+  });
+
+  it('does not show Signed in. for a saved Kimi API-key profile on the sign-in route', async () => {
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke: vi.fn().mockImplementation(async (channel: string) => {
+        if (channel === 'desktop.provider-profile.list') {
+          return [
+            {
+              id: 'kimi-api-key-profile',
+              provider: 'kimi',
+              baseUrl: 'https://api.moonshot.ai/v1',
+              modelId: 'kimi-api-model',
+              bound: true,
+              createdAt: '2026-11-18T00:00:00.000Z',
+              updatedAt: '2026-11-18T00:00:00.000Z',
+            },
+          ];
+        }
+        return undefined;
+      }),
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+
+    const rendered = await render(client());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const toggle = rendered.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle Kimi connection routes"]',
+    );
+    if (toggle === null) throw new Error('Expected the Kimi route toggle');
+    await act(async () => {
+      toggle.click();
+      await Promise.resolve();
+    });
+
+    const kimiRoute = rendered.querySelector<HTMLElement>('section[aria-label="Kimi OAuth route"]');
+    expect(kimiRoute?.querySelector('.joy-provider-signed-in')).toBeNull();
+    expect(rendered.textContent).not.toContain('Signed in.');
+    expect(kimiRoute?.querySelector('button')?.textContent?.trim()).not.toBe('Sign in again');
+  });
+
+  it('says Usage limit reached in the status banner when the connection stopped on a provider usage limit', async () => {
+    const limited: ByokSessionStatus = {
+      provider: 'openrouter',
+      modelId: 'openrouter/verified-model',
+      capability: 'incompatible',
+      message: 'The provider says the usage limit is reached. Try again later.',
+      reason: 'rate-limited',
+    };
+    const rendered = await render(client(), limited);
+
+    const banner = rendered.querySelector('.joy-settings-active-state');
+    expect(banner?.textContent).toBe('Usage limit reached');
+    expect(rendered.textContent).not.toContain('Connection failed. See the details below.');
+  });
+
+  it('keeps Connection failed in the status banner for a failure with no usage limit', async () => {
+    const failed: ByokSessionStatus = {
+      provider: 'openrouter',
+      modelId: 'openrouter/verified-model',
+      capability: 'incompatible',
+      message: 'The provider responded with an error.',
+    };
+    const rendered = await render(client(), failed);
+
+    expect(rendered.querySelector('.joy-settings-active-state')?.textContent).toBe(
+      'Connection failed. See the details below.',
+    );
   });
 });

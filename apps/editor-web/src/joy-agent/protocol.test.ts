@@ -25,6 +25,24 @@ const safeEvent = {
 };
 
 describe('JOY Agent Worker protocol V2', () => {
+  it('carries a rate-limited reason on a status, and no other reason', () => {
+    const status = {
+      provider: 'openai-compatible',
+      modelId: 'fixture-model',
+      capability: 'incompatible',
+      message: 'The provider says the usage limit is reached. Try again later.',
+    };
+    const envelope = (value: unknown) => ({
+      protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+      type: 'test-result',
+      status: value,
+    });
+
+    expect(isWorkerToMainMessage(envelope({ ...status, reason: 'rate-limited' }))).toBe(true);
+    expect(isWorkerToMainMessage(envelope(status))).toBe(true);
+    expect(isWorkerToMainMessage(envelope({ ...status, reason: 'anything-else' }))).toBe(false);
+  });
+
   it('rejects cached V1 envelopes and requires an epoch on every run', () => {
     expect(isWorkerToMainMessage({ protocolVersion: 1, type: 'event', event: safeEvent })).toBe(
       false,

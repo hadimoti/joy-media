@@ -176,6 +176,9 @@ export type {
 } from './adapters/openai-compatible.js';
 export { probeOpenAiCompatibleProvider } from './adapters/openai-compatible.js';
 
+// The one wording for a provider usage limit, shared by the desktop broker, the Worker, the dialog and the CLI.
+export { USAGE_LIMIT_MESSAGE, USAGE_LIMIT_REACHED } from './usage-limit.js';
+
 // Re-export the fixed sign-in origins (PLAN-v4 §5, §6d), so the desktop names no remote host itself.
 export {
   CHATGPT_AUTHORIZE_URL,
