@@ -135,8 +135,11 @@ try {
   New-Item -ItemType Directory -Force -Path $work | Out-Null
   $fixture = 'C:\in\offline-smoke-project.json'
   $database = Join-Path $work 'offline-smoke.sqlite'
+  # Windows PowerShell 5.1 turns native stderr text into a terminating error under 'Stop'; the exit code is checked below instead.
+  $ErrorActionPreference = 'Continue'
   $importOutput = & joy-media project import $fixture --sqlite-path $database --json 2>&1
   $importExit = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
   $importText = (@($importOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine).Trim()
   $importJson = $null
   try { $importJson = $importText | ConvertFrom-Json -ErrorAction Stop } catch { }
@@ -147,8 +150,11 @@ try {
   $exportPath = Join-Path $work 'offline-smoke-export.json'
   $exportExit = -1
   if ($importOk) {
+    # Windows PowerShell 5.1 turns native stderr text into a terminating error under 'Stop'; the exit code is checked below instead.
+    $ErrorActionPreference = 'Continue'
     $exportOutput = & joy-media project export $projectId --output $exportPath --sqlite-path $database --json 2>&1
     $exportExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
     $exportText = (@($exportOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine).Trim()
     $exportJson = $null
     try { $exportJson = $exportText | ConvertFrom-Json -ErrorAction Stop } catch { }
@@ -160,8 +166,11 @@ try {
   }
   Add-Step 'export' $exportOk $(if ($exportOk) { "Exported $projectId to the Sandbox work folder." } else { "Export failed with exit $exportExit." })
 
+  # Windows PowerShell 5.1 turns native stderr text into a terminating error under 'Stop'; the exit code is checked below instead.
+  $ErrorActionPreference = 'Continue'
   $doctorOutput = & joy-media doctor --json 2>&1
   $doctorExit = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
   $doctorText = (@($doctorOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine).Trim()
   $doctorJson = $null
   try { $doctorJson = $doctorText | ConvertFrom-Json -ErrorAction Stop } catch { }
@@ -170,8 +179,11 @@ try {
 
   if ($exportOk) {
     $renderDir = Join-Path $work 'render'
+    # Windows PowerShell 5.1 turns native stderr text into a terminating error under 'Stop'; the exit code is checked below instead.
+    $ErrorActionPreference = 'Continue'
     $renderOutput = & joy-media render --project $exportPath --out $renderDir --json 2>&1
     $renderExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
     $renderText = (@($renderOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine).Trim()
     $manifestWritten = $false
     foreach ($line in [regex]::Split($renderText, '\r?\n')) {

@@ -73,6 +73,7 @@ if ($DryRun) {
         $dryOut = Join-Path $dryRoot 'out'
         New-Item -ItemType Directory -Force -Path $dryOut | Out-Null
         $lifecycleScript = Join-Path $PSScriptRoot 'lifecycle.ps1'
+        $global:LASTEXITCODE = 0
         if ($OfflineSmoke) {
             & $lifecycleScript -DryRun -RunOfflineSmoke -OutputDirectory $dryOut
         } else {

@@ -77,6 +77,7 @@ if ($DryRun) {
   Add-Step 'open-window' $true 'fake JOY Media window'
   Add-Step 'project-fixture-import-export' $true 'legacy CLI smoke fixture'
   Add-Step 'offline-cli-smoke' $true 'legacy CLI doctor and render fixture'
+  Add-Step 'sandbox-network-adapter-absent' $true 'fake adapter count 0'
   Add-Step 'close-app' $true 'exit 0'
   Add-Step 'no-process-after-close' $true 'processes left: 0'
   Add-Step 'uninstall' $true 'exit 0'
@@ -188,6 +189,14 @@ try {
   }
   Add-Step 'project-fixture-import-export' ($null -ne $roundTrip -and $roundTrip.result -eq 'pass') $(if ($null -ne $roundTrip) { $roundTrip.detail } else { 'Project import/export was not recorded.' })
   Add-Step 'offline-cli-smoke' ($offlineCli -eq 'pass') $(if ($null -ne $cliSmoke) { 'doctor=' + $cliSmoke.offline.doctor.result + '; render=' + $cliSmoke.offline.render.result } else { 'CLI smoke result was not recorded.' })
+
+  # The adapter proof the lifecycle receipt always carried: networking is disabled in the .wsb, so none may be up.
+  try {
+    $adapters = @(Get-NetAdapter -ErrorAction Stop)
+    Add-Step 'sandbox-network-adapter-absent' ($adapters.Count -eq 0) $(if ($adapters.Count -eq 0) { 'Windows Sandbox networking was disabled and adapter enumeration returned zero.' } else { 'A Windows Sandbox network adapter was present: ' + (@($adapters | ForEach-Object { $_.Name }) -join ',') })
+  } catch {
+    Add-Step 'sandbox-network-adapter-absent' $false ('Network adapter enumeration failed: ' + $_.Exception.Message)
+  }
 
   if (-not $app.HasExited) {
     [void]$app.CloseMainWindow()
