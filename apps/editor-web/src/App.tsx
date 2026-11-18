@@ -7043,7 +7043,7 @@ function EditorWorkspace({
         if (importedAssets.length > 0) {
           // A file the library already holds (same content, same id) is not new: the toast must not count it as added.
           const alreadyInLibrary = importedAssets.filter(
-            (asset) => context.visualProject.assets[asset.id] !== undefined,
+            (asset) => context.session.visualProject.assets[asset.id] !== undefined,
           ).length;
           const timelineAssets: TimelineMediaAsset[] = [];
           const clipIds: string[] = [];
@@ -7052,10 +7052,12 @@ function EditorWorkspace({
           const shouldPlace = target.surface !== 'media' && composition !== undefined;
           const batchToken = Date.now();
           if (!shouldPlace) {
+            // The import is asynchronous: build on the live project, not the snapshot this drop
+            // started from, so that edits made while the files were being read are kept.
             context.replaceVisualProject(
               importedAssets.reduce(
                 (project, asset) => projectWithImportedAsset(project, asset),
-                context.visualProject,
+                context.session.visualProject,
               ),
             );
           }
