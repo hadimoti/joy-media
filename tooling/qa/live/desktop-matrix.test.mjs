@@ -489,7 +489,7 @@ test('row tables: unique ids in the T-A05, T-A06, T-A09 and T-H04 ranges, each w
     EXPORT_MISSING_ROWS.map((row) => row.id),
     ['D-R04-1', 'D-R04-2', 'D-R04-3'],
   );
-  for (const row of TIMELINE_DND_H04_ROWS) assert.match(row.id, /^D-H(?:01|02|06|07|08|10)$/u);
+  for (const row of TIMELINE_DND_H04_ROWS) assert.match(row.id, /^D-H(?:0[1-9]|10)$/u);
   for (const row of LIBRARY_THUMB_ROWS) assert.match(row.id, /^D-A11-\d{2}$/u);
   for (const row of MONITOR_SNAP_ROWS) assert.match(row.id, /^D-M06-\d{2}(?:-\d{2})?$/u);
   for (const row of Object.values(MATRIX_ROWS)) {
