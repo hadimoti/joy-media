@@ -30,6 +30,8 @@ type MonitorContextMenuBuilder = (input: {
   readonly missing: boolean;
   readonly showTransformActions?: boolean;
   readonly transformDisabledReason?: string;
+  readonly centreDisabledReason?: string;
+  readonly resetDisabledReason?: string;
   readonly alreadyCentred?: boolean;
   readonly alreadyReset?: boolean;
   readonly onAction: (action: ContextMenuAction, targetId: string) => void;
@@ -153,6 +155,47 @@ describe('Monitor context menu actions', () => {
     expect(items.map((item) => [item.label, item.disabled, item.disabledReason])).toEqual([
       ['Centre', true, 'A parent of this element is on a locked track.'],
       ['Reset transform', true, 'A parent of this element is on a locked track.'],
+    ]);
+  });
+
+  it('disables only the transform action whose own reason blocks it', () => {
+    const items = buildMonitorContextMenuItems!({
+      objectId: 'picture-3',
+      clipId: 'clip-3',
+      canFit: false,
+      canCrop: false,
+      missing: false,
+      showTransformActions: true,
+      centreDisabledReason:
+        'Position is animated or expression-driven, so Centre cannot set it here.',
+      onAction: vi.fn(),
+    });
+
+    expect(items.map((item) => [item.label, item.disabled, item.disabledReason])).toEqual([
+      ['Centre', true, 'Position is animated or expression-driven, so Centre cannot set it here.'],
+      ['Reset transform', undefined, undefined],
+    ]);
+  });
+
+  it('lets a shared reason override the per-action reasons', () => {
+    const items = buildMonitorContextMenuItems!({
+      objectId: 'picture-4',
+      clipId: 'clip-4',
+      canFit: false,
+      canCrop: false,
+      missing: false,
+      showTransformActions: true,
+      transformDisabledReason: 'The camera places this element. Change the camera instead.',
+      centreDisabledReason:
+        'Position is animated or expression-driven, so Centre cannot set it here.',
+      resetDisabledReason:
+        'Position, size or rotation is animated or expression-driven, so Reset cannot set it here.',
+      onAction: vi.fn(),
+    });
+
+    expect(items.map((item) => [item.label, item.disabledReason])).toEqual([
+      ['Centre', 'The camera places this element. Change the camera instead.'],
+      ['Reset transform', 'The camera places this element. Change the camera instead.'],
     ]);
   });
 });

@@ -197,10 +197,7 @@ function resetLocalValues(
     x: frameWidth / 2 - centreFromOrigin.x,
     y: frameHeight / 2 - centreFromOrigin.y,
   };
-  const local = worldDeltaToParentSpace(
-    { x: origin.x - parent.x, y: origin.y - parent.y },
-    target.parent,
-  );
+  const local = worldDeltaToParentSpace({ x: origin.x - parent.x, y: origin.y - parent.y }, parent);
   if (local === undefined) return undefined;
   return {
     x: cleanNumber(local.x),
