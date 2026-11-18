@@ -985,9 +985,11 @@ main {
   padding-inline: 0 !important;
 }
 .process-center-count {
+  /* Inside the button, at its lower right: the header sits at the top edge of the window, so a badge that
+     sticks out above the button was cut off by the window frame. */
   position: absolute;
-  top: -0.18rem;
-  right: -0.18rem;
+  bottom: 0.05rem;
+  right: 0.05rem;
   display: grid;
   place-items: center;
   min-width: 1rem;

@@ -12,7 +12,7 @@
  * `run.mjs` has already pointed the Asset Library Folder at the scratch library. Fixtures are
  * read from C:\jgp\v111\fixtures (T-A04), never copied or changed.
  */
-import { mkdirSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { importThroughLeftPanel, newProject, openMenu } from './steps.mjs';
 import { FIXTURE_ROOT, clipsOf, readDocument, rowsById } from './matrix-core.mjs';
@@ -510,6 +510,16 @@ rows.push({
     }
     if (toast === '' && !hasFreshMp4(ctx.downloadDir, startedAt)) {
       const where = await ctx.shot('D-A05-60', 'no-file');
+      if (ctx.outDir) {
+        const dir = join(ctx.outDir, 'D-A05-60');
+        mkdirSync(dir, { recursive: true });
+        const trail = stateTrail.map((entry) => `${entry.at}s ${entry.text}`).join('\n');
+        writeFileSync(
+          join(dir, 'state-trail.txt'),
+          `${trail}\n--- console\n${consoleTail.join('\n')}\n`,
+          'utf8',
+        );
+      }
       let dialogs = [];
       try {
         dialogs = await page.locator('[role="dialog"], [role="alertdialog"]').allInnerTexts();
