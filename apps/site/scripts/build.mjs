@@ -1,7 +1,7 @@
 // Builds the static site into apps/site/dist (Cloudflare Pages output).
 //
 // Environment:
-//   SITE_RELEASE_TAG   release tag the site describes (default v1.1.0)
+//   SITE_RELEASE_TAG   release tag the site describes (default v1.1.1)
 //   SITE_SHA256SUMS    path to that tag's staged SHA256SUMS.txt. Unset: the committed copy in
 //                      apps/site/release/<tag>/SHA256SUMS.txt is used, and if that is missing too the hash
 //                      cells stay as explicit placeholders (build.txt says hash_source=placeholder).
@@ -35,7 +35,7 @@ function gitHead() {
   }
 }
 
-const tag = assertReleaseTag(process.env.SITE_RELEASE_TAG ?? 'v1.1.0');
+const tag = assertReleaseTag(process.env.SITE_RELEASE_TAG ?? 'v1.1.1');
 const commit = process.env.SITE_COMMIT ?? gitHead();
 
 let sums = null;

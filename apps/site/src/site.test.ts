@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { PAGE_FILES, renderSite } from './render.mjs';
 import { REPOSITORY_URL, downloadUrl, parseSha256Sums, payloadNames } from './release.mjs';
 
-const TAG = 'v1.1.0';
+const TAG = 'v1.1.1';
 const NAMES = payloadNames(TAG);
 
 /** A SHA256SUMS.txt with distinct, valid hashes for the payload set. */
