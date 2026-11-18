@@ -8,6 +8,8 @@ import { monitorContextTransformState } from './monitor-context-transform.js';
 import { turn, type LocalTransform, type ParentTransform } from './monitor-transform-maths.js';
 import type { MonitorTransformTarget } from './monitor-transform-targets.js';
 
+type Point = { readonly x: number; readonly y: number };
+
 const textObject: VisualObjectV1 = {
   id: 'title',
   kind: 'text',
@@ -121,8 +123,61 @@ function target(overrides: Partial<MonitorTransformTarget> = {}): MonitorTransfo
   };
 }
 
-/** The renderer's order: the parent scales a child's position, then turns it. */
-function pivotInCanvas(parent: ParentTransform, local: LocalTransform): { x: number; y: number } {
+/**
+ * A drawn box from its top-left corner, its unscaled half-size, and its drawn scale and rotation: the
+ * renderer's box model. The centre is the top-left plus the half-size, turned and scaled.
+ */
+function boxAt(input: {
+  readonly topLeft: Point;
+  readonly size: Point;
+  readonly scale: Point;
+  readonly rotationDeg: number;
+}): MonitorTransformTarget['geometry'] {
+  const at = (u: number, v: number): Point => {
+    const q = turn({ x: input.scale.x * u, y: input.scale.y * v }, input.rotationDeg);
+    return { x: input.topLeft.x + q.x, y: input.topLeft.y + q.y };
+  };
+  const centre = at(input.size.x, input.size.y);
+  return {
+    transform: {
+      x: input.topLeft.x,
+      y: input.topLeft.y,
+      scaleX: input.scale.x,
+      scaleY: input.scale.y,
+      rotationDeg: input.rotationDeg,
+    },
+    corners: [
+      at(0, 0),
+      at(2 * input.size.x, 0),
+      at(2 * input.size.x, 2 * input.size.y),
+      at(0, 2 * input.size.y),
+    ],
+    origin: centre,
+    center: centre,
+  };
+}
+
+/** The same drawn box, placed by its centre. */
+function boxCentredAt(input: {
+  readonly centre: Point;
+  readonly size: Point;
+  readonly scale: Point;
+  readonly rotationDeg: number;
+}): MonitorTransformTarget['geometry'] {
+  const offset = turn(
+    { x: input.scale.x * input.size.x, y: input.scale.y * input.size.y },
+    input.rotationDeg,
+  );
+  return boxAt({
+    topLeft: { x: input.centre.x - offset.x, y: input.centre.y - offset.y },
+    size: input.size,
+    scale: input.scale,
+    rotationDeg: input.rotationDeg,
+  });
+}
+
+/** Where a child's translation point lands in canvas space: the parent scales it, then turns it. */
+function translationInCanvas(parent: ParentTransform, local: LocalTransform): Point {
   const moved = turn(
     { x: parent.scaleX * local.x, y: parent.scaleY * local.y },
     parent.rotationDeg,
@@ -130,44 +185,19 @@ function pivotInCanvas(parent: ParentTransform, local: LocalTransform): { x: num
   return { x: parent.x + moved.x, y: parent.y + moved.y };
 }
 
-/** Where a child's drawn box centre lands, given its offset from its pivot in its own units. */
-function centreInCanvas(
+/** The drawn centre of a child after a reset (rotation 0), from its own values and half-size. */
+function drawnCentreAfterReset(
   parent: ParentTransform,
-  local: LocalTransform,
-  offset: { readonly x: number; readonly y: number },
-): { x: number; y: number } {
-  const pivot = pivotInCanvas(parent, local);
-  const drawn = turn(
-    { x: parent.scaleX * local.scaleX * offset.x, y: parent.scaleY * local.scaleY * offset.y },
-    parent.rotationDeg + local.rotationDeg,
+  values: readonly number[],
+  half: Point,
+): Point {
+  const [x = 0, y = 0, scaleX = 1, scaleY = 1] = values;
+  const origin = translationInCanvas(parent, { x, y, scaleX, scaleY, rotationDeg: 0 });
+  const offset = turn(
+    { x: parent.scaleX * scaleX * half.x, y: parent.scaleY * scaleY * half.y },
+    parent.rotationDeg,
   );
-  return { x: pivot.x + drawn.x, y: pivot.y + drawn.y };
-}
-
-/** A child target built from the same model, so the test checks the maths and not hand-typed geometry. */
-function parentedTarget(
-  parent: ParentTransform,
-  local: LocalTransform,
-  offset: { readonly x: number; readonly y: number },
-): MonitorTransformTarget {
-  const pivot = pivotInCanvas(parent, local);
-  return target({
-    parent,
-    ancestorObjectIds: ['parent'],
-    local,
-    geometry: {
-      ...target().geometry,
-      transform: {
-        x: pivot.x,
-        y: pivot.y,
-        scaleX: parent.scaleX * local.scaleX,
-        scaleY: parent.scaleY * local.scaleY,
-        rotationDeg: parent.rotationDeg + local.rotationDeg,
-      },
-      origin: pivot,
-      center: centreInCanvas(parent, local, offset),
-    },
-  });
+  return { x: origin.x + offset.x, y: origin.y + offset.y };
 }
 
 function transformCommands(edit: VisualObjectTransaction | undefined) {
@@ -267,24 +297,25 @@ describe('Monitor context transform actions', () => {
     expect(transformKeys(state.resetTransaction)).not.toContain('crop');
   });
 
-  it('re-centres an off-centre anchor after resetting rotation and scale', () => {
+  it('re-centres a rotated, scaled box from its top-left corner after resetting rotation and scale', () => {
     const state = monitorContextTransformState({
       objectId: 'title',
       object: textObject,
       project: project(),
       target: target({
-        geometry: {
-          ...target().geometry,
-          transform: { x: 100, y: 200, scaleX: 2, scaleY: 4, rotationDeg: 90 },
-          center: { x: 120, y: 240 },
-        },
-        local: { x: 100, y: 200, scaleX: 2, scaleY: 4, rotationDeg: 90 },
+        geometry: boxCentredAt({
+          centre: { x: 120, y: 240 },
+          size: { x: 10, y: 10 },
+          scale: { x: 2, y: 4 },
+          rotationDeg: 90,
+        }),
+        local: { x: 160, y: 220, scaleX: 2, scaleY: 4, rotationDeg: 90 },
       }),
       frameWidth: 1080,
       frameHeight: 1920,
     });
 
-    expect(transformValues(state.resetTransaction)).toEqual([520, 965, 1, 1, 0]);
+    expect(transformValues(state.resetTransaction)).toEqual([530, 950, 1, 1, 0]);
   });
 
   it('supports a static parent while moving the child in canvas space', () => {
@@ -314,23 +345,28 @@ describe('Monitor context transform actions', () => {
 
   describe('under a rotated and scaled parent', () => {
     const parent: ParentTransform = { x: 300, y: 400, scaleX: 2, scaleY: 2, rotationDeg: 90 };
-    const offset = { x: 40, y: 0 };
     const child: VisualObjectV1 = { ...textObject, parentId: 'parent' };
     const nested = project({
       title: child,
       parent: { ...textObject, id: 'parent', kind: 'null' },
     });
+    // The child's own values. Its drawn box: world scale 2 x 2 = 4, world rotation 90 + 90 = 180, half-size (40, 30).
+    const local: LocalTransform = { x: 10, y: 20, scaleX: 2, scaleY: 2, rotationDeg: 90 };
+    const drawn = boxCentredAt({
+      centre: { x: 100, y: 420 },
+      size: { x: 40, y: 30 },
+      scale: { x: 4, y: 4 },
+      rotationDeg: 180,
+    });
+    const inParent = (geometry: MonitorTransformTarget['geometry'], values: LocalTransform) =>
+      target({ parent, ancestorObjectIds: ['parent'], local: values, geometry });
 
     it('centres the child in canvas space through the parent', () => {
       const state = monitorContextTransformState({
         objectId: 'title',
         object: child,
         project: nested,
-        target: parentedTarget(
-          parent,
-          { x: 10, y: 20, scaleX: 2, scaleY: 2, rotationDeg: 90 },
-          offset,
-        ),
+        target: inParent(drawn, local),
         frameWidth: 1080,
         frameHeight: 1920,
       });
@@ -343,37 +379,32 @@ describe('Monitor context transform actions', () => {
         objectId: 'title',
         object: child,
         project: nested,
-        target: parentedTarget(
-          parent,
-          { x: 10, y: 20, scaleX: 2, scaleY: 2, rotationDeg: 90 },
-          offset,
-        ),
+        target: inParent(drawn, local),
         frameWidth: 1080,
         frameHeight: 1920,
       });
 
-      // Rotation 0 and scale 1 are the child's own values, so the parent's 90 degrees stay in the parent.
+      // Rotation 0 and scale 1 are the child's own values; the parent keeps its 90 degrees.
       const reset = transformValues(state.resetTransaction);
-      expect(reset).toEqual([240, -120, 1, 1, 0]);
-      const centre = centreInCanvas(
-        parent,
-        { x: 240, y: -120, scaleX: 1, scaleY: 1, rotationDeg: 0 },
-        offset,
-      );
+      expect(reset).toEqual([240, -150, 1, 1, 0]);
+      const centre = drawnCentreAfterReset(parent, reset as number[], { x: 40, y: 30 });
       expect(centre.x).toBeCloseTo(540, 6);
       expect(centre.y).toBeCloseTo(960, 6);
     });
 
     it('reports a rotated and scaled child that is already centred and reset', () => {
+      const reset: LocalTransform = { x: 240, y: -150, scaleX: 1, scaleY: 1, rotationDeg: 0 };
+      const drawnReset = boxCentredAt({
+        centre: { x: 540, y: 960 },
+        size: { x: 40, y: 30 },
+        scale: { x: 2, y: 2 },
+        rotationDeg: 90,
+      });
       const state = monitorContextTransformState({
         objectId: 'title',
         object: child,
         project: nested,
-        target: parentedTarget(
-          parent,
-          { x: 240, y: -120, scaleX: 1, scaleY: 1, rotationDeg: 0 },
-          offset,
-        ),
+        target: inParent(drawnReset, reset),
         frameWidth: 1080,
         frameHeight: 1920,
       });
@@ -393,8 +424,8 @@ describe('Monitor context transform actions', () => {
       assetId: 'photo',
       transform: {
         ...textObject.transform,
-        x: 540,
-        y: 960,
+        x: 0,
+        y: 0,
         scaleX: 1,
         scaleY: 1,
         rotationDeg: 0,
@@ -407,20 +438,23 @@ describe('Monitor context transform actions', () => {
       project: withPhoto(project({ 'photo-object': photo })),
       target: target({
         objectId: 'photo-object',
-        local: { x: 540, y: 960, scaleX: 1, scaleY: 1, rotationDeg: 0 },
-        geometry: {
-          ...target().geometry,
-          transform: { x: 540, y: 960, scaleX: 1, scaleY: 1, rotationDeg: 0 },
-          origin: { x: 540, y: 960 },
-          center: { x: 540, y: 960 },
-        },
+        local: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0 },
+        geometry: boxAt({
+          topLeft: { x: -228, y: 528 },
+          size: { x: 768, y: 432 },
+          scale: { x: 1, y: 1 },
+          rotationDeg: 0,
+        }),
       }),
       frameWidth: 1080,
       frameHeight: 1920,
     });
 
-    // The visible 80 per cent of the picture (1536 by 864) fits the 1080 by 1920 frame at 45/64.
-    expect(transformValues(state.resetTransaction)).toEqual([540, 960, 0.703125, 0.703125, 0]);
+    // The visible 80 per cent of the picture (1536 by 864) fits the frame at 45/64. The position is the
+    // top-left of the uncropped picture, so the 10 per cent cut from each side is added back.
+    expect(transformValues(state.resetTransaction)).toEqual([
+      -135, 580.3125, 0.703125, 0.703125, 0,
+    ]);
     expect(transformKeys(state.resetTransaction)).not.toContain('crop');
   });
 
@@ -433,19 +467,19 @@ describe('Monitor context transform actions', () => {
       target: target({
         objectId: 'media',
         clipId: 'parent-clip',
-        local: { x: 540, y: 960, scaleX: 2, scaleY: 2, rotationDeg: 30 },
-        geometry: {
-          ...target().geometry,
-          transform: { x: 540, y: 960, scaleX: 2, scaleY: 2, rotationDeg: 30 },
-          origin: { x: 540, y: 960 },
-          center: { x: 540, y: 960 },
-        },
+        local: { x: 0, y: 0, scaleX: 2, scaleY: 2, rotationDeg: 30 },
+        geometry: boxCentredAt({
+          centre: { x: 540, y: 960 },
+          size: { x: 100, y: 50 },
+          scale: { x: 2, y: 2 },
+          rotationDeg: 30,
+        }),
       }),
       frameWidth: 1080,
       frameHeight: 1920,
     });
 
-    expect(transformValues(state.resetTransaction)).toEqual([540, 960, 0.5625, 0.5625, 0]);
+    expect(transformValues(state.resetTransaction)).toEqual([483.75, 931.875, 0.5625, 0.5625, 0]);
   });
 
   it('disables both actions while the composition has an active camera', () => {
@@ -489,13 +523,13 @@ describe('Monitor context transform actions', () => {
       object: textObject,
       project: project(),
       target: target({
-        geometry: {
-          ...target().geometry,
-          transform: { x: 540, y: 960, scaleX: 1, scaleY: 1, rotationDeg: 0 },
-          origin: { x: 540, y: 960 },
-          center: { x: 540, y: 960 },
-        },
-        local: { x: 540, y: 960, scaleX: 1, scaleY: 1, rotationDeg: 0 },
+        geometry: boxCentredAt({
+          centre: { x: 540, y: 960 },
+          size: { x: 50, y: 50 },
+          scale: { x: 1, y: 1 },
+          rotationDeg: 0,
+        }),
+        local: { x: 490, y: 910, scaleX: 1, scaleY: 1, rotationDeg: 0 },
       }),
       frameWidth: 1080,
       frameHeight: 1920,
