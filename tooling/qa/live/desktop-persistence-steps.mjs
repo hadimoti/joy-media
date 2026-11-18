@@ -306,7 +306,9 @@ rows.push({
     await ctx.editDocument(page);
     const relink = await importWithMissingMedia(page, ctx, 'D-A09-05');
     const importedBaseline = await ctx.readDocument(page);
-    await relink.setInputFiles(join(ctx.fixtures, 'picture-1080.jpg'));
+    // A different video of another size: refused as the original. (A picture is refused for a video: checked below.)
+    const DIFFERENT_VIDEO = 'h264-16x9-silent.mp4';
+    await relink.setInputFiles(join(ctx.fixtures, DIFFERENT_VIDEO));
     const warning = page.getByRole('alert').filter({
       hasText: /different size from the original|does not match the original checksum/u,
     });
@@ -317,6 +319,15 @@ rows.push({
     }
     const useDifferent = page.getByLabel(`Use a different file for ${MEDIA_FILE}`);
     await useDifferent.setInputFiles(join(ctx.fixtures, 'picture-1080.jpg'));
+    await page
+      .getByRole('status')
+      .getByText(/picture-1080\.jpg was not used\./u)
+      .waitFor({ state: 'visible', timeout: 10_000 });
+    const afterPicture = await ctx.readDocument(page);
+    if (normalizeDocument(afterPicture.document) !== normalizeDocument(importedBaseline.document)) {
+      throw new Error('a picture chosen for a missing video changed the imported project document');
+    }
+    await useDifferent.setInputFiles(join(ctx.fixtures, DIFFERENT_VIDEO));
     await page
       .getByRole('status')
       .getByText(/is now a separate asset/u)

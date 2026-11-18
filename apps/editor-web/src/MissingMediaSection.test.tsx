@@ -279,6 +279,36 @@ describe('MissingMediaSection review dialog', () => {
     expect(document.body.textContent).toContain('No missing media matches: locked.mp4.');
   });
 
+  it('says why a different file of another kind was not used instead of doing nothing', async () => {
+    const entries = entriesOf(1);
+    const picture = new File(['picture'], 'picture.jpg', { type: 'image/jpeg' });
+    const host = {
+      list: async () => entries,
+      relink: vi.fn(async () => ({ ok: false as const, reason: 'size-mismatch' as const })),
+      useDifferentFile: vi.fn(async () => {
+        throw new Error('selected asset type image/jpeg does not match video media');
+      }),
+    } as unknown as MissingMediaHost;
+    const mounted = await mount(host);
+    await act(async () => buttonNamed(mounted, 'Review')?.click());
+
+    const pick = async (label: string): Promise<void> => {
+      const input = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
+      if (input === null) throw new Error(`${label} input was not rendered`);
+      Object.defineProperty(input, 'files', { configurable: true, value: [picture] });
+      await act(async () => {
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    };
+    await pick('Relink clip-0.mp4');
+    await pick('Use a different file for clip-0.mp4');
+
+    expect(host.useDifferentFile).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain('picture.jpg was not used.');
+    expect(document.body.textContent).toContain('does not match video media');
+    expect(document.body.textContent).toContain('The original is unchanged.');
+  });
+
   it('returns focus to the Review button on close, and Escape does not reach other listeners', async () => {
     const mounted = await mount(hostWith(entriesOf(2)));
     const review = buttonNamed(mounted, 'Review');

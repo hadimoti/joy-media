@@ -326,9 +326,10 @@ for (const row of PERSISTENCE_ROWS) {
             document:
               row.id === 'D-A09-05' &&
               !undone &&
-              page.calls.some((call) =>
-                call.includes('Use a different file for h264-16x9-audio.mp4'),
-              )
+              // The override is the second pick of the different video (the first one is the refused relink).
+              page.calls.filter(
+                (call) => call.includes('setInputFiles(') && call.includes('h264-16x9-silent.mp4'),
+              ).length >= 2
                 ? overridden
                 : baseline,
           };

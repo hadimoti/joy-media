@@ -115,7 +115,18 @@ export function MissingMediaSection({
 
   const overrideWithFile = async (entry: MissingMediaEntry, file: File | undefined) => {
     if (file === undefined) return;
-    const outcome = await host.useDifferentFile(entry, file);
+    let outcome: Awaited<ReturnType<typeof host.useDifferentFile>>;
+    try {
+      outcome = await host.useDifferentFile(entry, file);
+    } catch (error) {
+      // A file of another kind (a picture for a missing video) or an unreadable file is refused with a reason,
+      // never silently.
+      const reason = error instanceof Error && error.message !== '' ? ` ${error.message}.` : '';
+      setMessage(
+        `${file.name || 'The chosen file'} was not used.${reason} The original is unchanged.`,
+      );
+      return;
+    }
     if (!outcome.ok) {
       setMessage('The chosen file is empty and was not used.');
       return;
