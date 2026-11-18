@@ -653,14 +653,14 @@ function freshEditorPageOf(base) {
       await card.waitFor({ timeout: 120_000 });
       await card.getByRole('button', { name: `Add ${name} to timeline`, exact: true }).click();
       await page
-        .locator(`.timeline-clip[aria-label^="${name},"]`)
+        .locator(`.timeline-clip:not(.timeline-clip--audio)[title^="${name}"]`)
         .first()
         .waitFor({ timeout: 60_000 });
     },
 
     async timelineClipCount(name) {
       return withinTime(
-        page.locator(`.timeline-clip[aria-label^="${name},"]`).count(),
+        page.locator(`.timeline-clip:not(.timeline-clip--audio)[title^="${name}"]`).count(),
         'the timeline clip count',
         30_000,
       );
@@ -844,7 +844,8 @@ function semanticsEditorPageOf(base) {
   const { page } = base;
   const button = (name) => page.getByRole('button', { name, exact: true });
   const menuItem = (name) => page.getByRole('menuitem', { name, exact: true });
-  const timelineClip = (label) => page.locator(`.timeline-clip[aria-label^="${label},"]`).first();
+  const timelineClip = (label) =>
+    page.locator(`.timeline-clip:not(.timeline-clip--audio)[title^="${label}"]`).first();
   const visible = (locator) =>
     withinTime(locator.isVisible(), 'a visibility check', 30_000).catch(() => false);
 
