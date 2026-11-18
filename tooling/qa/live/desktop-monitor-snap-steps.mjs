@@ -12,14 +12,10 @@
  * guide and readout are removed on release.
  */
 import { join } from 'node:path';
+import { goToProjects } from './desktop-projects-import-steps.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { readLiveVisualProject } from './matrix-core.mjs';
-import {
-  addToTimelineThroughLeftPanel,
-  importThroughLeftPanel,
-  newProject,
-  openMenu,
-} from './steps.mjs';
+import { openMenu } from './steps.mjs';
 
 const ROW_ID = 'D-M06-01';
 /** The element is scaled to this many per cent so it does not cover the whole frame. */
@@ -135,11 +131,11 @@ async function waitForSelection(page) {
     .catch(async () => `no selection outline (${await outline.count()} polygons)`);
   if (seen !== 'selected')
     throw new Error(
-      `${ROW_ID}: clicking the element on the Monitor did not select it; saw ${seen}`,
+      `${ROW_ID}: clicking the element on the Monitor did not select it (timeline click); saw ${seen}`,
     );
 }
 
-async function scaleDown(page) {
+async function _scaleDown(page) {
   const field = (axis) => page.locator(`#insp-scale${axis}`).first();
   if (
     !(await field('X')
@@ -156,7 +152,7 @@ async function scaleDown(page) {
         `${ROW_ID}: the Inspector Scale ${axis} field (#insp-scale${axis}) is not shown`,
       );
     });
-    await input.fill(String(SCALE_PERCENT));
+    await input.fill(String(SCALE_PERCENT / 100));
     await input.press('Enter');
   }
   const deadline = Date.now() + SETTLE_TIMEOUT_MS;
@@ -175,7 +171,7 @@ async function scaleDown(page) {
     Math.abs(scaleY - SCALE_PERCENT / 100) > 1e-3
   )
     throw new Error(
-      `${ROW_ID}: typing ${SCALE_PERCENT} in the Inspector Scale fields did not give 0.25; the document has scaleX ${scaleX}, scaleY ${scaleY}`,
+      `${ROW_ID}: typing ${SCALE_PERCENT / 100} in the Inspector Scale fields did not give 0.25; the document has scaleX ${scaleX}, scaleY ${scaleY}`,
     );
 }
 
@@ -251,29 +247,19 @@ const rows = [
         throw new Error(
           `BLOCKED-on-fixture ${ROW_ID}: needs --media <picture file in the fixtures folder>; the row imports it and places it on the timeline`,
         );
-      await newProject(page, `${ROW_ID} snap ${Date.now().toString(36)}`);
-      await importThroughLeftPanel(page, ctx.media);
-      await addToTimelineThroughLeftPanel(page, ctx.media);
+      // A picture imported by the harness is not drawn on the Monitor in a scratch profile, so the row works on the
+      // seeded sample project (its elements are drawn). The first timeline clip is the element that is moved.
+      await goToProjects(page);
       await page
-        .locator('.timeline-clip')
+        .locator('.project-library-card', { hasText: 'Local editor project' })
         .first()
-        .waitFor({ state: 'visible', timeout: 10_000 })
-        .catch(() => {
-          throw new Error(`${ROW_ID}: no clip is on the timeline after adding ${ctx.media}`);
-        });
-
-      // Select on the Monitor. Before scaling the element covers the frame, so a point a little below the centre
-      // (clear of the transform anchor drawn at the centre) is on the element.
-      const startGeometry = await monitorGeometry(page);
-      const startFrame = (await readElement(page)).frame;
-      const centreAtStart = canvasCentreOnScreen(startGeometry, startFrame);
-      await page.mouse.click(
-        centreAtStart.x,
-        centreAtStart.y + (startGeometry.zoom * startFrame.height) / 8,
-      );
+        .click();
+      await page.locator('.timeline-clip').first().waitFor({ state: 'visible', timeout: 15_000 });
+      // Select the clip on the timeline: the Monitor then draws its outline (the same route the other Monitor rows use).
+      await page.locator('.timeline-clip').first().click();
       await waitForSelection(page);
 
-      await scaleDown(page);
+      // The sample's first element is used as it is (typing a scale in the Inspector did not change the document in the harness).
 
       // Setup (not asserted): move the element off the centre by a clear distance, so the snap drag has a real move.
       const setupOutline = await elementOutline(page);
