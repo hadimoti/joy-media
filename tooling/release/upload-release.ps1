@@ -12,31 +12,37 @@ param(
 $ErrorActionPreference = 'Continue'
 if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { throw "Folder not found: $Dir" }
 
-$release = gh release view $Tag --repo $Repo --json isDraft,id 2>$null | ConvertFrom-Json
-if ($null -eq $release) { throw "Release $Tag not found in $Repo" }
-if (-not $release.isDraft) { throw "Release $Tag is already published; this script only fills a draft." }
+# The DRAFT with this tag. Filtering is done here on the parsed JSON, so no quoting reaches gh.
+function Get-Draft {
+    $all = (gh api "repos/$Repo/releases" --paginate 2>$null) -join "`n" | ConvertFrom-Json
+    return @($all | Where-Object { $_.tag_name -eq $Tag -and $_.draft -eq $true }) | Select-Object -First 1
+}
+$draft = Get-Draft
+if ($null -eq $draft) { throw "No draft release with tag $Tag in $Repo (a published release is never changed by this script)." }
 
 $failed = @()
 foreach ($file in (Get-ChildItem -LiteralPath $Dir -File | Sort-Object Name)) {
     $name = $file.Name
     $done = $false
     for ($try = 1; $try -le $MaxTries -and -not $done; $try++) {
-        $state = gh release view $Tag --repo $Repo --json assets -q ".assets[]|select(.name==`"$name`")|.state" 2>$null
-        if ($state -eq 'uploaded') {
+        $draft = Get-Draft
+        $asset = @($draft.assets | Where-Object { $_.name -eq $name }) | Select-Object -First 1
+        if ($null -ne $asset -and $asset.state -eq 'uploaded') {
             Write-Output "$name already uploaded"
             $done = $true
             break
         }
         # A half-uploaded asset of the same name (draft only) is removed before the next try.
-        $assetId = gh api "repos/$Repo/releases/$($release.id)/assets" --jq ".[]|select(.name==`"$name`")|.id" 2>$null
-        if ($assetId) { gh api -X DELETE "repos/$Repo/releases/assets/$assetId" 2>&1 | Out-Null }
+        if ($null -ne $asset) { gh api -X DELETE "repos/$Repo/releases/assets/$($asset.id)" 2>&1 | Out-Null }
         Write-Output "try $try uploading $name ($($file.Length) bytes)"
         gh release upload $Tag $file.FullName --repo $Repo --clobber 2>&1 | Select-Object -Last 2
-        $state = gh release view $Tag --repo $Repo --json assets -q ".assets[]|select(.name==`"$name`")|.state" 2>$null
-        if ($state -eq 'uploaded') { $done = $true; Write-Output "$name uploaded"; break }
+        $draft = Get-Draft
+        $asset = @($draft.assets | Where-Object { $_.name -eq $name }) | Select-Object -First 1
+        if ($null -ne $asset -and $asset.state -eq 'uploaded') { $done = $true; Write-Output "$name uploaded"; break }
         Start-Sleep -Seconds $WaitSeconds
     }
     if (-not $done) { $failed += $name }
 }
-gh release view $Tag --repo $Repo --json assets -q '.assets[]|"\(.name) \(.size) \(.state)"'
+$draft = Get-Draft
+$draft.assets | ForEach-Object { "$($_.name) $($_.size) $($_.state)" }
 if ($failed.Count -gt 0) { throw "Not uploaded: $($failed -join ', ')" }
