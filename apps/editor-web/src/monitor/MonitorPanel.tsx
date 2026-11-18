@@ -659,8 +659,9 @@ function MonitorPanelContent({
         }
       },
     });
-    if (items.length === 0) return;
+    // A right-click inside the frame never opens the browser's own menu, even when a clip has no items.
     event.preventDefault();
+    if (items.length === 0) return;
     selectClips([clipId]);
     setContextMenu({ x: event.clientX, y: event.clientY, items });
   };
