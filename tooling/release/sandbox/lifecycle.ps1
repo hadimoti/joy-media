@@ -1,11 +1,26 @@
 # Windows Sandbox installed-lifecycle run for the candidate setup exe: install, open, close, uninstall.
 # Inputs in C:in: joy-media-setup.exe and expected.sha256. Output in C:out: lifecycle.json (schema joy-media.sandbox-lifecycle/1).
 # Every step is logged as it happens, every wait has a timeout, and nothing here changes a security setting.
+param(
+  [switch]$DryRun,
+  [string]$OutputDirectory = 'C:\out'
+)
 $ErrorActionPreference = 'Stop'
-$out = 'C:\out'
+$out = $OutputDirectory
+New-Item -ItemType Directory -Force -Path $out | Out-Null
 $logPath = Join-Path $out 'progress.log'
 $steps = New-Object System.Collections.ArrayList
-$record = [ordered]@{ schema = 'joy-media.sandbox-lifecycle/1'; startedAt = (Get-Date).ToUniversalTime().ToString('o'); steps = $steps }
+$record = [ordered]@{ schema = 'joy-media.sandbox-lifecycle/1'; startedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'"); steps = $steps }
+$appStarted = $false
+$windowOpened = $false
+$cliSmoke = $null
+$networkEvidence = [ordered]@{
+  networkingDisabled = $true
+  adapterPresent = $true
+  adapterCount = -1
+  reason = 'The Sandbox network adapter check did not complete.'
+  adapterNames = @()
+}
 
 function Write-Log([string]$Text) { Add-Content -Path $logPath -Value ("{0} {1}" -f (Get-Date).ToUniversalTime().ToString('HH:mm:ss'), $Text) -Encoding utf8 }
 function Save-Record { $record | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $out 'lifecycle.json') -Encoding utf8 }
@@ -40,6 +55,52 @@ function Snapshot([string]$Name) {
     $files | Select-Object -First 40 -ExpandProperty FullName | Set-Content (Join-Path $out 'leftover-files.txt') -Encoding utf8
   }
 }
+function Save-OfflineSmokeEvidence($RunSteps, $Network) {
+  $projectResult = 'fail'
+  $projectDetail = 'The CLI project import/export checks did not complete.'
+  $cliResult = 'fail'
+  $cliDetail = 'The offline doctor/render checks did not complete.'
+  if ($null -ne $RunSteps) {
+    if ($RunSteps.offline.projectRoundTrip.result -eq 'pass') {
+      $projectResult = 'pass'
+      $projectDetail = $RunSteps.offline.projectRoundTrip.detail
+    }
+    if ($RunSteps.offline.cliResult -eq 'pass') {
+      $cliResult = 'pass'
+      $cliDetail = 'doctor and render both passed.'
+    } else {
+      $cliDetail = 'doctor: ' + $RunSteps.offline.doctor.result + '; render: ' + $RunSteps.offline.render.result
+    }
+  }
+  $offlineSteps = @(
+    [ordered]@{ id = 'launch'; result = $(if ($appStarted) { 'pass' } else { 'fail' }); detail = 'Installed app process started.' }
+    [ordered]@{ id = 'open'; result = $(if ($windowOpened) { 'pass' } else { 'fail' }); detail = 'Installed app window opened.' }
+    [ordered]@{ id = 'export'; result = $projectResult; detail = $projectDetail }
+    [ordered]@{ id = 'cli'; result = $cliResult; detail = $cliDetail }
+  )
+  $evidence = [ordered]@{
+    schema = 'joy-media.offline-smoke-evidence/1'
+    startedAt = $record.startedAt
+    finishedAt = $record.finishedAt
+    steps = $offlineSteps
+    network = $Network
+  }
+  $record.offlineSmokeEvidence = $evidence
+  $evidence | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $out 'offline-smoke-evidence.json') -Encoding utf8
+  $networkLines = @(
+    'Windows Sandbox Networking=Disable (configured by run-sandbox.ps1).'
+    ('Network adapter count=' + $Network.adapterCount)
+    ('Network adapter names=' + (@($Network.adapterNames) -join ','))
+    ('Reason=' + $Network.reason)
+    'Per-process egress counts are zero by construction because networking is disabled and no adapter is present.'
+  )
+  Set-Content -Path (Join-Path $out 'network-evidence.log') -Value $networkLines -Encoding utf8
+  Save-Record
+}
+function Get-CliCheck($RunSteps, [string]$Id) {
+  if ($null -eq $RunSteps -or $null -eq $RunSteps.checks) { return $null }
+  return $RunSteps.checks | Where-Object { $_.id -eq $Id } | Select-Object -First 1
+}
 function Save-Events {
   foreach ($name in @('Microsoft-Windows-CodeIntegrity/Operational', 'Microsoft-Windows-AppLocker/EXE and DLL')) {
     $file = Join-Path $out (($name -replace '[^A-Za-z0-9]', '-') + '.txt')
@@ -49,6 +110,61 @@ function Save-Events {
       Set-Content -Path $file -Value $lines -Encoding utf8
     } catch { Set-Content -Path $file -Value ('could not read: ' + $_.Exception.Message) -Encoding utf8 }
   }
+}
+
+if ($DryRun) {
+  $record.identity = [ordered]@{ user = 'WDAGUtilityAccount'; computer = 'DRY-RUN' }
+  Add-Step 'sandbox-identity' $true 'fake receipt writer input'
+  $record.beforeInstall = [ordered]@{ installFolderExists = $false }
+  Add-Step 'setup-digest' $true ('a' * 64)
+  Add-Step 'control-signed-program' $true 'exit 0'
+  Add-Step 'install-silent' $true 'exit 0'
+  Add-Step 'installed' $true 'fake install folder'
+  $record.afterInstall = [ordered]@{ installFolderExists = $true; installFileCount = 1; uninstallKey = $true }
+  Add-Step 'joy-cmd-version-reported' $true 'JOY Media CLI v1.1.1'
+  Add-Step 'joy-media-cmd-version-reported' $true 'JOY Media CLI v1.1.1'
+  Add-Step 'render-entrypoint-wrote-manifest' $true 'fake manifest path'
+  Add-Step 'open-window' $true 'fake JOY Media window'
+  Add-Step 'project-fixture-import-export' $true 'fake project round trip'
+  Add-Step 'offline-cli-smoke' $true 'fake doctor and render'
+  Add-Step 'sandbox-network-adapter-absent' $true 'fake adapter count 0'
+  Add-Step 'close-app' $true 'exit 0'
+  Add-Step 'no-process-after-close' $true 'processes left: 0'
+  Add-Step 'uninstall' $true 'exit 0'
+  Add-Step 'folder-removed' $true 'fake install folder removed'
+  $record.afterUninstall = [ordered]@{
+    installFolderExists = $false
+    uninstallKey = $false
+    pathHasJoy = $false
+    joyKey = $null
+    desktopShortcut = $false
+    startMenuShortcut = $false
+  }
+  $appStarted = $true
+  $windowOpened = $true
+  $cliSmoke = [ordered]@{
+    checks = @()
+    offline = [ordered]@{
+      projectRoundTrip = [ordered]@{ result = 'pass'; detail = 'fake import and export' }
+      doctor = [ordered]@{ result = 'pass'; detail = 'fake doctor JSON' }
+      render = [ordered]@{ result = 'pass'; detail = 'fake manifest' }
+      cliResult = 'pass'
+    }
+  }
+  $record.cliSmoke = $cliSmoke
+  $networkEvidence = [ordered]@{
+    networkingDisabled = $true
+    adapterPresent = $false
+    adapterCount = 0
+    reason = 'Dry-run fixture: networking disabled and adapter absent.'
+    adapterNames = @()
+  }
+  $record.finishedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
+  Save-Record
+  Save-OfflineSmokeEvidence $cliSmoke $networkEvidence
+  Write-Log 'script finished'
+  Write-Output 'Dry-run lifecycle receipt and offline evidence written.'
+  exit 0
 }
 
 Write-Log 'script started'
@@ -87,11 +203,58 @@ try {
   try { Add-Step 'exe-version' $true ((Get-Item $exe).VersionInfo.ProductVersion) } catch { Add-Step 'exe-version' $false $_.Exception.Message }
 
   $app = Start-Process -FilePath $exe -PassThru
+  $appStarted = $true
   $titled = $false
   for ($i = 0; $i -lt 60 -and -not $titled; $i++) { Start-Sleep -Seconds 1; $app.Refresh(); if ($app.MainWindowHandle -ne 0 -and $app.MainWindowTitle) { $titled = $true } }
+  $windowOpened = $titled
   Add-Step 'open-window' $titled "title: $($app.MainWindowTitle)"
   Start-Sleep -Seconds 5
   Snapshot 'whileRunning'
+
+  Write-Log 'starting fresh CLI shell for PATH and offline checks'
+  $cliShell = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+    '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\in\cli-smoke.ps1'
+  ) -PassThru
+  if (-not $cliShell.WaitForExit(300000)) {
+    try { $cliShell.Kill() } catch { }
+    throw 'The fresh CLI shell timed out after 300 s.'
+  }
+  $cliPath = Join-Path $out 'cli-smoke.json'
+  if (Test-Path -LiteralPath $cliPath -PathType Leaf) {
+    $cliSmoke = Get-Content -LiteralPath $cliPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $record.cliSmoke = $cliSmoke
+  }
+  foreach ($id in @('joy-cmd-version-reported', 'joy-media-cmd-version-reported', 'render-entrypoint-wrote-manifest')) {
+    $check = Get-CliCheck $cliSmoke $id
+    Add-Step $id ($null -ne $check -and $check.result -eq 'pass') $(if ($null -ne $check) { $check.detail } else { 'CLI check was not recorded.' })
+  }
+  $roundTrip = $null
+  $offlineCli = $null
+  if ($null -ne $cliSmoke) {
+    $roundTrip = $cliSmoke.offline.projectRoundTrip
+    $offlineCli = $cliSmoke.offline.cliResult
+  }
+  Add-Step 'project-fixture-import-export' ($null -ne $roundTrip -and $roundTrip.result -eq 'pass') $(if ($null -ne $roundTrip) { $roundTrip.detail } else { 'Project import/export was not recorded.' })
+  Add-Step 'offline-cli-smoke' ($offlineCli -eq 'pass') $(if ($null -ne $cliSmoke) { 'doctor=' + $cliSmoke.offline.doctor.result + '; render=' + $cliSmoke.offline.render.result } else { 'CLI smoke result was not recorded.' })
+
+  try {
+    $adapters = @(Get-NetAdapter -ErrorAction Stop)
+    $networkEvidence.adapterNames = @($adapters | ForEach-Object { $_.Name })
+    $networkEvidence.adapterCount = $adapters.Count
+    $networkEvidence.adapterPresent = $adapters.Count -gt 0
+    $networkEvidence.reason = if ($adapters.Count -eq 0) {
+      'Windows Sandbox networking was disabled and adapter enumeration returned zero.'
+    } else {
+      'A Windows Sandbox network adapter was present.'
+    }
+    Add-Step 'sandbox-network-adapter-absent' ($adapters.Count -eq 0) $networkEvidence.reason
+  } catch {
+    $networkEvidence.adapterPresent = $true
+    $networkEvidence.adapterCount = -1
+    $networkEvidence.reason = 'Network adapter enumeration failed: ' + $_.Exception.Message
+    Add-Step 'sandbox-network-adapter-absent' $false $networkEvidence.reason
+  }
+
   if (-not $app.HasExited) {
     [void]$app.CloseMainWindow()
     if (-not $app.WaitForExit(15000)) { try { $app.Kill() } catch { }; Add-Step 'close-app' $false 'had to kill the app' } else { Add-Step 'close-app' $true "exit $($app.ExitCode)" }
@@ -117,7 +280,8 @@ try {
   Add-Step 'error' $false $_.Exception.Message
 } finally {
   Save-Events
-  $record.finishedAt = (Get-Date).ToUniversalTime().ToString('o')
+  $record.finishedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
   Save-Record
+  Save-OfflineSmokeEvidence $cliSmoke $networkEvidence
   Write-Log 'script finished'
 }

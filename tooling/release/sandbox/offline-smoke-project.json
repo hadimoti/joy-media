@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "sandbox-offline-smoke",
+  "title": "Sandbox Offline Smoke",
+  "createdAt": "2026-11-18T00:00:00.000Z",
+  "updatedAt": "2026-11-18T00:00:00.000Z",
+  "rootCompositionId": "root",
+  "settings": {
+    "defaultLocale": "en"
+  },
+  "compositions": {
+    "root": {
+      "id": "root",
+      "name": "Main Composition",
+      "width": 16,
+      "height": 16,
+      "pixelAspectRatio": {
+        "num": 1,
+        "den": 1
+      },
+      "frameRate": {
+        "num": 30,
+        "den": 1
+      },
+      "durationUs": 33333,
+      "background": "#000000",
+      "tracks": [
+        {
+          "id": "track-v1",
+          "kind": "video",
+          "family": "visual",
+          "name": "Video 1",
+          "order": 0,
+          "enabled": true,
+          "locked": false,
+          "clips": [
+            {
+              "id": "smoke-clip",
+              "startUs": 0,
+              "durationUs": 33333
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "assets": {},
+  "variables": {},
+  "markers": [],
+  "visualObjects": {},
+  "captionDocuments": {},
+  "pluginData": {}
+}

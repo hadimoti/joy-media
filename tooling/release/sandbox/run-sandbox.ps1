@@ -24,9 +24,72 @@ param(
     [string]$ToVersion = '',
     [Parameter(Mandatory = $true)][string]$OutDir,
     [Parameter(Mandatory = $true)][string]$Receipt,
-    [int]$TimeoutSeconds = 900
+    [int]$TimeoutSeconds = 900,
+    [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
+
+if ($DryRun) {
+    if ($Kind -ne 'lifecycle') { throw '-DryRun currently validates the lifecycle and offline-smoke receipt writers only.' }
+    Write-Output 'DRY RUN: would install the candidate in Windows Sandbox with Networking=Disable.'
+    Write-Output 'DRY RUN: would run joy/joy-media version, doctor, project import/export and render checks.'
+    Write-Output ('DRY RUN: planned lifecycle receipt: ' + $Receipt)
+    Write-Output ('DRY RUN: planned offline receipt: ' + (Join-Path (Split-Path -Parent $Receipt) 'offline-smoke.json'))
+
+    $dryRoot = Join-Path $env:TEMP ('joy-media-sandbox-dry-run-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        $dryOut = Join-Path $dryRoot 'out'
+        New-Item -ItemType Directory -Force -Path $dryOut | Out-Null
+        $lifecycleScript = Join-Path $PSScriptRoot 'lifecycle.ps1'
+        & $lifecycleScript -DryRun -OutputDirectory $dryOut
+        if ($LASTEXITCODE -ne 0) { throw "lifecycle.ps1 -DryRun failed with exit $LASTEXITCODE." }
+
+        $dryEvidence = Get-Content -LiteralPath (Join-Path $dryOut 'offline-smoke-evidence.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $fakeSha = 'a' * 64
+        $fakeCommit = 'c' * 40
+        $context = [ordered]@{
+            candidateSha = $fakeCommit
+            workflowSha = $fakeCommit
+            runId = 'sandbox-dry-run'
+            attempt = 1
+            artifactName = 'joy-media-setup.exe'
+            artifactSha256 = $fakeSha
+            builtAt = [string]$dryEvidence.startedAt
+        }
+        $contextPath = Join-Path $dryOut 'offline-smoke-context.json'
+        [IO.File]::WriteAllText(
+            $contextPath,
+            (($context | ConvertTo-Json -Depth 4) + [Environment]::NewLine),
+            [Text.UTF8Encoding]::new($false)
+        )
+        $offlineReceipt = Join-Path $dryOut 'offline-smoke.json'
+        $writer = Join-Path $PSScriptRoot '..\src\write-offline-smoke-receipt.ts'
+        $lifecycleReceipt = Join-Path $dryOut 'lifecycle.json'
+        $writerArguments = @(
+            '--context', $contextPath,
+            '--evidence', (Join-Path $dryOut 'offline-smoke-evidence.json'),
+            '--network-log', (Join-Path $dryOut 'network-evidence.log'),
+            '--lifecycle', $lifecycleReceipt,
+            '--output', $offlineReceipt
+        )
+        & node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types $writer @writerArguments
+        if ($LASTEXITCODE -ne 0) { throw "Receipt writer validation failed with exit $LASTEXITCODE." }
+        Write-Output 'dry-run receipts accepted'
+        Write-Output 'Windows Sandbox was not started'
+    } finally {
+        $tempPrefix = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+        $fullDryRoot = [IO.Path]::GetFullPath($dryRoot)
+        if (
+            $fullDryRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+            (Split-Path -Leaf $fullDryRoot) -like 'joy-media-sandbox-dry-run-*'
+        ) {
+            Remove-Item -LiteralPath $fullDryRoot -Recurse -Force -ErrorAction SilentlyContinue
+        } else {
+            throw "Refusing to remove dry-run folder outside TEMP: $fullDryRoot"
+        }
+    }
+    return
+}
 
 if (Get-Process -Name 'WindowsSandboxRemoteSession', 'vmmemWindowsSandbox' -ErrorAction SilentlyContinue) {
     throw 'A Windows Sandbox is already running. Close it first (only one is allowed).'
@@ -68,6 +131,34 @@ $script = if ($Kind -eq 'lifecycle') { 'lifecycle.ps1' } else { 'upgrade.ps1' }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot $script) -Destination (Join-Path $in 'lifecycle.ps1')
 if ($Kind -eq 'lifecycle') {
     Set-Content -LiteralPath (Join-Path $in 'expected.sha256') -Value $setupHash -NoNewline
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'cli-smoke.ps1') -Destination (Join-Path $in 'cli-smoke.ps1')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'offline-smoke-project.json') -Destination (Join-Path $in 'offline-smoke-project.json')
+
+    $releaseDir = Split-Path -Parent $SetupExe
+    $manifestPath = Join-Path $releaseDir 'joy-media-release-manifest.json'
+    $sumsPath = Join-Path $releaseDir 'SHA256SUMS.txt'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Release manifest not found: $manifestPath" }
+    if (-not (Test-Path -LiteralPath $sumsPath -PathType Leaf)) { throw "SHA256SUMS.txt not found: $sumsPath" }
+    $releaseManifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($releaseManifest.targetCommit -notmatch '^[0-9a-f]{40}$') { throw 'Release manifest targetCommit is not a full Git SHA.' }
+    if ([string]::IsNullOrWhiteSpace([string]$releaseManifest.builtAt)) { throw 'Release manifest builtAt is missing.' }
+    $setupSum = Get-Content -LiteralPath $sumsPath | Where-Object { $_ -match ('^' + [regex]::Escape($setupHash) + '\s+joy-media-setup\.exe$') }
+    if (-not $setupSum) { throw 'SHA256SUMS.txt does not bind joy-media-setup.exe to the selected setup exe.' }
+    $context = [ordered]@{
+        candidateSha = [string]$releaseManifest.targetCommit
+        workflowSha = [string]$releaseManifest.targetCommit
+        runId = 'local-sandbox-' + [Guid]::NewGuid().ToString('N')
+        attempt = 1
+        artifactName = 'joy-media-setup.exe'
+        artifactSha256 = $setupHash
+        builtAt = [string]$releaseManifest.builtAt
+    }
+    $contextPath = Join-Path $out 'offline-smoke-context.json'
+    [IO.File]::WriteAllText(
+        $contextPath,
+        (($context | ConvertTo-Json -Depth 4) + [Environment]::NewLine),
+        [Text.UTF8Encoding]::new($false)
+    )
 } else {
     Set-Content -LiteralPath (Join-Path $in 'expected-new.sha256') -Value $setupHash -NoNewline
     $plan = [ordered]@{ fromVersion = $upgradeFrom; fromMode = $fromMode; toVersion = $ToVersion }
@@ -109,3 +200,29 @@ $name = if ($Kind -eq 'lifecycle') { 'lifecycle.json' } else { 'upgrade.json' }
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Receipt) | Out-Null
 Copy-Item -LiteralPath (Join-Path $out $name) -Destination $Receipt
 Write-Output "Receipt written: $Receipt (setup sha256 $setupHash). Close the Sandbox window now."
+if ($Kind -eq 'lifecycle') {
+    $offlineReceipt = Join-Path (Split-Path -Parent $Receipt) 'offline-smoke.json'
+    $writer = Join-Path $PSScriptRoot '..\src\write-offline-smoke-receipt.ts'
+    $writerArguments = @(
+        '--context', (Join-Path $out 'offline-smoke-context.json'),
+        '--evidence', (Join-Path $out 'offline-smoke-evidence.json'),
+        '--network-log', (Join-Path $out 'network-evidence.log'),
+        '--lifecycle', (Join-Path $out 'lifecycle.json'),
+        '--output', $offlineReceipt
+    )
+    & node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types $writer @writerArguments
+    if ($LASTEXITCODE -ne 0) { throw "Offline-smoke receipt writer failed with exit $LASTEXITCODE." }
+    $evidence = Get-Content -LiteralPath (Join-Path $out 'offline-smoke-evidence.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $checker = Join-Path $PSScriptRoot '..\src\check-offline-smoke.ts'
+    $checkerArguments = @(
+        '--candidate', $context.candidateSha,
+        '--receipt', $offlineReceipt,
+        '--sums', $sumsPath,
+        '--artifact', $context.artifactName,
+        '--window-start', $evidence.startedAt,
+        '--window-end', $evidence.finishedAt
+    )
+    & node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types $checker @checkerArguments
+    if ($LASTEXITCODE -ne 0) { throw "Offline-smoke receipt checker failed with exit $LASTEXITCODE." }
+    Write-Output "Offline-smoke receipt written: $offlineReceipt"
+}

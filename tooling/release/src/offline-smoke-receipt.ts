@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * The offline-smoke receipt for the packaged Windows app (plan section 8b, schema joy-media.offline-smoke/1).
  *
@@ -33,6 +35,80 @@ export interface OfflineSmokeExpectation {
 export interface OfflineSmokeResult {
   readonly ok: boolean;
   readonly reasons: readonly string[];
+}
+
+export interface OfflineSmokeReceiptContext {
+  readonly candidateSha: string;
+  readonly workflowSha: string;
+  readonly runId: string;
+  readonly attempt: number;
+  readonly artifactName: string;
+  readonly artifactSha256: string;
+  readonly builtAt: string;
+}
+
+export interface OfflineSmokeStepEvidence {
+  readonly id: string;
+  readonly result: 'pass' | 'fail';
+  readonly detail?: string;
+}
+
+export interface OfflineSmokeNetworkEvidence {
+  readonly networkingDisabled: boolean;
+  readonly adapterPresent: boolean;
+  readonly adapterCount: number;
+  readonly reason: string;
+}
+
+export interface OfflineSmokeRunEvidence {
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly steps: readonly OfflineSmokeStepEvidence[];
+  readonly network: OfflineSmokeNetworkEvidence;
+}
+
+/** Builds the gate receipt from Sandbox evidence; zero counters are justified only by isolation evidence. */
+export function createOfflineSmokeReceipt(
+  context: OfflineSmokeReceiptContext,
+  evidence: OfflineSmokeRunEvidence,
+  networkLog: string,
+): Record<string, unknown> {
+  if (
+    evidence.network.networkingDisabled !== true ||
+    evidence.network.adapterPresent !== false ||
+    evidence.network.adapterCount !== 0 ||
+    evidence.network.reason.trim() === ''
+  ) {
+    throw new Error(
+      'zero egress requires disabled Sandbox networking and an absent network adapter',
+    );
+  }
+  if (networkLog.trim() === '') throw new Error('network evidence log is empty');
+
+  const allPassed = evidence.steps.every((step) => step.result === 'pass');
+  return {
+    schema: OFFLINE_SMOKE_SCHEMA,
+    candidateSha: context.candidateSha,
+    workflowSha: context.workflowSha,
+    runId: context.runId,
+    attempt: context.attempt,
+    artifact: { name: context.artifactName, sha256: context.artifactSha256 },
+    builtAt: context.builtAt,
+    startedAt: evidence.startedAt,
+    finishedAt: evidence.finishedAt,
+    steps: evidence.steps,
+    egress: {
+      main: 0,
+      renderer: 0,
+      worker: 0,
+      cli: 0,
+      netLogSha256: createHash('sha256').update(networkLog, 'utf8').digest('hex'),
+      reason:
+        'Zero by construction: Windows Sandbox networking was disabled and its adapter was absent.',
+    },
+    network: evidence.network,
+    verdict: allPassed ? 'pass' : 'fail',
+  };
 }
 
 const SHA40 = /^[0-9a-f]{40}$/u;
@@ -115,6 +191,24 @@ function egressReasons(egress: unknown): string[] {
   if (typeof egress.netLogSha256 !== 'string' || !SHA64.test(egress.netLogSha256)) {
     reasons.push('egress.netLogSha256 is not a 64-character lowercase hex digest');
   }
+  if (typeof egress.reason !== 'string' || egress.reason.trim() === '') {
+    reasons.push('egress zero-by-construction reason is missing');
+  }
+  return reasons;
+}
+
+function networkReasons(network: unknown): string[] {
+  if (!isRecord(network)) return ['Sandbox network evidence is missing'];
+  const reasons: string[] = [];
+  if (network.networkingDisabled !== true) {
+    reasons.push('Sandbox networking was not recorded as disabled');
+  }
+  if (network.adapterPresent !== false || network.adapterCount !== 0) {
+    reasons.push('Sandbox network adapter was present');
+  }
+  if (typeof network.reason !== 'string' || network.reason.trim() === '') {
+    reasons.push('Sandbox network evidence reason is missing');
+  }
   return reasons;
 }
 
@@ -142,6 +236,7 @@ export function validateOfflineSmokeReceipt(
   reasons.push(...freshnessReasons(receipt, expected.runWindow));
   reasons.push(...stepReasons(receipt.steps));
   reasons.push(...egressReasons(receipt.egress));
+  reasons.push(...networkReasons(receipt.network));
   if (receipt.verdict !== 'pass') {
     reasons.push(receipt.verdict === 'fail' ? 'verdict is fail' : 'verdict is not pass');
   }

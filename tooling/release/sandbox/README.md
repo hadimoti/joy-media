@@ -40,5 +40,14 @@ The gate (`tooling/release/src/sandbox-lifecycle-receipt.ts`) accepts a receipt 
 - every required step passed and no `error` step was recorded;
 - the install folder, uninstaller registration, user PATH entry and shortcuts are gone after the
   uninstall, and (upgrade) the app data folder and its files survive the upgrade and the uninstall.
+- the clean lifecycle receipt also includes successful joy and joy-media version checks and a
+  render manifest written from the bundled offline-smoke project.
+
+The clean lifecycle run also writes offline-smoke.json beside sandbox-lifecycle.json. It records the
+installed app launch, project import/export, doctor JSON and render checks. The runner configures
+Windows Sandbox networking off and records whether any network adapter was visible; zero egress is
+accepted only when the receipt states why the counts are zero by construction. Use run-sandbox.ps1
+with the -DryRun switch to print the plan, validate fake lifecycle and offline-smoke receipts, and
+confirm that Windows Sandbox was not started.
 
 The v1.0.2 installer zip must match the released SHA-256 (`e59ee15f2f881cd6620ad59e9f1d9fdc4f9b82efaf221f4e6041c079978d59ca`).

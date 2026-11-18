@@ -12,6 +12,11 @@ import {
 const SETUP = 'c'.repeat(64);
 const OTHER = 'd'.repeat(64);
 const FROM_SETUP = 'f'.repeat(64);
+const CLI_CHECK_STEPS = [
+  'joy-cmd-version-reported',
+  'joy-media-cmd-version-reported',
+  'render-entrypoint-wrote-manifest',
+] as const;
 
 function steps(ids: readonly string[], digestId: string, digest: string) {
   return ids.map((id) => ({
@@ -85,6 +90,15 @@ const EXPECT_110 = { setupSha256: SETUP, fromVersion: '1.0.2', toVersion: '1.1.0
 describe('sandbox lifecycle receipt', () => {
   it('accepts a complete run on the candidate setup', () => {
     expect(validateSandboxLifecycle(lifecycle(), { setupSha256: SETUP })).toEqual([]);
+  });
+
+  it.each(CLI_CHECK_STEPS)('requires the %s CLI check', (id) => {
+    const run = lifecycle();
+    run.steps = (run.steps as Array<{ id: string }>).filter((step) => step.id !== id);
+
+    expect(validateSandboxLifecycle(run, { setupSha256: SETUP })).toContain(
+      'step ' + id + ' is missing',
+    );
   });
 
   it('refuses anything that is not an object', () => {

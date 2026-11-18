@@ -5,10 +5,19 @@ import {
   validateOfflineSmokeReceipt,
   validateOfflineSmokeReceiptText,
 } from './offline-smoke-receipt.ts';
+import * as offlineSmokeReceipt from './offline-smoke-receipt.ts';
 
 const CANDIDATE = 'a'.repeat(40);
 const ARTIFACT_NAME = 'joy-media-windows-x64-v1.1.0.zip';
 const ARTIFACT_SHA = 'b'.repeat(64);
+type OfflineSmokeReceiptWriter = (
+  context: Record<string, unknown>,
+  evidence: Record<string, unknown>,
+  networkLog: string,
+) => Record<string, unknown>;
+const receiptWriter = offlineSmokeReceipt as unknown as {
+  createOfflineSmokeReceipt?: OfflineSmokeReceiptWriter;
+};
 const expected: OfflineSmokeExpectation = {
   candidateSha: CANDIDATE,
   artifactName: ARTIFACT_NAME,
@@ -33,7 +42,20 @@ function baseline(): Record<string, unknown> {
       { id: 'export', result: 'pass' },
       { id: 'cli', result: 'pass' },
     ],
-    egress: { main: 0, renderer: 0, worker: 0, cli: 0, netLogSha256: 'd'.repeat(64) },
+    egress: {
+      main: 0,
+      renderer: 0,
+      worker: 0,
+      cli: 0,
+      netLogSha256: 'd'.repeat(64),
+      reason: 'Sandbox networking was disabled and no adapter was present; zero by construction.',
+    },
+    network: {
+      networkingDisabled: true,
+      adapterPresent: false,
+      adapterCount: 0,
+      reason: 'Windows Sandbox networking was disabled; adapter enumeration returned zero.',
+    },
     verdict: 'pass',
   };
 }
@@ -41,6 +63,80 @@ function baseline(): Record<string, unknown> {
 describe('offline-smoke receipt (joy-media.offline-smoke/1)', () => {
   it('accepts a receipt that binds to the candidate, the artifact and the run, with zero egress', () => {
     expect(validateOfflineSmokeReceipt(baseline(), expected)).toEqual({ ok: true, reasons: [] });
+  });
+
+  it('refuses a zero-egress claim when the Sandbox adapter is present', () => {
+    const receipt = baseline();
+    receipt.network = {
+      networkingDisabled: true,
+      adapterPresent: true,
+      adapterCount: 1,
+      reason: 'The Sandbox network adapter was present.',
+    };
+
+    const result = validateOfflineSmokeReceipt(receipt, expected);
+
+    expect(result.ok).toBe(false);
+    expect(result.reasons.join('\\n')).toMatch(/network adapter was present/u);
+  });
+
+  it('refuses a zero-egress claim without a stated construction reason', () => {
+    const receipt = baseline();
+    receipt.egress = {
+      main: 0,
+      renderer: 0,
+      worker: 0,
+      cli: 0,
+      netLogSha256: 'd'.repeat(64),
+    };
+
+    const result = validateOfflineSmokeReceipt(receipt, expected);
+
+    expect(result.ok).toBe(false);
+    expect(result.reasons.join('\\n')).toMatch(/egress.*reason/u);
+  });
+
+  it('writes a receipt whose zero egress is supported by the Sandbox evidence', () => {
+    const writer = receiptWriter.createOfflineSmokeReceipt;
+    expect(writer).toBeTypeOf('function');
+    if (writer === undefined) return;
+
+    const receipt = writer(
+      {
+        candidateSha: CANDIDATE,
+        workflowSha: 'c'.repeat(40),
+        runId: 'sandbox-test-1',
+        attempt: 1,
+        artifactName: ARTIFACT_NAME,
+        artifactSha256: ARTIFACT_SHA,
+        builtAt: '2026-11-09T01:00:00Z',
+      },
+      {
+        startedAt: '2026-11-09T02:00:00Z',
+        finishedAt: '2026-11-09T02:10:00Z',
+        steps: [
+          { id: 'launch', result: 'pass' },
+          { id: 'open', result: 'pass' },
+          { id: 'export', result: 'pass' },
+          { id: 'cli', result: 'pass' },
+        ],
+        network: {
+          networkingDisabled: true,
+          adapterPresent: false,
+          adapterCount: 0,
+          reason: 'Windows Sandbox networking was disabled; adapter enumeration returned zero.',
+        },
+      },
+      'Windows Sandbox Networking=Disable\\nNetwork adapters=0\\n',
+    );
+
+    expect(validateOfflineSmokeReceipt(receipt, expected)).toEqual({ ok: true, reasons: [] });
+    expect(receipt.egress).toMatchObject({
+      main: 0,
+      renderer: 0,
+      worker: 0,
+      cli: 0,
+    });
   });
 
   it.each<[string, (receipt: Record<string, unknown>) => void, RegExp]>([

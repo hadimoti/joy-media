@@ -32,7 +32,20 @@ function receipt(overrides: Record<string, unknown> = {}): string {
     startedAt: '2026-11-09T02:00:00Z',
     finishedAt: '2026-11-09T02:05:00Z',
     steps: ['launch', 'open', 'export', 'cli'].map((id) => ({ id, result: 'pass' })),
-    egress: { main: 0, renderer: 0, worker: 0, cli: 0, netLogSha256: 'e'.repeat(64) },
+    egress: {
+      main: 0,
+      renderer: 0,
+      worker: 0,
+      cli: 0,
+      netLogSha256: 'e'.repeat(64),
+      reason: 'Sandbox networking was disabled and no adapter was present; zero by construction.',
+    },
+    network: {
+      networkingDisabled: true,
+      adapterPresent: false,
+      adapterCount: 0,
+      reason: 'Windows Sandbox networking was disabled; adapter enumeration returned zero.',
+    },
     verdict: 'pass',
     ...overrides,
   });
