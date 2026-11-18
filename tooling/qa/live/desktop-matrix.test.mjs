@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -593,7 +593,15 @@ test('D-A05-60 fails with the known "cannot resolve visual asset" message and pa
   const missing = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
   assert.equal(missing.status, 'failed');
   assert.match(missing.message, /the sample ships without a clip's media/u);
-  app.world.textByKey['.export-toast'] = 'Completed — export.mp4 verified';
+  // A clean export shows no toast; the row then needs a fresh MP4 in the scratch download folder.
+  ctx.downloadDir = join(ctx.outDir, 'downloads');
+  ctx.exportTimeoutMs = 300;
+  mkdirSync(ctx.downloadDir, { recursive: true });
+  app.world.textByKey['.export-toast'] = '';
+  const noFile = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
+  assert.equal(noFile.status, 'failed');
+  assert.match(noFile.message, /no MP4 in the scratch download folder/u);
+  writeFileSync(join(ctx.downloadDir, 'Local editor project.mp4'), Buffer.from([0, 0, 0, 24]));
   const passed = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
   assert.equal(passed.status, 'passed', passed.message);
 });

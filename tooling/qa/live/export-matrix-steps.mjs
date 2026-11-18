@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path';
 import {
   compareFrames,
+  downscaleArea,
   extractExportFrame,
   extractFrameRegion,
   probeFrameDimensions,
@@ -26,7 +27,12 @@ import {
   waitForSnapshot,
 } from './ui-steps.mjs';
 
-const FRAME_TOLERANCE = 3;
+// The colour verdict is the area-averaged compare (a matrix or range error gives about 15); the full-size compare
+// only guards against a gross mismatch, because its error depends on the Monitor size (3.0 on a 1026 px picture).
+const FRAME_TOLERANCE = 5;
+// Measured on the PC (1026 px picture): averaged 2.1 to 2.4, full size 2.8 to 3.1; laptop (659 px) 1.0 to 1.7.
+const AVERAGED_TOLERANCE = 3;
+const AVERAGE_FACTOR = 8;
 const BURN_IN_TOLERANCE = 6; // text edges are resampled; live 17 Nov: a one-pixel shift of the burned digits gave 4.3 at 1 s and 2 s
 export const FRAME_COMPARE_SAMPLES = Object.freeze([
   { seconds: 1, sourceSeconds: 1 },
@@ -289,7 +295,19 @@ async function captureMonitorFrame(page, seconds, path, frameDimensions) {
     };
   });
   const picture = monitorPictureRect(rect, frameDimensions);
-  const capture = async () => page.screenshot({ path, clip: picture, animations: 'disabled' });
+  // The selection box, handles and overlays are drawn over the picture but are not part of the frame (live 18 Nov:
+  // the left side of the side-by-side showed handles and an orange outline). Hide them for the capture only.
+  const capture = async () => {
+    const style = await page.addStyleTag({
+      content:
+        '.monitor-transform-layer, [data-monitor-overlays] { visibility: hidden !important; }',
+    });
+    try {
+      return await page.screenshot({ path, clip: picture, animations: 'disabled' });
+    } finally {
+      await style.evaluate((element) => element.remove());
+    }
+  };
   let previous = await capture();
   for (let attempt = 0; attempt < 10; attempt += 1) {
     await page.waitForTimeout(100);
@@ -319,6 +337,12 @@ async function runFrameCompareRow(page, ctx) {
       join(dir, `compare-${seconds}s`),
       FRAME_TOLERANCE,
     );
+    const averaged = await compareFrames(
+      await downscaleArea(preview, join(dir, `monitor-${seconds}s-avg.png`), AVERAGE_FACTOR),
+      await downscaleArea(frame, join(dir, `export-${seconds}s-avg.png`), AVERAGE_FACTOR),
+      join(dir, `compare-avg-${seconds}s`),
+      AVERAGED_TOLERANCE,
+    );
     const burnIn = await compareBurnInRegion(
       preview,
       frame,
@@ -330,6 +354,7 @@ async function runFrameCompareRow(page, ctx) {
       expectedSourceSeconds: sourceSeconds,
       playheadTimecode: captured.playheadTimecode,
       burnIn,
+      averaged,
       ...result,
     });
   }
@@ -338,9 +363,11 @@ async function runFrameCompareRow(page, ctx) {
     `${JSON.stringify(
       {
         toleranceMeanAbsolutePerChannel: FRAME_TOLERANCE,
+        averagedToleranceMeanAbsolutePerChannel: AVERAGED_TOLERANCE,
+        averageFactor: AVERAGE_FACTOR,
         burnInToleranceMeanAbsolutePerChannel: BURN_IN_TOLERANCE,
         frameToleranceReason:
-          '3 levels allow small per-channel differences from GPU preview scaling versus ffmpeg Lanczos resampling',
+          'the full-size error depends on the Monitor size (GPU preview scaling versus ffmpeg Lanczos); the colour verdict is the area-averaged compare, where a colour matrix or range error gives about 15 levels',
         burnInCheck:
           'top-left 25% width by 10% height image comparison; expected source times are recorded per sample',
         results,
@@ -351,13 +378,16 @@ async function runFrameCompareRow(page, ctx) {
     'utf8',
   );
   const failed = results.filter(
-    (result) => result.status !== 'pass' || result.burnIn.status !== 'pass',
+    (result) =>
+      result.status !== 'pass' ||
+      result.averaged.status !== 'pass' ||
+      result.burnIn.status !== 'pass',
   );
   if (failed.length)
     throw new Error(
-      `frame/burn-in compare failed at ${failed.map((item) => `${item.seconds}s frame MAE ${item.meanAbsoluteChannelDelta}, burn-in ${item.burnIn.status}`).join(', ')}`,
+      `frame/burn-in compare failed at ${failed.map((item) => `${item.seconds}s frame MAE ${item.meanAbsoluteChannelDelta}, averaged MAE ${item.averaged.meanAbsoluteChannelDelta}, burn-in ${item.burnIn.status}`).join(', ')}`,
     );
-  return `four monitor/export frames passed (1, 2, 4, 5 s); frame MAE tolerance ${FRAME_TOLERANCE}, burn-in check tolerance ${BURN_IN_TOLERANCE}`;
+  return `four monitor/export frames passed (1, 2, 4, 5 s); frame MAE tolerance ${FRAME_TOLERANCE}, averaged tolerance ${AVERAGED_TOLERANCE}, burn-in check tolerance ${BURN_IN_TOLERANCE}`;
 }
 
 export function timecodeIsWithinFrame(timecode, expectedFrame, fps) {

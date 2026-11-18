@@ -221,6 +221,27 @@ export async function extractExportFrame(exportPath, timestamp, outputPath, dime
   return outputPath;
 }
 
+/**
+ * Area-averages an image to 1/factor of its size. Both sides of a Monitor-against-export compare are reduced the
+ * same way, so differences that only come from how the picture was resampled (GPU bilinear against ffmpeg
+ * Lanczos, text edges) wash out while a colour matrix or range error (about 15 levels) stays visible.
+ */
+export async function downscaleArea(inputPath, outputPath, factor = 8) {
+  await run(ffmpeg, [
+    '-y',
+    '-v',
+    'error',
+    '-i',
+    inputPath,
+    '-frames:v',
+    '1',
+    '-vf',
+    `scale=trunc(iw/${factor}):trunc(ih/${factor}):flags=area`,
+    outputPath,
+  ]);
+  return outputPath;
+}
+
 export async function extractFrameRegion(inputPath, outputPath, region) {
   const args = [
     '-y',

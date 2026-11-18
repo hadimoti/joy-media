@@ -12,7 +12,7 @@
  * the shortcuts dialog), AppMenuBar, AssetLibrarySettingsDialog and JoyAgentSettingsDialog; the first live run
  * must confirm each one.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { blockedRow, notReachable, runParts } from './rows.mjs';
 import {
@@ -314,6 +314,15 @@ export const ACTION_CHECKS = {
     }
     // A second export saves under the same name (the menu run, then the palette run), so a file counts as new
     // when its name is new or it was written again after this point.
+    // The earlier file may still be open (the Import row chose it in a file input), so Windows refuses to
+    // overwrite it; remove it first and, when that is refused, let the new file land under a new name.
+    for (const name of listNonMp4(t.ctx.downloadDir)) {
+      try {
+        unlinkSync(join(t.ctx.downloadDir, name));
+      } catch {
+        // locked: the driver saves the new download under a timestamped name
+      }
+    }
     const startedAt = Date.now();
     const before = listNonMp4(t.ctx.downloadDir);
     await t.fire();
@@ -500,7 +509,19 @@ export const ACTION_CHECKS = {
     await t.fire();
     const tab = t.page.locator('button[role="tab"][data-panel-tab-id="speed"]').first();
     await tab.waitFor({ state: 'visible' });
-    if ((await tab.getAttribute('aria-selected')) !== 'true') {
+    // The tab can already be visible while the editor still handles the request; wait for the selected state.
+    const selected = await t.page
+      .waitForFunction(
+        () =>
+          document
+            .querySelector('button[role="tab"][data-panel-tab-id="speed"]')
+            ?.getAttribute('aria-selected') === 'true',
+        undefined,
+        { timeout: 5_000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    if (!selected) {
       throw new Error('Speed… did not select the Inspector Speed tab for a video clip');
     }
     return 'Speed… opened the Inspector Speed tab for the video clip';
@@ -817,7 +838,12 @@ async function runMenuAndPalette(page, ctx) {
       }
       const check = ACTION_CHECKS[item.id];
       if (check === undefined) throw new Error(`${item.id} has no action check`);
-      return check({ page, ctx, rowId, surface, fire });
+      try {
+        return await check({ page, ctx, rowId, surface, fire });
+      } finally {
+        // A failed action must not leave a popup or focus trap behind for the next action (cascade).
+        await page.keyboard.press('Escape').catch(() => undefined);
+      }
     },
   );
   return outcome;

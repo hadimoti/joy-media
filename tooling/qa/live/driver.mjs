@@ -115,7 +115,13 @@ export function buildLaunchEnvironment({
 export function keepDownloadsInScratch(page, downloadDir) {
   page.on('download', (download) => {
     const name = basename(download.suggestedFilename() || 'download.bin');
-    download.saveAs(join(downloadDir, name)).catch(() => undefined);
+    // A file of the same name can be locked (Windows keeps one open that a file input chose): save under a
+    // timestamped name instead of losing the download.
+    download
+      .saveAs(join(downloadDir, name))
+      .catch(() =>
+        download.saveAs(join(downloadDir, `${Date.now()}-${name}`)).catch(() => undefined),
+      );
   });
 }
 

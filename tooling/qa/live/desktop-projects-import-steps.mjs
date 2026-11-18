@@ -12,7 +12,7 @@
  * `run.mjs` has already pointed the Asset Library Folder at the scratch library. Fixtures are
  * read from C:\jgp\v111\fixtures (T-A04), never copied or changed.
  */
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { importThroughLeftPanel, newProject, openMenu } from './steps.mjs';
 import { FIXTURE_ROOT, clipsOf, readDocument, rowsById } from './matrix-core.mjs';
@@ -430,6 +430,27 @@ rows.push({
   },
 });
 
+/** The size of the newest MP4 written after `since` (ms epoch) in the scratch download folder, or 0. */
+function freshMp4Size(downloadDir, since) {
+  if (!downloadDir) return 0;
+  try {
+    let size = 0;
+    for (const name of readdirSync(downloadDir)) {
+      if (!/\.mp4$/iu.test(name)) continue;
+      const info = statSync(join(downloadDir, name));
+      if (info.mtimeMs >= since - 1_000) size = Math.max(size, info.size);
+    }
+    return size;
+  } catch {
+    return 0;
+  }
+}
+
+/** True when the scratch download folder holds a non-empty MP4 written after `since` (ms epoch). */
+function hasFreshMp4(downloadDir, since) {
+  return freshMp4Size(downloadDir, since) > 0;
+}
+
 rows.push({
   id: 'D-A05-60',
   area: 'Export',
@@ -440,6 +461,11 @@ rows.push({
     await goToProjects(page);
     await projectCard(page, EDITOR_PROJECT).click();
     await page.getByRole('button', { name: 'File', exact: true }).waitFor({ state: 'visible' });
+    const startedAt = Date.now();
+    const consoleTail = [];
+    const onConsole = (message) =>
+      consoleTail.push(`${message.type()}: ${message.text()}`.slice(0, 160));
+    page.on?.('console', onConsole);
     await page.getByRole('button', EXPORT_BUTTON).click();
     // The button is idle before the click, so "not busy" is already true: wait for the export to start first,
     // then for it to finish, and require a message. Without this the row passed on an empty page.
@@ -452,17 +478,57 @@ rows.push({
       .catch(() => {
         throw new Error('the export did not start (the button never became busy)');
       });
-    await page.waitForFunction(
-      () => document.querySelector('.header-export-btn')?.getAttribute('aria-busy') !== 'true',
-      undefined,
-      { timeout: ctx.exportTimeoutMs ?? 120_000 },
-    );
-    const toast = await page
-      .locator('.export-toast')
-      .innerText({ timeout: 10_000 })
-      .catch(() => {
-        throw new Error('the export ended but no export message appeared');
-      });
+    // The export button goes idle between the encode and the Worker's final step, so idle is not "done". Like the
+    // other export rows, poll until the exported file is in the scratch download folder and the button is idle,
+    // or until a refusal or failure toast shows (a clean export removes its toast at once).
+    const exportDeadline = Date.now() + (ctx.exportTimeoutMs ?? 240_000);
+    let toast = '';
+    let lastSize = -1;
+    const stateTrail = [];
+    while (Date.now() < exportDeadline) {
+      toast = await page
+        .locator('.export-toast')
+        .innerText({ timeout: 500 })
+        .catch(() => '');
+      if (/failed|error|missing media|cannot resolve/iu.test(toast)) break;
+      const busy = await page
+        .locator('.header-export-btn')
+        .getAttribute('aria-busy')
+        .catch(() => null);
+      const size = freshMp4Size(ctx.downloadDir, startedAt);
+      const seen = await page
+        .evaluate(() => {
+          const progress = document.querySelector('.export-progress');
+          return `busy=${document.querySelector('.header-export-btn')?.getAttribute('aria-busy')} progress=${progress?.getAttribute('style') ?? progress?.textContent ?? '-'} toast=${document.querySelector('.export-toast')?.textContent ?? '-'}`;
+        })
+        .catch(() => 'page gone');
+      if (stateTrail[stateTrail.length - 1]?.text !== seen)
+        stateTrail.push({ at: Math.round((Date.now() - startedAt) / 1000), text: seen });
+      if (size > 0 && size === lastSize && busy !== 'true') break;
+      lastSize = size;
+      await page.waitForTimeout(1_000);
+    }
+    if (toast === '' && !hasFreshMp4(ctx.downloadDir, startedAt)) {
+      const where = await ctx.shot('D-A05-60', 'no-file');
+      let dialogs = [];
+      try {
+        dialogs = await page.locator('[role="dialog"], [role="alertdialog"]').allInnerTexts();
+      } catch {
+        // diagnostics only
+      }
+      let toasts = [];
+      try {
+        toasts = await page.locator('[class*="toast"]').allInnerTexts();
+      } catch {
+        // diagnostics only
+      }
+      throw new Error(
+        `the export ended with no message and no MP4 in the scratch download folder (screenshot ${where}; open dialogs: ${dialogs.join(' | ').slice(0, 300) || 'none'}; toasts: ${toasts.join(' | ').slice(0, 300) || 'none'}; console: ${consoleTail.slice(-4).join(' // ')}; trail: ${stateTrail
+          .slice(0, 14)
+          .map((entry) => `${entry.at}s ${entry.text}`)
+          .join(' | ')})`,
+      );
+    }
     const first = toast.split('\n')[0] ?? '';
     const shot = await ctx.shot('D-A05-60', 'export');
     if (/cannot resolve visual asset/iu.test(toast)) {
