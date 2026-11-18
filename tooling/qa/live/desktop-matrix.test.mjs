@@ -29,6 +29,7 @@ import {
 } from './desktop-projects-import-steps.mjs';
 import { PERSISTENCE_ROWS } from './desktop-persistence-steps.mjs';
 import { LIBRARY_THUMB_ROWS } from './desktop-library-thumb-steps.mjs';
+import { MONITOR_SNAP_ROWS } from './desktop-monitor-snap-steps.mjs';
 import {
   NOT_REACHABLE_COMMANDS,
   TIMELINE_ROWS,
@@ -476,6 +477,7 @@ test('row tables: unique ids in the T-A05, T-A06, T-A09 and T-H04 ranges, each w
     ...EXPORT_MISSING_ROWS,
     ...TIMELINE_DND_H04_ROWS,
     ...LIBRARY_THUMB_ROWS,
+    ...MONITOR_SNAP_ROWS,
   ].map((row) => row.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(MATRIX_IDS.toSorted(), ids.toSorted());
@@ -489,6 +491,7 @@ test('row tables: unique ids in the T-A05, T-A06, T-A09 and T-H04 ranges, each w
   );
   for (const row of TIMELINE_DND_H04_ROWS) assert.match(row.id, /^D-H(?:01|02|06|07|08|10)$/u);
   for (const row of LIBRARY_THUMB_ROWS) assert.match(row.id, /^D-A11-\d{2}$/u);
+  for (const row of MONITOR_SNAP_ROWS) assert.match(row.id, /^D-M06-\d{2}(?:-\d{2})?$/u);
   for (const row of Object.values(MATRIX_ROWS)) {
     assert.ok(row.title && typeof row.run === 'function', row.id);
     assert.ok(['blocker', 'major', 'minor'].includes(row.severity), row.id);

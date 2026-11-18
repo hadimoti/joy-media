@@ -273,7 +273,7 @@ input[type='checkbox']:focus-visible {
   height: 1.7rem;
   padding: 0 var(--space-2);
   border: 1px solid var(--joy-border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--joy-radius-inner);
   background: var(--joy-bg-input);
   color: var(--joy-text);
   font-size: var(--joy-type-xs);
@@ -2099,6 +2099,40 @@ h2 {
   border: 1px dashed var(--joy-accent);
   background: var(--joy-accent-dim);
   pointer-events: none;
+}
+.monitor-snap-overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+}
+.monitor-snap-guides {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.monitor-snap-guides line {
+  stroke: var(--joy-accent);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.monitor-snap-readout {
+  position: absolute;
+  box-sizing: border-box;
+  min-height: 34px;
+  max-width: calc(100% - 8px);
+  padding: 8px;
+  border: 1px solid var(--joy-accent);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-elevated);
+  color: var(--joy-text);
+  font-family: var(--joy-font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 /* Free-transform box (T-M05a): editor-only HTML/SVG above the canvas, in
    screen pixels so the handles keep their size at any zoom. Never in the frame,

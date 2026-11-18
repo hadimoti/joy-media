@@ -5,9 +5,11 @@ import type {
   MonitorOverlayAnchor,
   MonitorOverlayHandle,
 } from './monitor-overlay-model.js';
-import type { MonitorHandle } from './monitor-transform-maths.js';
+import type { MonitorHandle, MonitorScaleHandle } from './monitor-transform-maths.js';
 import type { MonitorTransformDrag, MonitorTransformGesture } from './monitor-transform-drag.js';
 import { TRANSFORM_BLOCK_MESSAGES } from './monitor-transform-targets.js';
+import type { MonitorSnapFeedback } from './MonitorSnapOverlay.js';
+import { snapScale, type SnapBox, type SnapTarget } from './snap-targets.js';
 import {
   canvasToScreenPoint,
   screenToCanvasPoint,
@@ -63,6 +65,10 @@ export interface MonitorTransformBoxProps {
     gesture: MonitorTransformGesture,
     start: NodePoint,
   ) => MonitorTransformDrag | undefined;
+  /** Frame, safe-area, user-guide and other visible-element snap lines. */
+  readonly snapTargets?: readonly SnapTarget[] | undefined;
+  /** Live readout/guide feedback for a scale drag. */
+  readonly onSnapFeedback?: ((feedback: MonitorSnapFeedback | null) => void) | undefined;
 }
 
 export function MonitorTransformBox({
@@ -72,9 +78,22 @@ export function MonitorTransformBox({
   viewportSize,
   interactive,
   startGesture,
+  snapTargets = [],
+  onSnapFeedback,
 }: MonitorTransformBoxProps) {
   const layerRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ pointerId: number; drag: MonitorTransformDrag } | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    drag: MonitorTransformDrag;
+    scale?: {
+      readonly start: NodePoint;
+      readonly initialBox: SnapBox;
+      readonly corners: readonly NodePoint[];
+      readonly localToCanvas: readonly number[];
+      readonly handle: MonitorScaleHandle;
+      readonly angle: number;
+    };
+  } | null>(null);
   const latestView = useRef(view);
   latestView.current = view;
 
@@ -93,6 +112,7 @@ export function MonitorTransformBox({
     gesture: MonitorTransformGesture,
     blocked: MonitorOverlayHandle['blocked'],
     event: ReactPointerEvent<HTMLElement>,
+    overlay: MonitorOverlay,
   ) => {
     if (event.button !== PRIMARY_BUTTON || !interactive) return;
     // The handle owns this press: no selection click and no marquee.
@@ -101,21 +121,104 @@ export function MonitorTransformBox({
     if (blocked !== undefined) return;
     const drag = startGesture(gesture, canvasPoint(event));
     if (drag === undefined) return;
-    dragRef.current = { pointerId: event.pointerId, drag };
+    const start = canvasPoint(event);
+    const scale =
+      gesture.kind === 'scale' || gesture.kind === 'group-scale'
+        ? (() => {
+            const xs = overlay.corners.map((corner) => corner.x);
+            const ys = overlay.corners.map((corner) => corner.y);
+            const x = Math.min(...xs);
+            const y = Math.min(...ys);
+            const angle =
+              (Math.atan2(overlay.localToCanvas[1] ?? 0, overlay.localToCanvas[0] ?? 1) * 180) /
+              Math.PI;
+            return {
+              start,
+              initialBox: {
+                x,
+                y,
+                width: Math.max(...xs) - x,
+                height: Math.max(...ys) - y,
+              },
+              corners: overlay.corners,
+              localToCanvas: overlay.localToCanvas,
+              handle: gesture.handle,
+              angle,
+            };
+          })()
+        : undefined;
+    dragRef.current =
+      scale === undefined
+        ? { pointerId: event.pointerId, drag }
+        : { pointerId: event.pointerId, drag, scale };
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
   const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     const current = dragRef.current;
     if (current === null || current.pointerId !== event.pointerId) return;
-    current.drag.update(canvasPoint(event), { shift: event.shiftKey, alt: event.altKey });
+    const point = canvasPoint(event);
+    if (current.scale === undefined) {
+      current.drag.update(point, { shift: event.shiftKey, alt: event.altKey });
+      return;
+    }
+
+    const { start, initialBox, corners, localToCanvas, handle, angle } = current.scale;
+    const [a = 1, b = 0, c = 0, d = 1] = localToCanvas;
+    const xLength = Math.hypot(a, b) || 1;
+    const yLength = Math.hypot(c, d) || 1;
+    const xAxis = { x: a / xLength, y: b / xLength };
+    const yAxis = { x: c / yLength, y: d / yLength };
+    const pointerDelta = { x: point.x - start.x, y: point.y - start.y };
+    const alongX =
+      handle.includes('e') || handle.includes('w')
+        ? pointerDelta.x * xAxis.x + pointerDelta.y * xAxis.y
+        : 0;
+    const alongY =
+      handle.includes('n') || handle.includes('s')
+        ? pointerDelta.x * yAxis.x + pointerDelta.y * yAxis.y
+        : 0;
+    const moveLeft = handle.includes('w');
+    const moveRight = handle.includes('e');
+    const moveTop = handle.includes('n');
+    const moveBottom = handle.includes('s');
+    const changedCorners = corners.map((corner, index) => {
+      const changesX = moveLeft
+        ? index === 0 || index === 3
+        : moveRight && (index === 1 || index === 2);
+      const changesY = moveTop
+        ? index === 0 || index === 1
+        : moveBottom && (index === 2 || index === 3);
+      return {
+        x: corner.x + (changesX ? xAxis.x * alongX : 0) + (changesY ? yAxis.x * alongY : 0),
+        y: corner.y + (changesX ? xAxis.y * alongX : 0) + (changesY ? yAxis.y * alongY : 0),
+      };
+    });
+    const xs = changedCorners.map((corner) => corner.x);
+    const ys = changedCorners.map((corner) => corner.y);
+    const candidate: SnapBox = {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+    };
+    const result = snapScale(candidate, initialBox, handle, snapTargets, view.zoom, event.ctrlKey);
+    const xBefore = moveLeft ? candidate.x : candidate.x + candidate.width;
+    const xAfter = moveLeft ? result.box.x : result.box.x + result.box.width;
+    const yBefore = moveTop ? candidate.y : candidate.y + candidate.height;
+    const yAfter = moveTop ? result.box.y : result.box.y + result.box.height;
+    current.drag.update(
+      { x: point.x + xAfter - xBefore, y: point.y + yAfter - yBefore },
+      { shift: event.shiftKey, alt: event.altKey },
+    );
+    onSnapFeedback?.({ box: result.box, angle, cursor: point, guides: result.guides });
   };
   const finish = (event: ReactPointerEvent<HTMLElement>, commit: boolean) => {
     const current = dragRef.current;
     if (current === null || current.pointerId !== event.pointerId) return;
+    if (commit) onPointerMove(event);
     dragRef.current = null;
-    if (commit)
-      current.drag.update(canvasPoint(event), { shift: event.shiftKey, alt: event.altKey });
     current.drag.end(commit);
+    if (current.scale !== undefined) onSnapFeedback?.(null);
     if (event.currentTarget.hasPointerCapture?.(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
   };
@@ -139,7 +242,7 @@ export function MonitorTransformBox({
           anchor.blocked === undefined ? ANCHOR_LABEL : TRANSFORM_BLOCK_MESSAGES[anchor.blocked]
         }
         style={{ left: `${point.x}px`, top: `${point.y}px` }}
-        onPointerDown={(event) => onPointerDown({ kind: 'anchor' }, anchor.blocked, event)}
+        onPointerDown={(event) => onPointerDown({ kind: 'anchor' }, anchor.blocked, event, overlay)}
         onPointerMove={onPointerMove}
         onPointerUp={(event) => finish(event, true)}
         onPointerCancel={(event) => finish(event, false)}
@@ -212,7 +315,12 @@ export function MonitorTransformBox({
               }
               style={{ left: `${point.x}px`, top: `${point.y}px` }}
               onPointerDown={(event) =>
-                onPointerDown(gestureFor(handle.id, overlay.group === true), handle.blocked, event)
+                onPointerDown(
+                  gestureFor(handle.id, overlay.group === true),
+                  handle.blocked,
+                  event,
+                  overlay,
+                )
               }
               onPointerMove={onPointerMove}
               onPointerUp={(event) => finish(event, true)}
