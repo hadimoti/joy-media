@@ -9389,7 +9389,7 @@ label {
 .joy-code-message > div {
   min-width: 0;
 }
-.joy-code-message strong {
+.joy-code-message > div > strong {
   color: var(--joy-text-faint);
   font-size: var(--joy-type-xs);
   font-weight: 650;
@@ -9402,7 +9402,23 @@ label {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.joy-code-message.is-user strong {
+.joy-code-message p strong {
+  color: var(--joy-text);
+  font-weight: 650;
+}
+.joy-code-message p em {
+  color: var(--joy-text);
+  font-style: italic;
+}
+.joy-code-message p code {
+  padding: 0 0.22rem;
+  border-radius: 0.25rem;
+  background: var(--joy-bg-control);
+  color: var(--joy-accent);
+  font-family: var(--joy-font-mono);
+  font-size: var(--joy-type-xs);
+}
+.joy-code-message.is-user > div > strong {
   display: none;
 }
 .joy-code-message.is-user p {

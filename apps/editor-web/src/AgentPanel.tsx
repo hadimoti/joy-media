@@ -155,6 +155,7 @@ import {
   type JoyCodeMessageKey,
 } from './joy-code-messages.js';
 import { JoyCodeFailureCard } from './joy-code-failure-card.js';
+import { JoyCodeInlineText } from './joy-code-inline-marks.js';
 import { JoyCodeMediaParts, type JoyCodeMediaPartsProps } from './joy-code-media-parts.js';
 import { readQcReportView, type QcReportView } from './joy-code-qc-report.js';
 import { JoyCodeQcReportCard } from './joy-code-qc-report-card.js';
@@ -229,6 +230,7 @@ const CONVERSATION_TITLE_WORD =
   /\b(?:title|heading|text)\b|(?<![\p{L}\p{M}])(?:عنوان|تیتر|متن)(?![\p{L}\p{M}])/iu;
 const CONVERSATION_REFERENCE_AMBIGUOUS_MESSAGE =
   'JOY cannot safely determine which previous item to use. Select one item before continuing.';
+const UNTESTED_MODEL_MESSAGE = 'The model capability is untested. Test a model in Agent Settings.';
 type ComposerCapability = 'edit' | 'creative-brief' | 'recipes' | 'looks';
 
 const LEGACY_JOY_AGENT_TOOL_NAMES = Object.freeze([
@@ -2058,6 +2060,15 @@ export function AgentPanel({
       setDraft('');
       return;
     }
+    const intentId = matchJoyCodeIntentId(body);
+    const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
+    // An untested model refuses the request. Refuse before the draft is cleared
+    // and before the user bubble is added, so the typed text stays in the box
+    // for the user to send again once a model is tested (defect 164).
+    if (intent === undefined && joyAgentEngineClient?.getStatus()?.capability === 'untested') {
+      appendMessage(threadId, 'assistant', UNTESTED_MODEL_MESSAGE);
+      return;
+    }
     setDraft('');
     appendMessage(threadId, 'user', body);
     if (pending !== undefined) {
@@ -2076,8 +2087,6 @@ export function AgentPanel({
       );
       return;
     }
-    const intentId = matchJoyCodeIntentId(body);
-    const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
     if (intent === undefined && settings.privacyMode === 'local-only') {
       appendMessage(
         threadId,
@@ -2116,7 +2125,7 @@ export function AgentPanel({
         if (connectionStatus.capability === 'incompatible') {
           message = 'The configured model is incompatible. Test another model in Agent Settings.';
         } else if (connectionStatus.capability === 'untested') {
-          message = 'The model capability is untested. Test a model in Agent Settings.';
+          message = UNTESTED_MODEL_MESSAGE;
         } else {
           message =
             'This model supports Creative Brief only. Connect a model with JOY edit tools in Agent Settings to run natural-language edits.';
@@ -4128,7 +4137,11 @@ export function AgentPanel({
                                   : undefined
                               }
                             >
-                              {message.body}
+                              {message.role === 'assistant' ? (
+                                <JoyCodeInlineText text={message.body} />
+                              ) : (
+                                message.body
+                              )}
                             </p>
                           )}
                         <JoyCodeMediaParts {...generatedMedia} parts={message.parts} />
@@ -4141,7 +4154,11 @@ export function AgentPanel({
                             : undefined
                         }
                       >
-                        {message.body}
+                        {message.role === 'assistant' ? (
+                          <JoyCodeInlineText text={message.body} />
+                        ) : (
+                          message.body
+                        )}
                       </p>
                     )}
                   </div>
