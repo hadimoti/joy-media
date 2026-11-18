@@ -74,8 +74,12 @@ export function MonitorCropBox({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<CropDrag | null>(null);
   const [previewCrop, setPreviewCrop] = useState(crop);
+  const previewCropRef = useRef(crop);
   useEffect(() => {
-    if (dragRef.current === null) setPreviewCrop(crop);
+    if (dragRef.current === null) {
+      previewCropRef.current = crop;
+      setPreviewCrop(crop);
+    }
   }, [crop]);
   const corners = cropBoxCorners(overlay, crop, previewCrop).map((point) =>
     canvasToScreenPoint(view, point),
@@ -107,7 +111,7 @@ export function MonitorCropBox({
   const onPointerDown = (edge: CropEdge, event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    dragRef.current = { edge, start: canvasPoint(event), crop: previewCrop };
+    dragRef.current = { edge, start: canvasPoint(event), crop: previewCropRef.current };
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
@@ -133,15 +137,18 @@ export function MonitorCropBox({
     const amount = horizontal ? (localX / width) * visibleWidth : (localY / height) * visibleHeight;
     const sign = drag.edge === 'left' || drag.edge === 'top' ? 1 : -1;
     const next = cropWithEdge(drag.crop, drag.edge, drag.crop[drag.edge] + sign * amount);
+    previewCropRef.current = next;
     setPreviewCrop(next);
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragRef.current === null) return;
+    const drag = dragRef.current;
+    if (drag === null) return;
     event.preventDefault();
     event.stopPropagation();
     dragRef.current = null;
-    if (JSON.stringify(previewCrop) !== JSON.stringify(crop)) onCommit(previewCrop);
+    if (JSON.stringify(previewCropRef.current) !== JSON.stringify(drag.crop))
+      onCommit(previewCropRef.current);
   };
 
   return (
@@ -154,6 +161,7 @@ export function MonitorCropBox({
       onPointerUp={onPointerUp}
       onPointerCancel={() => {
         dragRef.current = null;
+        previewCropRef.current = crop;
         setPreviewCrop(crop);
       }}
     >

@@ -60,6 +60,58 @@ function pointerEvent(type: string, point: { x: number; y: number }) {
 }
 
 describe('MonitorCropBox', () => {
+  it('does not commit a second drag without movement while the parent update is pending', () => {
+    const { onCommit } = mount();
+    const handle = container?.querySelector<HTMLButtonElement>('[data-crop-handle="left"]');
+    const box = container?.querySelector<HTMLElement>('[data-monitor-crop-box]');
+    act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 10, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointermove', { x: 30, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointerup', { x: 30, y: 70 })));
+    act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 30, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointerup', { x: 30, y: 70 })));
+    expect(onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the previous preview as the start of a second drag', () => {
+    const { onCommit } = mount();
+    const handle = container?.querySelector<HTMLButtonElement>('[data-crop-handle="left"]');
+    const box = container?.querySelector<HTMLElement>('[data-monitor-crop-box]');
+    act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 10, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointermove', { x: 30, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointerup', { x: 30, y: 70 })));
+    act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 30, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointermove', { x: 40, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointerup', { x: 40, y: 70 })));
+    expect(onCommit).toHaveBeenCalledTimes(2);
+    expect(onCommit.mock.calls[1]?.[0].left).toBeCloseTo(0.28);
+  });
+
+  it('cancels the preview without committing', () => {
+    const { onCommit } = mount();
+    const handle = container?.querySelector<HTMLButtonElement>('[data-crop-handle="left"]');
+    const box = container?.querySelector<HTMLElement>('[data-monitor-crop-box]');
+    const polygon = container?.querySelector('polygon');
+    const initial = polygon?.getAttribute('points');
+    act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 10, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointermove', { x: 30, y: 70 })));
+    expect(polygon?.getAttribute('points')).not.toBe(initial);
+    act(() => box?.dispatchEvent(pointerEvent('pointercancel', { x: 30, y: 70 })));
+    expect(polygon?.getAttribute('points')).toBe(initial);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('commits the last movement when pointer events are batched', () => {
+    const { onCommit } = mount();
+    const handle = container?.querySelector<HTMLButtonElement>('[data-crop-handle="left"]');
+    const box = container?.querySelector<HTMLElement>('[data-monitor-crop-box]');
+    act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 10, y: 70 })));
+    act(() => {
+      box?.dispatchEvent(pointerEvent('pointermove', { x: 30, y: 70 }));
+      box?.dispatchEvent(pointerEvent('pointerup', { x: 30, y: 70 }));
+    });
+    expect(onCommit).toHaveBeenCalledWith({ left: 0.2, top: 0, right: 0, bottom: 0 });
+  });
+
   it('commits a dragged edge using the existing crop fractions', () => {
     const { onCommit } = mount();
     const handle = container?.querySelector<HTMLButtonElement>('[data-crop-handle="left"]');
