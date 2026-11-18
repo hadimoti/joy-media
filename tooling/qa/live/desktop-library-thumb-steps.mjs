@@ -14,7 +14,8 @@ const CARD_TIMEOUT_MS = 20_000;
 // The fixtures seeded into the scratch library. The kind picks the folder; size and SHA-256 are read from the file.
 const SEEDS = [
   { file: 'picture-tiny.png', kind: 'image', folder: 'images', mimeType: 'image/png' },
-  { file: 'h264-16x9-audio.mp4', kind: 'video', folder: 'video', mimeType: 'video/mp4' },
+  // Not the --media file: the import step may already hold a browser copy of that one, which cards prefer.
+  { file: 'h264-16x9-silent.mp4', kind: 'video', folder: 'video', mimeType: 'video/mp4' },
 ];
 
 function fixturePath(fixturesDir, file) {
@@ -259,6 +260,14 @@ const rows = [
       const seeded = await seedLibrary(ctx.libraryDir, ctx.fixtures);
       await newProject(page, `${ROW_ID} thumbs ${Date.now().toString(36)}`);
       await openMediaPanel(page);
+      // The panel may have read the catalog before the seed, so it is read again.
+      await page.getByRole('button', { name: 'Refresh assets', exact: true }).click();
+      // An earlier step can leave the panel on the Video or Images tab, which hides the other card.
+      await page
+        .locator('button, [role="tab"]')
+        .filter({ hasText: /^\s*All\s*\d*\s*$/ })
+        .first()
+        .click();
 
       const cards = [];
       for (const item of seeded) cards.push(await checkCard(page, item));
