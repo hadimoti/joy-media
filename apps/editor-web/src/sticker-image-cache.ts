@@ -70,7 +70,7 @@ export class StickerImageCache {
       }
       let bitmap = entry.animated.frameAt(timeUs).bitmap;
       if (entry.matte !== undefined) bitmap = applyMatteAlpha(bitmap, entry.matte);
-      out.set(id, applyCrop(bitmap, entry.crop));
+      out.set(id, bitmap);
     }
     return out;
   }
@@ -96,8 +96,7 @@ export class StickerImageCache {
     if (
       existing !== undefined &&
       existing.assetId === options.assetId &&
-      existing.matteAssetId === options.matteAssetId &&
-      existing.cropKey === cropKey
+      existing.matteAssetId === options.matteAssetId
     ) {
       return existing.bitmap;
     }
@@ -149,7 +148,8 @@ export class StickerImageCache {
       animated?.dispose();
       return undefined;
     }
-    rgba = applyCrop(rgba, options.crop);
+    // Crop is not applied to the pixels: the renderer cuts the drawn box from the object's crop (T-M16, the same
+    // way in the Monitor and the export). Cutting the bitmap here too took the crop twice and stretched the picture.
     this.byObjectId.get(options.objectId)?.animated?.dispose();
     this.byObjectId.set(options.objectId, {
       assetId: options.assetId,
@@ -249,28 +249,6 @@ async function decodeBlobToRgba(blob: Blob): Promise<StickerBitmap> {
   }
 }
 
-/** Crop insets are fractions of source size in 0..0.49 (CapCut-like). */
-function applyCrop(source: StickerBitmap, crop: CropInsets): StickerBitmap {
-  const left = clampFraction(crop.left);
-  const top = clampFraction(crop.top);
-  const right = clampFraction(crop.right);
-  const bottom = clampFraction(crop.bottom);
-  if (left === 0 && top === 0 && right === 0 && bottom === 0) return source;
-  const x0 = Math.floor(source.width * left);
-  const y0 = Math.floor(source.height * top);
-  const x1 = Math.max(x0 + 1, Math.ceil(source.width * (1 - right)));
-  const y1 = Math.max(y0 + 1, Math.ceil(source.height * (1 - bottom)));
-  const width = Math.max(1, x1 - x0);
-  const height = Math.max(1, y1 - y0);
-  const data = new Uint8ClampedArray(width * height * 4);
-  for (let y = 0; y < height; y += 1) {
-    const srcRow = ((y0 + y) * source.width + x0) * 4;
-    const dstRow = y * width * 4;
-    data.set(source.data.subarray(srcRow, srcRow + width * 4), dstRow);
-  }
-  return { width, height, data };
-}
-
 function applyMatteAlpha(source: StickerBitmap, matte: StickerBitmap): StickerBitmap {
   const width = Math.min(source.width, matte.width);
   const height = Math.min(source.height, matte.height);
@@ -289,9 +267,4 @@ function applyMatteAlpha(source: StickerBitmap, matte: StickerBitmap): StickerBi
     }
   }
   return { width, height, data };
-}
-
-function clampFraction(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(0.49, Math.max(0, value));
 }

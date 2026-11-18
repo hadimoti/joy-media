@@ -988,7 +988,7 @@ describe('isolated composition capture', () => {
     }
   });
 
-  it('sizes a cropped sticker from the returned cropped bitmap', async () => {
+  it('sizes a cropped sticker from the whole bitmap and leaves the cut to the renderer', async () => {
     stubImageDecode();
     fakeRenderer();
     const image: VisualObjectV1 = {
@@ -1012,7 +1012,10 @@ describe('isolated composition capture', () => {
         0,
         new AbortController().signal,
       );
-      expect(frame.nodes.find((node) => node.id === 'cropped-image')).toMatchObject({ width: 3 });
+      expect(frame.nodes.find((node) => node.id === 'cropped-image')).toMatchObject({
+        width: 4,
+        transform: { crop: { left: 0.25 } },
+      });
     } finally {
       capture.release();
     }

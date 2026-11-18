@@ -164,3 +164,17 @@ describe('shortcut reference', () => {
     );
   });
 });
+
+describe('selected page text and Ctrl+C', () => {
+  it('copy and cut yield to text selected on the page, other keys do not', async () => {
+    const { actionYieldsToSelectedText, pageTextIsSelected } =
+      await import('./keyboard-shortcuts.js');
+    expect(actionYieldsToSelectedText('clip.copy')).toBe(true);
+    expect(actionYieldsToSelectedText('clip.cut')).toBe(true);
+    expect(actionYieldsToSelectedText('clip.paste')).toBe(false);
+    expect(actionYieldsToSelectedText('history.undo')).toBe(false);
+    expect(pageTextIsSelected({ toString: () => 'hi' })).toBe(true);
+    expect(pageTextIsSelected({ toString: () => '' })).toBe(false);
+    expect(pageTextIsSelected(null)).toBe(false);
+  });
+});

@@ -305,8 +305,14 @@ export function AiEffectIcon() {
 }
 
 /** The real gear for "settings". Sized like the 16 px vector icons it sits beside. */
+/** A true vector gear: eight teeth around a centre hole, drawn in the same 16-unit stroke style as the other icons. */
 export function SettingsGearIcon({ size = 16 }: { readonly size?: number }) {
-  return <PngMaskIcon src={UI_ICONS.settings} size={size} />;
+  return (
+    <Svg size={size}>
+      <path d="M7.06 3.09 7.22 1.45H8.78L8.94 3.09 10.81 3.86 12.09 2.82 13.18 3.91 12.14 5.19 12.91 7.06 14.55 7.22V8.78L12.91 8.94 12.14 10.81 13.18 12.09 12.09 13.18 10.81 12.14 8.94 12.91 8.78 14.55H7.22L7.06 12.91 5.19 12.14 3.91 13.18 2.82 12.09 3.86 10.81 3.09 8.94 1.45 8.78V7.22L3.09 7.06 3.86 5.19 2.82 3.91 3.91 2.82 5.19 3.86Z" />
+      <circle cx="8" cy="8" r="2.1" />
+    </Svg>
+  );
 }
 
 /** Three small controls — a crisp vector affordance for runtime tuning. */

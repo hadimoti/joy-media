@@ -532,8 +532,10 @@ import { PanelShell } from './PanelShell.js';
 import {
   SHORTCUT_REFERENCE,
   isEditableTarget,
+  actionYieldsToSelectedText,
   interactiveTargetOwnsAction,
   isInteractiveTarget,
+  pageTextIsSelected,
   resolveShortcut,
   scopedKeyTable,
 } from './keyboard-shortcuts.js';
@@ -4197,6 +4199,8 @@ function EditorWorkspace({
           (isInteractiveTarget(event.target) && interactiveTargetOwnsAction(action)))
       )
         return;
+      // Text selected on the page (a chat reply) is copied by the browser, not the selected clip.
+      if (actionYieldsToSelectedText(action) && pageTextIsSelected()) return;
       // Space with Shift, Ctrl, Alt or Meta does nothing (no play, no hold).
       if (action === 'playback.toggle' && hasKeyModifier(event)) return;
       if (action === 'playback.toggle' && event.repeat) {

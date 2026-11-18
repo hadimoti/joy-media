@@ -36,6 +36,32 @@ describe('StickerImageCache animated ownership', () => {
     expect(cache.bitmaps()).not.toHaveProperty('object');
   });
 
+  it('keeps the whole picture when the object has a crop: the renderer cuts the drawn box, not the pixels', async () => {
+    const cache = new StickerImageCache();
+    const blob = animatedGifBlob();
+    const animation = {
+      frameCount: 4,
+      cycleDurationUs: 1_000_000,
+      loopCount: 0,
+      hasAlpha: true,
+    } as const;
+    const options = {
+      objectId: 'object',
+      assetId: 'asset',
+      animation,
+      mimeType: 'image/gif',
+      loadBlob: async () => blob,
+    };
+    await cache.syncObject({ ...options, crop: emptyCrop() });
+    const whole = cache.bitmaps(0).get('object')!;
+    await cache.syncObject({
+      ...options,
+      crop: { left: 0.25, top: 0.1, right: 0.3, bottom: 0.2 },
+    });
+    const cropped = cache.bitmaps(0).get('object')!;
+    expect([cropped.width, cropped.height]).toEqual([whole.width, whole.height]);
+  });
+
   it('does not publish a stale async load after the object is cleared', async () => {
     const cache = new StickerImageCache();
     const blob = animatedGifBlob();

@@ -75,6 +75,22 @@ export function isInteractiveTarget(target: EventTarget | null): boolean {
   return false;
 }
 
+/**
+ * True when text is selected on the page (a chat reply, a label). Ctrl+C then copies that text, and Ctrl+X
+ * leaves it alone, instead of copying or cutting the selected timeline clip.
+ */
+export function pageTextIsSelected(
+  selection: Pick<Selection, 'toString'> | null = typeof window === 'undefined'
+    ? null
+    : window.getSelection(),
+): boolean {
+  return selection !== null && selection.toString().length > 0;
+}
+
+export function actionYieldsToSelectedText(action: ShortcutAction): boolean {
+  return action === 'clip.copy' || action === 'clip.cut';
+}
+
 const CONTROL_OWNED_ACTIONS: ReadonlySet<ShortcutAction> = new Set<ShortcutAction>([
   'playback.toggle',
   'playhead.back',
