@@ -39,6 +39,8 @@ import {
 
 export { applyColorGradeToPixels } from './effects-cpu.js';
 export { MAX_CUBE_LUT_BYTES, parseCubeLut, sampleCubeLut } from './lut.js';
+export { layoutTextSpanOffsets } from './text-span-layout.js';
+export type { TextSpanAlignment, TextSpanDirection } from './text-span-layout.js';
 // The editor draws its curves with the same spline the colour engine renders with (T-K03),
 // and its eyedropper finds bands with the engine's hue maths (T-K04).
 export {
@@ -199,7 +201,7 @@ function spanColor(
   node: Extract<VisualRenderNode, { kind: 'text' }>,
   characterIndex: number,
 ): Rgba {
-  if (node.spans === undefined) return node.color;
+  if (node.spans === undefined || node.spans.length <= 1) return node.color;
   let offset = 0;
   for (const span of node.spans) {
     if (characterIndex < offset + span.text.length) return span.color;
