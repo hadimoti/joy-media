@@ -91,27 +91,26 @@ const REDACTED_INPUT_PATHS = [
   'test-output/ci-janitor/inventory.json',
 ];
 
-// The two gate topologies (plan §3.4). The two-pass shape is the production gate (release-candidate-v2), and its values
-// above are unchanged. The single-pass shape is for release-candidate-v3: one Windows pass, one real-service pass and one P3
-// pass, each written under its own folder. Each topology's values are fixed here, so no caller can choose a shape that is
-// not listed.
+// The two gate topologies. The two-pass shape is the production gate (release-candidate-v2), and its values above are
+// unchanged. The single-pass shape records the current release-candidate-v3 job graph. Each topology is fixed here, so no
+// caller can choose a shape that is not listed.
 const SINGLE_PASS_VERDICT = 'release.exact-candidate';
 const SINGLE_PASS_SUMMARY = 'test-output/readiness/single-pass-evidence/manifest.json';
 const SINGLE_PASS_WINDOWS_PATHS = [
   'test-output/readiness/single-pass-evidence/windows/pass-1/acceptance.json',
 ];
-// The single-pass gate's lanes (plan section 3.4, release-candidate-v3). Its jobs merge the v2 lanes: hosted-verify replaces
-// the Linux verify:ci run, windows-candidate replaces windows-p0-real-services and windows-worker-clean, and fixture-acceptance
-// replaces acceptance-primary and prod-build-smoke. The gate's `needs` list must equal this list (release-candidate-v3.test.ts).
+// The single-pass gate's lanes (release-candidate-v3). The gate's `needs` list must equal this list
+// (release-candidate-v3.test.ts).
 export const SINGLE_PASS_LANES = [
   'hosted-verify',
   'node-contracts',
-  'linux-real-services',
+  'editor-web-bundle',
   'windows-candidate',
-  'real-service-acceptance',
+  'checksums',
+  'offline-packaged-smoke',
   'fixture-acceptance',
   'acceptance-responsive',
-  'p3-real-services',
+  'site-build',
 ];
 // `messages` keeps the two-pass wording exactly as the existing tests assert it.
 export const SHAPES = {

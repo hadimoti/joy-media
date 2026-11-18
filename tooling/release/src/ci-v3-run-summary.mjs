@@ -28,8 +28,8 @@ export const GATE_CHECKS = [
   'windows-acceptance',
   'feature-status',
 ];
-// The lanes of each topology, as the gate's needs list names them. The two-pass lanes are release-candidate-v2's six lanes (its Windows jobs were retired by 4cb35d7a); the
-// single-pass lanes are release-candidate-v3's eight (plan section 3.4). ci-v3-run-summary.test.ts pins both against the gate.
+// The lanes of each topology, as the gate's needs list names them. The two-pass lanes belong to release-candidate-v2;
+// the single-pass lanes are release-candidate-v3. ci-v3-run-summary.test.ts pins each list to its workflow contract.
 export const TWO_PASS_LANES = [
   'linux-real-services',
   'acceptance-primary',
@@ -41,12 +41,13 @@ export const TWO_PASS_LANES = [
 export const SINGLE_PASS_LANES = [
   'hosted-verify',
   'node-contracts',
-  'linux-real-services',
+  'editor-web-bundle',
   'windows-candidate',
-  'real-service-acceptance',
+  'checksums',
+  'offline-packaged-smoke',
   'fixture-acceptance',
   'acceptance-responsive',
-  'p3-real-services',
+  'site-build',
 ];
 export const LANES_BY_TOPOLOGY = { 'two-pass': TWO_PASS_LANES, 'single-pass': SINGLE_PASS_LANES };
 const TOPOLOGIES = Object.keys(LANES_BY_TOPOLOGY);

@@ -54,7 +54,7 @@ describe('run inputs for the shadow comparison', () => {
     expect(GATE_CHECK_IDS).toHaveLength(17);
   });
 
-  it('builds single-pass inputs that the run summary writer accepts, with the eight lanes', () => {
+  it('builds single-pass inputs that the run summary writer accepts, with the nine lanes', () => {
     const inputs = buildRunInputs(fixture('single-pass'));
     expect(inputs.topology).toBe('single-pass');
     expect(inputs.attempt).toBe(1);

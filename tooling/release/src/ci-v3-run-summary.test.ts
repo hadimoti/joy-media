@@ -60,8 +60,8 @@ describe('run summary', () => {
     );
 
     const missingLane = runInputs('single-pass');
-    delete (missingLane.lanes as Record<string, string>)['p3-real-services'];
-    expect(() => buildRunSummary(missingLane)).toThrow(/lane p3-real-services is missing/u);
+    delete (missingLane.lanes as Record<string, string>)['checksums'];
+    expect(() => buildRunSummary(missingLane)).toThrow(/lane checksums is missing/u);
 
     const noVitest = {
       ...runInputs('single-pass'),
