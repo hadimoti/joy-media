@@ -2,7 +2,7 @@ name: ci-dev
 
 # DEVELOPMENT VERIFICATION — NOT a release approval.
 #
-# Fast feedback on every push / PR: static checks, the full unit/integration
+# Fast feedback on every PR into main: static checks, the full unit/integration
 # suite, the full browser suite at the reference
 # viewport, and responsive checkpoints at the two tightest viewports. It does
 # NOT run the real-service acceptance lane, the effects soak, or the encoded
@@ -19,15 +19,15 @@ name: ci-dev
 # No job uses ubuntu-latest / windows-latest / macos-latest. The contract is
 # enforced offline by tooling/release/src/ci-runner-policy.test.ts.
 #
-# TRIGGERS: workflow_dispatch only for now. The push / pull_request triggers
-# (commented below) are enabled only after the independent reviewer accepts this
-# workflow as the development-verification gate and it replaces ci.yml.
+# TRIGGERS: workflow_dispatch, and pull_request into main. The owner enabled the
+# pull_request trigger on 19 Nov 2026, because a dispatched run does not count toward
+# a pull request's merge gate on GitHub. The push trigger stays off: push CI (ci.yml)
+# covers pushes to main.
 
 on:
   workflow_dispatch:
-  # push:
-  #   branches: [main, 'codex/**']
-  # pull_request:
+  pull_request:
+    branches: [main]
 
 concurrency:
   group: ci-dev-${{ github.workflow }}-${{ github.ref }}
