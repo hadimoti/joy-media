@@ -77,6 +77,13 @@ describe('visualObjectToRenderNode', () => {
     ).not.toThrow();
   });
 
+  it('defaults legacy text styles without a direction to automatic direction', () => {
+    const obj = makeObject({ id: 'rtl-legacy', kind: 'text', text: 'سلام' });
+    const node = visualObjectToRenderNode(resolved(obj));
+
+    expect(node).toMatchObject({ kind: 'text', direction: 'auto' });
+  });
+
   it('maps image objects to sprite nodes with placeholder dimensions', () => {
     const obj = makeObject({ id: 'img-1', kind: 'image', assetId: 'asset-a' });
     const node = visualObjectToRenderNode(resolved(obj));

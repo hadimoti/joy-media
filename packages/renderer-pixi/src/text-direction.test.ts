@@ -5,6 +5,7 @@ import {
   resolveCanvasTextAlign,
   resolveParagraphDirection,
   resolveParagraphDirections,
+  waitForCanvasTextFontsForText,
   waitForCanvasTextFonts,
   wrapTextByWords,
 } from './text-direction.js';
@@ -168,5 +169,36 @@ describe('canvas text direction', () => {
     expect(calls).toContainEqual({ font: '16px "Vazirmatn Variable"', text: 'سلام ۱۲۳' });
     expect(calls).toContainEqual({ font: '16px "Noto Sans Arabic"', text: 'مرحبا' });
     expect(calls).toContainEqual({ font: '16px "Inter Variable"', text: 'JOY 123' });
+  });
+
+  it('loads the exact text sample at its family, size, weight, and style', async () => {
+    const calls: Array<{ font: string; text: string | undefined }> = [];
+    vi.stubGlobal('document', {
+      fonts: {
+        load: async (font: string, text?: string) => {
+          calls.push({ font, text });
+          return [];
+        },
+      },
+    });
+
+    await waitForCanvasTextFontsForText({
+      text: '\u0633\u0644\u0627\u0645 \u06f1\u06f2\u06f3',
+      families: ['Vazirmatn Variable', 'Noto Sans Arabic'],
+      fontSizePx: 108,
+      fontWeight: 850,
+      italic: true,
+    });
+
+    expect(calls).toEqual([
+      {
+        font: 'italic 850 108px "Vazirmatn Variable"',
+        text: '\u0633\u0644\u0627\u0645 \u06f1\u06f2\u06f3',
+      },
+      {
+        font: 'italic 850 108px "Noto Sans Arabic"',
+        text: '\u0633\u0644\u0627\u0645 \u06f1\u06f2\u06f3',
+      },
+    ]);
   });
 });

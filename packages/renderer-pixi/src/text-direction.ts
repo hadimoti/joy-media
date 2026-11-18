@@ -13,6 +13,14 @@ export interface WrappedCanvasText {
   readonly lineDirections: readonly ('ltr' | 'rtl')[];
 }
 
+export interface CanvasTextFontRequest {
+  readonly text: string;
+  readonly families: readonly string[];
+  readonly fontSizePx: number;
+  readonly fontWeight: number;
+  readonly italic: boolean;
+}
+
 export const CANVAS_TEXT_FONT_FAMILIES = [
   'Inter Variable',
   'Vazirmatn Variable',
@@ -32,6 +40,17 @@ export async function waitForCanvasTextFonts(): Promise<void> {
   await Promise.all(
     CANVAS_TEXT_FONT_SAMPLES.map(({ family, text }) =>
       document.fonts.load(`16px ${JSON.stringify(family)}`, text),
+    ),
+  );
+}
+
+export async function waitForCanvasTextFontsForText(request: CanvasTextFontRequest): Promise<void> {
+  if (typeof document === 'undefined' || document.fonts === undefined || request.text.length === 0)
+    return;
+  const style = `${request.italic ? 'italic ' : ''}${request.fontWeight} ${request.fontSizePx}px`;
+  await Promise.all(
+    [...new Set(request.families)].map((family) =>
+      document.fonts.load(`${style} ${JSON.stringify(family)}`, request.text),
     ),
   );
 }

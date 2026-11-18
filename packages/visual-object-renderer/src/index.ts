@@ -170,9 +170,7 @@ export function visualObjectToRenderNode(
       transform: renderTransform,
       text,
       color,
-      ...(style?.direction === 'ltr' || style?.direction === 'rtl' || style?.direction === 'auto'
-        ? { direction: style.direction }
-        : {}),
+      direction: style?.direction ?? 'auto',
       ...(style?.align === 'start' || style?.align === 'center' || style?.align === 'end'
         ? { align: style.align }
         : {}),

@@ -71,6 +71,23 @@ export function registerPixiTextDirection(style: object, options: PixiTextDirect
   installCanvasTextDirectionAdapter();
 }
 
+export function pixiTextAlignmentOffset(
+  lineWidth: number,
+  alignWidth: number,
+  align: CanvasTextAlignment,
+  direction: 'ltr' | 'rtl',
+): number {
+  const alignment = resolveCanvasTextAlign(align, direction);
+  if (align === 'start' || align === 'end') {
+    if (alignment === 'right') return alignWidth;
+    if (alignment === 'center') return alignWidth / 2;
+    return 0;
+  }
+  if (alignment === 'right') return alignWidth - lineWidth;
+  if (alignment === 'center') return (alignWidth - lineWidth) / 2;
+  return 0;
+}
+
 function installCanvasTextDirectionAdapter(): void {
   if (installed) return;
   installed = true;
@@ -160,17 +177,12 @@ function installCanvasTextDirectionAdapter(): void {
     const lineCount = Math.max(1, active.options.lineDirections.length);
     const direction = active.options.lineDirections[active.alignmentIndex % lineCount] ?? 'ltr';
     active.alignmentIndex += 1;
-    const lineWidth = Number(args[0]);
-    const alignWidth = Number(args[1]);
-    const alignment = resolveCanvasTextAlign(active.options.align, direction);
-    if (active.options.align === 'start' || active.options.align === 'end') {
-      if (alignment === 'right') return alignWidth;
-      if (alignment === 'center') return alignWidth / 2;
-      return 0;
-    }
-    if (alignment === 'right') return alignWidth - lineWidth;
-    if (alignment === 'center') return (alignWidth - lineWidth) / 2;
-    return 0;
+    return pixiTextAlignmentOffset(
+      Number(args[0]),
+      Number(args[1]),
+      active.options.align,
+      direction,
+    );
   };
 
   generator._drawLetterSpacing = function (...args: unknown[]): void {

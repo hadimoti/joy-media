@@ -27,7 +27,16 @@
  * that persist have their transform / opacity / zIndex updated in place.
  */
 
-import { Application, Container, FillGradient, Graphics, Sprite, Text, Texture } from 'pixi.js';
+import {
+  Application,
+  Container,
+  FillGradient,
+  Graphics,
+  Sprite,
+  Text,
+  Texture,
+  type TextStyleOptions,
+} from 'pixi.js';
 import type {
   ColorGradeIR,
   NodeBounds,
@@ -66,6 +75,7 @@ import {
   resolveCanvasTextAlign,
   resolveParagraphDirections,
   waitForCanvasTextFonts,
+  waitForCanvasTextFontsForText,
   wrapTextByWords,
 } from './text-direction.js';
 import { createImageDataWriter } from './image-data-writer.js';
@@ -94,7 +104,7 @@ function createTextMeasurement(
   const fontSize = node.fontSizePx ?? 16;
   const tracking = node.tracking ?? 0;
   const fontStyle = node.italic ? 'italic' : 'normal';
-  const fontWeight = (node.fontWeight ?? 400) >= 700 ? 'bold' : 'normal';
+  const fontWeight = node.fontWeight ?? 400;
   const fontFamily = fontFamilies.map((family) => JSON.stringify(family)).join(', ');
   const font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
 
@@ -186,6 +196,10 @@ interface LayerContainer extends Container {
   transitionTexture?: Texture | undefined;
   /** The flattened node this layer last drew (for `nodeBounds`). */
   node?: VisualRenderNode | undefined;
+  /** Exact family/weight/size/text request currently used to gate its first paint. */
+  textFontKey?: string | undefined;
+  /** Set while that node's exact script/font subset is loading. */
+  pendingTextFontKey?: string | undefined;
 }
 
 /**
@@ -303,6 +317,9 @@ export async function createBrowserPixiRenderer(
 
   const spriteMap = new Map<string, LayerContainer>();
   const canvasFonts = typeof document === 'undefined' ? undefined : document.fonts;
+  const textFontLoads = new Map<string, Promise<void>>();
+  const loadedTextFontKeys = new Set<string>();
+  let fontTextureGeneration = 0;
   const writeBitmapToCanvas = createImageDataWriter();
   let frameWidth = options.width ?? 320;
   let frameHeight = options.height ?? 180;
@@ -378,11 +395,13 @@ export async function createBrowserPixiRenderer(
   };
 
   const refreshTextForLoadedFonts = (): void => {
+    fontTextureGeneration += 1;
     let refreshed = false;
     for (const layer of spriteMap.values()) {
       if (layer.visual instanceof Text && layer.node?.kind === 'text') {
-        updateTextVisual(layer.visual, layer.node);
+        updateTextVisual(layer.visual, layer.node, fontTextureGeneration);
         syncTextBackground(layer, layer.node);
+        setTextFontVisibility(layer, layer.pendingTextFontKey === undefined);
         refreshed = true;
       }
     }
@@ -449,8 +468,12 @@ export async function createBrowserPixiRenderer(
     else text.anchor.set(0, 0);
   };
 
-  const updateTextVisual = (text: Text, node: TextNode): void => {
-    const direction = node.direction ?? 'ltr';
+  const updateTextVisual = (
+    text: Text,
+    node: TextNode,
+    textureGeneration = fontTextureGeneration,
+  ): void => {
+    const direction = node.direction ?? 'auto';
     const paragraphDirections = resolveParagraphDirections(node.text, direction);
     const usesRtlRendering =
       node.direction === 'rtl' || paragraphDirections.some((direction) => direction === 'rtl');
@@ -465,7 +488,7 @@ export async function createBrowserPixiRenderer(
         : undefined;
     const renderedText = wrapped?.text ?? node.text;
     const lineDirections =
-      wrapped?.lineDirections ?? resolveParagraphDirections(renderedText, node.direction ?? 'ltr');
+      wrapped?.lineDirections ?? resolveParagraphDirections(renderedText, node.direction ?? 'auto');
     const baseDirection = lineDirections[0] ?? paragraphDirections[0] ?? 'ltr';
     text.text = renderedText;
     const fill =
@@ -511,17 +534,39 @@ export async function createBrowserPixiRenderer(
               angle: Math.atan2(node.shadow.offsetY, node.shadow.offsetX),
             };
     const horizontalScale = Math.abs(node.transform.scaleX);
+    const fontFamilies = usesRtlRendering
+      ? [...canvasFontFamilyStack(node.text, node.fontFamily)]
+      : node.fontFamily === undefined
+        ? undefined
+        : [node.fontFamily];
+    const cacheBustedFontFamilies =
+      textureGeneration === 0
+        ? fontFamilies
+        : (() => {
+            // Pixi 8.19 keys CanvasText textures by styleKey. Repeating the final
+            // fallback keeps CSS resolution unchanged while giving each font
+            // loading generation a new key, so stale fallback glyphs are missed.
+            const families = fontFamilies ?? ['Arial'];
+            const fallback = families.at(-1) ?? 'Arial';
+            return [...families, ...Array.from({ length: textureGeneration }, () => fallback)];
+          })();
     text.style = {
       fill,
       fontSize: node.fontSizePx ?? 16,
-      ...(usesRtlRendering
-        ? { fontFamily: [...canvasFontFamilyStack(node.text, node.fontFamily)] }
-        : node.fontFamily === undefined
+      // Left-to-right text keeps the plain family string it always had; only a font reload generation or the
+      // right-to-left font stack needs the array form.
+      ...(!usesRtlRendering && textureGeneration === 0
+        ? node.fontFamily === undefined
           ? {}
-          : { fontFamily: node.fontFamily }),
-      ...(node.fontWeight === undefined
+          : { fontFamily: node.fontFamily }
+        : cacheBustedFontFamilies === undefined
+          ? {}
+          : { fontFamily: cacheBustedFontFamilies }),
+      // Only the right-to-left path carries the weight (the Persian font is a variable font, and a heavy title must
+      // load and draw that weight); the left-to-right output stays exactly as before.
+      ...(node.fontWeight === undefined || !usesRtlRendering
         ? {}
-        : { fontWeight: node.fontWeight >= 700 ? 'bold' : 'normal' }),
+        : { fontWeight: String(node.fontWeight) as NonNullable<TextStyleOptions['fontWeight']> }),
       ...(node.italic === undefined ? {} : { fontStyle: node.italic ? 'italic' : 'normal' }),
       ...(node.lineHeight === undefined || node.fontSizePx === undefined
         ? {}
@@ -565,6 +610,78 @@ export async function createBrowserPixiRenderer(
     return text;
   };
 
+  const setTextFontVisibility = (layer: LayerContainer, visible: boolean): void => {
+    layer.visual.visible = visible;
+    if (layer.textBackground !== undefined) layer.textBackground.visible = visible;
+  };
+
+  const textFontRequest = (node: TextNode) => {
+    const direction = node.direction ?? 'auto';
+    const paragraphDirections = resolveParagraphDirections(node.text, direction);
+    const usesRtlRendering =
+      node.direction === 'rtl' ||
+      paragraphDirections.some((lineDirection) => lineDirection === 'rtl');
+    return {
+      text: node.text,
+      families: usesRtlRendering
+        ? canvasFontFamilyStack(node.text, node.fontFamily)
+        : [node.fontFamily ?? 'Arial'],
+      fontSizePx: node.fontSizePx ?? 16,
+      fontWeight: node.fontWeight ?? 400,
+      italic: node.italic ?? false,
+    };
+  };
+
+  const textFontRequestKey = (node: TextNode): string => JSON.stringify(textFontRequest(node));
+
+  const ensureTextFontsReady = (layer: LayerContainer, node: TextNode): void => {
+    const text = layer.visual;
+    if (!(text instanceof Text)) return;
+    const request = textFontRequest(node);
+    const key = JSON.stringify(request);
+    if (layer.textFontKey === key && layer.pendingTextFontKey === key) return;
+    layer.textFontKey = key;
+
+    if (canvasFonts?.load === undefined || loadedTextFontKeys.has(key)) {
+      layer.pendingTextFontKey = undefined;
+      setTextFontVisibility(layer, true);
+      return;
+    }
+
+    layer.pendingTextFontKey = key;
+    setTextFontVisibility(layer, false);
+    let load = textFontLoads.get(key);
+    if (load === undefined) {
+      load = waitForCanvasTextFontsForText(request)
+        .catch(() => undefined)
+        .then(() => {
+          loadedTextFontKeys.add(key);
+        })
+        .finally(() => textFontLoads.delete(key));
+      textFontLoads.set(key, load);
+    }
+    const finishLoading = (): void => {
+      if (
+        disposed ||
+        spriteMap.get(node.id) !== layer ||
+        layer.textFontKey !== key ||
+        layer.node?.kind !== 'text' ||
+        textFontRequestKey(layer.node) !== key
+      )
+        return;
+      const currentNode = layer.node;
+      layer.pendingTextFontKey = undefined;
+      updateTextVisual(text, currentNode, fontTextureGeneration);
+      syncTextBackground(layer, currentNode);
+      updateLayerTransform(layer, currentNode);
+      syncCropMask(layer, currentNode);
+      syncLayerEffects(layer, currentNode);
+      setTextFontVisibility(layer, true);
+      redraw();
+    };
+    void load.then(finishLoading, finishLoading);
+  };
+
   const clearTextBackground = (layer: LayerContainer): void => {
     const plate = layer.textBackground;
     if (plate === undefined) return;
@@ -589,7 +706,7 @@ export async function createBrowserPixiRenderer(
       return;
     }
     const padding = textPlatePadding(node);
-    const direction = resolveParagraphDirections(node.text, node.direction ?? 'ltr')[0] ?? 'ltr';
+    const direction = resolveParagraphDirections(node.text, node.direction ?? 'auto')[0] ?? 'ltr';
     const bounds = textPlateBounds(text.width, text.height, node.align, padding, direction);
     const plate = layer.textBackground ?? new Graphics();
     plate
@@ -637,7 +754,7 @@ export async function createBrowserPixiRenderer(
     if (node.kind === 'text') {
       if (!(layer.visual instanceof Text)) return { x: 0, y: 0, width: 0, height: 0 };
       const text = layer.visual;
-      const direction = resolveParagraphDirections(node.text, node.direction ?? 'ltr')[0] ?? 'ltr';
+      const direction = resolveParagraphDirections(node.text, node.direction ?? 'auto')[0] ?? 'ltr';
       const hasBackgroundPlate =
         node.background !== undefined &&
         hasTextContent(node) &&
@@ -792,6 +909,7 @@ export async function createBrowserPixiRenderer(
         const layer = createLayer(node, videoBitmap);
         layers.addChild(layer);
         spriteMap.set(node.id, layer);
+        if (node.kind === 'text') ensureTextFontsReady(layer, node);
         created += 1;
       } else {
         if (existing.kind !== node.kind) {
@@ -816,7 +934,7 @@ export async function createBrowserPixiRenderer(
             existing.videoTexture = video.videoTexture;
           }
         } else if (node.kind === 'text' && existing.visual instanceof Text) {
-          updateTextVisual(existing.visual, node);
+          updateTextVisual(existing.visual, node, fontTextureGeneration);
         } else if (node.kind !== 'text' && existing.visual instanceof Graphics) {
           updateRectVisual(existing.visual, node);
         }
@@ -825,6 +943,7 @@ export async function createBrowserPixiRenderer(
         updateLayerTransform(existing, node);
         syncCropMask(existing, node);
         syncLayerEffects(existing, node);
+        if (node.kind === 'text') ensureTextFontsReady(existing, node);
         reused += 1;
       }
       drawCalls += 1;

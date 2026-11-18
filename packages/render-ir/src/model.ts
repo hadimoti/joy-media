@@ -129,7 +129,7 @@ export interface TextNode extends RenderNodeBase {
   readonly kind: 'text';
   readonly text: string;
   readonly color: Rgba;
-  /** Text direction. 'auto' resolves independently for each paragraph. Default 'ltr'. */
+  /** Text direction. 'auto' resolves independently for each paragraph and is the default. */
   readonly direction?: 'ltr' | 'rtl' | 'auto';
   /** How the rendered run anchors to transform.translate. Default 'left'. */
   readonly align?: 'left' | 'center' | 'right' | 'start' | 'end';

@@ -109,7 +109,7 @@ function collectGpuTextStyles(nodes: readonly RenderNode[]): Record<string, GpuT
       return;
     }
     if (node.kind !== 'text') return;
-    const requested = node.direction ?? 'ltr';
+    const requested = node.direction ?? 'auto';
     const lines = node.text.split(/\r\n|\n|\r/u);
     const lineDirections = lines.map((line) => resolveGpuTextDirection(line, requested));
     styles[node.id] = {
