@@ -10,6 +10,9 @@ const CLIENT_API_PATHS = ['/api/v1/auth/session', '/api/health', '/api/v1/billin
 /** Paths outside the API that must also return 404 from 404.html. */
 const MISSING_PATHS = ['/no-such-page', '/download/missing'];
 
+/** The release payload is six files (apps/site/src/release.mjs, payloadNames); the unit tests pin the list. */
+const PAYLOAD_FILE_COUNT = 6;
+
 function isOffSite(request: Request, origin: string): boolean {
   return new URL(request.url()).origin !== origin;
 }
@@ -56,7 +59,8 @@ test.describe('landing site preview', () => {
     const links = await page
       .locator('a[href*="/releases/download/"]')
       .evaluateAll((elements) => elements.map((element) => (element as HTMLAnchorElement).href));
-    expect(links).toHaveLength(4);
+    // The page may link a file twice (a button and a table row), so count distinct files.
+    expect([...new Set(links)]).toHaveLength(PAYLOAD_FILE_COUNT);
     for (const link of links) {
       expect(link).toMatch(
         /^https:\/\/github\.com\/hadimoti\/joy-media\/releases\/download\/v\d+\.\d+\.\d+\/[^/]+$/,
@@ -77,7 +81,7 @@ test.describe('landing site preview', () => {
       .evaluateAll((elements) =>
         elements.map((element) => element.getAttribute('data-sha256-state')),
       );
-    expect(cells).toHaveLength(4);
+    expect(cells).toHaveLength(PAYLOAD_FILE_COUNT);
     const expected = buildText.includes('hash_source=placeholder') ? 'placeholder' : 'published';
     expect(cells.every((state) => state === expected)).toBe(true);
   });
