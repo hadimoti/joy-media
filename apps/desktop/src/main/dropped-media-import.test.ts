@@ -257,7 +257,9 @@ function makeHarness(
   };
 }
 
-describe('dropped media import', () => {
+// The import service only runs in the Windows desktop app, and these cases rely on Windows file semantics (hard links,
+// zero inodes, MAX_PATH, Win32 path rules), so they run on Windows only.
+describe.skipIf(process.platform !== 'win32')('dropped media import', () => {
   it('mints opaque tickets and reports unsupported files in one plain skip message', async () => {
     const harness = makeHarness();
     harness.files.set(dropPath('clip.mp4'), { kind: 'file', bytes: new Uint8Array([1]) });
