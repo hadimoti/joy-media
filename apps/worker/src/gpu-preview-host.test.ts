@@ -11,7 +11,12 @@ afterEach(() => {
   harness.events.length = 0;
 });
 
-function textNode(id: string, text: string, fontFamily: string) {
+function textNode(
+  id: string,
+  text: string,
+  fontFamily: string,
+  direction: 'ltr' | 'rtl' | 'auto' | undefined = 'auto',
+) {
   return {
     kind: 'text' as const,
     id,
@@ -20,7 +25,7 @@ function textNode(id: string, text: string, fontFamily: string) {
     transform: { translateX: 20, translateY: 30, scaleX: 1, scaleY: 1 },
     text,
     color: { r: 255, g: 255, b: 255, a: 255 },
-    direction: 'auto' as const,
+    ...(direction === undefined ? {} : { direction }),
     align: 'start' as const,
     fontFamily,
     fontSizePx: 24,
@@ -83,6 +88,7 @@ describe('GpuPreviewHost text setup', () => {
           textNode('persian', '\u0633\u0644\u0627\u0645 \u06F1\u06F2\u06F3', 'Vazirmatn Variable'),
           textNode('arabic', '\u0645\u0631\u062D\u0628\u0627', 'Noto Sans Arabic'),
           textNode('latin', 'JOY Media', 'Inter Variable'),
+          textNode('legacy', '\u0633\u0644\u0627\u0645', 'Vazirmatn Variable', undefined),
         ],
       },
     } as unknown as Parameters<GpuPreviewHost['render']>[0];
@@ -125,6 +131,7 @@ describe('GpuPreviewHost text setup', () => {
       'Inter Variable',
     ]);
     expect(renderInput.textStyles?.latin?.fontFamilyStack[0]).toBe('Inter Variable');
+    expect(renderInput.textStyles?.legacy?.lineDirections).toEqual(['rtl']);
     await host.destroy();
   });
 

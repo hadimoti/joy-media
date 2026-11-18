@@ -3,6 +3,7 @@ import type * as Pixi from 'pixi.js';
 import { CanvasTextMetrics } from 'pixi.js';
 import type { ColorGradeIR, RenderFrameIR } from '@joy-media/render-ir';
 import { createBrowserPixiRenderer } from './browser.js';
+import { pixiTextDirectionOf } from './pixi-text-direction.js';
 
 /**
  * The real Pixi Application needs a GPU context, which a Node test does not
@@ -15,6 +16,13 @@ const harness = vi.hoisted(() => ({
   maxDrawingBuffer: Number.POSITIVE_INFINITY,
   renders: 0,
   persianFontReady: false,
+  renderedText: [] as Array<{
+    label: string;
+    text: string;
+    styleKey: string;
+    visible: boolean;
+    style: object;
+  }>,
 }));
 
 vi.mock('pixi.js', async (importOriginal) => {
@@ -39,6 +47,36 @@ vi.mock('pixi.js', async (importOriginal) => {
       },
       render: (): void => {
         harness.renders += 1;
+        const renderedText: typeof harness.renderedText = [];
+        const visit = (node: unknown): void => {
+          if (typeof node !== 'object' || node === null) return;
+          const displayObject = node as {
+            children?: readonly unknown[];
+            label?: unknown;
+            text?: unknown;
+            styleKey?: unknown;
+            visible?: unknown;
+            style?: unknown;
+          };
+          if (
+            typeof displayObject.label === 'string' &&
+            typeof displayObject.text === 'string' &&
+            typeof displayObject.styleKey === 'string' &&
+            typeof displayObject.style === 'object' &&
+            displayObject.style !== null
+          ) {
+            renderedText.push({
+              label: displayObject.label,
+              text: displayObject.text,
+              styleKey: displayObject.styleKey,
+              visible: displayObject.visible !== false,
+              style: displayObject.style,
+            });
+          }
+          displayObject.children?.forEach(visit);
+        };
+        visit(this.stage);
+        harness.renderedText = renderedText;
       },
     };
     constructor() {
@@ -71,6 +109,25 @@ const frame = (width: number, height: number): RenderFrameIR => ({
   nodes: [],
 });
 
+function stubTextMetrics(): void {
+  vi.spyOn(CanvasTextMetrics, 'measureText').mockImplementation((text, style) => {
+    const content = String(text ?? '');
+    const fontSize = Number(style?.fontSize ?? 16);
+    const width = [...content].length * fontSize * 0.5;
+    return {
+      text: content,
+      style,
+      width,
+      height: fontSize * 1.2,
+      lines: [content],
+      lineWidths: [width],
+      lineHeight: fontSize * 1.2,
+      maxLineWidth: width,
+      fontProperties: { ascent: fontSize * 0.8, descent: fontSize * 0.2, fontSize },
+    } as unknown as ReturnType<typeof CanvasTextMetrics.measureText>;
+  });
+}
+
 beforeEach(() => {
   vi.stubGlobal('document', {
     createElement: () => ({ getContext: () => null }),
@@ -78,6 +135,7 @@ beforeEach(() => {
   harness.maxDrawingBuffer = Number.POSITIVE_INFINITY;
   harness.renders = 0;
   harness.persianFontReady = false;
+  harness.renderedText = [];
 });
 
 afterEach(() => {
@@ -438,5 +496,95 @@ describe('text fonts that finish loading after the first Monitor frame', () => {
     expect(renderer.nodeBounds(caption.id)!.width).toBeLessThan(before.caption);
     expect(renderer.nodeBounds(englishTitle.id)!.width).toBe(before.english);
     renderer.destroy();
+  });
+
+  it('waits for a Persian title font and changes Pixi’s text cache key after loadingdone', async () => {
+    const pendingLoads: Array<{ font: string; text: string; resolve: () => void }> = [];
+    const titleText = '\u0633\u0644\u0627\u0645 \u06f1\u06f2\u06f3';
+    const fonts = Object.assign(new EventTarget(), {
+      load: vi.fn((font: string, text = '') => {
+        if (font.startsWith('16px ')) return Promise.resolve([]);
+        return new Promise<FontFace[]>((resolve) => {
+          pendingLoads.push({ font, text, resolve: () => resolve([]) });
+        });
+      }),
+    });
+    vi.stubGlobal('document', {
+      createElement: () => ({ getContext: () => null }),
+      fonts,
+    });
+    stubTextMetrics();
+
+    const renderer = await createBrowserPixiRenderer();
+    try {
+      const title = {
+        kind: 'text' as const,
+        id: 'late-persian-title',
+        zIndex: 0,
+        opacity: 1,
+        transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+        text: titleText,
+        direction: 'auto' as const,
+        align: 'start' as const,
+        fontFamily: 'Vazirmatn Variable',
+        fontSizePx: 108,
+        fontWeight: 850,
+        color: { r: 255, g: 255, b: 255, a: 255 },
+      };
+      renderer.render({ ...frame(800, 450), nodes: [title] });
+
+      const before = harness.renderedText.find(({ label }) => label === 'text:late-persian-title');
+      expect(before?.visible).toBe(false);
+      expect(pendingLoads).toContainEqual({
+        font: '850 108px "Vazirmatn Variable"',
+        text: titleText,
+        resolve: expect.any(Function),
+      });
+      expect(before?.style).toMatchObject({ fontWeight: '850' });
+
+      const beforeStyleKey = before!.styleKey;
+      pendingLoads.forEach(({ resolve }) => resolve());
+      fonts.dispatchEvent(new Event('loadingdone'));
+
+      await vi.waitFor(() => {
+        const after = harness.renderedText.find(({ label }) => label === 'text:late-persian-title');
+        expect(after?.visible).toBe(true);
+        expect(after?.styleKey).not.toBe(beforeStyleKey);
+      });
+    } finally {
+      renderer.destroy();
+    }
+  });
+
+  it('uses automatic direction for Persian text nodes without a stored direction', async () => {
+    stubTextMetrics();
+    const renderer = await createBrowserPixiRenderer();
+    try {
+      renderer.render({
+        ...frame(800, 450),
+        nodes: [
+          {
+            kind: 'text',
+            id: 'legacy-persian-title',
+            zIndex: 0,
+            opacity: 1,
+            transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+            text: '\u0633\u0644\u0627\u0645',
+            color: { r: 255, g: 255, b: 255, a: 255 },
+          },
+        ],
+      });
+
+      const rendered = harness.renderedText.find(
+        ({ label }) => label === 'text:legacy-persian-title',
+      );
+      expect(rendered).toBeDefined();
+      expect(pixiTextDirectionOf(rendered!.style)).toMatchObject({
+        direction: 'auto',
+        lineDirections: ['rtl'],
+      });
+    } finally {
+      renderer.destroy();
+    }
   });
 });

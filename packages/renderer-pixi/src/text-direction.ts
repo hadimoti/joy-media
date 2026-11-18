@@ -13,6 +13,14 @@ export interface WrappedCanvasText {
   readonly lineDirections: readonly ('ltr' | 'rtl')[];
 }
 
+export interface CanvasTextFontRequest {
+  readonly text: string;
+  readonly families: readonly string[];
+  readonly fontSizePx: number;
+  readonly fontWeight: number;
+  readonly italic: boolean;
+}
+
 export const CANVAS_TEXT_FONT_FAMILIES = [
   'Inter Variable',
   'Vazirmatn Variable',
@@ -36,8 +44,20 @@ export async function waitForCanvasTextFonts(): Promise<void> {
   );
 }
 
+export async function waitForCanvasTextFontsForText(request: CanvasTextFontRequest): Promise<void> {
+  if (typeof document === 'undefined' || document.fonts === undefined || request.text.length === 0)
+    return;
+  const style = `${request.italic ? 'italic ' : ''}${request.fontWeight} ${request.fontSizePx}px`;
+  await Promise.all(
+    [...new Set(request.families)].map((family) =>
+      document.fonts.load(`${style} ${JSON.stringify(family)}`, request.text),
+    ),
+  );
+}
+
 const RTL_STRONG = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff\u{1ee00}-\u{1eeff}]/u;
 const PERSIAN_SPECIFIC = /[\u067e\u0686\u0698\u06a9\u06af\u06cc\u06f0-\u06f9\u200c]/u;
+const ARABIC_JOINING_SCRIPT = /\p{Script=Arabic}/u;
 const segmenterCache = new Map<string, Intl.Segmenter>();
 
 function getSegmenter(
@@ -75,6 +95,11 @@ export function countTextGraphemes(text: string): number {
   return segmenter === undefined
     ? fallbackGraphemes(text).length
     : [...segmenter.segment(text)].length;
+}
+
+/** Keep Arabic/Persian letters joined by omitting character tracking for their runs. */
+export function resolveCanvasTextTracking(text: string, tracking: number): number {
+  return ARABIC_JOINING_SCRIPT.test(text) ? 0 : tracking;
 }
 
 export function resolveParagraphDirection(

@@ -1,5 +1,6 @@
 import { CanvasTextGenerator, CanvasTextMetrics } from 'pixi.js';
 import {
+  resolveCanvasTextTracking,
   resolveCanvasTextAlign,
   resolveParagraphDirection,
   type CanvasTextAlignment,
@@ -71,6 +72,23 @@ export function registerPixiTextDirection(style: object, options: PixiTextDirect
   installCanvasTextDirectionAdapter();
 }
 
+export function pixiTextAlignmentOffset(
+  lineWidth: number,
+  alignWidth: number,
+  align: CanvasTextAlignment,
+  direction: 'ltr' | 'rtl',
+): number {
+  const alignment = resolveCanvasTextAlign(align, direction);
+  if (align === 'start' || align === 'end') {
+    if (alignment === 'right') return alignWidth;
+    if (alignment === 'center') return alignWidth / 2;
+    return 0;
+  }
+  if (alignment === 'right') return alignWidth - lineWidth;
+  if (alignment === 'center') return (alignWidth - lineWidth) / 2;
+  return 0;
+}
+
 function installCanvasTextDirectionAdapter(): void {
   if (installed) return;
   installed = true;
@@ -91,6 +109,8 @@ function installCanvasTextDirectionAdapter(): void {
     const previousDirection = context.direction;
     const previousTextAlign = context.textAlign;
     const previousActiveMeasure = activeMeasure;
+    // Pixi caches by text and styleKey. TextStyle gives each instance a unique styleKey,
+    // so direction registered to separate styles stays in separate measurement entries.
     context.direction = options.lineDirections[0] ?? 'ltr';
     context.textAlign = canvasTextAlign(options.align);
     activeMeasure = { options, lineIndex: 0 };
@@ -115,7 +135,8 @@ function installCanvasTextDirectionAdapter(): void {
     context.direction = direction;
     context.textAlign = canvasTextAlign(active.options.align);
     try {
-      return Reflect.apply(measureLine, this, args) as number;
+      const letterSpacing = resolveCanvasTextTracking(String(args[0] ?? ''), Number(args[1] ?? 0));
+      return Reflect.apply(measureLine, this, [args[0], letterSpacing, context]) as number;
     } finally {
       context.direction = previousDirection;
       context.textAlign = previousTextAlign;
@@ -160,17 +181,12 @@ function installCanvasTextDirectionAdapter(): void {
     const lineCount = Math.max(1, active.options.lineDirections.length);
     const direction = active.options.lineDirections[active.alignmentIndex % lineCount] ?? 'ltr';
     active.alignmentIndex += 1;
-    const lineWidth = Number(args[0]);
-    const alignWidth = Number(args[1]);
-    const alignment = resolveCanvasTextAlign(active.options.align, direction);
-    if (active.options.align === 'start' || active.options.align === 'end') {
-      if (alignment === 'right') return alignWidth;
-      if (alignment === 'center') return alignWidth / 2;
-      return 0;
-    }
-    if (alignment === 'right') return alignWidth - lineWidth;
-    if (alignment === 'center') return (alignWidth - lineWidth) / 2;
-    return 0;
+    return pixiTextAlignmentOffset(
+      Number(args[0]),
+      Number(args[1]),
+      active.options.align,
+      direction,
+    );
   };
 
   generator._drawLetterSpacing = function (...args: unknown[]): void {
@@ -203,14 +219,14 @@ function installCanvasTextDirectionAdapter(): void {
           resolveParagraphDirection(text, 'auto'))
         : resolveParagraphDirection(text, active.options.direction);
     const wordSpacing = Number(args[6] ?? 0);
+    const requestedTracking = Number(textStyle.letterSpacing ?? 0);
+    const preservesArabicJoining =
+      requestedTracking !== 0 && resolveCanvasTextTracking(text, requestedTracking) === 0;
     active.drawIndex += 1;
     context.direction = direction;
     context.textAlign = canvasTextAlign(active.options.align);
     try {
-      if (
-        direction === 'rtl' &&
-        (wordSpacing !== 0 || Number(textStyle.letterSpacing ?? 0) !== 0)
-      ) {
+      if (preservesArabicJoining || (direction === 'rtl' && wordSpacing !== 0)) {
         if ('letterSpacing' in context) context.letterSpacing = '0px';
         if ('textLetterSpacing' in context) context.textLetterSpacing = '0px';
         const x = Number(args[3]);

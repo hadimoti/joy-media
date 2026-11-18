@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CanvasTextGenerator, CanvasTextMetrics } from 'pixi.js';
-import { registerPixiTextDirection } from './pixi-text-direction.js';
+import { pixiTextAlignmentOffset, registerPixiTextDirection } from './pixi-text-direction.js';
 
 interface TestCanvasContext {
   direction: 'ltr' | 'rtl' | 'inherit';
@@ -178,4 +178,22 @@ describe('Pixi Canvas text direction adapter', () => {
     expect(trackedCalls.every(({ textAlign }) => textAlign === 'start')).toBe(true);
     expect(context).toMatchObject({ direction: 'inherit', textAlign: 'start' });
   });
+
+  it.each([
+    { direction: 'ltr', align: 'start', expected: 0 },
+    { direction: 'ltr', align: 'end', expected: 100 },
+    { direction: 'ltr', align: 'left', expected: 0 },
+    { direction: 'ltr', align: 'right', expected: 80 },
+    { direction: 'ltr', align: 'center', expected: 40 },
+    { direction: 'rtl', align: 'start', expected: 100 },
+    { direction: 'rtl', align: 'end', expected: 0 },
+    { direction: 'rtl', align: 'left', expected: 0 },
+    { direction: 'rtl', align: 'right', expected: 80 },
+    { direction: 'rtl', align: 'center', expected: 40 },
+  ] as const)(
+    'uses the correct $direction $align canvas offset',
+    ({ direction, align, expected }) => {
+      expect(pixiTextAlignmentOffset(20, 100, align, direction)).toBe(expected);
+    },
+  );
 });
