@@ -6,6 +6,19 @@ test('offline and recorder MP4 exports keep stable real pixels on repeated expor
 }) => {
   await page.goto('/src/offline-mp4-export.ts');
   await page.mouse.click(10, 10);
+  // The Chromium build of a Linux CI runner has no H.264 encoder; the export itself refuses there.
+  const canEncodeH264 = await page.evaluate(async () => {
+    if (typeof VideoEncoder === 'undefined') return false;
+    const support = await VideoEncoder.isConfigSupported({
+      codec: 'avc1.42001f',
+      width: 160,
+      height: 90,
+      framerate: 30,
+      bitrate: 2_000_000,
+    });
+    return support.supported === true;
+  });
+  test.skip(!canEncodeH264, 'This browser cannot encode H.264, so the MP4 pixel check cannot run.');
   const rendererExportModule = `/@fs/${join(process.cwd(), 'packages/renderer-pixi/src/browser-export.ts').split(String.fromCharCode(92)).join('/')}`;
   const mediabunnyModule = `/@fs/${join(process.cwd(), 'apps/editor-web/node_modules/mediabunny/dist/modules/src/index.js').split(String.fromCharCode(92)).join('/')}`;
   const codecDataModule = `/@fs/${join(process.cwd(), 'apps/editor-web/node_modules/mediabunny/dist/modules/src/codec-data.js').split(String.fromCharCode(92)).join('/')}`;

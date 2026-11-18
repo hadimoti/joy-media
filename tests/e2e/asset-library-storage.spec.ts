@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { authenticate, openDisposableWorkspace, openPanel } from './wp29-r5-harness.js';
-import { assertBrowserAudit, setupBrowserAudit } from './helpers/browser-console-audit.js';
+import {
+  allowExpectedConsoleError,
+  assertBrowserAudit,
+  setupBrowserAudit,
+} from './helpers/browser-console-audit.js';
 
 test.beforeEach(({ page }) => {
   setupBrowserAudit(page);
@@ -13,6 +17,9 @@ test.afterEach(async ({ page }, testInfo) => {
 test('an upgraded install can reselect its previous library and restore its catalog', async ({
   page,
 }) => {
+  // The fixture pretends to be the desktop app, so the library picture card asks for a joy-asset://
+  // address that only the real desktop protocol handler can answer; a plain browser reports it once.
+  allowExpectedConsoleError(page, { pattern: /ERR_UNKNOWN_URL_SCHEME/ });
   await authenticate(page);
   await openDisposableWorkspace(page, `Storage upgrade ${Date.now()}`);
 

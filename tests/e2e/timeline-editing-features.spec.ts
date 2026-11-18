@@ -38,7 +38,12 @@ test.describe('Timeline editing features — aspect ratio, merge, and speed', ()
     page,
   }) => {
     await openReferenceWorkspace(page);
-    const clips = page.locator('.timeline-track[data-track-id]').first().locator('.timeline-clip');
+    // The timeline lists an empty V1 track above the layer that holds the reference clips.
+    const clips = page
+      .locator('.timeline-track[data-track-id]')
+      .filter({ has: page.locator('.timeline-clip') })
+      .first()
+      .locator('.timeline-clip');
     const first = clips.nth(0);
     const second = clips.nth(1);
     await first.click();
