@@ -466,92 +466,83 @@ rows.push({
     const onConsole = (message) =>
       consoleTail.push(`${message.type()}: ${message.text()}`.slice(0, 160));
     page.on?.('console', onConsole);
-    await page.getByRole('button', EXPORT_BUTTON).click();
-    // The button is idle before the click, so "not busy" is already true: wait for the export to start first,
-    // then for it to finish, and require a message. Without this the row passed on an empty page.
-    await page
-      .waitForFunction(
-        () => document.querySelector('.header-export-btn')?.getAttribute('aria-busy') === 'true',
-        undefined,
-        { timeout: 15_000 },
-      )
-      .catch(() => {
-        throw new Error('the export did not start (the button never became busy)');
-      });
-    // The export button goes idle between the encode and the Worker's final step, so idle is not "done". Like the
-    // other export rows, poll until the exported file is in the scratch download folder and the button is idle,
-    // or until a refusal or failure toast shows (a clean export removes its toast at once).
-    const exportDeadline = Date.now() + (ctx.exportTimeoutMs ?? 240_000);
-    let toast = '';
-    let lastSize = -1;
-    const stateTrail = [];
-    while (Date.now() < exportDeadline) {
-      toast = await page
-        .locator('.export-toast')
-        .innerText({ timeout: 500 })
-        .catch(() => '');
-      if (/failed|error|missing media|cannot resolve/iu.test(toast)) break;
-      const busy = await page
-        .locator('.header-export-btn')
-        .getAttribute('aria-busy')
-        .catch(() => null);
-      const size = freshMp4Size(ctx.downloadDir, startedAt);
-      const seen = await page
-        .evaluate(() => {
-          const progress = document.querySelector('.export-progress');
-          return `busy=${document.querySelector('.header-export-btn')?.getAttribute('aria-busy')} progress=${progress?.getAttribute('style') ?? progress?.textContent ?? '-'} toast=${document.querySelector('.export-toast')?.textContent ?? '-'}`;
-        })
-        .catch(() => 'page gone');
-      if (stateTrail[stateTrail.length - 1]?.text !== seen)
-        stateTrail.push({ at: Math.round((Date.now() - startedAt) / 1000), text: seen });
-      if (size > 0 && size === lastSize && busy !== 'true') break;
-      lastSize = size;
-      await page.waitForTimeout(1_000);
-    }
-    if (toast === '' && !hasFreshMp4(ctx.downloadDir, startedAt)) {
-      const where = await ctx.shot('D-A05-60', 'no-file');
-      if (ctx.outDir) {
-        const dir = join(ctx.outDir, 'D-A05-60');
-        mkdirSync(dir, { recursive: true });
-        const trail = stateTrail.map((entry) => `${entry.at}s ${entry.text}`).join('\n');
-        writeFileSync(
-          join(dir, 'state-trail.txt'),
-          `${trail}\n--- console\n${consoleTail.join('\n')}\n`,
-          'utf8',
+    try {
+      await page.getByRole('button', EXPORT_BUTTON).click();
+      // The button is idle before the click, so "not busy" is already true: wait for the export to start first.
+      await page
+        .waitForFunction(
+          () => document.querySelector('.header-export-btn')?.getAttribute('aria-busy') === 'true',
+          undefined,
+          { timeout: 15_000 },
+        )
+        .catch(() => {
+          throw new Error('the export did not start (the button never became busy)');
+        });
+      // The export button goes idle between the encode and the Worker's final step, so idle is not "done". Like
+      // the other export rows, poll until the exported file is in the scratch download folder and the button is
+      // idle, or until a refusal or failure toast shows (a clean export removes its toast at once).
+      const exportDeadline = Date.now() + (ctx.exportTimeoutMs ?? 240_000);
+      let toast = '';
+      let lastSize = -1;
+      const stateTrail = [];
+      while (Date.now() < exportDeadline) {
+        toast = await page
+          .locator('.export-toast')
+          .innerText({ timeout: 500 })
+          .catch(() => '');
+        if (/failed|error|missing media|cannot resolve/iu.test(toast)) break;
+        const busy = await page
+          .locator('.header-export-btn')
+          .getAttribute('aria-busy')
+          .catch(() => null);
+        const size = freshMp4Size(ctx.downloadDir, startedAt);
+        const seen = await page
+          .evaluate(() => {
+            const progress = document.querySelector('.export-progress');
+            return `busy=${document.querySelector('.header-export-btn')?.getAttribute('aria-busy')} progress=${progress?.getAttribute('style') ?? progress?.textContent ?? '-'} toast=${document.querySelector('.export-toast')?.textContent ?? '-'}`;
+          })
+          .catch(() => 'page gone');
+        if (stateTrail[stateTrail.length - 1]?.text !== seen)
+          stateTrail.push({ at: Math.round((Date.now() - startedAt) / 1000), text: seen });
+        if (size > 0 && size === lastSize && busy !== 'true') break;
+        lastSize = size;
+        await page.waitForTimeout(1_000);
+      }
+      const first = toast.split('\n')[0] ?? '';
+      const hasFile = hasFreshMp4(ctx.downloadDir, startedAt);
+      // A refusal or a failure names itself, with or without a file.
+      if (/cannot resolve visual asset/iu.test(toast)) {
+        throw new Error(`known failure still present: ${first}`);
+      }
+      if (/missing media in this export/iu.test(toast)) {
+        throw new Error(`the sample ships without a clip's media: ${first}`);
+      }
+      if (/failed|error/iu.test(toast)) throw new Error(`export ended with: ${first}`);
+      // Success needs the file. A toast that is still showing progress at the deadline is not a pass.
+      if (!hasFile) {
+        const where = await ctx.shot('D-A05-60', 'no-file');
+        if (ctx.outDir) {
+          const dir = join(ctx.outDir, 'D-A05-60');
+          mkdirSync(dir, { recursive: true });
+          const trail = stateTrail.map((entry) => `${entry.at}s ${entry.text}`).join('\n');
+          writeFileSync(
+            join(dir, 'state-trail.txt'),
+            `${trail}\n--- console\n${consoleTail.join('\n')}\n`,
+            'utf8',
+          );
+        }
+        throw new Error(
+          `the export ended with no MP4 in the scratch download folder (status: "${first || 'none'}"; screenshot ${where}; the state trail is next to it)`,
         );
       }
-      let dialogs = [];
-      try {
-        dialogs = await page.locator('[role="dialog"], [role="alertdialog"]').allInnerTexts();
-      } catch {
-        // diagnostics only
-      }
-      let toasts = [];
-      try {
-        toasts = await page.locator('[class*="toast"]').allInnerTexts();
-      } catch {
-        // diagnostics only
-      }
-      throw new Error(
-        `the export ended with no message and no MP4 in the scratch download folder (screenshot ${where}; open dialogs: ${dialogs.join(' | ').slice(0, 300) || 'none'}; toasts: ${toasts.join(' | ').slice(0, 300) || 'none'}; console: ${consoleTail.slice(-4).join(' // ')}; trail: ${stateTrail
-          .slice(0, 14)
-          .map((entry) => `${entry.at}s ${entry.text}`)
-          .join(' | ')})`,
-      );
+      const shot = await ctx.shot('D-A05-60', 'export');
+      return {
+        message: `export of "${EDITOR_PROJECT}" wrote an MP4 (${first || 'no toast'})`,
+        evidence: [shot],
+      };
+    } finally {
+      page.off?.('console', onConsole);
     }
-    const first = toast.split('\n')[0] ?? '';
-    const shot = await ctx.shot('D-A05-60', 'export');
-    if (/cannot resolve visual asset/iu.test(toast)) {
-      throw new Error(`known failure still present: ${first}`);
-    }
-    if (/missing media in this export/iu.test(toast)) {
-      throw new Error(`the sample ships without a clip's media: ${first}`);
-    }
-    if (/failed|error/iu.test(toast)) throw new Error(`export ended with: ${first}`);
-    return {
-      message: `export of "${EDITOR_PROJECT}" ended: ${first || 'no toast'}`,
-      evidence: [shot],
-    };
   },
 });
 

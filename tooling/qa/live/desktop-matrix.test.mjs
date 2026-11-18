@@ -601,6 +601,12 @@ test('D-A05-60 fails with the known "cannot resolve visual asset" message and pa
   const noFile = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
   assert.equal(noFile.status, 'failed');
   assert.match(noFile.message, /no MP4 in the scratch download folder/u);
+  // A progress toast that is still showing at the deadline is not a pass without the file.
+  app.world.textByKey['.export-toast'] = 'Encoding 50%…';
+  const stalled = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
+  assert.equal(stalled.status, 'failed');
+  assert.match(stalled.message, /no MP4 in the scratch download folder/u);
+  app.world.textByKey['.export-toast'] = '';
   writeFileSync(join(ctx.downloadDir, 'Local editor project.mp4'), Buffer.from([0, 0, 0, 24]));
   const passed = await executeRow(PROJECTS_IMPORT_ROWS_BY_ID['D-A05-60'], app.page, ctx);
   assert.equal(passed.status, 'passed', passed.message);
