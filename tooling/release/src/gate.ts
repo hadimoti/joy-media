@@ -94,6 +94,59 @@ export interface ReleaseAttendedEvidence {
   readonly candidateVersion?: string;
   /** Reasons the receipts can not be tied to the commit under test (see resolveAttendedCandidate). Empty when they can. */
   readonly bindingProblems?: readonly string[];
+  /**
+   * The owner's written decision to release without the Windows Sandbox receipts (sandbox-waiver.json in the
+   * candidate's attended folder). Read as data: lifecycleWaiver checks that it names the candidate.
+   */
+  readonly sandboxWaiver?: unknown;
+}
+
+export const SANDBOX_WAIVER_SCHEMA = 'joy-media.sandbox-waiver/1';
+
+export interface SandboxWaiver {
+  readonly schema: typeof SANDBOX_WAIVER_SCHEMA;
+  readonly candidateSha: string;
+  readonly owner: string;
+  readonly decidedAt: string;
+  /** The owner's own words, so the record shows what was decided. */
+  readonly ownerWords: string;
+  readonly reason: string;
+}
+
+/** The waiver when it is complete and names this candidate; otherwise undefined. */
+export function validSandboxWaiver(
+  evidence: ReleaseAttendedEvidence | null | undefined,
+): SandboxWaiver | undefined {
+  const value = evidence?.sandboxWaiver;
+  if (evidence === null || evidence === undefined || typeof value !== 'object' || value === null)
+    return undefined;
+  const waiver = value as Record<string, unknown>;
+  const text = (key: string): string | undefined =>
+    typeof waiver[key] === 'string' && (waiver[key] as string).trim() !== ''
+      ? (waiver[key] as string)
+      : undefined;
+  const owner = text('owner');
+  const decidedAt = text('decidedAt');
+  const ownerWords = text('ownerWords');
+  const reason = text('reason');
+  if (
+    waiver.schema !== SANDBOX_WAIVER_SCHEMA ||
+    waiver.candidateSha !== evidence.candidateSha ||
+    owner === undefined ||
+    decidedAt === undefined ||
+    !Number.isFinite(Date.parse(decidedAt)) ||
+    ownerWords === undefined ||
+    reason === undefined
+  )
+    return undefined;
+  return {
+    schema: SANDBOX_WAIVER_SCHEMA,
+    candidateSha: evidence.candidateSha,
+    owner,
+    decidedAt,
+    ownerWords,
+    reason,
+  };
 }
 
 export interface ReleaseGateInput {
@@ -354,13 +407,7 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
           performanceEvidenceMessage(input.performanceEvidence, input.sourceProvenance, now),
         ),
     ...(localOnly
-      ? [
-          check(
-            'lifecycle-evidence',
-            lifecycleBlockers(input.attendedEvidence).length === 0,
-            lifecycleMessage(input.attendedEvidence),
-          ),
-        ]
+      ? [lifecycleCheck(input.attendedEvidence)]
       : [
           check(
             'operational-evidence',
@@ -464,6 +511,24 @@ function lifecycleMessage(evidence: ReleaseAttendedEvidence | null | undefined):
   return blockers.length === 0
     ? 'Windows Sandbox install, upgrades over v1.0.2 and v1.1.0 and uninstall passed on the candidate setup'
     : `Sandbox receipts are incomplete: ${blockers.join('; ')}`;
+}
+
+/**
+ * The Sandbox check. It fails while a receipt is missing or wrong. The owner may waive it for one candidate in
+ * writing (sandbox-waiver.json); the report then says 'waived' with the owner's words and every blocker, so the
+ * waiver can never be read as a pass.
+ */
+function lifecycleCheck(evidence: ReleaseAttendedEvidence | null | undefined): ReleaseCheck {
+  const blockers = lifecycleBlockers(evidence);
+  if (blockers.length === 0) return check('lifecycle-evidence', true, lifecycleMessage(evidence));
+  const waiver = validSandboxWaiver(evidence);
+  if (waiver === undefined) return check('lifecycle-evidence', false, lifecycleMessage(evidence));
+  return {
+    id: 'lifecycle-evidence',
+    status: 'waived',
+    message: `WAIVED by ${waiver.owner} on ${waiver.decidedAt}: ${waiver.reason} (owner's words: "${waiver.ownerWords}"). Not passed. Missing or failing: ${blockers.join('; ')}`,
+    critical: true,
+  };
 }
 
 function check(id: string, passed: boolean, message: string, critical = true): ReleaseCheck {
@@ -1507,6 +1572,7 @@ export function readAttendedEvidence(
     sandboxLifecycle: readJson('sandbox-lifecycle.json'),
     sandboxUpgrade: readJson('sandbox-upgrade.json'),
     sandboxUpgradeFrom110: readJson('sandbox-upgrade-from-1.1.0.json'),
+    sandboxWaiver: readJson('sandbox-waiver.json'),
     candidateVersion,
     bindingProblems: [...bindingProblems, ...setupProblems],
   };

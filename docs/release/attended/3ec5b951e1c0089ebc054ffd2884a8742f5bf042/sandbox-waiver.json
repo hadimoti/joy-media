@@ -1,0 +1,8 @@
+{
+  "schema": "joy-media.sandbox-waiver/1",
+  "candidateSha": "3ec5b951e1c0089ebc054ffd2884a8742f5bf042",
+  "owner": "Hadi",
+  "decidedAt": "2026-11-18T07:17:00.000Z",
+  "ownerWords": "YES GO ON WITHOUT SANDBOX. we will figure out at the end if its failed to be installed",
+  "reason": "Windows Sandbox on this PC blocks every unsigned installer (Application Control policy inside the Sandbox, three attempts on the candidate and one on the v1.1.0 setup that passed on 12 Nov); the clean install and both upgrade paths were therefore not observed in a clean Windows for this candidate"
+}

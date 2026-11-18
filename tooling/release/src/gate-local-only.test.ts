@@ -152,6 +152,74 @@ const status = (overrides: Partial<ReleaseGateInput>, id: string): string | unde
 const ids = (overrides: Partial<ReleaseGateInput>): string[] =>
   evaluateReleaseGate(input(overrides), NOW).checks.map((item) => item.id);
 
+const WAIVER = {
+  schema: 'joy-media.sandbox-waiver/1',
+  candidateSha: CANDIDATE,
+  owner: 'Hadi',
+  decidedAt: '2026-11-18T11:00:00.000Z',
+  ownerWords: 'GO ON WITHOUT SANDBOX',
+  reason: 'Windows Sandbox blocks every unsigned installer on this host',
+};
+
+describe('owner waiver of the Sandbox receipts', () => {
+  const noSandbox = (extra: Record<string, unknown> = {}) =>
+    evidence({
+      sandboxLifecycle: undefined,
+      sandboxUpgrade: undefined,
+      sandboxUpgradeFrom110: undefined,
+      ...extra,
+    });
+  const run = (attendedEvidence: ReleaseAttendedEvidence) =>
+    evaluateReleaseGate(input({ profile: 'local-only', attendedEvidence }), NOW);
+  /** The checks that fail for a reason other than the Sandbox, with complete receipts: the baseline. */
+  const failedIds = (result: ReturnType<typeof run>): string[] =>
+    result.checks.filter((entry) => entry.status === 'failed').map((entry) => entry.id);
+  const baseline = failedIds(run(evidence()));
+
+  it('fails without a waiver', () => {
+    expect(failedIds(run(noSandbox()))).toEqual([...baseline, 'lifecycle-evidence']);
+  });
+
+  it('shows waived, never passed, with the owner words and the blockers, when the owner waived this candidate', () => {
+    const result = run(noSandbox({ sandboxWaiver: WAIVER }));
+    const item = result.checks.find((entry) => entry.id === 'lifecycle-evidence');
+    expect(item?.status).toBe('waived');
+    expect(item?.message).toContain('GO ON WITHOUT SANDBOX');
+    expect(item?.message).toContain('lifecycle: the receipt is missing');
+    expect(failedIds(result)).toEqual(baseline);
+  });
+
+  it('ignores a waiver for another candidate or an incomplete one', () => {
+    for (const bad of [
+      { candidateSha: 'b'.repeat(40) },
+      { ownerWords: ' ' },
+      { schema: 'other' },
+      { decidedAt: 'soon' },
+    ]) {
+      expect(failedIds(run(noSandbox({ sandboxWaiver: { ...WAIVER, ...bad } })))).toContain(
+        'lifecycle-evidence',
+      );
+    }
+  });
+
+  it('does not touch the attended journey check', () => {
+    const result = run(noSandbox({ sandboxWaiver: WAIVER, receipts: {} }));
+    expect(result.checks.find((entry) => entry.id === 'attended-journey')?.status).toBe('failed');
+  });
+
+  it('reads sandbox-waiver.json from the candidate folder', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-waiver-'));
+    try {
+      const folder = join(root, 'docs', 'release', 'attended', CANDIDATE);
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, 'sandbox-waiver.json'), JSON.stringify(WAIVER));
+      expect(readAttendedEvidence(root, CANDIDATE)?.sandboxWaiver).toEqual(WAIVER);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('local-only gate profile', () => {
   it('keeps the standard checks and leaves out the two the local build cannot have', () => {
     const standard = ids({});
