@@ -79,6 +79,13 @@ async function selectAssetCategory(page: Page, fileName: string): Promise<void> 
 async function previewAsset(page: Page, displayName: string): Promise<void> {
   await selectAssetCategory(page, displayName);
   const card = page.locator('.asset-card', { hasText: displayName }).first();
+  if (assetCategory(displayName).source === '^Images') {
+    // A picture already shows on its card: it has no preview button and opens no large copy above the grid.
+    await expect(card.getByRole('button', { name: `Preview ${displayName}` })).toHaveCount(0);
+    await card.click();
+    await expect(page.getByRole('region', { name: `Preview: ${displayName}` })).toHaveCount(0);
+    return;
+  }
   await card.getByRole('button', { name: `Preview ${displayName}` }).click();
   const preview = page.getByRole('region', { name: `Preview: ${displayName}` });
   await expect(preview).toBeVisible();
