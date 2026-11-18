@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveTestApiBaseUrl, resolveTestDownloadDirectory } from './test-api-override.js';
 
@@ -49,20 +51,21 @@ describe('resolveTestApiBaseUrl', () => {
 });
 
 describe('resolveTestDownloadDirectory', () => {
-  const userDataDirectory = 'C:\\temp\\joy-media-profile';
+  const userDataDirectory = path.join(tmpdir(), 'joy-media-profile');
+  const downloadDirectory = path.join(userDataDirectory, 'downloads');
 
   it('requires desktop test mode and confines test downloads to the disposable profile', () => {
     expect(
       resolveTestDownloadDirectory({
         argv: ['--joy-media-test-mode'],
-        env: { JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY: 'C:\\temp\\joy-media-profile\\downloads' },
+        env: { JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY: downloadDirectory },
         userDataDirectory,
       }),
-    ).toBe('C:\\temp\\joy-media-profile\\downloads');
+    ).toBe(downloadDirectory);
     expect(
       resolveTestDownloadDirectory({
         argv: [],
-        env: { JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY: 'C:\\Users\\test\\Downloads' },
+        env: { JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY: path.join(tmpdir(), 'Downloads') },
         userDataDirectory,
       }),
     ).toBeUndefined();
@@ -78,7 +81,7 @@ describe('resolveTestDownloadDirectory', () => {
     ).toBeUndefined();
   });
 
-  it.each(['C:\\Users\\test\\Downloads', 'C:\\temp\\joy-media-profile', 'downloads'])(
+  it.each([path.join(tmpdir(), 'Downloads'), userDataDirectory, 'downloads'])(
     'rejects configured download paths outside the disposable profile: %s',
     (directory) => {
       expect(() =>

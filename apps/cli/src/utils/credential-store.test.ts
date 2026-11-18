@@ -228,8 +228,11 @@ describe('credential store', () => {
       });
       expect(store.list()).toEqual([firstProfile, secondProfile]);
       const stored = readFileSync(join(getJoyMediaDir(), 'credentials.json'), 'utf8');
-      expect(stored).not.toContain(OPENROUTER.apiKey);
-      expect(stored).not.toContain(CUSTOM.apiKey);
+      // Non-Windows uses the documented owner-only plaintext fallback, not DPAPI encryption.
+      if (process.platform === 'win32') {
+        expect(stored).not.toContain(OPENROUTER.apiKey);
+        expect(stored).not.toContain(CUSTOM.apiKey);
+      }
       const providerMetadata = readFileSync(getAiProvidersPath(), 'utf8');
       expect(providerMetadata).not.toContain(OPENROUTER.apiKey);
       expect(providerMetadata).not.toContain(CUSTOM.apiKey);
@@ -456,8 +459,11 @@ describe('provider metadata', () => {
       expect(metadata).toContain('"authKind": "oauth"');
       expect(metadata).not.toContain(credential.tokenRecord.accessToken);
       expect(metadata).not.toContain(credential.tokenRecord.refreshToken);
-      expect(stored).not.toContain(credential.tokenRecord.accessToken);
-      expect(stored).not.toContain(credential.tokenRecord.refreshToken);
+      // Non-Windows uses the documented owner-only plaintext fallback, not DPAPI encryption.
+      if (process.platform === 'win32') {
+        expect(stored).not.toContain(credential.tokenRecord.accessToken);
+        expect(stored).not.toContain(credential.tokenRecord.refreshToken);
+      }
       expect(loadAiProviders()['kimi-profile']).not.toHaveProperty('apiKey');
       expect(loadAiProviders()['kimi-profile']?.authKind).toBe('oauth');
       expect(loadAiProviders().legacy).toMatchObject({ apiKey: CUSTOM.apiKey });

@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createFileRegistry } from './file-registry.js';
 import {
@@ -10,6 +12,12 @@ import {
 } from './dropped-media-import.js';
 import type { LocalOriginalWriter } from './local-originals.js';
 import type { LocalAssetRegistration } from '../store/local-assets.js';
+
+const DROP_ROOT = path.join(tmpdir(), 'joy-dropped-media-test');
+
+function dropPath(...segments: string[]): string {
+  return path.join(DROP_ROOT, ...segments);
+}
 
 interface FakeFileInfo {
   readonly kind: 'file' | 'directory';
@@ -100,14 +108,14 @@ function makeHarness(
       return handle;
     },
     opendir: async (directory: string) => {
-      const prefix = directory.endsWith('\\') ? directory : `${directory}\\`;
+      const prefix = directory.endsWith(path.sep) ? directory : `${directory}${path.sep}`;
       return {
         close: async () => undefined,
         async *[Symbol.asyncIterator]() {
           for (const candidate of files.keys()) {
             if (!candidate.startsWith(prefix)) continue;
             const name = candidate.slice(prefix.length);
-            if (name.includes('\\')) continue;
+            if (name.includes(path.sep)) continue;
             directoryYieldCounts.set(directory, (directoryYieldCounts.get(directory) ?? 0) + 1);
             yield {
               name,
@@ -249,23 +257,25 @@ function makeHarness(
   };
 }
 
-describe('dropped media import', () => {
+// The import service only runs in the Windows desktop app, and these cases rely on Windows file semantics (hard links,
+// zero inodes, MAX_PATH, Win32 path rules), so they run on Windows only.
+describe.skipIf(process.platform !== 'win32')('dropped media import', () => {
   it('mints opaque tickets and reports unsupported files in one plain skip message', async () => {
     const harness = makeHarness();
-    harness.files.set('C:\\drop\\clip.mp4', { kind: 'file', bytes: new Uint8Array([1]) });
-    harness.files.set('C:\\drop\\notes.docx', { kind: 'file', bytes: new Uint8Array([2]) });
-    harness.files.set('C:\\drop\\data.zip', { kind: 'file', bytes: new Uint8Array([3]) });
+    harness.files.set(dropPath('clip.mp4'), { kind: 'file', bytes: new Uint8Array([1]) });
+    harness.files.set(dropPath('notes.docx'), { kind: 'file', bytes: new Uint8Array([2]) });
+    harness.files.set(dropPath('data.zip'), { kind: 'file', bytes: new Uint8Array([3]) });
 
     const result = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\clip.mp4', name: 'clip.mp4' },
-      { path: 'C:\\drop\\notes.docx', name: 'notes.docx' },
-      { path: 'C:\\drop\\data.zip', name: 'data.zip' },
+      { path: dropPath('clip.mp4'), name: 'clip.mp4' },
+      { path: dropPath('notes.docx'), name: 'notes.docx' },
+      { path: dropPath('data.zip'), name: 'data.zip' },
     ]);
 
     expect(result.tickets).toHaveLength(1);
     expect(result.tickets[0]).toMatchObject({ displayName: 'clip.mp4', mediaKind: 'video' });
     expect(result.skippedMessage).toBe('2 files were skipped: notes.docx, data.zip');
-    expect(JSON.stringify(result)).not.toContain('C:\\drop');
+    expect(JSON.stringify(result)).not.toContain(dropPath());
   });
 
   it('does not import a ticket id that the main process did not mint', async () => {
@@ -277,25 +287,28 @@ describe('dropped media import', () => {
     expect(harness.originals.appendOriginalChunk).not.toHaveBeenCalled();
   });
 
-  it('rejects UNC, device, and reserved-name paths before stat or read', async () => {
-    const harness = makeHarness();
-    const batch = await harness.service.prepareDroppedPaths([
-      { path: '\\\\server\\share\\clip.mp4', name: 'clip.mp4' },
-      { path: '\\\\.\\C:\\clip.mp4', name: 'clip.mp4' },
-      { path: 'C:\\drop\\NUL.mp4', name: 'NUL.mp4' },
-    ]);
+  it.skipIf(process.platform !== 'win32')(
+    'rejects Win32 UNC, device, and reserved-name paths before stat or read',
+    async () => {
+      const harness = makeHarness();
+      const batch = await harness.service.prepareDroppedPaths([
+        { path: '\\\\server\\share\\clip.mp4', name: 'clip.mp4' },
+        { path: '\\\\.\\C:\\clip.mp4', name: 'clip.mp4' },
+        { path: 'C:\\drop\\NUL.mp4', name: 'NUL.mp4' },
+      ]);
 
-    expect(batch.tickets).toEqual([]);
-    expect(harness.readPaths).toEqual([]);
-  });
+      expect(batch.tickets).toEqual([]);
+      expect(harness.readPaths).toEqual([]);
+    },
+  );
 
   it('expires unused tickets after two minutes', async () => {
     const harness = makeHarness();
-    harness.files.set('C:\\drop\\clip.mp4', { kind: 'file', bytes: new Uint8Array([1, 2]) });
+    harness.files.set(dropPath('clip.mp4'), { kind: 'file', bytes: new Uint8Array([1, 2]) });
     vi.useFakeTimers();
     try {
       const batch = await harness.service.prepareDroppedPaths([
-        { path: 'C:\\drop\\clip.mp4', name: 'clip.mp4' },
+        { path: dropPath('clip.mp4'), name: 'clip.mp4' },
       ]);
       await vi.advanceTimersByTimeAsync(120_000);
       await expect(harness.service.importTicket(batch.tickets[0]!.id)).resolves.toEqual({
@@ -310,11 +323,11 @@ describe('dropped media import', () => {
 
   it('revokes every ticket when a prepared batch is abandoned', async () => {
     const harness = makeHarness();
-    harness.files.set('C:\\drop\\first.mp4', { kind: 'file', bytes: new Uint8Array([1]) });
-    harness.files.set('C:\\drop\\second.mp4', { kind: 'file', bytes: new Uint8Array([2]) });
+    harness.files.set(dropPath('first.mp4'), { kind: 'file', bytes: new Uint8Array([1]) });
+    harness.files.set(dropPath('second.mp4'), { kind: 'file', bytes: new Uint8Array([2]) });
     const batch = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\first.mp4', name: 'first.mp4' },
-      { path: 'C:\\drop\\second.mp4', name: 'second.mp4' },
+      { path: dropPath('first.mp4'), name: 'first.mp4' },
+      { path: dropPath('second.mp4'), name: 'second.mp4' },
     ]);
     const revokeTickets = (
       harness.service as unknown as { revokeTickets?: (ticketIds: readonly string[]) => void }
@@ -337,16 +350,16 @@ describe('dropped media import', () => {
 
   it('walks a dropped folder one level and ignores nested folders', async () => {
     const harness = makeHarness();
-    harness.files.set('C:\\drop\\folder', { kind: 'directory' });
-    harness.files.set('C:\\drop\\folder\\clip.mp4', { kind: 'file', bytes: new Uint8Array([1]) });
-    harness.files.set('C:\\drop\\folder\\nested', { kind: 'directory' });
-    harness.files.set('C:\\drop\\folder\\nested\\hidden.mp4', {
+    harness.files.set(dropPath('folder'), { kind: 'directory' });
+    harness.files.set(dropPath('folder', 'clip.mp4'), { kind: 'file', bytes: new Uint8Array([1]) });
+    harness.files.set(dropPath('folder', 'nested'), { kind: 'directory' });
+    harness.files.set(dropPath('folder', 'nested', 'hidden.mp4'), {
       kind: 'file',
       bytes: new Uint8Array([2]),
     });
 
     const result = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\folder', name: 'folder' },
+      { path: dropPath('folder'), name: 'folder' },
     ]);
 
     expect(result.tickets.map((ticket) => ticket.displayName)).toEqual(['clip.mp4']);
@@ -356,21 +369,21 @@ describe('dropped media import', () => {
 
   it('caps folder enumeration and reports a lower bound without draining the directory', async () => {
     const harness = makeHarness();
-    harness.files.set('C:\\drop\\folder', { kind: 'directory' });
+    harness.files.set(dropPath('folder'), { kind: 'directory' });
     for (let index = 0; index < 3_000; index += 1) {
       const name = `clip-${index}.mp4`;
-      harness.files.set(`C:\\drop\\folder\\${name}`, {
+      harness.files.set(dropPath('folder', name), {
         kind: 'file',
         bytes: new Uint8Array([index & 0xff]),
       });
     }
 
     const result = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\folder', name: 'folder' },
+      { path: dropPath('folder'), name: 'folder' },
     ]);
 
     expect(result.tickets).toHaveLength(2_000);
-    expect(harness.directoryYieldCounts.get('C:\\drop\\folder')).toBeLessThanOrEqual(2_001);
+    expect(harness.directoryYieldCounts.get(dropPath('folder'))).toBeLessThanOrEqual(2_001);
     expect(result.skippedMessage).toBe(
       'At least 1 more entry was skipped because the dropped folder exceeded the 2000-entry limit.',
     );
@@ -379,11 +392,11 @@ describe('dropped media import', () => {
   it('stops all expanded folders at the 5,000-entry drop cap', async () => {
     const harness = makeHarness();
     for (let folder = 0; folder < 3; folder += 1) {
-      const folderPath = `C:\\drop\\folder-${folder}`;
+      const folderPath = dropPath(`folder-${folder}`);
       harness.files.set(folderPath, { kind: 'directory' });
       for (let index = 0; index < 2_000; index += 1) {
         const name = `clip-${index}.mp4`;
-        harness.files.set(`${folderPath}\\${name}`, {
+        harness.files.set(path.join(folderPath, name), {
           kind: 'file',
           bytes: new Uint8Array([index & 0xff]),
         });
@@ -391,9 +404,9 @@ describe('dropped media import', () => {
     }
 
     const result = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\folder-0', name: 'folder-0' },
-      { path: 'C:\\drop\\folder-1', name: 'folder-1' },
-      { path: 'C:\\drop\\folder-2', name: 'folder-2' },
+      { path: dropPath('folder-0'), name: 'folder-0' },
+      { path: dropPath('folder-1'), name: 'folder-1' },
+      { path: dropPath('folder-2'), name: 'folder-2' },
     ]);
 
     expect(result.tickets).toHaveLength(4_997);
@@ -408,13 +421,13 @@ describe('dropped media import', () => {
   it('uses the existing asset when a second import has the same hash', async () => {
     const harness = makeHarness();
     const bytes = new TextEncoder().encode('same media bytes');
-    harness.files.set('C:\\drop\\first.mp4', { kind: 'file', bytes });
-    harness.files.set('C:\\drop\\copy.mp4', { kind: 'file', bytes });
+    harness.files.set(dropPath('first.mp4'), { kind: 'file', bytes });
+    harness.files.set(dropPath('copy.mp4'), { kind: 'file', bytes });
     const first = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\first.mp4', name: 'first.mp4' },
+      { path: dropPath('first.mp4'), name: 'first.mp4' },
     ]);
     const second = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\copy.mp4', name: 'copy.mp4' },
+      { path: dropPath('copy.mp4'), name: 'copy.mp4' },
     ]);
 
     const imported = await harness.service.importTicket(first.tickets[0]!.id);
@@ -426,13 +439,13 @@ describe('dropped media import', () => {
       ok: true,
       data: { id: `joylib-${sha256}`, deduplicated: true },
     });
-    expect(JSON.stringify(imported)).not.toContain('C:\\drop');
+    expect(JSON.stringify(imported)).not.toContain(dropPath());
     expect(JSON.stringify(imported)).not.toContain('path');
     expect(harness.storedAssetIds).toEqual([`joylib-${sha256}`]);
   });
 
   it('stores exactly the bytes hashed from one source stream', async () => {
-    const path = 'C:\\drop\\clip.mp4';
+    const path = dropPath('clip.mp4');
     const bytes = new TextEncoder().encode('first stream bytes');
     const secondReadBytes = new TextEncoder().encode('different second read');
     const harness = makeHarness({
@@ -450,7 +463,7 @@ describe('dropped media import', () => {
   });
 
   it('imports a zero-inode file using one hashed staging stream', async () => {
-    const path = 'C:\\drop\\clip.mp4';
+    const path = dropPath('clip.mp4');
     const bytes = new TextEncoder().encode('zero inode media');
     const harness = makeHarness({ zeroInode: true });
     harness.files.set(path, { kind: 'file', bytes });
@@ -465,7 +478,7 @@ describe('dropped media import', () => {
   });
 
   it('detects a zero-inode source change during streaming and removes the staged bytes', async () => {
-    const path = 'C:\\drop\\clip.mp4';
+    const path = dropPath('clip.mp4');
     const harness = makeHarness({
       zeroInode: true,
       duringStream: (file, streamNumber) => {
@@ -491,13 +504,13 @@ describe('dropped media import', () => {
   it('serializes concurrent imports with the same hash into one stored asset', async () => {
     const harness = makeHarness();
     const bytes = new TextEncoder().encode('same concurrent media bytes');
-    harness.files.set('C:\\drop\\first.mp4', { kind: 'file', bytes });
-    harness.files.set('C:\\drop\\copy.mp4', { kind: 'file', bytes });
+    harness.files.set(dropPath('first.mp4'), { kind: 'file', bytes });
+    harness.files.set(dropPath('copy.mp4'), { kind: 'file', bytes });
     const first = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\first.mp4', name: 'first.mp4' },
+      { path: dropPath('first.mp4'), name: 'first.mp4' },
     ]);
     const second = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\copy.mp4', name: 'copy.mp4' },
+      { path: dropPath('copy.mp4'), name: 'copy.mp4' },
     ]);
 
     const results = await Promise.all([
@@ -512,9 +525,9 @@ describe('dropped media import', () => {
 
   it('does not return filesystem paths from an asset-library failure', async () => {
     const harness = makeHarness({ libraryError: 'EACCES: C:\\private\\media-root\\catalog.json' });
-    harness.files.set('C:\\drop\\clip.mp4', { kind: 'file', bytes: new Uint8Array([1, 2]) });
+    harness.files.set(dropPath('clip.mp4'), { kind: 'file', bytes: new Uint8Array([1, 2]) });
     const batch = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\clip.mp4', name: 'clip.mp4' },
+      { path: dropPath('clip.mp4'), name: 'clip.mp4' },
     ]);
 
     const result = await harness.service.importTicket(batch.tickets[0]!.id);
@@ -524,7 +537,7 @@ describe('dropped media import', () => {
   });
 
   it('refuses a same-size target replacement after opening the file handle', async () => {
-    const path = 'C:\\drop\\clip.mp4';
+    const path = dropPath('clip.mp4');
     const harness = makeHarness({
       afterOpen: (openedPath, files) => {
         expect(openedPath).toBe(path);
@@ -551,7 +564,7 @@ describe('dropped media import', () => {
   });
 
   it('refuses a same-size target replacement between validation and opening before staging', async () => {
-    const path = 'C:\\drop\\clip.mp4';
+    const path = dropPath('clip.mp4');
     const harness = makeHarness({
       beforeOpen: (openedPath, files) => {
         expect(openedPath).toBe(path);
@@ -582,12 +595,12 @@ describe('dropped media import', () => {
         if (streamIndex === 1) file.mtimeNs = 2n;
       },
     });
-    harness.files.set('C:\\drop\\clip.mp4', {
+    harness.files.set(dropPath('clip.mp4'), {
       kind: 'file',
       bytes: new Uint8Array([1, 2, 3, 4]),
     });
     const batch = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\clip.mp4', name: 'clip.mp4' },
+      { path: dropPath('clip.mp4'), name: 'clip.mp4' },
     ]);
 
     const result = await harness.service.importTicket(batch.tickets[0]!.id);
@@ -600,14 +613,18 @@ describe('dropped media import', () => {
     expect(harness.assets.size).toBe(0);
   });
 
-  it('accepts a Windows short-name alias only when native canonicalization resolves to the same real path', async () => {
-    const shortPath = 'C:\\MEDIA~1\\clip.mp4';
-    const realPath = 'C:\\Media Folder\\clip.mp4';
-    const otherPath = 'C:\\Other Folder\\clip.mp4';
-    const canonicalize = async (filePath: string) => (filePath === shortPath ? realPath : filePath);
-    await expect(sameCanonicalRealPath(shortPath, realPath, canonicalize)).resolves.toBe(true);
-    await expect(sameCanonicalRealPath(shortPath, otherPath, canonicalize)).resolves.toBe(false);
-  });
+  it.skipIf(process.platform !== 'win32')(
+    'accepts a Windows short-name alias only when native canonicalization resolves to the same real path',
+    async () => {
+      const shortPath = 'C:\\MEDIA~1\\clip.mp4';
+      const realPath = 'C:\\Media Folder\\clip.mp4';
+      const otherPath = 'C:\\Other Folder\\clip.mp4';
+      const canonicalize = async (filePath: string) =>
+        filePath === shortPath ? realPath : filePath;
+      await expect(sameCanonicalRealPath(shortPath, realPath, canonicalize)).resolves.toBe(true);
+      await expect(sameCanonicalRealPath(shortPath, otherPath, canonicalize)).resolves.toBe(false);
+    },
+  );
 
   it('cancels an in-progress stream and removes its partial original', async () => {
     const serviceRef: { current?: DroppedMediaImportService } = {};
@@ -619,12 +636,12 @@ describe('dropped media import', () => {
     });
     const service = harness.service;
     serviceRef.current = service;
-    harness.files.set('C:\\drop\\clip.mp4', {
+    harness.files.set(dropPath('clip.mp4'), {
       kind: 'file',
       bytes: new Uint8Array([1, 2, 3, 4]),
     });
     const batch = await service.prepareDroppedPaths([
-      { path: 'C:\\drop\\clip.mp4', name: 'clip.mp4' },
+      { path: dropPath('clip.mp4'), name: 'clip.mp4' },
     ]);
 
     const result = await service.importTicket(batch.tickets[0]!.id);
@@ -645,9 +662,9 @@ describe('dropped media import', () => {
       },
     });
     serviceRef.current = harness.service;
-    harness.files.set('C:\\drop\\clip.mp4', { kind: 'file', bytes: new Uint8Array([4, 5, 6]) });
+    harness.files.set(dropPath('clip.mp4'), { kind: 'file', bytes: new Uint8Array([4, 5, 6]) });
     const batch = await harness.service.prepareDroppedPaths([
-      { path: 'C:\\drop\\clip.mp4', name: 'clip.mp4' },
+      { path: dropPath('clip.mp4'), name: 'clip.mp4' },
     ]);
 
     const result = await harness.service.importTicket(batch.tickets[0]!.id);
@@ -658,20 +675,23 @@ describe('dropped media import', () => {
     expect(harness.assets.size).toBe(0);
   });
 
-  it('preserves Persian names and absolute paths longer than MAX_PATH', async () => {
-    const harness = makeHarness();
-    const directory = new Array(15).fill('long-directory-segment').join('\\');
-    const path = `C:\\${directory}\\موسیقی.mp3`;
-    expect(path.length).toBeGreaterThan(260);
-    harness.files.set(path, { kind: 'file', bytes: new Uint8Array([8, 9]) });
-    const batch = await harness.service.prepareDroppedPaths([{ path, name: 'موسیقی.mp3' }]);
+  it.skipIf(process.platform !== 'win32')(
+    'preserves Persian names and absolute paths longer than MAX_PATH on Windows',
+    async () => {
+      const harness = makeHarness();
+      const directory = new Array(15).fill('long-directory-segment').join('\\');
+      const path = `C:\\${directory}\\موسیقی.mp3`;
+      expect(path.length).toBeGreaterThan(260);
+      harness.files.set(path, { kind: 'file', bytes: new Uint8Array([8, 9]) });
+      const batch = await harness.service.prepareDroppedPaths([{ path, name: 'موسیقی.mp3' }]);
 
-    const result = await harness.service.importTicket(batch.tickets[0]!.id);
+      const result = await harness.service.importTicket(batch.tickets[0]!.id);
 
-    expect(batch.tickets[0]).toMatchObject({ displayName: 'موسیقی.mp3', mediaKind: 'audio' });
-    expect(result.ok).toBe(true);
-    expect(harness.readPaths).toContain(path);
-    expect(harness.openedPaths).toEqual([path]);
-    expect(harness.readHandles).toHaveLength(1);
-  });
+      expect(batch.tickets[0]).toMatchObject({ displayName: 'موسیقی.mp3', mediaKind: 'audio' });
+      expect(result.ok).toBe(true);
+      expect(harness.readPaths).toContain(path);
+      expect(harness.openedPaths).toEqual([path]);
+      expect(harness.readHandles).toHaveLength(1);
+    },
+  );
 });

@@ -53,19 +53,43 @@ describe('resolveLibraryAssetPath', () => {
     }
   });
 
-  it.each(['..\\x', '../x'])('rejects traversal path %s', (relativePath) => {
+  it.skipIf(process.platform !== 'win32')('rejects Windows traversal path ..\\x', () => {
     const { root, baseDir } = makeDirectories();
     try {
-      expect(resolveLibraryAssetPath(baseDir, relativePath)).toBeUndefined();
+      expect(resolveLibraryAssetPath(baseDir, '..\\x')).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it('rejects a sibling folder that shares the library name prefix', () => {
+  it.each(['../x', 'a/../../x'])(
+    'rejects POSIX traversal path %s on every platform',
+    (relativePath) => {
+      const { root, baseDir } = makeDirectories();
+      try {
+        expect(resolveLibraryAssetPath(baseDir, relativePath)).toBeUndefined();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'rejects a Windows sibling folder that shares the library name prefix',
+    () => {
+      const { root, baseDir } = makeDirectories();
+      try {
+        expect(resolveLibraryAssetPath(baseDir, '..\\library2\\a')).toBeUndefined();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('rejects a POSIX sibling folder that shares the library name prefix', () => {
     const { root, baseDir } = makeDirectories();
     try {
-      expect(resolveLibraryAssetPath(baseDir, '..\\library2\\a')).toBeUndefined();
+      expect(resolveLibraryAssetPath(baseDir, '../library2/a')).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -75,6 +99,18 @@ describe('resolveLibraryAssetPath', () => {
     const { root, baseDir } = makeDirectories();
     try {
       expect(resolveLibraryAssetPath(baseDir, path.resolve(root, 'outside.png'))).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['POSIX', path.posix.resolve('/', 'outside.png')],
+    ['Windows', path.win32.resolve('C:\\', 'outside.png')],
+  ])('rejects %s absolute path syntax', (_style, absolutePath) => {
+    const { root, baseDir } = makeDirectories();
+    try {
+      expect(resolveLibraryAssetPath(baseDir, absolutePath)).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

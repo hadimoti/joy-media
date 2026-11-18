@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIpcHandlers, dispatchIpcRequest, DRIVE_TYPE_WAIT_MS } from './ipc-handlers.js';
 import { createFileRegistry } from './file-registry.js';
@@ -11,6 +13,8 @@ import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { encodeTokenRecord, type ChatGptTokenRecord } from './oauth/chatgpt.js';
 import type { GenerationJobs } from './generation-jobs.js';
 
+const selectedMediaPath = path.join(tmpdir(), 'joy-media-ipc-test', 'Media', 'clip.mp4');
+
 function deps() {
   const fileRegistry = createFileRegistry(() => 'ref-1');
   const workerSupervisor = createWorkerSupervisor({
@@ -18,7 +22,7 @@ function deps() {
     command: 'node',
     workerId: () => 'w-1',
   });
-  const showOpenDialog = vi.fn(async () => ({ canceled: false, path: 'C:\\Media\\clip.mp4' }));
+  const showOpenDialog = vi.fn(async () => ({ canceled: false, path: selectedMediaPath }));
   const localDatabase = new LocalDatabase({
     filePath: ':memory:',
     idFactory: () => 'job-1',
@@ -215,7 +219,7 @@ describe('IPC dispatch', () => {
       origin: 'http://localhost:5173',
       channel: 'desktop.select-file',
     });
-    expect(d.probeMedia).toHaveBeenCalledWith('C:\\Media\\clip.mp4');
+    expect(d.probeMedia).toHaveBeenCalledWith(selectedMediaPath);
     expect(d.localDatabase.getMedia('ref-1')).toEqual({
       refId: 'ref-1',
       checksum: 'sha-abc',
@@ -863,9 +867,9 @@ describe('IPC dispatch', () => {
   });
 
   it('reselects a prior library for an unconfigured install without moving or deleting files', async () => {
-    const previousLibrary = 'C:\\test-assets\\previous-library';
-    const nextDefault = 'C:\\test-assets\\new-default';
-    const catalogPath = `${previousLibrary}\\catalog.json`;
+    const previousLibrary = path.join(tmpdir(), 'joy-media-ipc-test', 'previous-library');
+    const nextDefault = path.join(tmpdir(), 'joy-media-ipc-test', 'new-default');
+    const catalogPath = path.join(previousLibrary, 'catalog.json');
     const catalog = {
       version: 1,
       counts: { total: 2, audio: 1, image: 1 },
@@ -946,7 +950,7 @@ describe('IPC dispatch', () => {
   });
 
   it('asset-library.open-directory opens the configured folder, and no other', async () => {
-    const library = 'C:\\test-assets\\library';
+    const library = path.join(tmpdir(), 'joy-media-ipc-test', 'library');
     vi.spyOn(fs, 'existsSync').mockReturnValue(true);
     vi.spyOn(fs, 'statSync').mockReturnValue({ isDirectory: () => true } as fs.Stats);
     const openDirectory = vi.fn(async () => '');
@@ -967,7 +971,7 @@ describe('IPC dispatch', () => {
   });
 
   it('asset-library.open-directory refuses a configured file path with a clear error', async () => {
-    const file = 'C:\\test-assets\\library.json';
+    const file = path.join(tmpdir(), 'joy-media-ipc-test', 'library.json');
     vi.spyOn(fs, 'existsSync').mockReturnValue(true);
     vi.spyOn(fs, 'statSync').mockReturnValue({ isDirectory: () => false } as fs.Stats);
     const openDirectory = vi.fn(async () => '');
@@ -1088,7 +1092,8 @@ describe('asset library catalog', () => {
     };
     vi.spyOn(fs, 'existsSync').mockReturnValue(true);
     vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify(catalog) as never);
-    d.localDatabase.getAssetLibraryDirectory = () => 'C:\\test-assets\\library';
+    d.localDatabase.getAssetLibraryDirectory = () =>
+      path.join(tmpdir(), 'joy-media-ipc-test', 'library');
 
     try {
       const result = await createIpcHandlers(d)['desktop.asset-library.get-catalog'](undefined);

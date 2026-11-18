@@ -75,7 +75,7 @@ describe('agent run against a provider that stalls (real binary)', () => {
     await mock.waitForRequests(1, '/chat/completions');
     live.child.kill('SIGTERM');
     const r = await live.done;
-    expect(r.code, describeRun(r)).toBe(130);
+    expect(r.code, describeRun(r)).toBe(143); // 128 + SIGTERM (15)
     expect(readProjects(env.sb)[0]!.revision).toBe(1);
   });
 
