@@ -21,15 +21,24 @@ import {
   type MonitorSelectionSetters,
 } from './monitor-selection.js';
 
-type ContextMenuAction = 'fit' | 'fill' | 'crop' | 'relink';
+type ContextMenuAction = 'fit' | 'fill' | 'crop' | 'relink' | 'centre' | 'reset';
 type MonitorContextMenuBuilder = (input: {
   readonly objectId: string;
   readonly clipId: string;
   readonly canFit: boolean;
   readonly canCrop: boolean;
   readonly missing: boolean;
+  readonly showTransformActions?: boolean;
+  readonly transformDisabledReason?: string;
+  readonly alreadyCentred?: boolean;
+  readonly alreadyReset?: boolean;
   readonly onAction: (action: ContextMenuAction, targetId: string) => void;
-}) => readonly { readonly label: string; readonly action: () => void }[];
+}) => readonly {
+  readonly label: string;
+  readonly action: () => void;
+  readonly disabled?: boolean;
+  readonly disabledReason?: string;
+}[];
 
 const buildMonitorContextMenuItems = (
   monitorSelectionExports as unknown as { buildMonitorContextMenuItems?: MonitorContextMenuBuilder }
@@ -88,6 +97,63 @@ describe('Monitor context menu actions', () => {
 
     expect(items).toEqual([]);
     expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it('routes Centre and Reset transform to the visual object', () => {
+    const onAction = vi.fn();
+    const items = buildMonitorContextMenuItems!({
+      objectId: 'title-1',
+      clipId: 'clip-1',
+      canFit: false,
+      canCrop: false,
+      missing: false,
+      showTransformActions: true,
+      onAction,
+    });
+
+    expect(items.map((item) => item.label)).toEqual(['Centre', 'Reset transform']);
+    for (const item of items) item.action();
+    expect(onAction.mock.calls).toEqual([
+      ['centre', 'title-1'],
+      ['reset', 'title-1'],
+    ]);
+  });
+
+  it('disables Centre and Reset transform when they are already in that state', () => {
+    const items = buildMonitorContextMenuItems!({
+      objectId: 'shape-1',
+      clipId: 'clip-1',
+      canFit: false,
+      canCrop: false,
+      missing: false,
+      showTransformActions: true,
+      alreadyCentred: true,
+      alreadyReset: true,
+      onAction: vi.fn(),
+    });
+
+    expect(items.map((item) => [item.label, item.disabled, item.disabledReason])).toEqual([
+      ['Centre', true, 'Already centred.'],
+      ['Reset transform', true, 'Already reset.'],
+    ]);
+  });
+
+  it('shows unavailable transform actions disabled with their reason', () => {
+    const items = buildMonitorContextMenuItems!({
+      objectId: 'video-controller',
+      clipId: 'clip-1',
+      canFit: false,
+      canCrop: false,
+      missing: false,
+      showTransformActions: true,
+      transformDisabledReason: 'A parent of this element is on a locked track.',
+      onAction: vi.fn(),
+    });
+
+    expect(items.map((item) => [item.label, item.disabled, item.disabledReason])).toEqual([
+      ['Centre', true, 'A parent of this element is on a locked track.'],
+      ['Reset transform', true, 'A parent of this element is on a locked track.'],
+    ]);
   });
 });
 

@@ -177,11 +177,13 @@ export interface MonitorSelectionSetters {
   readonly clearSelection: () => void;
 }
 
-export type MonitorContextAction = 'fit' | 'fill' | 'crop' | 'relink';
+export type MonitorContextAction = 'fit' | 'fill' | 'crop' | 'relink' | 'centre' | 'reset';
 
 export interface MonitorContextMenuItem {
   readonly label: string;
   readonly action: () => void;
+  readonly disabled?: boolean;
+  readonly disabledReason?: string;
 }
 
 /** The context actions that have a matching editor command for this element. */
@@ -191,6 +193,10 @@ export function buildMonitorContextMenuItems(input: {
   readonly canFit: boolean;
   readonly canCrop: boolean;
   readonly missing: boolean;
+  readonly showTransformActions?: boolean;
+  readonly transformDisabledReason?: string;
+  readonly alreadyCentred?: boolean;
+  readonly alreadyReset?: boolean;
   readonly onAction: (action: MonitorContextAction, targetId: string) => void;
 }): readonly MonitorContextMenuItem[] {
   const items: MonitorContextMenuItem[] = [];
@@ -204,6 +210,25 @@ export function buildMonitorContextMenuItems(input: {
     items.push({ label: 'Crop', action: () => input.onAction('crop', input.objectId) });
   if (input.missing)
     items.push({ label: 'Relink', action: () => input.onAction('relink', input.clipId) });
+  if (input.showTransformActions === true) {
+    const centreReason =
+      input.transformDisabledReason ??
+      (input.alreadyCentred === true ? 'Already centred.' : undefined);
+    const resetReason =
+      input.transformDisabledReason ?? (input.alreadyReset === true ? 'Already reset.' : undefined);
+    items.push(
+      {
+        label: 'Centre',
+        action: () => input.onAction('centre', input.objectId),
+        ...(centreReason === undefined ? {} : { disabled: true, disabledReason: centreReason }),
+      },
+      {
+        label: 'Reset transform',
+        action: () => input.onAction('reset', input.objectId),
+        ...(resetReason === undefined ? {} : { disabled: true, disabledReason: resetReason }),
+      },
+    );
+  }
   return items;
 }
 

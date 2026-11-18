@@ -8,6 +8,7 @@ export interface ContextMenuItem {
   readonly label: string;
   readonly action?: () => void;
   readonly disabled?: boolean;
+  readonly disabledReason?: string;
   readonly dividerBefore?: boolean;
   readonly icon?: ComponentType<{ className?: string }>;
   readonly shortcut?: string;
@@ -118,6 +119,7 @@ export function TimelineContextMenu({
                   role="menuitem"
                   className="timeline-context-item"
                   disabled={item.disabled}
+                  title={item.disabled === true ? item.disabledReason : undefined}
                   data-menu-index={index}
                   onFocus={() => {
                     focusedIndexRef.current = index;

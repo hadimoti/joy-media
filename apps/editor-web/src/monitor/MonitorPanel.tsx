@@ -129,6 +129,7 @@ import {
   type MonitorElement,
 } from './monitor-selection.js';
 import { buildMediaFitTransaction, mediaFitSelection } from '../media-fit-transform.js';
+import { monitorContextTransformState } from './monitor-context-transform.js';
 import type { CropInsets } from '../media-fit-transform.js';
 import { textObjectWithDraftText } from '../TextPanel.js';
 import { MonitorCropBox } from './MonitorCropBox.js';
@@ -635,20 +636,72 @@ function MonitorPanelContent({
     const assetId =
       object.assetId ?? (selectedClip?.kind === 'video' ? selectedClip.assetId : undefined);
     const mediaFit = mediaFitSelection(visualProject, object, clipId);
+    const frame = currentFrameRef.current;
+    const composition =
+      frame === undefined
+        ? undefined
+        : (previewVisualProject.compositions[frame.compositionId] ??
+          previewVisualProject.compositions[previewVisualProject.rootCompositionId]);
+    const transformableVisual =
+      object.kind === 'image' ||
+      object.kind === 'text' ||
+      object.kind === 'shape' ||
+      object.kind === 'html-scene' ||
+      (object.kind === 'null' &&
+        (selectedClip?.kind === 'video' ||
+          previewVisualProject.assets[assetId ?? '']?.kind === 'image' ||
+          previewVisualProject.assets[assetId ?? '']?.kind === 'video'));
+    const transformTarget =
+      transformableVisual && frame !== undefined
+        ? readTransformTargetsRef
+            .current([clipId])
+            .find((candidate) => candidate.objectId === object.id)
+        : undefined;
+    const transformState =
+      transformableVisual && transformTarget !== undefined && composition !== undefined
+        ? monitorContextTransformState({
+            objectId: object.id,
+            object,
+            project: previewVisualProject,
+            target: transformTarget,
+            frameWidth: composition.width,
+            frameHeight: composition.height,
+            activeCamera: composition.activeCameraId !== undefined,
+          })
+        : undefined;
     const missing =
       assetId !== undefined &&
       missingAssetIds?.has(assetId) === true &&
       onRelinkMissing !== undefined;
+    const transformDisabledReason =
+      transformState?.disabledReason ??
+      (transformableVisual && transformState === undefined
+        ? 'This element cannot be transformed in the current view.'
+        : undefined);
     const items = buildMonitorContextMenuItems({
       objectId: object.id,
       clipId,
       canFit: mediaFit !== undefined && mediaFit.disabledReason === undefined,
       canCrop: object.kind === 'image',
       missing,
+      showTransformActions: transformableVisual,
+      ...(transformDisabledReason === undefined ? {} : { transformDisabledReason }),
+      ...(transformState === undefined
+        ? {}
+        : {
+            alreadyCentred: transformState.alreadyCentred,
+            alreadyReset: transformState.alreadyReset,
+          }),
       onAction: (action: MonitorContextAction, targetId: string) => {
         if (action === 'fit' || action === 'fill') {
           if (mediaFit === undefined) return;
           const transaction = buildMediaFitTransaction(targetId, mediaFit, action);
+          if (transaction !== undefined) dispatchProject(transaction);
+        } else if (action === 'centre' || action === 'reset') {
+          const transaction =
+            action === 'centre'
+              ? transformState?.centreTransaction
+              : transformState?.resetTransaction;
           if (transaction !== undefined) dispatchProject(transaction);
         } else if (action === 'crop') {
           selectClips([clipId]);
