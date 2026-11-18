@@ -74,6 +74,9 @@ export function MonitorCropBox({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<CropDrag | null>(null);
   const [previewCrop, setPreviewCrop] = useState(crop);
+  // The latest preview. Commit, drag start and cancel read this ref, because the state
+  // only redraws the box once React has rendered: a batch of pointer events must not
+  // read a stale state.
   const previewCropRef = useRef(crop);
   useEffect(() => {
     if (dragRef.current === null) {
@@ -147,6 +150,8 @@ export function MonitorCropBox({
     event.preventDefault();
     event.stopPropagation();
     dragRef.current = null;
+    // Compared with where this drag began, not with the saved crop: the parent may not have
+    // applied the previous commit yet, and a drag without movement must commit nothing.
     if (JSON.stringify(previewCropRef.current) !== JSON.stringify(drag.crop))
       onCommit(previewCropRef.current);
   };
@@ -160,9 +165,13 @@ export function MonitorCropBox({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={() => {
+        // A cancelled drag returns to where it began. An earlier commit that the parent has
+        // not applied yet stays on screen.
+        const drag = dragRef.current;
         dragRef.current = null;
-        previewCropRef.current = crop;
-        setPreviewCrop(crop);
+        if (drag === null) return;
+        previewCropRef.current = drag.crop;
+        setPreviewCrop(drag.crop);
       }}
     >
       <svg

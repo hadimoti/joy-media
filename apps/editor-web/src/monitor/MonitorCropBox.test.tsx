@@ -91,6 +91,8 @@ describe('MonitorCropBox', () => {
     const handle = container?.querySelector<HTMLButtonElement>('[data-crop-handle="left"]');
     const box = container?.querySelector<HTMLElement>('[data-monitor-crop-box]');
     const polygon = container?.querySelector('polygon');
+    expect(handle).not.toBeNull();
+    expect(box).not.toBeNull();
     const initial = polygon?.getAttribute('points');
     act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 10, y: 70 })));
     act(() => box?.dispatchEvent(pointerEvent('pointermove', { x: 30, y: 70 })));
@@ -98,6 +100,25 @@ describe('MonitorCropBox', () => {
     act(() => box?.dispatchEvent(pointerEvent('pointercancel', { x: 30, y: 70 })));
     expect(polygon?.getAttribute('points')).toBe(initial);
     expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('returns a cancelled drag to where it began, keeping an earlier commit the parent has not applied', () => {
+    const { onCommit } = mount();
+    const handle = container?.querySelector<HTMLButtonElement>('[data-crop-handle="left"]');
+    const box = container?.querySelector<HTMLElement>('[data-monitor-crop-box]');
+    const polygon = container?.querySelector('polygon');
+    expect(handle).not.toBeNull();
+    expect(box).not.toBeNull();
+    act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 10, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointermove', { x: 30, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointerup', { x: 30, y: 70 })));
+    const committed = polygon?.getAttribute('points');
+    act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 30, y: 70 })));
+    act(() => box?.dispatchEvent(pointerEvent('pointermove', { x: 40, y: 70 })));
+    expect(polygon?.getAttribute('points')).not.toBe(committed);
+    act(() => box?.dispatchEvent(pointerEvent('pointercancel', { x: 40, y: 70 })));
+    expect(polygon?.getAttribute('points')).toBe(committed);
+    expect(onCommit).toHaveBeenCalledTimes(1);
   });
 
   it('commits the last movement when pointer events are batched', () => {
