@@ -752,7 +752,7 @@ function freshEditorPageOf(base) {
         30_000,
       );
       if (expanded !== 'true') await recent.click();
-      const history = page.getByRole('region', { name: 'Recent processes', exact: true });
+      const history = page.getByRole('dialog', { name: 'Recent processes', exact: true });
       await history
         .getByText(/Completed — final MP4 verified|Failed —/u)
         .first()
