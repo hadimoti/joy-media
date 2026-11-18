@@ -190,10 +190,16 @@ export const MONITOR_SUITE_CASES = {
       );
     return dragEveryHandle(page, ctx.clips, ctx.readTransform);
   },
-  'D-M04': blocked('D-M04', 'snapping and the live readout are T-M06, not merged here'),
-  'D-M05': blocked('D-M05', 'in-place text is T-M07, not merged here'),
-  'D-M06': blocked('D-M06', 'crop and mask handles are T-M07, not merged here'),
-  'D-M07': blocked('D-M07', 'the right-click menu on the Monitor is T-M07, not merged here'),
+  'D-M04': blocked(
+    'D-M04',
+    'snapping and the live readout are T-M06 (built; no live driver written yet)',
+  ),
+  'D-M05': blocked('D-M05', 'in-place text is T-M07 (built; no live driver written yet)'),
+  'D-M06': blocked('D-M06', 'crop and mask handles are T-M07 (built; no live driver written yet)'),
+  'D-M07': blocked(
+    'D-M07',
+    'the right-click menu on the Monitor is T-M07 (built; no live driver written yet)',
+  ),
   'D-M08': viewMenuOverlays,
   'D-M09': previewQuality,
   'D-M10': transportFrames,
