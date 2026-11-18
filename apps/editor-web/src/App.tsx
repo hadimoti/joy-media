@@ -399,7 +399,7 @@ import {
 import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
-import { AssetLibraryPanel } from './AssetLibraryPanel.js';
+import { ASSET_LIBRARY_CHANGED_EVENT, AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { BrowserControlPlaneRequestError, type BrowserJob } from './control-plane-client.js';
 import { ProjectDocumentAutosync } from './project-document-autosync.js';
 import { createStorageFlushNotifier, type StorageFlushNotifier } from './storage-flush.js';
@@ -1160,8 +1160,6 @@ function EditorWorkspace({
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | undefined>(undefined);
   const [exportProgress, setExportProgress] = useState<number | undefined>(undefined);
-  // Bumped after a drop imports files, so the Media panel reloads its catalog (defect 206).
-  const [libraryRevision, setLibraryRevision] = useState(0);
   const [droppedImportProgress, setDroppedImportProgress] = useState<
     DroppedImportProgressState | undefined
   >(undefined);
@@ -7043,7 +7041,9 @@ function EditorWorkspace({
         }
 
         if (importedAssets.length > 0) {
-          setLibraryRevision((revision) => revision + 1);
+          // The Media panel reloads its catalog on this event (defect 206): it reads no prop, because
+          // the dock panels keep the closure they were created with.
+          window.dispatchEvent(new Event(ASSET_LIBRARY_CHANGED_EVENT));
           // A file the library already holds (same content, same id) is not new: the toast must not count it as added.
           const alreadyInLibrary = importedAssets.filter(
             (asset) => context.session.visualProject.assets[asset.id] !== undefined,
@@ -7402,7 +7402,6 @@ function EditorWorkspace({
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onAddToTimeline={addAssetToTimeline}
           onImportFiles={(files) => handleDroppedFiles(files, { surface: 'media' })}
-          libraryRevision={libraryRevision}
           {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
           onCancelDroppedImport={cancelDroppedImport}
           onEditWithAi={(asset) => {

@@ -127,6 +127,9 @@ export function withAssetTimelineTimeout<T>(
   });
 }
 
+/** Window event: files were added to the library catalog outside the panel (defect 206). */
+export const ASSET_LIBRARY_CHANGED_EVENT = 'joy-media:asset-library-changed';
+
 /**
  * Asset discovery stays metadata-only. A preview is hydrated through the
  * authenticated API, verified, then cached in OPFS by AuthorizedDerivativeResolver.
@@ -143,7 +146,6 @@ export function AssetLibraryPanel({
   droppedImportProgress,
   onCancelDroppedImport,
   missingMedia,
-  libraryRevision,
 }: {
   readonly projectId: string;
   readonly projectTitle?: string;
@@ -174,11 +176,6 @@ export function AssetLibraryPanel({
   readonly onImportFiles?: (files: readonly File[]) => void | Promise<void>;
   readonly droppedImportProgress?: DroppedImportProgressState;
   readonly onCancelDroppedImport?: () => void;
-  /**
-   * Bumped by the editor when files are added to the catalog from outside this panel (a timeline
-   * drop), so the panel reloads the catalog it shows (defect 206).
-   */
-  readonly libraryRevision?: number | undefined;
   /** Missing project media, relinked from the panel's Missing media section. */
   readonly missingMedia?: {
     readonly host: MissingMediaHost;
@@ -313,12 +310,13 @@ export function AssetLibraryPanel({
   useEffect(() => {
     void refresh();
   }, [refresh]);
-  const seenLibraryRevisionRef = useRef(libraryRevision);
+  // A drop on the timeline adds files to the catalog outside this panel. The editor announces it on
+  // the window, so the panel reloads without depending on props (defect 206).
   useEffect(() => {
-    if (libraryRevision === seenLibraryRevisionRef.current) return;
-    seenLibraryRevisionRef.current = libraryRevision;
-    void refresh();
-  }, [libraryRevision, refresh]);
+    const reload = () => void refresh();
+    window.addEventListener(ASSET_LIBRARY_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(ASSET_LIBRARY_CHANGED_EVENT, reload);
+  }, [refresh]);
   useEffect(() => {
     return () => {
       refreshSeqRef.current += 1;

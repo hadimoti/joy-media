@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AssetLibraryPanel } from './AssetLibraryPanel.js';
+import { ASSET_LIBRARY_CHANGED_EVENT, AssetLibraryPanel } from './AssetLibraryPanel.js';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -49,18 +49,9 @@ function catalogReads(invoke: ReturnType<typeof installCatalogBridge>): number {
   return invoke.mock.calls.filter(([channel]) => channel === CATALOG_CHANNEL).length;
 }
 
-async function renderPanel(libraryRevision: number): Promise<void> {
-  await act(async () => {
-    root?.render(
-      <AssetLibraryPanel
-        projectId="project-1"
-        storage={storage}
-        libraryRevision={libraryRevision}
-      />,
-    );
-    await Promise.resolve();
-    await Promise.resolve();
-  });
+async function flush(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function mountRoot(): void {
@@ -69,7 +60,21 @@ function mountRoot(): void {
   root = createRoot(container);
 }
 
-describe('AssetLibraryPanel catalog reload after a timeline drop (defect 206)', () => {
+async function renderPanel(): Promise<void> {
+  await act(async () => {
+    root?.render(<AssetLibraryPanel projectId="project-1" storage={storage} />);
+    await flush();
+  });
+}
+
+async function announceLibraryChange(): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(new Event(ASSET_LIBRARY_CHANGED_EVENT));
+    await flush();
+  });
+}
+
+describe('AssetLibraryPanel reloads after the library changes outside it (defect 206)', () => {
   afterEach(() => {
     act(() => root?.unmount());
     container?.remove();
@@ -78,21 +83,23 @@ describe('AssetLibraryPanel catalog reload after a timeline drop (defect 206)', 
     restoreBridge?.();
   });
 
-  it('reloads the catalog when the editor reports a new library revision', async () => {
+  it('reloads the catalog when the editor announces a library change', async () => {
     const invoke = installCatalogBridge();
     mountRoot();
-    await renderPanel(0);
+    await renderPanel();
     const readsAtMount = catalogReads(invoke);
-    await renderPanel(1);
+    await announceLibraryChange();
     expect(catalogReads(invoke)).toBe(readsAtMount + 1);
   });
 
-  it('does not reload again while the revision stays the same', async () => {
+  it('stops listening once the panel is gone', async () => {
     const invoke = installCatalogBridge();
     mountRoot();
-    await renderPanel(3);
-    const readsAtMount = catalogReads(invoke);
-    await renderPanel(3);
-    expect(catalogReads(invoke)).toBe(readsAtMount);
+    await renderPanel();
+    act(() => root?.unmount());
+    root = undefined;
+    const readsBeforeAnnouncement = catalogReads(invoke);
+    await announceLibraryChange();
+    expect(catalogReads(invoke)).toBe(readsBeforeAnnouncement);
   });
 });
