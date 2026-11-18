@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { calculateMediaFitTransform } from './media-fit-transform.js';
+import * as mediaFitExports from './media-fit-transform.js';
 
 interface FitInput {
   readonly sourceWidth: number;
@@ -23,6 +24,64 @@ interface FitResult {
   readonly scaleX: number;
   readonly scaleY: number;
 }
+
+describe('Inspector media fit transaction', () => {
+  it('builds one Fit or Fill transaction for the requested object', () => {
+    const buildTransaction = (
+      mediaFitExports as unknown as {
+        buildMediaFitTransaction?: (
+          objectId: string,
+          input: Omit<FitInput, 'mode'>,
+          mode: 'fit' | 'fill',
+        ) =>
+          | {
+              readonly label: string;
+              readonly commands: readonly { readonly payload: { objectId: string } }[];
+            }
+          | undefined;
+      }
+    ).buildMediaFitTransaction;
+    expect(buildTransaction).toBeTypeOf('function');
+    const input = { sourceWidth: 640, sourceHeight: 480, frameWidth: 1920, frameHeight: 1080 };
+
+    for (const mode of ['fit', 'fill'] as const) {
+      const transaction = buildTransaction!('picture-3', input, mode);
+      const transform = calculateMediaFitTransform({ ...input, mode });
+      expect(transaction?.label).toBe(mode === 'fit' ? 'Fit to frame' : 'Fill frame');
+      expect(transaction?.commands.map((command) => command.payload.objectId)).toEqual([
+        'picture-3',
+        'picture-3',
+        'picture-3',
+        'picture-3',
+      ]);
+      expect(transaction?.commands.map((command) => command.payload)).toEqual([
+        { objectId: 'picture-3', key: 'x', value: transform?.x },
+        { objectId: 'picture-3', key: 'y', value: transform?.y },
+        { objectId: 'picture-3', key: 'scaleX', value: transform?.scaleX },
+        { objectId: 'picture-3', key: 'scaleY', value: transform?.scaleY },
+      ]);
+    }
+  });
+});
+
+describe('Monitor crop edge math', () => {
+  it('updates one crop edge without crossing the opposite edge', () => {
+    const cropWithEdge = (
+      mediaFitExports as unknown as {
+        cropWithEdge?: (
+          crop: NonNullable<FitInput['crop']>,
+          edge: 'left' | 'top' | 'right' | 'bottom',
+          value: number,
+        ) => NonNullable<FitInput['crop']>;
+      }
+    ).cropWithEdge;
+    expect(cropWithEdge).toBeTypeOf('function');
+    const crop = { left: 0.1, top: 0.05, right: 0.2, bottom: 0.1 };
+    expect(cropWithEdge!(crop, 'left', 0.3)).toEqual({ ...crop, left: 0.3 });
+    expect(cropWithEdge!(crop, 'right', 0.95)).toEqual({ ...crop, right: 0.49 });
+    expect(cropWithEdge!(crop, 'left', -0.2)).toEqual({ ...crop, left: 0 });
+  });
+});
 
 function frameCornersAreInsideMedia(input: FitInput, transform: FitResult): boolean {
   const crop = input.crop ?? { left: 0, top: 0, right: 0, bottom: 0 };

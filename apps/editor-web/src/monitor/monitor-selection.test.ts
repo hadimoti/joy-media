@@ -8,6 +8,7 @@ import {
 } from '@joy-media/render-ir';
 import { bindClipToObject } from '../sticker-bindings.js';
 import { captionNodeId } from './monitor-ids.js';
+import * as monitorSelectionExports from './monitor-selection.js';
 import {
   applyMonitorSelection,
   buildMonitorElements,
@@ -20,6 +21,20 @@ import {
   type MonitorSelectionSetters,
 } from './monitor-selection.js';
 
+type ContextMenuAction = 'fit' | 'fill' | 'crop' | 'relink';
+type MonitorContextMenuBuilder = (input: {
+  readonly objectId: string;
+  readonly clipId: string;
+  readonly canFit: boolean;
+  readonly canCrop: boolean;
+  readonly missing: boolean;
+  readonly onAction: (action: ContextMenuAction, targetId: string) => void;
+}) => readonly { readonly label: string; readonly action: () => void }[];
+
+const buildMonitorContextMenuItems = (
+  monitorSelectionExports as unknown as { buildMonitorContextMenuItems?: MonitorContextMenuBuilder }
+).buildMonitorContextMenuItems;
+
 const objectTransform = {
   x: 0,
   y: 0,
@@ -29,6 +44,52 @@ const objectTransform = {
   opacity: 1,
   crop: { left: 0, top: 0, right: 0, bottom: 0 },
 };
+
+describe('Monitor context menu actions', () => {
+  it('routes each available action to the object or clip under the pointer', () => {
+    expect(buildMonitorContextMenuItems).toBeTypeOf('function');
+    const onAction = vi.fn();
+    const items = buildMonitorContextMenuItems!({
+      objectId: 'picture-7',
+      clipId: 'clip-4',
+      canFit: true,
+      canCrop: true,
+      missing: true,
+      onAction,
+    });
+
+    for (const item of items) item.action();
+
+    expect(items.map((item) => item.label)).toEqual([
+      'Fit to frame',
+      'Fill frame',
+      'Crop',
+      'Relink',
+    ]);
+    expect(onAction.mock.calls).toEqual([
+      ['fit', 'picture-7'],
+      ['fill', 'picture-7'],
+      ['crop', 'picture-7'],
+      ['relink', 'clip-4'],
+    ]);
+  });
+
+  it('hides actions that do not apply to the clicked element', () => {
+    expect(buildMonitorContextMenuItems).toBeTypeOf('function');
+    const onAction = vi.fn();
+    const items = buildMonitorContextMenuItems!({
+      objectId: 'shape-2',
+      clipId: 'clip-8',
+      canFit: false,
+      canCrop: false,
+      missing: false,
+      onAction,
+    });
+
+    expect(items).toEqual([]);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+});
 
 /** Visual objects: a title, a picture, a shape and the 3D element (an html scene). */
 function visualProject(): JoyProjectV1 {

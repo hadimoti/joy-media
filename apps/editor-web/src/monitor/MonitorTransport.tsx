@@ -58,6 +58,9 @@ export interface MonitorTransportProps {
   /** The Monitor View options (safe areas, guides, background, preview overlay). */
   readonly viewOptions: MonitorViewOptions;
   readonly onViewOptionsChange: (next: MonitorViewOptions) => void;
+  readonly cropMode?: boolean;
+  readonly cropAvailable?: boolean;
+  readonly onCropToggle?: () => void;
 }
 
 /** The bar under the monitor: zoom drawer, play controls, preview quality and format. */
@@ -86,6 +89,9 @@ export function MonitorTransport({
   canvasPresetId,
   viewOptions,
   onViewOptionsChange,
+  cropMode = false,
+  cropAvailable = false,
+  onCropToggle = () => undefined,
 }: MonitorTransportProps) {
   const formatReadout = canvasFormatReadout({ width, height }, canvasPresetId);
   const formatShape = canvasShapeLabel(width, height);
@@ -254,6 +260,16 @@ export function MonitorTransport({
             })}
           </select>
         </label>
+        <button
+          type="button"
+          className="monitor-transport-btn monitor-crop-toggle"
+          aria-pressed={cropMode}
+          disabled={!cropAvailable && !cropMode}
+          title={cropMode ? 'Leave crop mode (Esc)' : 'Crop the selected picture'}
+          onClick={onCropToggle}
+        >
+          Crop
+        </button>
         <MonitorViewMenu options={viewOptions} onChange={onViewOptionsChange} />
         {viewOptions.showPerformanceStats && (
           <span

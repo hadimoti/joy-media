@@ -7545,6 +7545,11 @@ function EditorWorkspace({
           {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
           onCancelDroppedImport={cancelDroppedImport}
           formatMenu={formatMenu}
+          missingAssetIds={missingAssetIds}
+          onRelinkMissing={() => {
+            setMissingReviewRequested(true);
+            context.activatePanel('media');
+          }}
           {...(() => {
             const offlineAssetId = missingClipAt(state.playheadUs);
             if (offlineAssetId === undefined) return {};

@@ -68,4 +68,26 @@ describe('TimelineContextMenu', () => {
     expect(container.contains(menu)).toBe(false);
     expect(menu?.parentElement).toBe(document.body);
   });
+
+  it('runs the focused action when Enter is pressed', async () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    let calls = 0;
+    await act(async () => {
+      root?.render(
+        <TimelineContextMenu
+          menu={{ x: 20, y: 20, items: [{ label: 'Fit to frame', action: () => calls++ }] }}
+          onClose={() => undefined}
+        />,
+      );
+    });
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+
+    expect(calls).toBe(1);
+  });
 });

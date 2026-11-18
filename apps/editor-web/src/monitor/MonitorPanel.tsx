@@ -1,9 +1,18 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { EditorPanelContext, type EditorPanelContextValue } from '../editor-panel-context.js';
 import { withVideoFrameNode } from '@joy-media/playback-engine';
 import type { EditorOverlayIR, RenderFrameIR } from '@joy-media/render-ir';
 import {
   textGradientAnchors,
+  textDocumentToString,
   type TextGradientPointV1,
   type VisualObjectV1,
 } from '@joy-media/project-schema';
@@ -71,6 +80,7 @@ import { appAgentPreviewStore, stickerImageCache } from '../editor-runtime-singl
 import { usePopup, type PopupControl } from '../popup-manager.js';
 import { POPUP_IDS } from '../popup-ids.js';
 import { MonitorTransport } from './MonitorTransport.js';
+import { TimelineContextMenu, type TimelineContextMenuState } from '../TimelineContextMenu.js';
 import { MonitorOverlays } from './MonitorOverlays.js';
 import { MediaOfflineNote } from './MediaOfflineNote.js';
 import { useMonitorViewOptions } from './MonitorViewMenu.js';
@@ -86,6 +96,7 @@ import {
   type MonitorViewportSelection,
 } from './MonitorViewport.js';
 import { nextElementClipId } from './monitor-keyboard.js';
+import { clipIdToObjectId } from './monitor-ids.js';
 import { scopedKeyTable } from '../keyboard-shortcuts.js';
 import { MonitorSelectionOverlay } from './MonitorSelectionOverlay.js';
 import { MonitorTransformBox } from './MonitorTransformBox.js';
@@ -113,8 +124,15 @@ import {
   monitorMarqueeClipIds,
   monitorSelectionOverlay,
   sameMonitorOverlay,
+  buildMonitorContextMenuItems,
+  type MonitorContextAction,
   type MonitorElement,
 } from './monitor-selection.js';
+import { buildMediaFitTransaction, mediaFitSelection } from '../media-fit-transform.js';
+import type { CropInsets } from '../media-fit-transform.js';
+import { textObjectWithDraftText } from '../TextPanel.js';
+import { MonitorCropBox } from './MonitorCropBox.js';
+import { MonitorTextInlineEditor } from './MonitorTextInlineEditor.js';
 import { monitorPixelScale } from './monitor-pixel-scale.js';
 import { createProjectColorLutResolver } from '../project-color-luts.js';
 import {
@@ -144,6 +162,8 @@ export function MonitorPanel({
   onCancelDroppedImport,
   formatMenu,
   mediaOfflineName,
+  missingAssetIds,
+  onRelinkMissing,
 }: {
   readonly agentPreviewSurfaceVisible?: boolean;
   readonly onFilesDrop?: (files: readonly File[]) => void;
@@ -154,6 +174,8 @@ export function MonitorPanel({
   readonly formatMenu: PopupControl;
   /** Set while the video clip at the playhead has a missing file: its name, for the "Media offline" frame (T-R03). */
   readonly mediaOfflineName?: string;
+  readonly missingAssetIds?: ReadonlySet<string>;
+  readonly onRelinkMissing?: () => void;
 }) {
   const context = useContext(EditorPanelContext);
   if (context === undefined)
@@ -172,6 +194,8 @@ export function MonitorPanel({
       onCancelDroppedImport={onCancelDroppedImport}
       formatMenu={formatMenu}
       mediaOfflineName={mediaOfflineName}
+      missingAssetIds={missingAssetIds}
+      onRelinkMissing={onRelinkMissing}
     />
   );
 }
@@ -185,6 +209,8 @@ function MonitorPanelContent({
   onCancelDroppedImport,
   formatMenu,
   mediaOfflineName,
+  missingAssetIds,
+  onRelinkMissing,
 }: {
   readonly context: EditorPanelContextValue;
   readonly agentPreviewSurfaceVisible: boolean;
@@ -192,6 +218,8 @@ function MonitorPanelContent({
   readonly onAssetDrop?: ((asset: EditorPointerMediaAsset) => void) | undefined;
   readonly droppedImportProgress?: DroppedImportProgressState | undefined;
   readonly mediaOfflineName?: string | undefined;
+  readonly missingAssetIds?: ReadonlySet<string> | undefined;
+  readonly onRelinkMissing?: (() => void) | undefined;
   readonly onCancelDroppedImport?: (() => void) | undefined;
   readonly formatMenu: PopupControl;
 }) {
@@ -218,6 +246,10 @@ function MonitorPanelContent({
   const agentPreviewState = useAgentPreviewSnapshot();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [monitorDragOver, setMonitorDragOver] = useState(false);
+  const [contextMenu, setContextMenu] = useState<TimelineContextMenuState | undefined>();
+  const [editingTextId, setEditingTextId] = useState<string | undefined>();
+  const [cropMode, setCropMode] = useState(false);
+  const [cropObjectId, setCropObjectId] = useState<string | undefined>();
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
   const rendererPromiseRef = useRef<Promise<BrowserPixiRenderer> | null>(null);
   const rendererDisposeTimerRef = useRef<number | undefined>(undefined);
@@ -452,6 +484,22 @@ function MonitorPanelContent({
     const hoverRevision = [state.playheadUs, previewVisualProject, timelineProject] as const;
     return {
       isElementAt: (point) => monitorHitClipIds(point, readMonitorElementsRef.current()).length > 0,
+      doubleClick: (point) => {
+        if (agentPreviewOnScreen) return false;
+        const elements = readMonitorElementsRef.current();
+        const clipId = monitorHitClipIds(point, elements)[0];
+        if (clipId === undefined) return false;
+        const element = elements.find((candidate) => candidate.clipId === clipId);
+        const objectId =
+          element !== undefined && previewVisualProject.visualObjects[element.id] !== undefined
+            ? element.id
+            : clipIdToObjectId(previewVisualProject, clipId);
+        const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
+        if (object?.kind !== 'text') return false;
+        selectClips([clipId]);
+        setEditingTextId(objectId);
+        return true;
+      },
       hover: (point) => monitorHoverElementAt(point, monitorElementsRef.current, state.selectedIds),
       hoverRevision,
       click: (point, modifiers) =>
@@ -546,6 +594,7 @@ function MonitorPanelContent({
     };
   }, [
     clearSelection,
+    agentPreviewOnScreen,
     frameSize,
     monitorView.view.zoom,
     previewVisualProject,
@@ -555,8 +604,61 @@ function MonitorPanelContent({
     timelineProject,
     toggleSelection,
     transformController,
+    visualProject,
+    setEditingTextId,
     viewOptions.guides,
   ]);
+  const openMonitorContextMenu = (
+    event: ReactMouseEvent<HTMLDivElement>,
+    canvasPoint: { readonly x: number; readonly y: number },
+  ) => {
+    if (agentPreviewOnScreen) return;
+    const elements = readMonitorElementsRef.current();
+    const clipId = monitorHitClipIds(canvasPoint, elements)[0];
+    if (clipId === undefined) return;
+    const element = elements.find((candidate) => candidate.clipId === clipId);
+    const objectId =
+      element !== undefined && visualProject.visualObjects[element.id] !== undefined
+        ? element.id
+        : clipIdToObjectId(visualProject, clipId);
+    const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
+    if (object === undefined) return;
+
+    const selectedClip = Object.values(visualProject.compositions)
+      .flatMap((composition) => composition.tracks.flatMap((track) => track.clips))
+      .find((clip) => clip.id === clipId);
+    const assetId =
+      object.assetId ?? (selectedClip?.kind === 'video' ? selectedClip.assetId : undefined);
+    const mediaFit = mediaFitSelection(visualProject, object, clipId);
+    const missing =
+      assetId !== undefined &&
+      missingAssetIds?.has(assetId) === true &&
+      onRelinkMissing !== undefined;
+    const items = buildMonitorContextMenuItems({
+      objectId: object.id,
+      clipId,
+      canFit: mediaFit !== undefined && mediaFit.disabledReason === undefined,
+      canCrop: object.kind === 'image',
+      missing,
+      onAction: (action: MonitorContextAction, targetId: string) => {
+        if (action === 'fit' || action === 'fill') {
+          if (mediaFit === undefined) return;
+          const transaction = buildMediaFitTransaction(targetId, mediaFit, action);
+          if (transaction !== undefined) dispatchProject(transaction);
+        } else if (action === 'crop') {
+          selectClips([clipId]);
+          setCropObjectId(targetId);
+          setCropMode(true);
+        } else if (action === 'relink') {
+          onRelinkMissing?.();
+        }
+      },
+    });
+    if (items.length === 0) return;
+    event.preventDefault();
+    selectClips([clipId]);
+    setContextMenu({ x: event.clientX, y: event.clientY, items });
+  };
   // Announced to screen readers (polite) when Tab changes the selected element (T-M12).
   const [keyAnnouncement, setKeyAnnouncement] = useState('');
   // Keyboard-only editing of the picture (T-M12): with focus on the picture (its
@@ -932,6 +1034,67 @@ function MonitorPanelContent({
     () => buildMonitorGroupOverlay(transformTargets, monitorView.view.zoom),
     [monitorView.view.zoom, transformTargets],
   );
+  const editingTextObject =
+    editingTextId === undefined ? undefined : visualProject.visualObjects[editingTextId];
+  const editingTextOverlay =
+    editingTextId === undefined
+      ? undefined
+      : transformOverlays.find((overlay) => overlay.elementId === editingTextId);
+  const selectedImageOverlay =
+    transformOverlays.length === 1 &&
+    visualProject.visualObjects[transformOverlays[0]!.elementId]?.kind === 'image'
+      ? transformOverlays[0]
+      : undefined;
+  const cropTargetId = cropObjectId ?? selectedImageOverlay?.elementId;
+  const cropTargetObject =
+    cropTargetId === undefined ? undefined : visualProject.visualObjects[cropTargetId];
+  const cropOverlay =
+    cropTargetId === undefined
+      ? undefined
+      : transformOverlays.find((overlay) => overlay.elementId === cropTargetId);
+  useEffect(() => {
+    if (!cropMode || cropObjectId === undefined) return;
+    if (resolveObjectIdForSelection(visualProject, state.selectedIds) === cropObjectId) return;
+    setCropMode(false);
+    setCropObjectId(undefined);
+  }, [cropMode, cropObjectId, state.selectedIds, visualProject]);
+  const commitMonitorText = (text: string) => {
+    if (editingTextId === undefined) return;
+    const project = session.visualProject;
+    const object = project.visualObjects[editingTextId];
+    if (object?.kind !== 'text') return;
+    const currentText =
+      object.textDocument === undefined
+        ? (object.text ?? '')
+        : textDocumentToString(object.textDocument);
+    if (text === currentText) return;
+    try {
+      const updatedObject = textObjectWithDraftText(object, text);
+      session.dispatchCompound('Edit text', {
+        document: {
+          ...project,
+          updatedAt: new Date().toISOString(),
+          visualObjects: { ...project.visualObjects, [object.id]: updatedObject },
+        },
+      });
+      bumpProjectRevision();
+    } catch (reason) {
+      showToast(
+        `Could not edit the title: ${reason instanceof Error ? reason.message : String(reason)}`,
+        'error',
+      );
+    }
+  };
+  const commitMonitorCrop = (crop: CropInsets) => {
+    if (cropTargetId === undefined) return;
+    const object = session.visualProject.visualObjects[cropTargetId];
+    if (object?.kind !== 'image' || JSON.stringify(object.transform.crop) === JSON.stringify(crop))
+      return;
+    dispatchProject({
+      label: 'Crop',
+      commands: [{ type: 'object.setCrop', payload: { objectId: cropTargetId, crop } }],
+    });
+  };
   const transformSnapTargets = collectSnapTargets(
     frameSize,
     monitorElementsRef.current
@@ -1130,6 +1293,7 @@ function MonitorPanelContent({
         selection={monitorSelection}
         background={viewOptions.background}
         playing={state.playing}
+        onContextMenu={openMonitorContextMenu}
       >
         <div ref={containerRef} className="monitor-canvas" />
         {mediaOfflineName !== undefined && <MediaOfflineNote name={mediaOfflineName} />}
@@ -1147,21 +1311,45 @@ function MonitorPanelContent({
           clipIdOf={(nodeId) => selectionOutline.clipByNode.get(nodeId)}
         />
         <MonitorTransformBox
-          overlays={transformOverlays}
-          group={transformGroup}
+          overlays={editingTextId === undefined && !cropMode ? transformOverlays : []}
+          group={editingTextId === undefined && !cropMode ? transformGroup : undefined}
           view={monitorView.view}
           viewportSize={monitorView.viewportSize}
-          interactive={monitorView.tool === 'select' && !spaceHeld}
+          interactive={monitorView.tool === 'select' && !spaceHeld && editingTextId === undefined}
           startGesture={transformController.startGesture}
           snapTargets={transformSnapTargets}
           onSnapFeedback={setSnapFeedback}
         />
+        {editingTextObject?.kind === 'text' && editingTextOverlay !== undefined && (
+          <MonitorTextInlineEditor
+            key={editingTextObject.id}
+            object={editingTextObject}
+            overlay={editingTextOverlay}
+            view={monitorView.view}
+            onCommit={commitMonitorText}
+            onClose={() => setEditingTextId(undefined)}
+          />
+        )}
+        {cropMode && cropTargetObject?.kind === 'image' && cropOverlay !== undefined && (
+          <MonitorCropBox
+            key={cropTargetObject.id}
+            crop={cropTargetObject.transform.crop}
+            overlay={cropOverlay}
+            view={monitorView.view}
+            viewportSize={monitorView.viewportSize}
+            onCommit={commitMonitorCrop}
+            onClose={() => {
+              setCropMode(false);
+              setCropObjectId(undefined);
+            }}
+          />
+        )}
         <MonitorSnapOverlay
           feedback={snapFeedback}
           view={monitorView.view}
           viewportSize={monitorView.viewportSize}
         />
-        {gradientTarget !== undefined && (
+        {!cropMode && gradientTarget !== undefined && (
           <MonitorGradientAnchors
             overlay={gradientTarget.overlay}
             start={gradientTarget.start}
@@ -1186,6 +1374,9 @@ function MonitorPanelContent({
           onBeforeChange={setAgentPreviewBefore}
         />
       </MonitorViewport>
+      {contextMenu !== undefined && (
+        <TimelineContextMenu menu={contextMenu} onClose={() => setContextMenu(undefined)} />
+      )}
       <MonitorTransport
         zoomDrawer={zoomDrawer}
         zoomFit={monitorView.fit}
@@ -1211,6 +1402,17 @@ function MonitorPanelContent({
         canvasPresetId={canvasPresetId}
         viewOptions={viewOptions}
         onViewOptionsChange={setViewOptions}
+        cropMode={cropMode}
+        cropAvailable={selectedImageOverlay !== undefined}
+        onCropToggle={() => {
+          if (cropMode) {
+            setCropMode(false);
+            setCropObjectId(undefined);
+          } else if (selectedImageOverlay !== undefined) {
+            setCropObjectId(selectedImageOverlay.elementId);
+            setCropMode(true);
+          }
+        }}
       />
     </article>
   );
