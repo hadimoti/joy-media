@@ -57,6 +57,7 @@ export async function waitForCanvasTextFontsForText(request: CanvasTextFontReque
 
 const RTL_STRONG = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff\u{1ee00}-\u{1eeff}]/u;
 const PERSIAN_SPECIFIC = /[\u067e\u0686\u0698\u06a9\u06af\u06cc\u06f0-\u06f9\u200c]/u;
+const ARABIC_JOINING_SCRIPT = /\p{Script=Arabic}/u;
 const segmenterCache = new Map<string, Intl.Segmenter>();
 
 function getSegmenter(
@@ -94,6 +95,11 @@ export function countTextGraphemes(text: string): number {
   return segmenter === undefined
     ? fallbackGraphemes(text).length
     : [...segmenter.segment(text)].length;
+}
+
+/** Keep Arabic/Persian letters joined by omitting character tracking for their runs. */
+export function resolveCanvasTextTracking(text: string, tracking: number): number {
+  return ARABIC_JOINING_SCRIPT.test(text) ? 0 : tracking;
 }
 
 export function resolveParagraphDirection(

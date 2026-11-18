@@ -1,5 +1,6 @@
 import { CanvasTextGenerator, CanvasTextMetrics } from 'pixi.js';
 import {
+  resolveCanvasTextTracking,
   resolveCanvasTextAlign,
   resolveParagraphDirection,
   type CanvasTextAlignment,
@@ -108,6 +109,8 @@ function installCanvasTextDirectionAdapter(): void {
     const previousDirection = context.direction;
     const previousTextAlign = context.textAlign;
     const previousActiveMeasure = activeMeasure;
+    // Pixi caches by text and styleKey. TextStyle gives each instance a unique styleKey,
+    // so direction registered to separate styles stays in separate measurement entries.
     context.direction = options.lineDirections[0] ?? 'ltr';
     context.textAlign = canvasTextAlign(options.align);
     activeMeasure = { options, lineIndex: 0 };
@@ -132,7 +135,8 @@ function installCanvasTextDirectionAdapter(): void {
     context.direction = direction;
     context.textAlign = canvasTextAlign(active.options.align);
     try {
-      return Reflect.apply(measureLine, this, args) as number;
+      const letterSpacing = resolveCanvasTextTracking(String(args[0] ?? ''), Number(args[1] ?? 0));
+      return Reflect.apply(measureLine, this, [args[0], letterSpacing, context]) as number;
     } finally {
       context.direction = previousDirection;
       context.textAlign = previousTextAlign;
@@ -215,14 +219,14 @@ function installCanvasTextDirectionAdapter(): void {
           resolveParagraphDirection(text, 'auto'))
         : resolveParagraphDirection(text, active.options.direction);
     const wordSpacing = Number(args[6] ?? 0);
+    const requestedTracking = Number(textStyle.letterSpacing ?? 0);
+    const preservesArabicJoining =
+      requestedTracking !== 0 && resolveCanvasTextTracking(text, requestedTracking) === 0;
     active.drawIndex += 1;
     context.direction = direction;
     context.textAlign = canvasTextAlign(active.options.align);
     try {
-      if (
-        direction === 'rtl' &&
-        (wordSpacing !== 0 || Number(textStyle.letterSpacing ?? 0) !== 0)
-      ) {
+      if (preservesArabicJoining || (direction === 'rtl' && wordSpacing !== 0)) {
         if ('letterSpacing' in context) context.letterSpacing = '0px';
         if ('textLetterSpacing' in context) context.textLetterSpacing = '0px';
         const x = Number(args[3]);

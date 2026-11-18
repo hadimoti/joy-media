@@ -3,6 +3,7 @@ import {
   canvasFontFamilyStack,
   countTextGraphemes,
   resolveCanvasTextAlign,
+  resolveCanvasTextTracking,
   resolveParagraphDirection,
   resolveParagraphDirections,
   waitForCanvasTextFontsForText,
@@ -15,6 +16,12 @@ afterEach(() => {
 });
 
 describe('canvas text direction', () => {
+  it('does not apply character tracking inside Arabic joining runs', () => {
+    expect(resolveCanvasTextTracking('سلام دنیا', 2)).toBe(0);
+    expect(resolveCanvasTextTracking('שלום', 2)).toBe(2);
+    expect(resolveCanvasTextTracking('JOY MEDIA', 2)).toBe(2);
+  });
+
   it('reuses word and grapheme segmenters across repeated wraps', () => {
     const NativeSegmenter = Intl.Segmenter;
     const constructions = vi.fn();

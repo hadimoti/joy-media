@@ -73,6 +73,7 @@ import {
   canvasFontFamilyStack,
   countTextGraphemes,
   resolveCanvasTextAlign,
+  resolveCanvasTextTracking,
   resolveParagraphDirections,
   waitForCanvasTextFonts,
   waitForCanvasTextFontsForText,
@@ -114,7 +115,8 @@ function createTextMeasurement(
     (context as CanvasRenderingContext2D & { direction: 'ltr' | 'rtl' }).direction = direction;
     const measuredWidth = context.measureText(candidate).width;
     const graphemeCount = countTextGraphemes(candidate);
-    return measuredWidth + Math.max(0, graphemeCount - 1) * tracking;
+    const appliedTracking = resolveCanvasTextTracking(candidate, tracking);
+    return measuredWidth + Math.max(0, graphemeCount - 1) * appliedTracking;
   };
 }
 
