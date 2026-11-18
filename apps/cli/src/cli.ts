@@ -164,7 +164,10 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     options: [
       ['--width <px> --height <px> --fps <n>', 'Canvas settings for create'],
       ['--output, -o <file.json>', 'Export destination'],
-      ['--sqlite-path <path>', 'Project database (default ~/.joy-media/joy-media.sqlite3)'],
+      [
+        '--sqlite-path <path>',
+        'Project database (default %APPDATA%\\@joy-media\\desktop\\joy-media.sqlite3; with JOY_MEDIA_HOME set, <JOY_MEDIA_HOME>\\desktop\\joy-media.sqlite3)',
+      ],
       ['--json', 'Machine-readable output where supported'],
     ],
   },
@@ -235,10 +238,12 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   doctor: {
     summary: 'System health check & diagnostics',
     usage: 'joy-media doctor [--json]',
-    options: [['--json', 'One JSON document: { ok, summary, checks[] }']],
+    options: [['--json', 'One JSON document: { ok, summary, checks[], dataLocation }']],
     notes: [
       'Exit code 1 when a check fails; warnings (optional features missing) exit 0.',
-      'Environment: JOY_MEDIA_EDGE_URL=<url>|off sets or disables the edge connectivity probe;',
+      'Data location: the project database in use and whether it comes from JOY_MEDIA_HOME, --sqlite-path or the default.',
+      'Environment: JOY_MEDIA_HOME=<dir> moves all CLI data, including the project database at <dir>\\desktop\\joy-media.sqlite3;',
+      '--sqlite-path still wins. JOY_MEDIA_EDGE_URL=<url>|off sets or disables the edge connectivity probe;',
       'JOY_MODELS_DIR overrides the model weights directory.',
     ],
   },
