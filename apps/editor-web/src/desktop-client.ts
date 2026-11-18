@@ -463,6 +463,20 @@ export async function openDesktopAssetLibraryDirectory(): Promise<void> {
  * Formats a local asset relative path or ID to the joy-asset:// protocol for instant local streaming.
  */
 export function resolveDesktopAssetUrl(relativePathOrId: string): string {
+  const alreadyUrl = /^joy-asset:\/\/library\/?/.test(relativePathOrId);
   const clean = relativePathOrId.replace(/^joy-asset:\/\/library\/?/, '').replace(/^\/+/, '');
-  return `joy-asset://library/${clean}`;
+  const encodedPath = clean
+    .split('/')
+    // A joy-asset URL is already encoded; a plain relative path is not (a file name may hold a real "%").
+    .map((segment) => encodeURIComponent(alreadyUrl ? decodeSegment(segment) : segment))
+    .join('/');
+  return `joy-asset://library/${encodedPath}`;
+}
+
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }

@@ -4,7 +4,7 @@ import type { OpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import { preferredDerivative } from './asset-library-state.js';
 import { revokeDetachedObjectUrl } from './media-object-url.js';
 
-export type AssetThumbSource = 'derivative' | 'opfs' | 'none';
+export type AssetThumbSource = 'derivative' | 'opfs' | 'library' | 'none';
 
 export interface AssetThumbResult {
   readonly url?: string;
@@ -26,7 +26,7 @@ function previewMimeType(asset: BrowserAsset, blob: Blob): string {
 
 /**
  * Resolve a card preview URL from local data:
- * preferredDerivative -> OPFS original -> none.
+ * preferredDerivative -> OPFS original -> desktop library file -> none.
  */
 export async function resolveAssetThumb(options: {
   readonly asset: BrowserAsset;
@@ -34,8 +34,9 @@ export async function resolveAssetThumb(options: {
   readonly projectId: string;
   readonly resolver: AuthorizedDerivativeResolver;
   readonly originalCache: OpfsOriginalAssetCache;
+  readonly libraryUrl?: (relativePath: string) => string;
 }): Promise<AssetThumbResult> {
-  const { asset, derivatives, projectId, resolver, originalCache } = options;
+  const { asset, derivatives, projectId, resolver, originalCache, libraryUrl } = options;
 
   const derivative = preferredDerivative(derivatives);
   if (derivative !== undefined) {
@@ -76,6 +77,24 @@ export async function resolveAssetThumb(options: {
     }
   } catch {
     /* fall through */
+  }
+
+  const relativePath = asset.relativePath;
+  if (
+    libraryUrl !== undefined &&
+    typeof relativePath === 'string' &&
+    relativePath.length > 0 &&
+    (asset.kind === 'image' || asset.kind === 'video')
+  ) {
+    const expectedPrefix = `${asset.kind}/`;
+    return {
+      url: libraryUrl(relativePath),
+      mimeType: asset.descriptor.mimeType.startsWith(expectedPrefix)
+        ? asset.descriptor.mimeType
+        : `${asset.kind}/unknown`,
+      source: 'library',
+      revoke: () => undefined,
+    };
   }
 
   return { source: 'none', revoke: () => undefined };

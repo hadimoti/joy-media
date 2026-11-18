@@ -317,6 +317,20 @@ describe('asset library helpers', () => {
     expect(resolveDesktopAssetUrl('joy-asset://library/audio/test.wav')).toBe(
       'joy-asset://library/audio/test.wav',
     );
+    expect(resolveDesktopAssetUrl('images/cover with #tag.png')).toBe(
+      'joy-asset://library/images/cover%20with%20%23tag.png',
+    );
+    expect(resolveDesktopAssetUrl('images/日本語.png')).toBe(
+      'joy-asset://library/images/%E6%97%A5%E6%9C%AC%E8%AA%9E.png',
+    );
+    // A URL that is already encoded stays the same (no double encoding); a plain path with a real "%" is encoded once.
+    expect(resolveDesktopAssetUrl('joy-asset://library/images/cover%20art.png')).toBe(
+      'joy-asset://library/images/cover%20art.png',
+    );
+    expect(resolveDesktopAssetUrl('images/100%.png')).toBe('joy-asset://library/images/100%25.png');
+    expect(resolveDesktopAssetUrl('joy-asset://library/images/bad%zz.png')).toBe(
+      'joy-asset://library/images/bad%25zz.png',
+    );
   });
 });
 

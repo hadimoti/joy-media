@@ -11,8 +11,8 @@ const previewSource = readFileSync(new URL('./asset-card-preview.ts', import.met
  * Regression guard for JOY-002: asset preview buttons were `disabled` for any
  * asset without a formal derivative, and `openPreview` required a derivative —
  * so locally imported / OPFS-only images could never be previewed.
- * `resolveAssetThumb` must fall back from derivatives to the OPFS original and
- * return `none` (not throw) when nothing local is available.
+ * `resolveAssetThumb` must fall back from derivatives to the OPFS original,
+ * then the desktop library file, and return `none` when no source is available.
  */
 const IMAGE: BrowserAsset = {
   id: 'img-1',
@@ -60,45 +60,47 @@ function fakeOriginal(blob: Blob | undefined): OpfsOriginalAssetCache {
 }
 
 describe('resolveAssetThumb fallback chain', () => {
-  it('keeps card preview resolution local to derivatives and OPFS originals', () => {
+  it('keeps card previews on local sources', () => {
     expect(previewSource).not.toContain('fetchCloudOriginal');
     expect(previewSource).not.toContain('cloudBacked');
     expect(previewSource).not.toContain("source: 'cloud'");
   });
 
-  it('uses the derivative when it resolves available-local', async () => {
+  it('uses the derivative before the library URL when it resolves available-local', async () => {
     const resolver = fakeResolver({
       state: 'available-local',
       url: 'blob:dv',
       revoke: () => undefined,
     });
     const result: AssetThumbResult = await resolveAssetThumb({
-      asset: IMAGE,
+      asset: { ...IMAGE, relativePath: 'images/library.png' },
       derivatives: [DERIVATIVE],
       projectId: 'prj-1',
       resolver,
       originalCache: fakeOriginal(undefined),
+      libraryUrl: (relativePath) => `joy-asset://library/${relativePath}`,
     });
     expect(result.source).toBe('derivative');
     expect(result.url).toBe('blob:dv');
     expect(result.mimeType).toBe('image/png');
   });
 
-  it('falls back to the OPFS original when there is no derivative', async () => {
+  it('uses the OPFS original before the library URL when there is no derivative', async () => {
     const original = new Blob([], { type: 'image/png' });
     const result = await resolveAssetThumb({
-      asset: IMAGE,
+      asset: { ...IMAGE, relativePath: 'images/library.png' },
       derivatives: [],
       projectId: 'prj-1',
       resolver: fakeResolver({ state: 'unavailable' }),
       originalCache: fakeOriginal(original),
+      libraryUrl: (relativePath) => `joy-asset://library/${relativePath}`,
     });
     expect(result.source).toBe('opfs');
   });
 
-  it('returns none when no local source is available', async () => {
+  it('returns none when no library URL callback is available', async () => {
     const result = await resolveAssetThumb({
-      asset: IMAGE,
+      asset: { ...IMAGE, relativePath: 'images/cover.png' },
       derivatives: [],
       projectId: 'prj-1',
       resolver: fakeResolver({ state: 'unavailable' }),
@@ -106,6 +108,95 @@ describe('resolveAssetThumb fallback chain', () => {
     });
     expect(result.source).toBe('none');
     expect(result.url).toBeUndefined();
+  });
+
+  it('uses the desktop library URL for an image after local caches miss', async () => {
+    const asset = { ...IMAGE, relativePath: 'images/cover.png' };
+    const libraryUrl = vi.fn((relativePath: string) => `joy-asset://library/${relativePath}`);
+    const result = await resolveAssetThumb({
+      asset,
+      derivatives: [],
+      projectId: 'prj-1',
+      resolver: fakeResolver({ state: 'unavailable' }),
+      originalCache: fakeOriginal(undefined),
+      libraryUrl,
+    });
+
+    expect(result).toMatchObject({
+      source: 'library',
+      url: 'joy-asset://library/images/cover.png',
+      mimeType: 'image/png',
+    });
+    expect(libraryUrl).toHaveBeenCalledWith('images/cover.png');
+    expect(() => result.revoke()).not.toThrow();
+  });
+
+  it('uses the descriptor MIME type for a library video', async () => {
+    const asset = {
+      ...VIDEO,
+      relativePath: 'video/clip',
+    };
+    const result = await resolveAssetThumb({
+      asset,
+      derivatives: [],
+      projectId: 'prj-1',
+      resolver: fakeResolver({ state: 'unavailable' }),
+      originalCache: fakeOriginal(undefined),
+      libraryUrl: (relativePath) => `joy-asset://library/${relativePath}`,
+    });
+
+    expect(result).toMatchObject({
+      source: 'library',
+      url: 'joy-asset://library/video/clip',
+      mimeType: 'video/mp4',
+    });
+  });
+
+  it('uses the kind fallback MIME type for an image with an octet-stream descriptor', async () => {
+    const result = await resolveAssetThumb({
+      asset: {
+        ...IMAGE,
+        relativePath: 'images/cover',
+        descriptor: { mimeType: 'application/octet-stream' },
+      },
+      derivatives: [],
+      projectId: 'prj-1',
+      resolver: fakeResolver({ state: 'unavailable' }),
+      originalCache: fakeOriginal(undefined),
+      libraryUrl: (relativePath) => `joy-asset://library/${relativePath}`,
+    });
+
+    expect(result.mimeType).toBe('image/unknown');
+  });
+
+  it('keeps audio on its icon even when a library URL callback is available', async () => {
+    const asset = { ...IMAGE, kind: 'audio' as const, relativePath: 'audio/song.wav' };
+    const result = await resolveAssetThumb({
+      asset,
+      derivatives: [],
+      projectId: 'prj-1',
+      resolver: fakeResolver({ state: 'unavailable' }),
+      originalCache: fakeOriginal(undefined),
+      libraryUrl: (relativePath) => `joy-asset://library/${relativePath}`,
+    });
+
+    expect(result.source).toBe('none');
+    expect(result.url).toBeUndefined();
+  });
+
+  it('does not use the library URL for an empty relative path', async () => {
+    const libraryUrl = vi.fn((relativePath: string) => `joy-asset://library/${relativePath}`);
+    const result = await resolveAssetThumb({
+      asset: { ...IMAGE, relativePath: '' },
+      derivatives: [],
+      projectId: 'prj-1',
+      resolver: fakeResolver({ state: 'unavailable' }),
+      originalCache: fakeOriginal(undefined),
+      libraryUrl,
+    });
+
+    expect(result.source).toBe('none');
+    expect(libraryUrl).not.toHaveBeenCalled();
   });
 
   it('falls back to OPFS original when the derivative resolver throws', async () => {

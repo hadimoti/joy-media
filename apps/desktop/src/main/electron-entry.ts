@@ -56,6 +56,8 @@ import { localWorkerEnv } from '../jobs/worker-env.js';
 import { createLocalOriginalWriter } from './local-originals.js';
 import { createMediaChannelHandlers } from './media-channel.js';
 import { createDroppedMediaImportService } from './dropped-media-import.js';
+import { readFileHead, resolveLibraryAssetPath } from './library-asset-path.js';
+import { sniffMediaMime } from './media-mime-sniff.js';
 import { createAssetLibrary } from '../store/asset-library.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { classifyDriveOfDirectory } from './drive-type-probe.js';
@@ -561,14 +563,22 @@ if (!app.requestSingleInstanceLock()) {
           });
         }
         const url = new URL(request.url);
-        let relPath = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+        let relPath: string;
+        try {
+          relPath = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+        } catch {
+          // A broken %-sequence is a bad request, not a server fault.
+          return new Response('Bad Request', {
+            status: 400,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+          });
+        }
         if (relPath.startsWith('library/')) {
           relPath = relPath.slice('library/'.length);
         }
         const baseDir = localDatabase.getAssetLibraryDirectory();
-        const resolvedPath = path.normalize(path.join(baseDir, relPath));
-        const normalizedBase = path.normalize(baseDir);
-        if (!resolvedPath.startsWith(normalizedBase)) {
+        const resolvedPath = resolveLibraryAssetPath(baseDir, relPath);
+        if (resolvedPath === undefined) {
           return new Response('Forbidden', {
             status: 403,
             headers: { 'Access-Control-Allow-Origin': '*' },
@@ -586,6 +596,16 @@ if (!app.requestSingleInstanceLock()) {
         const headers = new Headers(response.headers);
         headers.set('Access-Control-Allow-Origin', '*');
         headers.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        // Library files have no extension, so the response can lack a media type. A video element may refuse
+        // to play without one, so the type is guessed from the first bytes of the file when it is missing or generic.
+        const declaredType = (headers.get('Content-Type') ?? '')
+          .split(';')[0]
+          ?.trim()
+          .toLowerCase();
+        if (declaredType === '' || declaredType === 'application/octet-stream') {
+          const sniffedType = sniffMediaMime(readFileHead(resolvedPath, 32));
+          if (sniffedType !== undefined) headers.set('Content-Type', sniffedType);
+        }
         return new Response(response.body, {
           status: response.status,
           statusText: response.statusText,

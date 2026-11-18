@@ -605,6 +605,7 @@ export function AssetLibraryPanel({
           projectId,
           resolver: resolverInstance,
           originalCache,
+          ...(isDesktopHost() ? { libraryUrl: resolveDesktopAssetUrl } : {}),
         });
         if (requestId !== previewSeqRef.current) {
           outcome.revoke();
@@ -626,7 +627,9 @@ export function AssetLibraryPanel({
         setStatus(
           outcome.source === 'derivative'
             ? `Preview for ${asset.displayName} is shown from this browser’s verified local cache.`
-            : `Preview for ${asset.displayName} is shown from this browser’s local copy.`,
+            : outcome.source === 'library'
+              ? `Preview for ${asset.displayName} is shown from your asset library folder.`
+              : `Preview for ${asset.displayName} is shown from this browser’s local copy.`,
         );
       } catch (error) {
         if (requestId !== previewSeqRef.current) return;
@@ -1431,7 +1434,7 @@ function AssetLocateOriginalButton({
   );
 }
 
-function AssetCardMedia({
+export function AssetCardMedia({
   asset,
   derivatives,
   projectId,
@@ -1491,6 +1494,7 @@ function AssetCardMedia({
         projectId,
         resolver,
         originalCache,
+        ...(isDesktopHost() ? { libraryUrl: resolveDesktopAssetUrl } : {}),
       });
       if (cancelled) {
         result.revoke();
@@ -1519,6 +1523,12 @@ function AssetCardMedia({
   }, [asset, derivatives, projectId, resolverPromise, originalCachePromise, nearViewport]);
 
   const interactive = onOpenDerivative !== undefined;
+  const handleMediaError = () => {
+    if (source !== 'library') return;
+    setUrl(undefined);
+    setSource('none');
+  };
+
   return (
     <button
       ref={mediaRef}
@@ -1534,9 +1544,9 @@ function AssetCardMedia({
       data-source={source}
     >
       {url !== undefined && mimeType?.startsWith('video/') ? (
-        <video src={url} muted playsInline preload="metadata" />
+        <video src={url} muted playsInline preload="metadata" onError={handleMediaError} />
       ) : url !== undefined && mimeType?.startsWith('image/') ? (
-        <img src={url} alt="" loading="lazy" decoding="async" />
+        <img src={url} alt="" loading="lazy" decoding="async" onError={handleMediaError} />
       ) : (
         <span className="asset-card-placeholder" aria-hidden>
           {asset.kind === 'video' ? (
