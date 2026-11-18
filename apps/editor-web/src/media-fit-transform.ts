@@ -1,5 +1,5 @@
 import type { VisualObjectTransaction } from '@joy-media/property-system';
-import type { ClipV1, JoyProjectV1, VisualObjectV1 } from '@joy-media/project-schema';
+import type { JoyProjectV1, VisualObjectV1 } from '@joy-media/project-schema';
 
 export type MediaFitMode = 'fit' | 'fill';
 
@@ -34,21 +34,15 @@ export function mediaFitSelection(
     return undefined;
 
   let composition: JoyProjectV1['compositions'][string] | undefined;
-  let selectedClip: ClipV1 | undefined;
   for (const candidate of Object.values(project.compositions)) {
-    const clip = candidate.tracks
-      .flatMap((track) => track.clips)
-      .find((item) => item.id === selectedClipId);
-    if (clip !== undefined) {
+    if (candidate.tracks.some((track) => track.clips.some((item) => item.id === selectedClipId))) {
       composition = candidate;
-      selectedClip = clip;
       break;
     }
   }
   if (composition === undefined) return undefined;
 
-  const assetId =
-    object.assetId ?? (selectedClip?.kind === 'video' ? selectedClip.assetId : undefined);
+  const assetId = drawnAssetId(project, object, selectedClipId);
   const asset = assetId === undefined ? undefined : project.assets[assetId];
   const sourceWidth = asset?.descriptor?.width;
   const sourceHeight = asset?.descriptor?.height;
@@ -84,6 +78,21 @@ export function mediaFitSelection(
     anchor: { x: object.transform.anchorX ?? 0.5, y: object.transform.anchorY ?? 0.5 },
     ...(disabledReason === undefined ? {} : { disabledReason }),
   };
+}
+
+/**
+ * The asset a Monitor element draws: the object's own, or the selected video
+ * clip's when the object has none. Fit, Fill and Reset share this rule.
+ */
+export function drawnAssetId(
+  project: JoyProjectV1,
+  object: VisualObjectV1,
+  selectedClipId: string,
+): string | undefined {
+  const clip = Object.values(project.compositions)
+    .flatMap((composition) => composition.tracks.flatMap((track) => track.clips))
+    .find((item) => item.id === selectedClipId);
+  return object.assetId ?? (clip?.kind === 'video' ? clip.assetId : undefined);
 }
 
 export interface MediaFitTransform {

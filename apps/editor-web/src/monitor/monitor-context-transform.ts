@@ -1,20 +1,39 @@
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import type { JoyProjectV1, VisualObjectV1 } from '@joy-media/project-schema';
 import { objectIdToClipIds } from './monitor-ids.js';
-import { applyWorldChange, turn, type LocalTransform } from './monitor-transform-maths.js';
+import {
+  applyWorldChange,
+  cleanNumber,
+  turn,
+  worldDeltaToParentSpace,
+  type LocalTransform,
+  type ParentTransform,
+} from './monitor-transform-maths.js';
 import {
   TRANSFORM_BLOCK_MESSAGES,
   type MonitorTransformTarget,
 } from './monitor-transform-targets.js';
-import { calculateMediaFitTransform } from '../media-fit-transform.js';
+import { calculateMediaFitTransform, drawnAssetId } from '../media-fit-transform.js';
 
 const TRANSFORM_CHANNELS = ['x', 'y', 'scaleX', 'scaleY', 'rotationDeg'] as const;
+const POSITION_CHANNELS = ['x', 'y'] as const;
 const STATE_EPSILON = 1e-6;
+const NO_PARENT: ParentTransform = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0 };
+const CENTRE_ANIMATED_MESSAGE =
+  'Position is animated or expression-driven, so Centre cannot set it here.';
+const RESET_ANIMATED_MESSAGE =
+  'Position, size or rotation is animated or expression-driven, so Reset cannot set it here.';
+const NO_SIZE_MESSAGE = 'This element has no size, so Reset cannot centre it.';
 
 type TransformProperty = (typeof TRANSFORM_CHANNELS)[number];
 
 export interface MonitorContextTransformState {
+  /** Why both actions are off: the camera, a locked track, or a parent or canvas that cannot be used. */
   readonly disabledReason?: string;
+  /** Why only Centre is off: its position is animated or expression-driven. */
+  readonly centreDisabledReason?: string;
+  /** Why only Reset is off: a rotation, size or position channel is animated or expression-driven. */
+  readonly resetDisabledReason?: string;
   readonly alreadyCentred: boolean;
   readonly alreadyReset: boolean;
   readonly centreTransaction?: VisualObjectTransaction;
@@ -51,28 +70,28 @@ function parentIsLocked(project: JoyProjectV1, target: MonitorTransformTarget): 
   );
 }
 
-function hasTransformAnimationOrExpression(object: VisualObjectV1): boolean {
-  return TRANSFORM_CHANNELS.some(
+/** True when one of the channels is animated or driven by an expression. */
+function animatedOrExpression(
+  object: VisualObjectV1,
+  channels: readonly TransformProperty[],
+): boolean {
+  return channels.some(
     (channel) =>
       object.animations?.[channel] !== undefined || object.expressions?.[channel] !== undefined,
   );
 }
 
-function disabledReason(input: MonitorContextTransformInput): string | undefined {
+/**
+ * Why both actions are off. The Monitor gesture's reason comes first so the two
+ * stay in step. An animated parent does not block: like the box gesture, the
+ * values are read at the playhead.
+ */
+function sharedDisabledReason(input: MonitorContextTransformInput): string | undefined {
   const blocked = input.target.blocked.move;
   if (blocked !== undefined) return TRANSFORM_BLOCK_MESSAGES[blocked];
   if (input.activeCamera === true) return TRANSFORM_BLOCK_MESSAGES.camera;
   if (parentIsLocked(input.project, input.target))
     return 'A parent of this element is on a locked track.';
-  if (
-    input.target.ancestorObjectIds?.some((id) => {
-      const parent = input.project.visualObjects[id];
-      return parent !== undefined && hasTransformAnimationOrExpression(parent);
-    })
-  )
-    return 'A parent of this element has an animated or expression-driven transform.';
-  if (hasTransformAnimationOrExpression(input.object))
-    return 'This element has an animated or expression-driven transform.';
   if (
     !Number.isFinite(input.frameWidth) ||
     !Number.isFinite(input.frameHeight) ||
@@ -98,13 +117,16 @@ function transaction(
   };
 }
 
-function resetScale(
-  object: VisualObjectV1,
-  project: JoyProjectV1,
-  frameWidth: number,
-  frameHeight: number,
-): { readonly scaleX: number; readonly scaleY: number } {
-  const asset = object.assetId === undefined ? undefined : project.assets[object.assetId];
+/**
+ * The scale a new object of this kind gets: the Fit scale of its visible media
+ * (the crop is part of the visible box), or 1 for everything else.
+ */
+function defaultScale(input: MonitorContextTransformInput): {
+  readonly scaleX: number;
+  readonly scaleY: number;
+} {
+  const assetId = drawnAssetId(input.project, input.object, input.target.clipId);
+  const asset = assetId === undefined ? undefined : input.project.assets[assetId];
   const width = asset?.descriptor?.width;
   const height = asset?.descriptor?.height;
   if (
@@ -116,9 +138,10 @@ function resetScale(
   const fitted = calculateMediaFitTransform({
     sourceWidth: width,
     sourceHeight: height,
-    frameWidth,
-    frameHeight,
+    frameWidth: input.frameWidth,
+    frameHeight: input.frameHeight,
     mode: 'fit',
+    crop: input.object.transform.crop,
   });
   return fitted === undefined
     ? { scaleX: 1, scaleY: 1 }
@@ -130,91 +153,115 @@ function samePosition(a: LocalTransform, b: LocalTransform): boolean {
 }
 
 function sameResetTransform(a: LocalTransform, b: LocalTransform): boolean {
-  return TRANSFORM_CHANNELS.every((channel) => !valuesDiffer(a[channel], b[channel]));
+  return (
+    samePosition(a, b) &&
+    !valuesDiffer(a.scaleX, b.scaleX) &&
+    !valuesDiffer(a.scaleY, b.scaleY) &&
+    !valuesDiffer(a.rotationDeg, b.rotationDeg)
+  );
+}
+
+/**
+ * The object's own values that return it to its defaults (no rotation, the
+ * default scale) with its drawn box centred in the frame. The renderer places
+ * the rotation origin through the parent, and draws the box from there with the
+ * parent's turn and scale applied, so the offset from the origin to the box
+ * centre is scaled and turned the same way before the origin is placed.
+ */
+function resetLocalValues(
+  target: MonitorTransformTarget,
+  scale: { readonly scaleX: number; readonly scaleY: number },
+  frameWidth: number,
+  frameHeight: number,
+): LocalTransform | undefined {
+  const { geometry } = target;
+  const before = geometry.transform;
+  if (Math.abs(before.scaleX) < STATE_EPSILON || Math.abs(before.scaleY) < STATE_EPSILON)
+    return undefined;
+  // The box centre relative to the rotation origin, in the object's own unrotated, unscaled units.
+  const fromOrigin = turn(
+    { x: geometry.center.x - geometry.origin.x, y: geometry.center.y - geometry.origin.y },
+    -before.rotationDeg,
+  );
+  const offset = { x: fromOrigin.x / before.scaleX, y: fromOrigin.y / before.scaleY };
+  const parent = target.parent ?? NO_PARENT;
+  // With rotation 0 and the default scale, the centre sits this far from the origin in canvas space.
+  const centreFromOrigin = turn(
+    {
+      x: offset.x * scale.scaleX * parent.scaleX,
+      y: offset.y * scale.scaleY * parent.scaleY,
+    },
+    parent.rotationDeg,
+  );
+  const origin = {
+    x: frameWidth / 2 - centreFromOrigin.x,
+    y: frameHeight / 2 - centreFromOrigin.y,
+  };
+  const local = worldDeltaToParentSpace(
+    { x: origin.x - parent.x, y: origin.y - parent.y },
+    target.parent,
+  );
+  if (local === undefined) return undefined;
+  return {
+    x: cleanNumber(local.x),
+    y: cleanNumber(local.y),
+    scaleX: scale.scaleX,
+    scaleY: scale.scaleY,
+    rotationDeg: 0,
+  };
 }
 
 /** Build one undoable Centre and Reset edit from the Monitor's drawn geometry. */
 export function monitorContextTransformState(
   input: MonitorContextTransformInput,
 ): MonitorContextTransformState {
-  const unavailable = disabledReason(input);
-  if (unavailable !== undefined)
-    return { disabledReason: unavailable, alreadyCentred: false, alreadyReset: false };
+  const shared = sharedDisabledReason(input);
+  if (shared !== undefined)
+    return { disabledReason: shared, alreadyCentred: false, alreadyReset: false };
 
-  const before = input.target.geometry.transform;
-  const centreDelta = {
-    x: input.frameWidth / 2 - input.target.geometry.center.x,
-    y: input.frameHeight / 2 - input.target.geometry.center.y,
-  };
+  const { target, frameWidth, frameHeight } = input;
+  const centreBlocked = animatedOrExpression(input.object, POSITION_CHANNELS);
+  const resetBlocked = animatedOrExpression(input.object, TRANSFORM_CHANNELS);
+
+  // Centre moves the whole drawn box: a world translation, so scale and rotation stay as they are.
+  const before = target.geometry.transform;
   const centreAfter = {
     ...before,
-    x: before.x + centreDelta.x,
-    y: before.y + centreDelta.y,
+    x: before.x + (frameWidth / 2 - target.geometry.center.x),
+    y: before.y + (frameHeight / 2 - target.geometry.center.y),
   };
-  const centredLocal = applyWorldChange(
-    input.target.local,
-    before,
-    centreAfter,
-    input.target.parent,
-  );
+  const centredLocal = applyWorldChange(target.local, before, centreAfter, target.parent);
   if (centredLocal === undefined)
     return {
       disabledReason: TRANSFORM_BLOCK_MESSAGES['parent-zero-scale'],
       alreadyCentred: false,
       alreadyReset: false,
     };
+  const alreadyCentred = samePosition(target.local, centredLocal);
 
-  // Recover the local offset between the object's rotation origin and its box
-  // centre so Reset can centre the box after returning rotation and scale.
-  const centreFromOrigin = {
-    x: input.target.geometry.center.x - input.target.geometry.origin.x,
-    y: input.target.geometry.center.y - input.target.geometry.origin.y,
-  };
-  const unrotatedCentreOffset = turn(centreFromOrigin, -before.rotationDeg);
-  const localCentreOffset = {
-    x: unrotatedCentreOffset.x / before.scaleX,
-    y: unrotatedCentreOffset.y / before.scaleY,
-  };
-  const scale = resetScale(input.object, input.project, input.frameWidth, input.frameHeight);
-  const resetAfter = {
-    x: input.frameWidth / 2 - localCentreOffset.x * scale.scaleX,
-    y: input.frameHeight / 2 - localCentreOffset.y * scale.scaleY,
-    scaleX: scale.scaleX,
-    scaleY: scale.scaleY,
-    rotationDeg: 0,
-  };
-  const resetLocal = applyWorldChange(input.target.local, before, resetAfter, input.target.parent);
-  if (resetLocal === undefined)
-    return {
-      disabledReason: TRANSFORM_BLOCK_MESSAGES['parent-zero-scale'],
-      alreadyCentred: false,
-      alreadyReset: false,
-    };
+  const resetLocal = resetLocalValues(target, defaultScale(input), frameWidth, frameHeight);
+  const alreadyReset = resetLocal !== undefined && sameResetTransform(target.local, resetLocal);
+  const resetDisabledReason = resetBlocked
+    ? RESET_ANIMATED_MESSAGE
+    : resetLocal === undefined
+      ? NO_SIZE_MESSAGE
+      : undefined;
 
-  const alreadyCentred = samePosition(input.target.local, centredLocal);
-  const alreadyReset = sameResetTransform(input.target.local, resetLocal);
+  const centreTransaction =
+    centreBlocked || alreadyCentred
+      ? undefined
+      : transaction('Centre in frame', input.objectId, POSITION_CHANNELS, centredLocal);
+  const resetTransaction =
+    resetBlocked || resetLocal === undefined || alreadyReset
+      ? undefined
+      : transaction('Reset transform', input.objectId, TRANSFORM_CHANNELS, resetLocal);
+
   return {
     alreadyCentred,
     alreadyReset,
-    ...(alreadyCentred
-      ? {}
-      : {
-          centreTransaction: transaction(
-            'Centre in frame',
-            input.objectId,
-            ['x', 'y'],
-            centredLocal,
-          ),
-        }),
-    ...(alreadyReset
-      ? {}
-      : {
-          resetTransaction: transaction(
-            'Reset transform',
-            input.objectId,
-            TRANSFORM_CHANNELS,
-            resetLocal,
-          ),
-        }),
+    ...(centreBlocked ? { centreDisabledReason: CENTRE_ANIMATED_MESSAGE } : {}),
+    ...(resetDisabledReason === undefined ? {} : { resetDisabledReason }),
+    ...(centreTransaction === undefined ? {} : { centreTransaction }),
+    ...(resetTransaction === undefined ? {} : { resetTransaction }),
   };
 }

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import type { JoyProjectV1, VisualObjectV1 } from '@joy-media/project-schema';
+import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { INITIAL_EDITOR_PROJECT } from '../editor-project.js';
 import { EditorSession } from '../editor-session.js';
 import { monitorContextTransformState } from './monitor-context-transform.js';
+import { turn, type LocalTransform, type ParentTransform } from './monitor-transform-maths.js';
 import type { MonitorTransformTarget } from './monitor-transform-targets.js';
 
 const textObject: VisualObjectV1 = {
@@ -52,7 +54,15 @@ function project(
             order: 0,
             enabled: true,
             locked: options.parentTrackLocked === true,
-            clips: [{ id: 'parent-clip', kind: 'video', startUs: 0, durationUs: 1_000_000 }],
+            clips: [
+              {
+                id: 'parent-clip',
+                kind: 'video',
+                assetId: 'video',
+                startUs: 0,
+                durationUs: 1_000_000,
+              },
+            ],
           },
         ],
       },
@@ -70,6 +80,22 @@ function project(
     visualObjects: objects,
     captionDocuments: {},
     pluginData: { 'joy.clipObjects': { 'parent-clip': 'parent' } },
+  } as unknown as JoyProjectV1;
+}
+
+/** The same project with one more picture asset, 1920 by 1080. */
+function withPhoto(base: JoyProjectV1): JoyProjectV1 {
+  return {
+    ...base,
+    assets: {
+      ...base.assets,
+      photo: {
+        id: 'photo',
+        kind: 'image',
+        displayName: 'Photo',
+        descriptor: { mimeType: 'image/png', width: 1920, height: 1080 },
+      },
+    },
   } as unknown as JoyProjectV1;
 }
 
@@ -93,6 +119,67 @@ function target(overrides: Partial<MonitorTransformTarget> = {}): MonitorTransfo
     blocked: {},
     ...overrides,
   };
+}
+
+/** The renderer's order: the parent scales a child's position, then turns it. */
+function pivotInCanvas(parent: ParentTransform, local: LocalTransform): { x: number; y: number } {
+  const moved = turn(
+    { x: parent.scaleX * local.x, y: parent.scaleY * local.y },
+    parent.rotationDeg,
+  );
+  return { x: parent.x + moved.x, y: parent.y + moved.y };
+}
+
+/** Where a child's drawn box centre lands, given its offset from its pivot in its own units. */
+function centreInCanvas(
+  parent: ParentTransform,
+  local: LocalTransform,
+  offset: { readonly x: number; readonly y: number },
+): { x: number; y: number } {
+  const pivot = pivotInCanvas(parent, local);
+  const drawn = turn(
+    { x: parent.scaleX * local.scaleX * offset.x, y: parent.scaleY * local.scaleY * offset.y },
+    parent.rotationDeg + local.rotationDeg,
+  );
+  return { x: pivot.x + drawn.x, y: pivot.y + drawn.y };
+}
+
+/** A child target built from the same model, so the test checks the maths and not hand-typed geometry. */
+function parentedTarget(
+  parent: ParentTransform,
+  local: LocalTransform,
+  offset: { readonly x: number; readonly y: number },
+): MonitorTransformTarget {
+  const pivot = pivotInCanvas(parent, local);
+  return target({
+    parent,
+    ancestorObjectIds: ['parent'],
+    local,
+    geometry: {
+      ...target().geometry,
+      transform: {
+        x: pivot.x,
+        y: pivot.y,
+        scaleX: parent.scaleX * local.scaleX,
+        scaleY: parent.scaleY * local.scaleY,
+        rotationDeg: parent.rotationDeg + local.rotationDeg,
+      },
+      origin: pivot,
+      center: centreInCanvas(parent, local, offset),
+    },
+  });
+}
+
+function transformCommands(edit: VisualObjectTransaction | undefined) {
+  return edit?.commands.filter((command) => command.type === 'object.setTransformProperty') ?? [];
+}
+
+function transformValues(edit: VisualObjectTransaction | undefined) {
+  return transformCommands(edit).map((command) => command.payload.value);
+}
+
+function transformKeys(edit: VisualObjectTransaction | undefined) {
+  return transformCommands(edit).map((command) => command.payload.key);
 }
 
 function memoryStorage() {
@@ -177,11 +264,7 @@ describe('Monitor context transform actions', () => {
       ],
     });
     expect(state.resetTransaction?.commands).toHaveLength(5);
-    expect(
-      state.resetTransaction?.commands
-        .filter((command) => command.type === 'object.setTransformProperty')
-        .map((command) => command.payload.key),
-    ).not.toContain('crop');
+    expect(transformKeys(state.resetTransaction)).not.toContain('crop');
   });
 
   it('re-centres an off-centre anchor after resetting rotation and scale', () => {
@@ -201,11 +284,7 @@ describe('Monitor context transform actions', () => {
       frameHeight: 1920,
     });
 
-    expect(
-      state.resetTransaction?.commands
-        .filter((command) => command.type === 'object.setTransformProperty')
-        .map((command) => command.payload.value),
-    ).toEqual([520, 965, 1, 1, 0]);
+    expect(transformValues(state.resetTransaction)).toEqual([520, 965, 1, 1, 0]);
   });
 
   it('supports a static parent while moving the child in canvas space', () => {
@@ -230,11 +309,143 @@ describe('Monitor context transform actions', () => {
     });
 
     expect(state.disabledReason).toBeUndefined();
-    expect(
-      state.centreTransaction?.commands
-        .filter((command) => command.type === 'object.setTransformProperty')
-        .map((command) => command.payload.value),
-    ).toEqual([450, 780]);
+    expect(transformValues(state.centreTransaction)).toEqual([450, 780]);
+  });
+
+  describe('under a rotated and scaled parent', () => {
+    const parent: ParentTransform = { x: 300, y: 400, scaleX: 2, scaleY: 2, rotationDeg: 90 };
+    const offset = { x: 40, y: 0 };
+    const child: VisualObjectV1 = { ...textObject, parentId: 'parent' };
+    const nested = project({
+      title: child,
+      parent: { ...textObject, id: 'parent', kind: 'null' },
+    });
+
+    it('centres the child in canvas space through the parent', () => {
+      const state = monitorContextTransformState({
+        objectId: 'title',
+        object: child,
+        project: nested,
+        target: parentedTarget(
+          parent,
+          { x: 10, y: 20, scaleX: 2, scaleY: 2, rotationDeg: 90 },
+          offset,
+        ),
+        frameWidth: 1080,
+        frameHeight: 1920,
+      });
+
+      expect(transformValues(state.centreTransaction)).toEqual([280, -200]);
+    });
+
+    it('returns a rotated and scaled child to its own defaults and centres its box in the frame', () => {
+      const state = monitorContextTransformState({
+        objectId: 'title',
+        object: child,
+        project: nested,
+        target: parentedTarget(
+          parent,
+          { x: 10, y: 20, scaleX: 2, scaleY: 2, rotationDeg: 90 },
+          offset,
+        ),
+        frameWidth: 1080,
+        frameHeight: 1920,
+      });
+
+      // Rotation 0 and scale 1 are the child's own values, so the parent's 90 degrees stay in the parent.
+      const reset = transformValues(state.resetTransaction);
+      expect(reset).toEqual([240, -120, 1, 1, 0]);
+      const centre = centreInCanvas(
+        parent,
+        { x: 240, y: -120, scaleX: 1, scaleY: 1, rotationDeg: 0 },
+        offset,
+      );
+      expect(centre.x).toBeCloseTo(540, 6);
+      expect(centre.y).toBeCloseTo(960, 6);
+    });
+
+    it('reports a rotated and scaled child that is already centred and reset', () => {
+      const state = monitorContextTransformState({
+        objectId: 'title',
+        object: child,
+        project: nested,
+        target: parentedTarget(
+          parent,
+          { x: 240, y: -120, scaleX: 1, scaleY: 1, rotationDeg: 0 },
+          offset,
+        ),
+        frameWidth: 1080,
+        frameHeight: 1920,
+      });
+
+      expect(state.alreadyCentred).toBe(true);
+      expect(state.alreadyReset).toBe(true);
+      expect(state.centreTransaction).toBeUndefined();
+      expect(state.resetTransaction).toBeUndefined();
+    });
+  });
+
+  it('fits a cropped picture to the frame as Fit does, and leaves the crop alone', () => {
+    const photo: VisualObjectV1 = {
+      ...textObject,
+      id: 'photo-object',
+      kind: 'image',
+      assetId: 'photo',
+      transform: {
+        ...textObject.transform,
+        x: 540,
+        y: 960,
+        scaleX: 1,
+        scaleY: 1,
+        rotationDeg: 0,
+        crop: { left: 0.1, top: 0.1, right: 0.1, bottom: 0.1 },
+      },
+    };
+    const state = monitorContextTransformState({
+      objectId: 'photo-object',
+      object: photo,
+      project: withPhoto(project({ 'photo-object': photo })),
+      target: target({
+        objectId: 'photo-object',
+        local: { x: 540, y: 960, scaleX: 1, scaleY: 1, rotationDeg: 0 },
+        geometry: {
+          ...target().geometry,
+          transform: { x: 540, y: 960, scaleX: 1, scaleY: 1, rotationDeg: 0 },
+          origin: { x: 540, y: 960 },
+          center: { x: 540, y: 960 },
+        },
+      }),
+      frameWidth: 1080,
+      frameHeight: 1920,
+    });
+
+    // The visible 80 per cent of the picture (1536 by 864) fits the 1080 by 1920 frame at 45/64.
+    expect(transformValues(state.resetTransaction)).toEqual([540, 960, 0.703125, 0.703125, 0]);
+    expect(transformKeys(state.resetTransaction)).not.toContain('crop');
+  });
+
+  it("uses the selected video clip's asset when the object has none", () => {
+    const media: VisualObjectV1 = { ...textObject, id: 'media', kind: 'null' };
+    const state = monitorContextTransformState({
+      objectId: 'media',
+      object: media,
+      project: project({ media }),
+      target: target({
+        objectId: 'media',
+        clipId: 'parent-clip',
+        local: { x: 540, y: 960, scaleX: 2, scaleY: 2, rotationDeg: 30 },
+        geometry: {
+          ...target().geometry,
+          transform: { x: 540, y: 960, scaleX: 2, scaleY: 2, rotationDeg: 30 },
+          origin: { x: 540, y: 960 },
+          center: { x: 540, y: 960 },
+        },
+      }),
+      frameWidth: 1080,
+      frameHeight: 1920,
+    });
+
+    expect(transformValues(state.resetTransaction)).toEqual([540, 960, 0.5625, 0.5625, 0]);
   });
 
   it('disables both actions while the composition has an active camera', () => {
@@ -251,6 +462,131 @@ describe('Monitor context transform actions', () => {
     expect(state.disabledReason).toBe('The camera places this element. Change the camera instead.');
     expect(state.centreTransaction).toBeUndefined();
     expect(state.resetTransaction).toBeUndefined();
+  });
+
+  it('disables both actions when the parent is on a locked track', () => {
+    const child: VisualObjectV1 = { ...textObject, parentId: 'parent' };
+    const state = monitorContextTransformState({
+      objectId: 'title',
+      object: child,
+      project: project(
+        { title: child, parent: { ...textObject, id: 'parent', kind: 'null' } },
+        { parentTrackLocked: true },
+      ),
+      target: target({ ancestorObjectIds: ['parent'] }),
+      frameWidth: 1080,
+      frameHeight: 1920,
+    });
+
+    expect(state.disabledReason).toBe('A parent of this element is on a locked track.');
+    expect(state.centreTransaction).toBeUndefined();
+    expect(state.resetTransaction).toBeUndefined();
+  });
+
+  it('reports an object that is already centred and reset', () => {
+    const state = monitorContextTransformState({
+      objectId: 'title',
+      object: textObject,
+      project: project(),
+      target: target({
+        geometry: {
+          ...target().geometry,
+          transform: { x: 540, y: 960, scaleX: 1, scaleY: 1, rotationDeg: 0 },
+          origin: { x: 540, y: 960 },
+          center: { x: 540, y: 960 },
+        },
+        local: { x: 540, y: 960, scaleX: 1, scaleY: 1, rotationDeg: 0 },
+      }),
+      frameWidth: 1080,
+      frameHeight: 1920,
+    });
+
+    expect(state.alreadyCentred).toBe(true);
+    expect(state.alreadyReset).toBe(true);
+    expect(state.centreTransaction).toBeUndefined();
+    expect(state.resetTransaction).toBeUndefined();
+  });
+
+  it('blocks both actions while the position is animated', () => {
+    const moving: VisualObjectV1 = {
+      ...textObject,
+      animations: { x: { keyframes: [{ timeUs: 0, value: 100, interpolation: 'linear' }] } },
+    };
+    const state = monitorContextTransformState({
+      objectId: 'title',
+      object: moving,
+      project: project({ title: moving }),
+      target: target(),
+      frameWidth: 1080,
+      frameHeight: 1920,
+    });
+
+    expect(state.disabledReason).toBeUndefined();
+    expect(state.centreDisabledReason).toBeDefined();
+    expect(state.resetDisabledReason).toBeDefined();
+    expect(state.centreTransaction).toBeUndefined();
+    expect(state.resetTransaction).toBeUndefined();
+  });
+
+  it('keeps Centre and blocks only Reset while the scale is animated', () => {
+    const scaling: VisualObjectV1 = {
+      ...textObject,
+      animations: { scaleX: { keyframes: [{ timeUs: 0, value: 1, interpolation: 'linear' }] } },
+    };
+    const state = monitorContextTransformState({
+      objectId: 'title',
+      object: scaling,
+      project: project({ title: scaling }),
+      target: target(),
+      frameWidth: 1080,
+      frameHeight: 1920,
+    });
+
+    expect(state.disabledReason).toBeUndefined();
+    expect(state.centreDisabledReason).toBeUndefined();
+    expect(state.centreTransaction).toBeDefined();
+    expect(state.resetDisabledReason).toBeDefined();
+    expect(state.resetTransaction).toBeUndefined();
+  });
+
+  it('keeps Centre and blocks only Reset while a rotation expression drives the object', () => {
+    const turning: VisualObjectV1 = { ...textObject, expressions: { rotationDeg: 'time' } };
+    const state = monitorContextTransformState({
+      objectId: 'title',
+      object: turning,
+      project: project({ title: turning }),
+      target: target(),
+      frameWidth: 1080,
+      frameHeight: 1920,
+    });
+
+    expect(state.centreTransaction).toBeDefined();
+    expect(state.resetDisabledReason).toBeDefined();
+    expect(state.resetTransaction).toBeUndefined();
+  });
+
+  it('keeps both actions for a child of an animated parent, as the Monitor box does', () => {
+    const child: VisualObjectV1 = { ...textObject, parentId: 'parent' };
+    const parent: VisualObjectV1 = {
+      ...textObject,
+      id: 'parent',
+      kind: 'null',
+      animations: {
+        rotationDeg: { keyframes: [{ timeUs: 0, value: 10, interpolation: 'linear' }] },
+      },
+    };
+    const state = monitorContextTransformState({
+      objectId: 'title',
+      object: child,
+      project: project({ title: child, parent }),
+      target: target({ ancestorObjectIds: ['parent'] }),
+      frameWidth: 1080,
+      frameHeight: 1920,
+    });
+
+    expect(state.disabledReason).toBeUndefined();
+    expect(state.centreTransaction).toBeDefined();
+    expect(state.resetTransaction).toBeDefined();
   });
 
   it.each(['centreTransaction', 'resetTransaction'] as const)(
@@ -301,77 +637,4 @@ describe('Monitor context transform actions', () => {
       expect(session.canUndo).toBe(false);
     },
   );
-
-  it.each([
-    [
-      'the object is already centred and reset',
-      target({
-        geometry: {
-          ...target().geometry,
-          transform: { x: 540, y: 960, scaleX: 1, scaleY: 1, rotationDeg: 0 },
-          origin: { x: 540, y: 960 },
-          center: { x: 540, y: 960 },
-        },
-        local: { x: 540, y: 960, scaleX: 1, scaleY: 1, rotationDeg: 0 },
-      }),
-      project(),
-    ],
-    [
-      'the object has an animated transform',
-      target(),
-      project({
-        title: {
-          ...textObject,
-          animations: { x: { keyframes: [{ timeUs: 0, value: 100, interpolation: 'linear' }] } },
-        },
-      }),
-    ],
-    [
-      'the parent is locked',
-      target({ ancestorObjectIds: ['parent'] }),
-      project(
-        {
-          title: { ...textObject, parentId: 'parent' },
-          parent: { ...textObject, id: 'parent', kind: 'null' },
-        },
-        { parentTrackLocked: true },
-      ),
-    ],
-    [
-      'the parent has an animated transform',
-      target({ ancestorObjectIds: ['parent'] }),
-      project({
-        title: { ...textObject, parentId: 'parent' },
-        parent: {
-          ...textObject,
-          id: 'parent',
-          kind: 'null',
-          animations: {
-            rotationDeg: {
-              keyframes: [{ timeUs: 0, value: 10, interpolation: 'linear' }],
-            },
-          },
-        },
-      }),
-    ],
-  ])('disables both actions when %s', (_name, targetInput, projectInput) => {
-    const object = projectInput.visualObjects.title!;
-    const state = monitorContextTransformState({
-      objectId: 'title',
-      object,
-      project: projectInput,
-      target: targetInput,
-      frameWidth: 1080,
-      frameHeight: 1920,
-    });
-
-    if (_name === 'the object is already centred and reset') {
-      expect(state.alreadyCentred).toBe(true);
-      expect(state.alreadyReset).toBe(true);
-    } else {
-      expect(state.disabledReason).toBeTruthy();
-      expect(state.centreTransaction).toBeUndefined();
-      expect(state.resetTransaction).toBeUndefined();
-    }
-  });
 });

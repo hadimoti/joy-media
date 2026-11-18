@@ -195,6 +195,8 @@ export function buildMonitorContextMenuItems(input: {
   readonly missing: boolean;
   readonly showTransformActions?: boolean;
   readonly transformDisabledReason?: string;
+  readonly centreDisabledReason?: string;
+  readonly resetDisabledReason?: string;
   readonly alreadyCentred?: boolean;
   readonly alreadyReset?: boolean;
   readonly onAction: (action: MonitorContextAction, targetId: string) => void;
@@ -213,9 +215,12 @@ export function buildMonitorContextMenuItems(input: {
   if (input.showTransformActions === true) {
     const centreReason =
       input.transformDisabledReason ??
+      input.centreDisabledReason ??
       (input.alreadyCentred === true ? 'Already centred.' : undefined);
     const resetReason =
-      input.transformDisabledReason ?? (input.alreadyReset === true ? 'Already reset.' : undefined);
+      input.transformDisabledReason ??
+      input.resetDisabledReason ??
+      (input.alreadyReset === true ? 'Already reset.' : undefined);
     items.push(
       {
         label: 'Centre',

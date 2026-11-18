@@ -686,6 +686,12 @@ function MonitorPanelContent({
       missing,
       showTransformActions: transformableVisual,
       ...(transformDisabledReason === undefined ? {} : { transformDisabledReason }),
+      ...(transformState?.centreDisabledReason === undefined
+        ? {}
+        : { centreDisabledReason: transformState.centreDisabledReason }),
+      ...(transformState?.resetDisabledReason === undefined
+        ? {}
+        : { resetDisabledReason: transformState.resetDisabledReason }),
       ...(transformState === undefined
         ? {}
         : {
