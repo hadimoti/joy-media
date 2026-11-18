@@ -51,8 +51,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function providerResponse(message: Record<string, unknown>): Response {
-  return new Response(JSON.stringify({ choices: [{ message }] }), {
+function providerResponse(message: Record<string, unknown>, finishReason?: string): Response {
+  const choice =
+    finishReason === undefined ? { message } : { message, finish_reason: finishReason };
+  return new Response(JSON.stringify({ choices: [choice] }), {
     headers: { 'content-type': 'application/json' },
   });
 }
@@ -117,6 +119,7 @@ function defaultHostMethods(
 async function mountedWorker(
   provider: ProviderHandler,
   hostMethods: HostRpcMethods = defaultHostMethods(),
+  baseUrl = 'https://provider.example/v1',
 ): Promise<MountedWorker> {
   const output: WorkerToMainMessage[] = [];
   let receive: ((event: MessageEvent<unknown>) => void) | undefined;
@@ -206,7 +209,7 @@ async function mountedWorker(
     type: 'configure',
     config: {
       provider: 'openai-compatible',
-      baseUrl: 'https://provider.example/v1',
+      baseUrl,
       modelId: 'fixture-model',
       profileId: 'profile-test',
     },
@@ -1030,6 +1033,138 @@ describe('JOY Agent Engine Worker V2', () => {
       ),
     ).toBe(false);
   });
+
+  it.each(['plan-only', 'tool-loop'] as const)(
+    'reports a %s reply that ran out of output room as JOY_AGENT_EMPTY_ANSWER',
+    async (mode) => {
+      const worker = await mountedWorker(
+        structuredProvider(() => providerResponse({ role: 'assistant', content: null }, 'length')),
+      );
+      await verifyStructuredConnection(worker);
+
+      run(worker, { runId: `room-${mode}`, runEpoch: 4, prompt: 'Summarize', mode });
+      await waitForRunFinished(worker, `room-${mode}`, 4);
+
+      expect(worker.output).toContainEqual(
+        expect.objectContaining({
+          type: 'event',
+          event: expect.objectContaining({
+            runId: `room-${mode}`,
+            phase: 'failed',
+            errorCode: 'JOY_AGENT_EMPTY_ANSWER',
+            message: 'The model used its output room without sending an answer',
+          }),
+        }),
+      );
+    },
+  );
+
+  it.each([
+    // An empty reply that says stop keeps its existing code. The tool loop still reports it as a
+    // network failure; that is a candidate for a later change, not part of this one.
+    { mode: 'plan-only' as const, code: 'JOY_AGENT_INVALID_PROPOSAL' },
+    { mode: 'tool-loop' as const, code: 'JOY_AGENT_CORS_OR_NETWORK' },
+  ])('keeps the existing code for an empty $mode reply that says stop', async ({ mode, code }) => {
+    const worker = await mountedWorker(
+      structuredProvider(() => providerResponse({ role: 'assistant', content: null }, 'stop')),
+    );
+    await verifyStructuredConnection(worker);
+
+    run(worker, { runId: `stop-${mode}`, runEpoch: 7, prompt: 'Summarize', mode });
+    await waitForRunFinished(worker, `stop-${mode}`, 7);
+
+    expect(worker.output).toContainEqual(
+      expect.objectContaining({
+        type: 'event',
+        event: expect.objectContaining({
+          runId: `stop-${mode}`,
+          phase: 'failed',
+          errorCode: code,
+        }),
+      }),
+    );
+    expect(JSON.stringify(worker.output)).not.toContain('JOY_AGENT_EMPTY_ANSWER');
+  });
+
+  it('leaves a reply that has tool calls alone, even when finish_reason is length', async () => {
+    const worker = await mountedWorker(
+      structuredProvider((_body, exchangeIndex) =>
+        exchangeIndex === 0
+          ? providerResponse(
+              {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'read-length',
+                    type: 'function',
+                    function: {
+                      name: 'read_project_context',
+                      arguments: JSON.stringify({ domain: 'overview' }),
+                    },
+                  },
+                ],
+              },
+              'length',
+            )
+          : providerTextResponse(JSON.stringify({ summary: 'The overview is ready.' })),
+      ),
+    );
+    await verifyStructuredConnection(worker);
+
+    run(worker, {
+      runId: 'tool-length',
+      runEpoch: 5,
+      prompt: 'Read the overview',
+      mode: 'tool-loop',
+    });
+    await waitForRunFinished(worker, 'tool-length', 5);
+
+    expect(worker.output).toContainEqual(
+      expect.objectContaining({
+        type: 'event',
+        event: expect.objectContaining({
+          runId: 'tool-length',
+          phase: 'completed',
+          result: { kind: 'answer', text: 'The overview is ready.' },
+        }),
+      }),
+    );
+    expect(JSON.stringify(worker.output)).not.toContain('JOY_AGENT_EMPTY_ANSWER');
+  });
+
+  it.each([
+    { baseUrl: 'https://api.minimax.io/v1', budget: 16384 },
+    { baseUrl: 'https://provider.example/v1', budget: 2048 },
+  ])(
+    'sends max_tokens $budget on the main answer call for $baseUrl',
+    async ({ baseUrl, budget }) => {
+      const worker = await mountedWorker(
+        structuredProvider(() => providerTextResponse(JSON.stringify({ summary: 'Ready.' }))),
+        defaultHostMethods(),
+        baseUrl,
+      );
+      await verifyStructuredConnection(worker);
+
+      run(worker, {
+        runId: `budget-${budget}`,
+        runEpoch: 6,
+        prompt: 'Summarize',
+        mode: 'plan-only',
+      });
+      await waitForRunFinished(worker, `budget-${budget}`, 6);
+
+      // The main call is the one whose first message is the system instruction; the probes have none.
+      const mainBodies = worker.fetcher.mock.calls
+        .map((call) => parseBody(call[1] as RequestInit | undefined))
+        .filter((body) => {
+          const messages = body.messages;
+          return Array.isArray(messages) && isRecord(messages[0]) && messages[0].role === 'system';
+        });
+      expect(mainBodies).toHaveLength(1);
+      expect(mainBodies[0]?.max_tokens).toBe(budget);
+    },
+  );
 
   it.each([
     ['URL', 'https://provider.example.invalid/private-result'],

@@ -120,6 +120,8 @@ function explainFailure(
       return 'The provider rejected the credentials.';
     case 'JOY_AGENT_CORS_OR_NETWORK':
       return 'A network error occurred while talking to the provider.';
+    case 'JOY_AGENT_EMPTY_ANSWER':
+      return 'The model used its whole output budget without sending an answer.';
     default:
       return 'The provider returned something JOY could not use (is it an OpenAI-compatible chat-completions endpoint, and does the model support tool calls?).';
   }

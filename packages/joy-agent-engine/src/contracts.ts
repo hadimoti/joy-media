@@ -61,6 +61,7 @@ export const JOY_AGENT_ERROR_CODES = [
   'JOY_AGENT_STALE_REVISION',
   'JOY_AGENT_RATE_LIMITED',
   'JOY_AGENT_PROVIDER_INCOMPATIBLE',
+  'JOY_AGENT_EMPTY_ANSWER',
 ] as const;
 export type JoyAgentErrorCode = (typeof JOY_AGENT_ERROR_CODES)[number];
 

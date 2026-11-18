@@ -62,7 +62,8 @@ export type JoyAgentErrorCode =
   | 'JOY_AGENT_INVALID_PROPOSAL'
   | 'JOY_AGENT_STALE_REVISION'
   | 'JOY_AGENT_PROVIDER_INCOMPATIBLE'
-  | 'JOY_AGENT_RATE_LIMITED';
+  | 'JOY_AGENT_RATE_LIMITED'
+  | 'JOY_AGENT_EMPTY_ANSWER';
 
 export type JoyAgentProvider =
   'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom';
@@ -317,6 +318,7 @@ const ERROR_CODES: ReadonlySet<string> = new Set([
   'JOY_AGENT_STALE_REVISION',
   'JOY_AGENT_PROVIDER_INCOMPATIBLE',
   'JOY_AGENT_RATE_LIMITED',
+  'JOY_AGENT_EMPTY_ANSWER',
 ]);
 const TASK_KINDS: ReadonlySet<string> = new Set([
   'joy-code',

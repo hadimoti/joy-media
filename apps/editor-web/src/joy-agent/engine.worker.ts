@@ -39,6 +39,7 @@ import {
   MAX_MULTIMODAL_RESPONSE_BYTES,
 } from './multimodal-transport.js';
 import { jsonUtf8Size } from './json-bytes.js';
+import { outputTokenBudget } from './output-budget.js';
 import { issueObservationConsent } from './observation-consent.js';
 import {
   isPrivateObservationMainToWorkerMessage,
@@ -785,6 +786,31 @@ function firstProviderMessage(
   return isRecord(message) ? message : undefined;
 }
 
+/**
+ * A reply with no text, no tool calls and finish_reason "length" ran out of output room: a thinking
+ * model spent its budget reasoning and sent no answer. That is not a network failure, so it gets its
+ * own code. Any other empty reply keeps its existing path.
+ */
+function assertNotOutOfRoom(text: string): void {
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(text) as unknown;
+  } catch {
+    return;
+  }
+  if (!isRecord(envelope) || !Array.isArray(envelope.choices) || !isRecord(envelope.choices[0]))
+    return;
+  const choice = envelope.choices[0];
+  const message = firstProviderMessage(envelope);
+  if (message === undefined || choice.finish_reason !== 'length') return;
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return;
+  if (typeof message.content === 'string' && message.content.trim().length > 0) return;
+  throw new JoyAgentWorkerError(
+    'JOY_AGENT_EMPTY_ANSWER',
+    'The model used its output budget without sending an answer',
+  );
+}
+
 function isEmptyObject(value: unknown): boolean {
   return isRecord(value) && Object.keys(value).length === 0;
 }
@@ -1321,6 +1347,8 @@ function failureMessage(
     return { code, message: 'The provider account needs credit to complete this request.' };
   }
   if (code === 'JOY_AGENT_RATE_LIMITED') return { code, message: USAGE_LIMIT_MESSAGE };
+  if (code === 'JOY_AGENT_EMPTY_ANSWER')
+    return { code, message: 'The model used its output room without sending an answer' };
   if (code === 'JOY_AGENT_RESPONSE_TOO_LARGE')
     return { code, message: 'Provider response too large' };
   if (code === 'JOY_AGENT_TIMEOUT') return { code, message: 'Provider request timed out' };
@@ -1526,12 +1554,13 @@ async function run(request: JoyAgentRunRequest): Promise<void> {
           model: connection.modelId,
           messages: providerMessages,
           ...(toolCatalog === undefined ? {} : { tools: toolCatalog.tools }),
-          max_tokens: 2048,
+          max_tokens: outputTokenBudget(connection),
         },
         controller.signal,
         remaining,
       );
       consumeBudget(active, { outputBytes: response.bytes });
+      assertNotOutOfRoom(response.text);
       return response.text;
     };
     if (structured) {

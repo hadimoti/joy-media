@@ -84,6 +84,13 @@ describe('JOY Agent redaction', () => {
     });
   });
 
+  it('keeps an empty answer that ran out of room as its own code, and retryable', () => {
+    expect(toSafeJoyAgentError(new Error('JOY_AGENT_EMPTY_ANSWER'))).toEqual({
+      code: 'JOY_AGENT_EMPTY_ANSWER',
+      retryable: true,
+    });
+  });
+
   it('reports that the provider account needs credit and does not mark billing retryable', () => {
     expect(joyAgentErrorMessage('JOY_AGENT_BILLING_REQUIRED')).toBe(
       'The provider account needs credit to complete this request.',
