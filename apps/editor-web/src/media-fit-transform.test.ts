@@ -1,5 +1,6 @@
+import type { JoyProjectV1, VisualObjectV1 } from '@joy-media/project-schema';
 import { describe, expect, it } from 'vitest';
-import { calculateMediaFitTransform } from './media-fit-transform.js';
+import { calculateMediaFitTransform, mediaFitSelection } from './media-fit-transform.js';
 import * as mediaFitExports from './media-fit-transform.js';
 
 interface FitInput {
@@ -369,6 +370,44 @@ describe('calculateMediaFitTransform', () => {
         frameHeight: 1080,
         mode: 'fit',
       }),
+    ).toBeUndefined();
+  });
+});
+
+describe('mediaFitSelection on the universal timeline (defect 207)', () => {
+  const transform = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0 };
+  const projectWithClips = (clipIds: readonly string[]) =>
+    ({
+      schemaVersion: 1,
+      rootCompositionId: 'root',
+      compositions: { root: { id: 'root', width: 1920, height: 1080, tracks: [] } },
+      assets: {
+        'asset-pic': { id: 'asset-pic', kind: 'image', descriptor: { width: 2400, height: 1350 } },
+      },
+      visualObjects: {},
+      universalTimeline: { items: clipIds.map((id) => ({ id })) },
+    }) as unknown as JoyProjectV1;
+  const picture = {
+    id: 'object-pic',
+    kind: 'image',
+    assetId: 'asset-pic',
+    transform,
+  } as unknown as VisualObjectV1;
+
+  it('fits a picture placed on the universal timeline to the root frame', () => {
+    const selection = mediaFitSelection(projectWithClips(['clip-pic']), picture, 'clip-pic');
+    expect(selection?.disabledReason).toBeUndefined();
+    expect(selection).toMatchObject({
+      sourceWidth: 2400,
+      sourceHeight: 1350,
+      frameWidth: 1920,
+      frameHeight: 1080,
+    });
+  });
+
+  it('offers no Fit or Fill for a clip that is on no timeline', () => {
+    expect(
+      mediaFitSelection(projectWithClips(['clip-other']), picture, 'clip-pic'),
     ).toBeUndefined();
   });
 });

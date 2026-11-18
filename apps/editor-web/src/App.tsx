@@ -1160,6 +1160,8 @@ function EditorWorkspace({
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | undefined>(undefined);
   const [exportProgress, setExportProgress] = useState<number | undefined>(undefined);
+  // Bumped after a drop imports files, so the Media panel reloads its catalog (defect 206).
+  const [libraryRevision, setLibraryRevision] = useState(0);
   const [droppedImportProgress, setDroppedImportProgress] = useState<
     DroppedImportProgressState | undefined
   >(undefined);
@@ -7041,6 +7043,7 @@ function EditorWorkspace({
         }
 
         if (importedAssets.length > 0) {
+          setLibraryRevision((revision) => revision + 1);
           // A file the library already holds (same content, same id) is not new: the toast must not count it as added.
           const alreadyInLibrary = importedAssets.filter(
             (asset) => context.session.visualProject.assets[asset.id] !== undefined,
@@ -7399,6 +7402,7 @@ function EditorWorkspace({
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onAddToTimeline={addAssetToTimeline}
           onImportFiles={(files) => handleDroppedFiles(files, { surface: 'media' })}
+          libraryRevision={libraryRevision}
           {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
           onCancelDroppedImport={cancelDroppedImport}
           onEditWithAi={(asset) => {

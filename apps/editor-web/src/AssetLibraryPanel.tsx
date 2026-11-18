@@ -143,6 +143,7 @@ export function AssetLibraryPanel({
   droppedImportProgress,
   onCancelDroppedImport,
   missingMedia,
+  libraryRevision,
 }: {
   readonly projectId: string;
   readonly projectTitle?: string;
@@ -173,6 +174,11 @@ export function AssetLibraryPanel({
   readonly onImportFiles?: (files: readonly File[]) => void | Promise<void>;
   readonly droppedImportProgress?: DroppedImportProgressState;
   readonly onCancelDroppedImport?: () => void;
+  /**
+   * Bumped by the editor when files are added to the catalog from outside this panel (a timeline
+   * drop), so the panel reloads the catalog it shows (defect 206).
+   */
+  readonly libraryRevision?: number | undefined;
   /** Missing project media, relinked from the panel's Missing media section. */
   readonly missingMedia?: {
     readonly host: MissingMediaHost;
@@ -307,6 +313,12 @@ export function AssetLibraryPanel({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  const seenLibraryRevisionRef = useRef(libraryRevision);
+  useEffect(() => {
+    if (libraryRevision === seenLibraryRevisionRef.current) return;
+    seenLibraryRevisionRef.current = libraryRevision;
+    void refresh();
+  }, [libraryRevision, refresh]);
   useEffect(() => {
     return () => {
       refreshSeqRef.current += 1;
