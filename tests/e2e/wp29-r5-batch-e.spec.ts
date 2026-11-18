@@ -16,6 +16,7 @@ async function selectProductClip(page: Page): Promise<void> {
 async function selectIntroJunction(page: Page): Promise<void> {
   const clips = page
     .locator('.timeline-track[data-track-id]')
+    .filter({ has: page.locator('.timeline-clip') })
     .first()
     .locator('.timeline-clip[data-clip-id]');
   const left = clips.nth(0);

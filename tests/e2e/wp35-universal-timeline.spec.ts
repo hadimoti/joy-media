@@ -91,7 +91,10 @@ test.describe('WP-35 universal timeline closeout', () => {
     const beforeCount = await clips.count();
     expect(beforeCount).toBeGreaterThanOrEqual(2);
 
-    const targetTrack = page.locator('.timeline-track[data-track-id]').first();
+    const targetTrack = page
+      .locator('.timeline-track[data-track-id]')
+      .filter({ has: page.locator('.timeline-clip[data-clip-id]') })
+      .first();
     const lane = targetTrack.locator('.timeline-lane[data-track-id]');
     const laneBox = await lane.boundingBox();
     expect(laneBox).not.toBeNull();
