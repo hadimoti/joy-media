@@ -1066,6 +1066,19 @@ export async function createBrowserPixiRenderer(
       }
       drawCalls += 1;
     }
+    // Layers with the same zIndex draw in child order. The frame lists them in draw order (the video under the
+    // overlays), but a layer created on a later frame is appended at the end: the Monitor paints the title first
+    // and the decoded video a moment later, so the opaque video ended up above the title. Put each layer at the
+    // position its node has in this frame, so equal layers keep the frame's order.
+    let nextChildIndex = 0;
+    for (const { node } of drawNodes) {
+      if (node.kind === 'transition') continue;
+      const layer = spriteMap.get(node.id);
+      if (layer === undefined || layer.parent !== layers) continue;
+      if (layers.getChildIndex(layer) !== nextChildIndex)
+        layers.setChildIndex(layer, nextChildIndex);
+      nextChildIndex += 1;
+    }
     for (const [id, layer] of spriteMap) {
       if (!seen.has(id)) {
         disposePixiColorGradeFilter(layer.colorGradeFilter);
