@@ -164,7 +164,8 @@ export function MonitorCropBox({
       style={{ width: viewportSize.width, height: viewportSize.height }}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={() => {
+      onPointerCancel={(event) => {
+        event.stopPropagation();
         // A cancelled drag returns to where it began. An earlier commit that the parent has
         // not applied yet stays on screen.
         const drag = dragRef.current;

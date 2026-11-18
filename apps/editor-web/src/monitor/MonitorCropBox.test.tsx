@@ -91,8 +91,8 @@ describe('MonitorCropBox', () => {
     const handle = container?.querySelector<HTMLButtonElement>('[data-crop-handle="left"]');
     const box = container?.querySelector<HTMLElement>('[data-monitor-crop-box]');
     const polygon = container?.querySelector('polygon');
-    expect(handle).not.toBeNull();
-    expect(box).not.toBeNull();
+    expect(handle).toBeTruthy();
+    expect(box).toBeTruthy();
     const initial = polygon?.getAttribute('points');
     act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 10, y: 70 })));
     act(() => box?.dispatchEvent(pointerEvent('pointermove', { x: 30, y: 70 })));
@@ -107,8 +107,8 @@ describe('MonitorCropBox', () => {
     const handle = container?.querySelector<HTMLButtonElement>('[data-crop-handle="left"]');
     const box = container?.querySelector<HTMLElement>('[data-monitor-crop-box]');
     const polygon = container?.querySelector('polygon');
-    expect(handle).not.toBeNull();
-    expect(box).not.toBeNull();
+    expect(handle).toBeTruthy();
+    expect(box).toBeTruthy();
     act(() => handle?.dispatchEvent(pointerEvent('pointerdown', { x: 10, y: 70 })));
     act(() => box?.dispatchEvent(pointerEvent('pointermove', { x: 30, y: 70 })));
     act(() => box?.dispatchEvent(pointerEvent('pointerup', { x: 30, y: 70 })));
