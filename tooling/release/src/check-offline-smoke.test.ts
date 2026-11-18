@@ -31,7 +31,7 @@ function receipt(overrides: Record<string, unknown> = {}): string {
     builtAt: '2026-11-09T01:00:00Z',
     startedAt: '2026-11-09T02:00:00Z',
     finishedAt: '2026-11-09T02:05:00Z',
-    steps: ['launch', 'open', 'export', 'cli'].map((id) => ({ id, result: 'pass' })),
+    steps: ['launch', 'import', 'export', 'doctor', 'render'].map((id) => ({ id, result: 'pass' })),
     egress: {
       main: 0,
       renderer: 0,
@@ -67,6 +67,95 @@ describe('attended offline-smoke check', () => {
       io({ [ARGS.sumsPath]: SUMS, [ARGS.receiptPath]: receipt() }),
     );
     expect(outcome).toEqual({ ok: true, reasons: [] });
+  });
+
+  it('accepts a hand-written five-step receipt with offline isolation evidence', () => {
+    const handWrittenReceipt = JSON.stringify({
+      schema: OFFLINE_SMOKE_SCHEMA,
+      candidateSha: CANDIDATE,
+      workflowSha: 'd'.repeat(40),
+      runId: 'hand-written-1',
+      attempt: 1,
+      artifact: { name: ARTIFACT, sha256: DIGEST },
+      builtAt: '2026-11-09T01:00:00Z',
+      startedAt: '2026-11-09T02:00:00Z',
+      finishedAt: '2026-11-09T02:05:00Z',
+      steps: [
+        { id: 'launch', result: 'pass' },
+        { id: 'import', result: 'pass' },
+        { id: 'export', result: 'pass' },
+        { id: 'doctor', result: 'pass' },
+        { id: 'render', result: 'pass' },
+      ],
+      egress: {
+        main: 0,
+        renderer: 0,
+        worker: 0,
+        cli: 0,
+        netLogSha256: 'e'.repeat(64),
+        reason: 'Zero by construction: Sandbox networking is disabled and no adapter is present.',
+      },
+      network: {
+        networkingDisabled: true,
+        adapterPresent: false,
+        adapterCount: 0,
+        reason: 'Get-NetAdapter returned no adapters with Networking=Disable.',
+      },
+      verdict: 'pass',
+    });
+
+    expect(
+      checkOfflineSmoke(
+        ARGS,
+        io({ [ARGS.sumsPath]: SUMS, [ARGS.receiptPath]: handWrittenReceipt }),
+      ),
+    ).toEqual({ ok: true, reasons: [] });
+  });
+
+  it.each([
+    [
+      'adapter present',
+      {
+        network: {
+          networkingDisabled: true,
+          adapterPresent: true,
+          adapterCount: 1,
+          reason: 'adapter found',
+        },
+      },
+      /network adapter was present/u,
+    ],
+    [
+      'missing render step',
+      { steps: ['launch', 'import', 'export', 'doctor'].map((id) => ({ id, result: 'pass' })) },
+      /step render is missing/u,
+    ],
+    [
+      'non-zero CLI egress',
+      {
+        egress: {
+          main: 0,
+          renderer: 0,
+          worker: 0,
+          cli: 1,
+          netLogSha256: 'e'.repeat(64),
+          reason: 'not isolated',
+        },
+      },
+      /egress\.cli is not zero/u,
+    ],
+    [
+      'wrong schema',
+      { schema: 'joy-media.offline-smoke/0' },
+      /schema is not joy-media\.offline-smoke\/1/u,
+    ],
+  ])('refuses a receipt with %s', (_name, overrides, reason) => {
+    const outcome = checkOfflineSmoke(
+      ARGS,
+      io({ [ARGS.sumsPath]: SUMS, [ARGS.receiptPath]: receipt(overrides) }),
+    );
+    expect(outcome.ok).toBe(false);
+    expect(outcome.reasons.join('\n')).toMatch(reason);
   });
 
   it('refuses when the SHA256SUMS.txt file is missing', () => {

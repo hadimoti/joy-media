@@ -3,16 +3,21 @@ import { createHash } from 'node:crypto';
 /**
  * The offline-smoke receipt for the packaged Windows app (plan section 8b, schema joy-media.offline-smoke/1).
  *
- * The packaged app is launched, opened, used for an export and run through its CLI, with network egress recorded
- * per process. The gate accepts the receipt only when it binds to the exact candidate and artifact, comes from the
- * first attempt of a fresh run, records zero egress for every process and passes every step. A missing, unreadable,
- * mismatched, stale or failed receipt is refused, and every reason is named.
+ * The installed app is launched, a bundled fixture is imported and exported, and the CLI doctor and render commands
+ * run in a Sandbox with networking disabled. Egress counters are zero by construction only when no adapter is
+ * present. The gate also binds the receipt to the exact candidate and artifact and refuses stale or failed evidence.
  */
 
 export const OFFLINE_SMOKE_SCHEMA = 'joy-media.offline-smoke/1';
 
 /** The steps the receipt must record, each exactly once, in any order. */
-export const OFFLINE_SMOKE_STEP_IDS: readonly string[] = ['launch', 'open', 'export', 'cli'];
+export const OFFLINE_SMOKE_STEP_IDS: readonly string[] = [
+  'launch',
+  'import',
+  'export',
+  'doctor',
+  'render',
+];
 
 /** The processes whose egress must be zero. */
 export const OFFLINE_SMOKE_EGRESS_KEYS: readonly string[] = ['main', 'renderer', 'worker', 'cli'];
