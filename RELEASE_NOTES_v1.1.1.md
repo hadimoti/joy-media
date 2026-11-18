@@ -49,6 +49,8 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Auto captions use the selected clip, or the clip under the playhead if none is selected. The words are placed where the clip plays, with its trim and speed. Auto captions need a speech-to-text provider that you connect in Joy Code Settings.
 - Caption sliders keep the value inside their range.
 - The Inspector names a text clip by its words, not by an id.
+- Long titles wrap inside the frame (at 90 percent of its width). A title that fits on one line looks the same as before.
+- The Karaoke Pop caption style colours the word being spoken in the Monitor and in the export (tested in code; not yet seen on screen with real caption timing).
 
 ## Joy Code
 
@@ -95,6 +97,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Dragging an effect or filter card onto a clip no longer starts the browser's picture drag.
 - The Monitor zoom keys Ctrl+0, Ctrl+1, Ctrl++ and Ctrl+- did not work. Fixed.
 - A short clip next to a cut could not be clicked, because an invisible drop target sat over it. Fixed.
+- A title was hidden behind the video in the Monitor (the picture drew it, the exported video did not). It is drawn over the video now. This also fixes Persian and Arabic titles that looked missing.
 
 ### Menus and panels
 
@@ -128,6 +131,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - In a narrow Media panel, the list view shows the picture and name. The Collection and Size columns hide when the panel is narrow, so nothing is cut.
 - On the Projects page, the Projects and Trash tabs and the Grid and List switch are icons. Hovering over one shows its name.
 - The Media panel message ("... added to the timeline") has a close button.
+- The count on the Recent processes button sits inside the button, so the window frame no longer cuts it off.
 
 ### Saving and export
 
@@ -149,7 +153,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - **Some drags.** One clip dragged from the asset panel showed on the timeline but was missing from the saved project; this is not yet explained. Dropping an image from the Asset Library onto the filter layer can do nothing, with no message.
 - **Export size.** Export size may follow the selected preset instead of the canvas size.
 - **Projects page when maximised.** The bottom of the Projects page can sit behind the Windows taskbar.
-- **Persian and Arabic text is not finished.** Right-to-left shaping and line direction are not correct in titles or captions in the video. This is planned for a later version.
+- **Persian and Arabic text.** Titles and captions are drawn joined, right to left and in the right place (a Persian title was seen working in the Monitor on 18 Nov). Letter spacing is not applied to Persian and Arabic letters, so joined letters stay joined. Right-to-left captions in an exported video and the worker preview were tested in code only.
 - **Transitions.** TV Static uses random noise, so the preview and the export cannot match. Kaleidoscope and Ripple: the Speed option showed no change in the test (open). Slide and push transitions are tested with a looser limit for the last frame. Full table: `docs/qa/v1.1.1/TRANSITIONS.md`.
 - **Video clips have no fade.** There are no opacity fade handles on video. Audio fades are set in the Audio panel.
 - **No Detach audio.** The Clip menu cannot split the sound of a video clip into its own audio clip. The audio strips on the first audio row are display only.
@@ -159,7 +163,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - **Text gradients use anchors.** There is no angle field and no "reset anchors" button.
 - **Smart guides, snapping while you move on the Monitor, text editing in place, crop handles and the right-click menu on the Monitor** are planned for v1.1.2.
 - **Joy Code can run a quality check on the open project** (it samples frames of the composition on this computer and reports findings; asked in words, for example "run a quality check and fix the problems"). It measures where titles and captions sit on a check-only copy of the renderer and says when text could not be measured. It cannot yet make pictures or videos.
-- **Very long exports use a lot of memory.** A 10-minute 1080p export finishes (about 15 minutes on the test laptop) but the app can use about 4 GB while it runs. Shorter exports use far less.
+- **Very long exports use a lot of memory.** A 10-minute 1080p export finishes (about 5 minutes on a fast desktop PC, about 15 minutes on the test laptop) but the app can use about 3 to 4 GB while it runs. Shorter exports use far less.
 - **Quality check repairs.** When the check finds a title or caption outside the safe area, Joy Code prepares one plan that moves it back; you approve it and one Undo restores the project. This is tested in code but was not yet seen live in the app. A title that is hard to read is reported but not repaired automatically. The quality check card is not kept after a reload; only its summary line is.
 - **Glow** still blurs the whole picture. **Vibrance** is slightly different in the preview and in the command-line render. The Tone Geometry Angle slider does nothing until a shape other than Circle is chosen.
 - The HSL band names do not match their centre angles (Yellow shows 90 degrees, Green 135).
@@ -168,7 +172,6 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - The web build of the drop progress Cancel button cannot stop the file that is being imported. The desktop app is not affected.
 - **Position X** uses offsets from the centre for picture clips and pixels for text clips, so the same number can mean different things.
 - **Small items, not yet fixed:** the vertical ruler on the Monitor has no numbers; Alt+arrow scaling at the smallest size can change a box's shape; the Monitor's frame-step keys are not in the command palette; the command palette shows a different Undo shortcut from the menus; the View menu cannot reopen the Captions, Text, Audio, Transitions, Colour, Motion or Templates panels; the command line prints an older provider risk sentence; one title template still says "New tools for JOY Studio"; some icon buttons in Joy Code Settings keep fixed colours instead of the theme colours; the History panel shows internal ids in a few labels.
-- Long titles run off the frame. They do not wrap yet (a fix is in work).
 - On a hard kill during the half second after an edit, that last edit can still be lost. The file is written within about half a second to two seconds.
 
 ## Not yet checked on screen
