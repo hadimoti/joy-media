@@ -43,11 +43,17 @@ The gate (`tooling/release/src/sandbox-lifecycle-receipt.ts`) accepts a receipt 
 - the clean lifecycle receipt also includes successful joy and joy-media version checks and a
   render manifest written from the bundled offline-smoke project.
 
-The clean lifecycle run also writes offline-smoke.json beside sandbox-lifecycle.json. It records the
-installed app launch, project import/export, doctor JSON and render checks. The runner configures
-Windows Sandbox networking off and records whether any network adapter was visible; zero egress is
-accepted only when the receipt states why the counts are zero by construction. Use run-sandbox.ps1
-with the -DryRun switch to print the plan, validate fake lifecycle and offline-smoke receipts, and
-confirm that Windows Sandbox was not started.
+The clean lifecycle run can also include the optional offline smoke step after install. Add
+`-OfflineSmoke` to `run-sandbox.ps1` to run `offline-smoke.ps1`; it launches the installed app,
+imports and exports the bundled fixture, then runs `joy-media doctor` and `joy-media render`.
+The generated `offline-smoke.json` records those five results and the `Get-NetAdapter` output.
+The runner writes `<Networking>Disable</Networking>` in the `.wsb` file. The receipt assigns zero
+egress by construction only when `Get-NetAdapter` returns no adapters. Use `-DryRun` to print the
+same `.wsb` XML and validate temporary fixture receipts without starting Windows Sandbox.
+
+```powershell
+.\tooling\release\sandbox\run-sandbox.ps1 -Kind lifecycle -SetupExe <setup.exe> `
+  -OutDir <new-output-folder> -Receipt <receipt.json> -OfflineSmoke
+```
 
 The v1.0.2 installer zip must match the released SHA-256 (`e59ee15f2f881cd6620ad59e9f1d9fdc4f9b82efaf221f4e6041c079978d59ca`).

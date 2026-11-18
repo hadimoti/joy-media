@@ -38,9 +38,10 @@ function baseline(): Record<string, unknown> {
     finishedAt: '2026-11-09T02:10:00Z',
     steps: [
       { id: 'launch', result: 'pass' },
-      { id: 'open', result: 'pass' },
+      { id: 'import', result: 'pass' },
       { id: 'export', result: 'pass' },
-      { id: 'cli', result: 'pass' },
+      { id: 'doctor', result: 'pass' },
+      { id: 'render', result: 'pass' },
     ],
     egress: {
       main: 0,
@@ -116,9 +117,10 @@ describe('offline-smoke receipt (joy-media.offline-smoke/1)', () => {
         finishedAt: '2026-11-09T02:10:00Z',
         steps: [
           { id: 'launch', result: 'pass' },
-          { id: 'open', result: 'pass' },
+          { id: 'import', result: 'pass' },
           { id: 'export', result: 'pass' },
-          { id: 'cli', result: 'pass' },
+          { id: 'doctor', result: 'pass' },
+          { id: 'render', result: 'pass' },
         ],
         network: {
           networkingDisabled: true,
@@ -176,21 +178,23 @@ describe('offline-smoke receipt (joy-media.offline-smoke/1)', () => {
       (r) =>
         (r.steps = [
           { id: 'launch', result: 'pass' },
-          { id: 'open', result: 'fail' },
+          { id: 'import', result: 'fail' },
           { id: 'export', result: 'pass' },
-          { id: 'cli', result: 'pass' },
+          { id: 'doctor', result: 'pass' },
+          { id: 'render', result: 'pass' },
         ]),
-      /step open did not pass/,
+      /step import did not pass/,
     ],
     [
       'a missing step',
       (r) =>
         (r.steps = [
           { id: 'launch', result: 'pass' },
-          { id: 'open', result: 'pass' },
+          { id: 'import', result: 'pass' },
           { id: 'export', result: 'pass' },
+          { id: 'doctor', result: 'pass' },
         ]),
-      /step cli is missing/,
+      /step render is missing/,
     ],
     [
       'a repeated step',
@@ -198,9 +202,10 @@ describe('offline-smoke receipt (joy-media.offline-smoke/1)', () => {
         (r.steps = [
           { id: 'launch', result: 'pass' },
           { id: 'launch', result: 'pass' },
-          { id: 'open', result: 'pass' },
+          { id: 'import', result: 'pass' },
           { id: 'export', result: 'pass' },
-          { id: 'cli', result: 'pass' },
+          { id: 'doctor', result: 'pass' },
+          { id: 'render', result: 'pass' },
         ]),
       /step launch appears more than once/,
     ],
@@ -209,9 +214,10 @@ describe('offline-smoke receipt (joy-media.offline-smoke/1)', () => {
       (r) =>
         (r.steps = [
           { id: 'launch', result: 'pass' },
-          { id: 'open', result: 'pass' },
+          { id: 'import', result: 'pass' },
           { id: 'export', result: 'pass' },
-          { id: 'cli', result: 'pass' },
+          { id: 'doctor', result: 'pass' },
+          { id: 'render', result: 'pass' },
           { id: 'stretch', result: 'pass' },
         ]),
       /unknown id/,
