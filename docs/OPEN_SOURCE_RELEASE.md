@@ -45,7 +45,7 @@ Release evidence must include the Worker size/import gate, production
 dependency audit, third-party notices, repository license decision, and asset
 redistribution review.
 
-Before tagging a release, you must dispatch the `release-candidate-v2` workflow against the exact `main` SHA you intend to tag, and attach the successful run URL to the release notes.
+Before tagging a release, you must dispatch the `release-candidate-v3` workflow (`.github/workflows/release-candidate-v3.yml`, manual, with the full 40-character candidate SHA) against the exact `main` SHA you intend to tag, and attach the successful run URL to the release notes. `release-candidate-v2` has been deleted and must not be used.
 
 ## 2026-09-30 closeout status
 

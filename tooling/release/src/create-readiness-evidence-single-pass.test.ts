@@ -12,20 +12,21 @@ import {
   validateReadinessEvidence,
 } from './readiness-evidence.js';
 
-// The single-pass topology (release-candidate-v3, plan §3.4). These tests build the topology's own fixture: one Windows
-// pass, one real-service pass and one P3 pass. Every value is written to disk, so each refusal below comes from the builder.
+// The single-pass topology (release-candidate-v3). Every value is written to disk, so each refusal below comes from the builder.
 const CANDIDATE_SHA = 'a'.repeat(40);
 const RUN_ID = '555';
 const ATTEMPT = '1';
 const SINGLE_LANES = [
+  'validate-candidate',
   'hosted-verify',
   'node-contracts',
-  'linux-real-services',
+  'editor-web-bundle',
   'windows-candidate',
-  'real-service-acceptance',
+  'checksums',
+  'offline-packaged-smoke',
   'fixture-acceptance',
   'acceptance-responsive',
-  'p3-real-services',
+  'site-build',
 ];
 const IMAGE_DIGEST = `sha256:${'b'.repeat(64)}`;
 const SUMMARY = 'test-output/readiness/single-pass-evidence/manifest.json';
@@ -313,11 +314,11 @@ describe('single-pass readiness evidence (release-candidate-v3)', () => {
   });
 
   it('fails when any single-pass lane is not green, or a lane is absent from the needs context', () => {
-    expect(() => build(needsJson({ 'p3-real-services': { result: 'failure' } }))).toThrow(
+    expect(() => build(needsJson({ 'offline-packaged-smoke': { result: 'failure' } }))).toThrow(
       /not all green/u,
     );
     const absent = JSON.parse(needsJson()) as Record<string, unknown>;
-    delete absent['p3-real-services'];
+    delete absent['offline-packaged-smoke'];
     expect(() => build(JSON.stringify(absent))).toThrow(/not all green/u);
   });
 
@@ -402,14 +403,11 @@ describe('single-pass readiness evidence (release-candidate-v3)', () => {
     ).toThrow(/does not match candidate SHA/u);
   });
 
-  it('builds the single-pass lane list and the two-pass lane list from separate shapes', async () => {
+  it('builds the single-pass lane list and source count from its shape', async () => {
     const { SHAPES } = await import('./create-readiness-evidence.mjs');
     expect(SHAPES['single-pass'].lanes).toEqual(SINGLE_LANES);
-    // The single-pass job graph merges v2's Windows, fixture and Linux verification lanes (plan section 3.4), so its lanes
-    // differ from the two-pass lanes. The two-pass lanes are the six lanes of the line's v2 (its Windows jobs were retired by 4cb35d7a).
-    expect(SHAPES['two-pass'].lanes).toHaveLength(6);
-    expect(SHAPES['single-pass'].lanes).not.toEqual(SHAPES['two-pass'].lanes);
     expect(SHAPES['single-pass'].sourceCount).toBe(2);
-    expect(SHAPES['two-pass'].sourceCount).toBe(4);
+    // The two-pass shape is removed with release-candidate-v2: its topology is refused.
+    expect(Object.keys(SHAPES)).toEqual(['single-pass']);
   });
 });

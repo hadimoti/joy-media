@@ -5,32 +5,17 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateGateSummary } from './ci-gate-summary.ts';
-import {
-  REQUIRED_SCENARIOS,
-  requiredScenariosFor,
-  validateReadinessEvidence,
-} from './readiness-evidence.ts';
+import { requiredScenariosFor, validateReadinessEvidence } from './readiness-evidence.ts';
 import { parseChecksumFile, verifyArtifacts } from './artifact-integrity.mjs';
 
 // Every value in the emitted record is derived from authenticated execution evidence:
-// the workflow's `needs` context, the two exact Windows lifecycle receipts, the two-pass
+// the workflow's `needs` context, the exact Windows lifecycle receipt, the single-pass
 // summary, and the checked-out tree. Anything missing, failed, first-attempt-only or
 // inconsistent makes the build throw, so no record is written. Nothing is filled in
 // from a constant.
-const RELEASE_LANES = [
-  'linux-real-services',
-  'acceptance-primary',
-  'acceptance-responsive',
-  'prod-build-smoke',
-  'real-service-acceptance',
-  'p3-real-services',
-];
-const TWO_PASS_SCENARIO = 'release.exact-candidate-two-pass';
-// Every required scenario except the two-pass verdict is measured by the Windows
-// installed-lifecycle receipt of each exact pass. Deriving the list from the validator's
-// inventory keeps the producer and the gate from drifting apart.
-const LIFECYCLE_SCENARIOS = REQUIRED_SCENARIOS.filter((id) => id !== TWO_PASS_SCENARIO);
 // The lifecycle scenarios of a topology: its required inventory without its own verdict scenario.
+// The Windows installed-lifecycle receipt measures every one of them, so deriving the list from
+// the validator's inventory keeps the producer and the gate from drifting apart.
 function lifecycleScenariosFor(topology) {
   const verdict = shapeFor(topology).verdict;
   return requiredScenariosFor(topology).filter((id) => id !== verdict);
@@ -47,7 +32,6 @@ function releaseArtifacts(version) {
     ['joy-worker.exe', 'candidateWorkerExecutableSha256'],
   ];
 }
-const TWO_PASS_SUMMARY = 'test-output/readiness/two-pass-evidence/manifest.json';
 // Artifact bytes, the independent checksum file and the release manifest, as retained by the
 // evidence store. Expected digests come only from the checksum file, never from a receipt.
 const ARTIFACT_ROOT = 'test-output/readiness/artifacts';
@@ -68,73 +52,30 @@ function readRequiredJson(root, relativePath) {
     throw error;
   }
 }
-const WINDOWS_PASS_PATHS = [
-  'test-output/readiness/two-pass-evidence/windows/pass-1/acceptance.json',
-  'test-output/readiness/two-pass-evidence/windows/pass-2/acceptance.json',
-];
-const REDACTED_INPUT_PATHS = [
-  TWO_PASS_SUMMARY,
-  `${ARTIFACT_ROOT}/SHA256SUMS.txt`,
-  `${ARTIFACT_ROOT}/joy-media-release-manifest.json`,
-  ...WINDOWS_PASS_PATHS,
-  'test-output/windows/acceptance.json',
-  'test-output/windows/acceptance-passes/pass-1.json',
-  'test-output/windows/acceptance-passes/pass-2.json',
-  'test-output/browser/journeys.json',
-  'test-output/release-performance/polling.json',
-  'test-output/release-performance/effects-soak.json',
-  'test-output/release-performance/timeline-integrity.json',
-  'test-output/release-performance/editor.json',
-  'test-output/delivery/result.json',
-  'test-output/operations/restore.json',
-  'test-output/operations/teardown.json',
-  'test-output/ci-janitor/inventory.json',
-];
-
-// The two gate topologies (plan §3.4). The two-pass shape is the production gate (release-candidate-v2), and its values
-// above are unchanged. The single-pass shape is for release-candidate-v3: one Windows pass, one real-service pass and one P3
-// pass, each written under its own folder. Each topology's values are fixed here, so no caller can choose a shape that is
-// not listed.
+// The gate topology (plan §3.4, release-candidate-v3): one Windows pass, one real-service pass and one P3 pass, each
+// written under its own folder. The two-pass shape of release-candidate-v2 is removed; its values are no longer built.
 const SINGLE_PASS_VERDICT = 'release.exact-candidate';
 const SINGLE_PASS_SUMMARY = 'test-output/readiness/single-pass-evidence/manifest.json';
 const SINGLE_PASS_WINDOWS_PATHS = [
   'test-output/readiness/single-pass-evidence/windows/pass-1/acceptance.json',
 ];
-// The single-pass gate's lanes (plan section 3.4, release-candidate-v3). Its jobs merge the v2 lanes: hosted-verify replaces
-// the Linux verify:ci run, windows-candidate replaces windows-p0-real-services and windows-worker-clean, and fixture-acceptance
-// replaces acceptance-primary and prod-build-smoke. The gate's `needs` list must equal this list (release-candidate-v3.test.ts).
+// The single-pass gate's lanes (release-candidate-v3). The gate's `needs` list must equal this list
+// (release-candidate-v3.test.ts).
 export const SINGLE_PASS_LANES = [
+  'validate-candidate',
   'hosted-verify',
   'node-contracts',
-  'linux-real-services',
+  'editor-web-bundle',
   'windows-candidate',
-  'real-service-acceptance',
+  'checksums',
+  'offline-packaged-smoke',
   'fixture-acceptance',
   'acceptance-responsive',
-  'p3-real-services',
+  'site-build',
 ];
-// `messages` keeps the two-pass wording exactly as the existing tests assert it.
+// Each topology's fixed values. `messages` keeps the wording the existing tests assert, so no caller can choose a shape
+// that is not listed here.
 export const SHAPES = {
-  'two-pass': {
-    lanes: RELEASE_LANES,
-    verdict: TWO_PASS_SCENARIO,
-    summaryPath: TWO_PASS_SUMMARY,
-    windowsPaths: WINDOWS_PASS_PATHS,
-    sourceKeys: 'p3:1,p3:2,real-service:1,real-service:2',
-    sourceCount: 4,
-    windowsPassNumbers: '1,2',
-    redactedInputPaths: REDACTED_INPUT_PATHS,
-    evidenceLabel: 'two-pass evidence',
-    messages: {
-      sourceCount:
-        'two-pass summary does not bind four real-service/P3 passes to this candidate and run',
-      sourceKeys: 'two-pass summary is missing a required Linux acceptance pass',
-      windowsCount: 'two-pass summary does not contain both Windows acceptance passes',
-      windowsNumbers: 'two-pass summary does not list Windows passes 1 and 2 exactly once',
-      windowsDigest: (pass) =>
-        `Windows pass ${pass} receipt does not match the digest recorded in the two-pass summary`,
-    },
-  },
   'single-pass': {
     lanes: SINGLE_PASS_LANES,
     verdict: SINGLE_PASS_VERDICT,
@@ -144,10 +85,19 @@ export const SHAPES = {
     sourceCount: 2,
     windowsPassNumbers: '1',
     redactedInputPaths: [
-      ...REDACTED_INPUT_PATHS.filter(
-        (path) =>
-          !path.includes('two-pass-evidence') && !path.endsWith('acceptance-passes/pass-2.json'),
-      ),
+      `${ARTIFACT_ROOT}/SHA256SUMS.txt`,
+      `${ARTIFACT_ROOT}/joy-media-release-manifest.json`,
+      'test-output/windows/acceptance.json',
+      'test-output/windows/acceptance-passes/pass-1.json',
+      'test-output/browser/journeys.json',
+      'test-output/release-performance/polling.json',
+      'test-output/release-performance/effects-soak.json',
+      'test-output/release-performance/timeline-integrity.json',
+      'test-output/release-performance/editor.json',
+      'test-output/delivery/result.json',
+      'test-output/operations/restore.json',
+      'test-output/operations/teardown.json',
+      'test-output/ci-janitor/inventory.json',
       SINGLE_PASS_SUMMARY,
       ...SINGLE_PASS_WINDOWS_PATHS,
     ],
@@ -195,7 +145,7 @@ function readJson(root, relativePath) {
   }
 }
 
-// Reads a receipt and the digest of its exact bytes, so the two-pass summary can bind it.
+// Reads a receipt and the digest of its exact bytes, so the summary can bind it.
 function readReceipt(root, relativePath) {
   const absolute = evidencePath(root, relativePath);
   if (!existsSync(absolute)) fail(`required two-pass evidence file is missing: ${relativePath}`);
@@ -293,7 +243,7 @@ function assertLifecycle(evidence, expected) {
 // Each exact pass must report its own measured result for every lifecycle scenario. A
 // scenario counts only when the pass reports it as passed, on its first attempt, with
 // zero retries. A missing entry fails closed.
-function measuredOutcomes(lifecycle, pass, scenarios = LIFECYCLE_SCENARIOS) {
+function measuredOutcomes(lifecycle, pass, scenarios) {
   return new Map(
     scenarios.map((id) => {
       const matches = (lifecycle.scenarios ?? []).filter((candidate) => candidate?.id === id);
@@ -335,7 +285,7 @@ export function buildReadinessEvidence({
   attempt,
   needsJson,
   now = new Date(),
-  topology = 'two-pass',
+  topology = 'single-pass',
 }) {
   const shape = shapeFor(topology);
   const lifecycleScenarios = lifecycleScenariosFor(topology);
@@ -408,22 +358,6 @@ export function buildReadinessEvidence({
     measuredOutcomes(lifecycle, index + 1, lifecycleScenarios),
   );
   const first = lifecycles[0];
-  // A second pass, when the topology has one, must match the first pass exactly. A single pass has nothing to match.
-  const others = lifecycles.slice(1);
-  const artifactKeys = releaseFiles.map(([, key]) => key);
-  if (
-    others.some(
-      (other) =>
-        first.versions.candidate !== other.versions.candidate ||
-        first.containerIdentity.containerId !== other.containerIdentity.containerId ||
-        first.containerIdentity.imageDigest !== other.containerIdentity.imageDigest ||
-        artifactKeys.some((key) => first.artifacts[key] !== other.artifacts[key]),
-    )
-  ) {
-    fail(
-      'Windows acceptance passes do not use the same exact candidate artifacts and runner container',
-    );
-  }
   if (first.versions.candidate !== desktopPackage.version) {
     fail('Windows installed lifecycle version does not match the checked-out candidate package');
   }
@@ -438,16 +372,6 @@ export function buildReadinessEvidence({
   ) {
     fail('Windows lifecycle toolchain versions are incomplete');
   }
-  if (
-    others.some((other) =>
-      ['node', 'pnpm', 'electron', 'ffmpeg', 'ffprobe', 'windows'].some(
-        (name) => first.toolchain[name] !== other.toolchain[name],
-      ),
-    )
-  ) {
-    fail('Windows lifecycle toolchain changed between its two acceptance passes');
-  }
-
   const lockfileSha256 = hashFile(root, 'pnpm-lock.yaml');
   const fixtureManifestSha256 = hashFile(root, 'packages/test-fixtures/media/manifest.json');
   const sourceEvidencePath = shape.windowsPaths[0];
@@ -494,19 +418,14 @@ export function buildReadinessEvidence({
 
   // Scenario results are copied from the measured entries of the exact passes.
   const scenarioResults = lifecycleScenarios.map((id) => ({ id, ...outcomes[0].get(id) }));
-  const everyPass = shape.windowsPassNumbers.includes(',');
-  const twoPassRequirements = [
+  const requirements = [
     ['every required lane succeeded in the workflow needs context', lanes.ok],
     [
-      everyPass
-        ? 'both exact Windows passes verified against this candidate and run'
-        : 'the exact Windows pass verified against this candidate and run',
+      'the exact Windows pass verified against this candidate and run',
       lifecycles.length === windowsCount,
     ],
     [
-      everyPass
-        ? 'every lifecycle scenario measured as passed on its first attempt in both passes'
-        : 'every lifecycle scenario measured as passed on its first attempt in the pass',
+      'every lifecycle scenario measured as passed on its first attempt in the pass',
       outcomes.every((map) =>
         lifecycleScenarios.every((id) => {
           const outcome = map.get(id);
@@ -520,7 +439,7 @@ export function buildReadinessEvidence({
     ],
     ['checked-out HEAD equals the candidate SHA', headSha === candidateSha],
   ];
-  const unmet = twoPassRequirements.filter(([, met]) => met !== true).map(([label]) => label);
+  const unmet = requirements.filter(([, met]) => met !== true).map(([label]) => label);
   if (unmet.length > 0) fail(`${shape.verdict} is not satisfied: ${unmet.join('; ')}`);
   scenarioResults.push({
     id: shape.verdict,
@@ -546,8 +465,7 @@ export function buildReadinessEvidence({
     .sort((a, b) => b - a)[0];
   const evidence = {
     schemaVersion: 1,
-    // Only single-pass evidence names its topology; a two-pass record keeps its existing shape.
-    ...(topology === 'single-pass' ? { topology } : {}),
+    topology,
     candidateSha,
     lockfileSha256,
     toolchainVersions: {
@@ -584,7 +502,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
       cwd: workspaceRoot,
       encoding: 'utf8',
     }).trim();
-    const topology = process.env.READINESS_TOPOLOGY ?? 'two-pass';
+    const topology = process.env.READINESS_TOPOLOGY ?? 'single-pass';
     const evidence = buildReadinessEvidence({
       workspaceRoot,
       candidateSha: process.env.CANDIDATE_SHA,
@@ -597,9 +515,8 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     const outputPath = join(workspaceRoot, 'test-output/readiness/evidence.json');
     mkdirSync(dirname(outputPath), { recursive: true });
     writeFileSync(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'wx' });
-    const passes = topology === 'single-pass' ? 'one pass' : 'two passes';
     process.stdout.write(
-      `Readiness evidence verified for ${evidence.passCount} exact-candidate scenarios across ${passes}.\n`,
+      `Readiness evidence verified for ${evidence.passCount} exact-candidate scenarios across one pass.\n`,
     );
   } catch (error) {
     process.stderr.write(

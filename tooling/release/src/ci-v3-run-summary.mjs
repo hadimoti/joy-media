@@ -28,35 +28,28 @@ export const GATE_CHECKS = [
   'windows-acceptance',
   'feature-status',
 ];
-// The lanes of each topology, as the gate's needs list names them. The two-pass lanes are release-candidate-v2's six lanes (its Windows jobs were retired by 4cb35d7a); the
-// single-pass lanes are release-candidate-v3's eight (plan section 3.4). ci-v3-run-summary.test.ts pins both against the gate.
-export const TWO_PASS_LANES = [
-  'linux-real-services',
-  'acceptance-primary',
-  'acceptance-responsive',
-  'prod-build-smoke',
-  'real-service-acceptance',
-  'p3-real-services',
-];
+// The lanes of the topology, as the gate's needs list names them: the release-candidate-v3 lanes.
+// ci-v3-run-summary.test.ts pins them against the gate.
 export const SINGLE_PASS_LANES = [
+  'validate-candidate',
   'hosted-verify',
   'node-contracts',
-  'linux-real-services',
+  'editor-web-bundle',
   'windows-candidate',
-  'real-service-acceptance',
+  'checksums',
+  'offline-packaged-smoke',
   'fixture-acceptance',
   'acceptance-responsive',
-  'p3-real-services',
+  'site-build',
 ];
-export const LANES_BY_TOPOLOGY = { 'two-pass': TWO_PASS_LANES, 'single-pass': SINGLE_PASS_LANES };
+export const LANES_BY_TOPOLOGY = { 'single-pass': SINGLE_PASS_LANES };
 const TOPOLOGIES = Object.keys(LANES_BY_TOPOLOGY);
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 
 /** Checks the run's inputs and returns the summary. Throws, naming every problem, when any input is missing or malformed. */
 export function buildRunSummary(input) {
   const problems = [];
-  if (!TOPOLOGIES.includes(input.topology))
-    problems.push('topology must be single-pass or two-pass');
+  if (!TOPOLOGIES.includes(input.topology)) problems.push('topology must be single-pass');
   if (!Number.isInteger(input.attempt) || input.attempt < 1)
     problems.push('attempt must be a positive integer');
   if (typeof input.candidateSha !== 'string' || !SHA_PATTERN.test(input.candidateSha)) {

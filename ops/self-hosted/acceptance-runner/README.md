@@ -3,8 +3,8 @@
 Labels: `self-hosted,linux,x64,joy-media-acceptance`
 
 The acceptance runner is a SECONDARY Linux Docker self-hosted runner
-used only by the isolated real-services acceptance lane of
-`release-candidate.yml` / `release-candidate-v2.yml`.
+used only by the `fixture-acceptance` lane of `release-candidate-v3.yml`.
+The real-services acceptance lanes of the older workflows are retired.
 
 ## Self-hosted label
 

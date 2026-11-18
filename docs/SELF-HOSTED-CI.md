@@ -115,9 +115,10 @@ environment files; they are not production credentials and are not copied to
 logs, artifacts, or Gbrain. The workflows must consume these values from the
 runner environment rather than embedding defaults in the repository. The
 legacy `r2-candidate.yml` path now follows that rule as well.
-`JOY_MEDIA_CI_RELEASE_COMMAND` points at the checked-out
-`ops/self-hosted/linux-runner/release-real-services.sh`, which creates and
-unconditionally drops a run/schema and bucket namespace.
+`ops/self-hosted/linux-runner/release-real-services.sh` is a retired real-service
+script. It creates and unconditionally drops a run/schema and bucket namespace.
+`release-candidate-v3` does not run it, and nothing should point
+`JOY_MEDIA_CI_RELEASE_COMMAND` at it.
 
 The acceptance runner `joy-media-ci-acceptance` is a separate repository-scoped
 Linux runner with its own runner volume and labels `self-hosted`, `linux`, `x64`,
@@ -184,16 +185,22 @@ minutes. If a release lane later uploads evidence, it must be the minimal saniti
 
 P5 retired the Windows-Docker runner and the `windows-acceptance` release-gate check with it. The release workflows no longer schedule Windows runner jobs or require Windows-platform evidence. The separate `evidence.windows` field remains part of operational real-service lifecycle evidence; it describes the Worker lifecycle and is not Windows-platform acceptance.
 
-## v2 release-candidate self-hosted CI
+## release-candidate-v3 self-hosted CI
 
-`.github/workflows/release-candidate-v2.yml` is the proposed successor to `release-candidate.yml`,
-dispatched manually with a full 40-character candidate SHA. It runs the same lane inventory
-described above, but encodes the clean-state repeat explicitly as two in-workflow passes per
-matrix lane and restructures the browser viewport matrix so each pass stays inside its lane's
-timeout budget. It depends on the same `self-hosted` runners (`joy-media-ci`,
-`joy-media-acceptance`) and on the same runner-local env vars
-(`JOY_MEDIA_CI_RELEASE_COMMAND`, `JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND`,
-`JOY_MEDIA_CI_EVIDENCE_ROOT`).
+`.github/workflows/release-candidate-v3.yml` is the current candidate workflow. It is dispatched
+manually with a full 40-character candidate SHA and runs the lanes listed in its `gate-summary`
+`needs`. It uses only the `self-hosted` runners (`joy-media-ci` for every lane except
+`fixture-acceptance`, which uses `joy-media-acceptance`). It has no real-service lanes.
+`release-candidate-v2.yml` has been deleted; the sections below that mention v2 describe that
+retired design and are kept only as history.
+
+The `checksums` lane needs the runner to provide `$JOY_MEDIA_CI_EVIDENCE_ROOT/<candidate sha>/candidate-files`
+(the release files and `SHA256SUMS.txt`). The job fails closed when that folder is missing. Nothing in
+the repository produces that folder yet.
+
+The `windows-candidate` lane runs the local release gate (`pnpm release:gate:local --candidate=<sha>`).
+A waived Sandbox lifecycle is printed as WAIVED (its check status is `waived`, not `passed`). With a valid
+owner waiver the gate still exits 0, so the printed report is the place to see the waiver.
 
 ### Durable evidence root
 
@@ -226,9 +233,15 @@ orchestrator run history. The VPS Gbrain metadata is index-only; it never owns t
 authoritative evidence bytes. Operator-only buckets apply; never assume the public
 gh-pages index now reflects v2 runs.
 
-### v2 artifact upload policy
+### v3 artifact use
 
-v2 does not call `actions/upload-artifact` or `actions/download-artifact`. Both the
+`release-candidate-v3.yml` uses `actions/upload-artifact` and `actions/download-artifact` only as
+transport between its own jobs, with one-day retention and run-scoped names. The receiving jobs check the
+candidate SHA, and the hosted-verify report is checked against a digest the producing job outputs.
+
+### v2 artifact upload policy (retired design, history only)
+
+The retired v2 workflow did not call `actions/upload-artifact` or `actions/download-artifact`. Both the
 real-service and the P3 pass instead write an `ARTIFACT-UPLOAD-STATUS.txt` receipt into
 their durable evidence directory with the fields `candidate_sha`, `run_id`, `attempt`,
 `pass`, `upload_outcome=disabled`, `source=durable-evidence-store`, and
