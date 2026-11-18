@@ -89,6 +89,8 @@ import { nextElementClipId } from './monitor-keyboard.js';
 import { scopedKeyTable } from '../keyboard-shortcuts.js';
 import { MonitorSelectionOverlay } from './MonitorSelectionOverlay.js';
 import { MonitorTransformBox } from './MonitorTransformBox.js';
+import { MonitorSnapOverlay, type MonitorSnapFeedback } from './MonitorSnapOverlay.js';
+import { collectSnapTargets, snapMove } from './snap-targets.js';
 import { boxContainsPoint } from './monitor-hit-test.js';
 import { monitorHoverElementAt } from './monitor-hover.js';
 import { buildMonitorGroupOverlay, buildMonitorOverlays } from './monitor-overlay-model.js';
@@ -348,6 +350,7 @@ function MonitorPanelContent({
     readonly overlay: EditorOverlayIR;
     readonly clipByNode: ReadonlyMap<string, string>;
   }>({ overlay: EMPTY_MONITOR_OVERLAY, clipByNode: new Map() });
+  const [snapFeedback, setSnapFeedback] = useState<MonitorSnapFeedback | null>(null);
   const readMonitorElementsRef = useRef<() => readonly MonitorElement[]>(() => []);
   const monitorElementsRef = useRef<readonly MonitorElement[]>([]);
   readMonitorElementsRef.current = () => {
@@ -487,11 +490,64 @@ function MonitorPanelContent({
           clipIds = modifiers.shift && !selected.includes(top) ? [...selected, top] : [top];
           selectClips(clipIds);
         }
-        return transformController.startGesture({ kind: 'move' }, start, clipIds);
+        const movingElements = elements.filter(
+          (element) => clipIds.includes(element.clipId) && element.hidden !== true,
+        );
+        if (movingElements.length === 0) return undefined;
+        const movingIds = new Set(movingElements.map((element) => element.id));
+        const initialBox = movingElements
+          .map((element) => element.bounds.aabb)
+          .reduce((bounds, box) => {
+            const left = Math.min(bounds.x, box.x);
+            const top = Math.min(bounds.y, box.y);
+            const right = Math.max(bounds.x + bounds.width, box.x + box.width);
+            const bottom = Math.max(bounds.y + bounds.height, box.y + box.height);
+            return { x: left, y: top, width: right - left, height: bottom - top };
+          });
+        const targets = collectSnapTargets(
+          frameSize,
+          elements
+            .filter((element) => element.hidden !== true && !movingIds.has(element.id))
+            .map((element) => element.bounds.aabb),
+          viewOptions.guides,
+        );
+        const drag = transformController.startGesture({ kind: 'move' }, start, clipIds);
+        if (drag === undefined) return undefined;
+        const angle = movingElements.length === 1 ? movingElements[0]!.bounds.rotationDeg : 0;
+        return {
+          update: (point, nextModifiers) => {
+            const deltaX = point.x - start.x;
+            const deltaY = point.y - start.y;
+            const result = snapMove(
+              {
+                ...initialBox,
+                x: initialBox.x + deltaX,
+                y: initialBox.y + deltaY,
+              },
+              targets,
+              monitorView.view.zoom,
+              nextModifiers.ctrl,
+            );
+            drag.update(
+              {
+                x: start.x + result.box.x - initialBox.x,
+                y: start.y + result.box.y - initialBox.y,
+              },
+              { shift: nextModifiers.shift, alt: nextModifiers.alt },
+            );
+            setSnapFeedback({ box: result.box, angle, cursor: point, guides: result.guides });
+          },
+          end: (commit) => {
+            drag.end(commit);
+            setSnapFeedback(null);
+          },
+        };
       },
     };
   }, [
     clearSelection,
+    frameSize,
+    monitorView.view.zoom,
     previewVisualProject,
     selectClips,
     state.playheadUs,
@@ -499,6 +555,7 @@ function MonitorPanelContent({
     timelineProject,
     toggleSelection,
     transformController,
+    viewOptions.guides,
   ]);
   // Announced to screen readers (polite) when Tab changes the selected element (T-M12).
   const [keyAnnouncement, setKeyAnnouncement] = useState('');
@@ -875,6 +932,13 @@ function MonitorPanelContent({
     () => buildMonitorGroupOverlay(transformTargets, monitorView.view.zoom),
     [monitorView.view.zoom, transformTargets],
   );
+  const transformSnapTargets = collectSnapTargets(
+    frameSize,
+    monitorElementsRef.current
+      .filter((element) => element.hidden !== true && !state.selectedIds.includes(element.clipId))
+      .map((element) => element.bounds.aabb),
+    viewOptions.guides,
+  );
   // A selected text with a gradient fill shows its two anchors on the picture: drag them to place the gradient.
   const gradientTarget = useMemo(() => {
     if (transformOverlays.length !== 1) return undefined;
@@ -1089,6 +1153,13 @@ function MonitorPanelContent({
           viewportSize={monitorView.viewportSize}
           interactive={monitorView.tool === 'select' && !spaceHeld}
           startGesture={transformController.startGesture}
+          snapTargets={transformSnapTargets}
+          onSnapFeedback={setSnapFeedback}
+        />
+        <MonitorSnapOverlay
+          feedback={snapFeedback}
+          view={monitorView.view}
+          viewportSize={monitorView.viewportSize}
         />
         {gradientTarget !== undefined && (
           <MonitorGradientAnchors

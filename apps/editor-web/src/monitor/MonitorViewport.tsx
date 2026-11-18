@@ -318,13 +318,16 @@ export interface MonitorViewportSelection {
    */
   readonly dragElement?: (
     start: MonitorPoint,
-    modifiers: { shift: boolean; alt: boolean },
+    modifiers: { shift: boolean; alt: boolean; ctrl: boolean },
   ) => MonitorElementDrag | undefined;
 }
 
 /** A move that follows the pointer (canvas points) and ends once. */
 export interface MonitorElementDrag {
-  readonly update: (canvasPoint: MonitorPoint, modifiers: { shift: boolean; alt: boolean }) => void;
+  readonly update: (
+    canvasPoint: MonitorPoint,
+    modifiers: { shift: boolean; alt: boolean; ctrl: boolean },
+  ) => void;
   readonly end: (commit: boolean) => void;
 }
 
@@ -518,6 +521,7 @@ export function MonitorViewport({
           press.drag.update(screenToCanvasPoint(view, end), {
             shift: event.shiftKey,
             alt: event.altKey,
+            ctrl: event.ctrlKey,
           });
         press.drag.end(commit && !monitorSpaceGesture.isHolding());
         return;
@@ -599,7 +603,7 @@ export function MonitorViewport({
         if (press.moved && !press.onElement) setMarquee({ start: press.start, end: point });
         if (press.moved && press.onElement) {
           const view = latest.current.view;
-          const modifiers = { shift: event.shiftKey, alt: event.altKey };
+          const modifiers = { shift: event.shiftKey, alt: event.altKey, ctrl: event.ctrlKey };
           if (press.dragAsked !== true && !monitorSpaceGesture.isHolding()) {
             press.dragAsked = true;
             press.drag = latestSelection.current?.dragElement?.(
