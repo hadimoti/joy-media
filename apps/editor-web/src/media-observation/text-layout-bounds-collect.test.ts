@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { nodeBoundsFromBox } from '@joy-media/render-ir';
-import { collectTextLayoutBounds, type TextLayoutCandidate } from './text-layout-bounds-collect.js';
+import {
+  collectTextLayoutBounds,
+  type TextLayoutCandidate,
+  type TextLayoutNodeMeasurement,
+} from './text-layout-bounds-collect.js';
 
 const COLOR = { r: 255, g: 255, b: 255 };
 const REVISION = 'rev-1';
@@ -90,6 +94,29 @@ describe('collectTextLayoutBounds', () => {
     expect(result.boxes).toEqual([]);
     expect(result.unavailable).toEqual(['bad', 'zero', 'missing', 'stale']);
     expect(result.notMeasured).toBe(true);
+  });
+
+  it('keeps a zero-size empty title as an empty QC box', () => {
+    const zero = nodeBoundsFromBox(
+      'empty-title',
+      { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+      { x: 0, y: 0, width: 0, height: 0 },
+    );
+    const emptyNode = {
+      id: 'empty-title',
+      bounds: zero,
+      textColor: COLOR,
+      emptyText: true,
+    } as TextLayoutNodeMeasurement & { readonly emptyText: true };
+    const result = collectTextLayoutBounds(
+      [candidate('empty-title')],
+      [{ ...frame(['empty-title']), nodes: [emptyNode] }],
+    );
+
+    expect(result.boxes).toMatchObject([
+      { id: 'empty-title', x: 0, y: 0, width: 0, height: 0, emptyText: true },
+    ]);
+    expect(result.unavailable).toEqual([]);
   });
 
   it('keeps two caption lines and overlapping titles as separate boxes', () => {

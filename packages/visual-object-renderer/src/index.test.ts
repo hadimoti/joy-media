@@ -148,11 +148,33 @@ describe('buildRenderFrameIR', () => {
     },
   );
 
+  it.each([
+    { rotationDeg: 90, expectedMaxWidth: 972 },
+    { rotationDeg: 270, expectedMaxWidth: 972 },
+    { rotationDeg: 45, expectedMaxWidth: 1728 },
+  ])(
+    'uses the dimension the text runs along at $rotationDeg degrees',
+    ({ rotationDeg, expectedMaxWidth }) => {
+      const base = makeObject({ id: 'base', kind: 'text' }).transform!;
+      const title = makeObject({
+        id: `title-${rotationDeg}`,
+        kind: 'text',
+        text: 'A long title',
+        transform: { ...base, rotationDeg },
+      });
+      const frame = buildRenderFrameIR('root', 0, 1920, 1080, [resolved(title)]);
+
+      expect(frame.nodes[0]).toMatchObject({ kind: 'text', maxWidth: expectedMaxWidth });
+    },
+  );
+
   it('uses an explicit text maxWidth in place of the default safe width', () => {
+    const base = makeObject({ id: 'base', kind: 'text' }).transform!;
     const title = makeObject({
       id: 'title',
       kind: 'text',
       text: 'A long title',
+      transform: { ...base, rotationDeg: 90 },
       textStyle: {
         ...DEFAULT_TEXT_STYLE_V1,
         maxWidth: 640,

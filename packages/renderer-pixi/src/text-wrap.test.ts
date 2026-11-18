@@ -1,5 +1,49 @@
-import { describe, expect, it } from 'vitest';
-import { CanvasTextGenerator, TextStyle, wordWrap } from 'pixi.js';
+// @vitest-environment jsdom
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type * as Pixi from 'pixi.js';
+import { Text, TextStyle, wordWrap } from 'pixi.js';
+
+vi.mock('pixi.js', async (importOriginal) => {
+  Object.defineProperty(globalThis, 'CanvasRenderingContext2D', {
+    configurable: true,
+    value: class FakeCanvasRenderingContext2D {},
+  });
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    value: () => {
+      const target = {
+        font: '',
+        measureText: (text: string) => {
+          const width = [...text].length * 10;
+          return {
+            width,
+            actualBoundingBoxAscent: 12,
+            actualBoundingBoxDescent: 4,
+            actualBoundingBoxLeft: 0,
+            actualBoundingBoxRight: width,
+          };
+        },
+        getImageData: () => ({ data: new Uint8ClampedArray(4) }),
+      };
+      return new Proxy(target, {
+        get(object, key) {
+          if (key in object) return object[key as keyof typeof object];
+          return () => {};
+        },
+        set(object, key, value) {
+          Reflect.set(object, key, value);
+          return true;
+        },
+      });
+    },
+  });
+  return importOriginal<typeof Pixi>();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const graphemes = (text: string): string[] =>
   typeof Intl.Segmenter === 'function'
@@ -27,59 +71,6 @@ function wrap(text: string, width: number): string {
     () => true,
     graphemes,
   );
-}
-
-type GeneratorProbe = {
-  _renderTextToCanvas: (
-    style: TextStyle,
-    padding: number,
-    resolution: number,
-    canvasAndContext: { canvas: { height: number }; context: Record<string, unknown> },
-    measured: {
-      lines: readonly string[];
-      lineHeight: number;
-      lineWidths: readonly number[];
-      maxLineWidth: number;
-      fontProperties: { fontSize: number; ascent: number; descent: number };
-      height: number;
-    },
-  ) => void;
-  _drawLetterSpacing: (...args: unknown[]) => void;
-  _setFillAndStrokeStyles: (...args: unknown[]) => void;
-};
-
-function drawCalls(style: TextStyle, lines: readonly string[]): readonly unknown[][] {
-  const generator = CanvasTextGenerator as unknown as GeneratorProbe;
-  const calls: unknown[][] = [];
-  const originalDraw = generator._drawLetterSpacing;
-  const originalStyles = generator._setFillAndStrokeStyles;
-  generator._drawLetterSpacing = (text, _style, _canvas, x, y, stroke, wordSpacing) => {
-    calls.push([text, x, y, stroke, wordSpacing]);
-  };
-  generator._setFillAndStrokeStyles = () => {};
-  try {
-    generator._renderTextToCanvas(
-      style,
-      0,
-      1,
-      {
-        canvas: { height: 100 },
-        context: { resetTransform() {}, scale() {}, textBaseline: 'alphabetic' },
-      },
-      {
-        lines,
-        lineHeight: 20,
-        lineWidths: lines.map(measure),
-        maxLineWidth: Math.max(...lines.map(measure), 0),
-        fontProperties: { fontSize: 16, ascent: 12, descent: 4 },
-        height: lines.length * 20,
-      },
-    );
-  } finally {
-    generator._drawLetterSpacing = originalDraw;
-    generator._setFillAndStrokeStyles = originalStyles;
-  }
-  return calls;
 }
 
 describe('Pixi text wrapping options', () => {
@@ -111,19 +102,50 @@ describe('Pixi text wrapping options', () => {
     expect(wrap('One line\nTwo lines', 200)).toBe('One line\nTwo lines');
   });
 
-  it('passes the same canvas draw arguments for a short title with wrapping enabled', () => {
-    const text = 'Clean Title';
-    const originalStyle = new TextStyle({ fontSize: 16, fill: 0xffffff });
-    const wrappedStyle = new TextStyle({
-      fontSize: 16,
-      fill: 0xffffff,
-      wordWrap: true,
-      wordWrapWidth: 400,
-      breakWords: true,
+  it('measures short text identically with wrapping enabled and wraps a long title', () => {
+    const shortText = 'Clean Title';
+    const shortPlain = new Text({
+      text: shortText,
+      style: new TextStyle({ fontSize: 16, fill: 0xffffff }),
+    });
+    const shortWrapped = new Text({
+      text: shortText,
+      style: new TextStyle({
+        fontSize: 16,
+        fill: 0xffffff,
+        wordWrap: true,
+        wordWrapWidth: 400,
+        breakWords: true,
+      }),
+    });
+    const longText = 'This is a long English title to test wrapping inside the frame width today';
+    const longPlain = new Text({
+      text: longText,
+      style: new TextStyle({ fontSize: 16, fill: 0xffffff }),
+    });
+    const longWrapped = new Text({
+      text: longText,
+      style: new TextStyle({
+        fontSize: 16,
+        fill: 0xffffff,
+        wordWrap: true,
+        wordWrapWidth: 180,
+        breakWords: true,
+      }),
     });
 
-    expect(drawCalls(originalStyle, [text])).toEqual(
-      drawCalls(wrappedStyle, wrap(text, 400).split('\n')),
-    );
+    try {
+      expect({ width: shortWrapped.width, height: shortWrapped.height }).toEqual({
+        width: shortPlain.width,
+        height: shortPlain.height,
+      });
+      expect(longWrapped.height).toBeGreaterThan(longPlain.height);
+      expect(longWrapped.width).toBeLessThanOrEqual(180);
+    } finally {
+      shortPlain.destroy();
+      shortWrapped.destroy();
+      longPlain.destroy();
+      longWrapped.destroy();
+    }
   });
 });

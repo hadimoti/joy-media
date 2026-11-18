@@ -435,6 +435,7 @@ export async function createBrowserPixiRenderer(
               distance: Math.hypot(node.shadow.offsetX, node.shadow.offsetY),
               angle: Math.atan2(node.shadow.offsetY, node.shadow.offsetX),
             };
+    const horizontalScale = Math.abs(node.transform.scaleX);
     text.style = {
       fill,
       fontSize: node.fontSizePx ?? 16,
@@ -449,7 +450,13 @@ export async function createBrowserPixiRenderer(
       ...(node.tracking === undefined ? {} : { letterSpacing: node.tracking }),
       align: node.align ?? 'left',
       ...(node.maxWidth !== undefined
-        ? { wordWrap: true, wordWrapWidth: node.maxWidth, breakWords: true }
+        ? {
+            wordWrap: true,
+            // The layer scales after Pixi measures local text bounds. Keep the authored frame-pixel
+            // limit consistent by converting it back to local text units first.
+            wordWrapWidth: horizontalScale === 0 ? node.maxWidth : node.maxWidth / horizontalScale,
+            breakWords: true,
+          }
         : {}),
       ...(node.stroke === undefined
         ? {}
@@ -483,12 +490,18 @@ export async function createBrowserPixiRenderer(
   const textPlatePadding = (node: TextNode): number =>
     Math.max(2, Math.round((node.fontSizePx ?? 16) * 0.12));
 
+  const hasTextContent = (node: TextNode): boolean => node.text.trim().length > 0;
+
   const syncTextBackground = (layer: LayerContainer, node: TextNode): void => {
     if (node.background === undefined || !(layer.visual instanceof Text)) {
       clearTextBackground(layer);
       return;
     }
     const text = layer.visual;
+    if (!hasTextContent(node) || (text.width === 0 && text.height === 0)) {
+      clearTextBackground(layer);
+      return;
+    }
     const padding = textPlatePadding(node);
     const bounds = textPlateBounds(text.width, text.height, node.align, padding);
     const plate = layer.textBackground ?? new Graphics();
@@ -537,9 +550,13 @@ export async function createBrowserPixiRenderer(
     if (node.kind === 'text') {
       if (!(layer.visual instanceof Text)) return { x: 0, y: 0, width: 0, height: 0 };
       const text = layer.visual;
-      return node.background === undefined
-        ? textPlateBounds(text.width, text.height, node.align)
-        : textPlateBounds(text.width, text.height, node.align, textPlatePadding(node));
+      const hasBackgroundPlate =
+        node.background !== undefined &&
+        hasTextContent(node) &&
+        !(text.width === 0 && text.height === 0);
+      return hasBackgroundPlate
+        ? textPlateBounds(text.width, text.height, node.align, textPlatePadding(node))
+        : textPlateBounds(text.width, text.height, node.align);
     }
     return { x: 0, y: 0, width: node.width, height: node.height };
   };

@@ -293,9 +293,12 @@ export function buildRenderFrameIR(
     const imageSize = options.imageSizesByObjectId?.[resolved.object.id];
     const node = visualObjectToRenderNode(resolved, effects, imageSize);
     if (node) {
+      const rotationRadians = ((node.transform.rotationDeg ?? 0) * Math.PI) / 180;
+      const defaultTextWrapDimension =
+        Math.abs(Math.sin(rotationRadians)) > Math.abs(Math.cos(rotationRadians)) ? height : width;
       const laidOutNode =
         node.kind === 'text'
-          ? { ...node, maxWidth: resolveTextWrapWidth(width, node.maxWidth) }
+          ? { ...node, maxWidth: resolveTextWrapWidth(defaultTextWrapDimension, node.maxWidth) }
           : node;
       const zIndex = options.zIndexByObjectId?.[laidOutNode.id];
       nodes.push(zIndex === undefined ? laidOutNode : { ...laidOutNode, zIndex });
