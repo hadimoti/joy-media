@@ -190,6 +190,33 @@ describe('ffmpeg output parsers', () => {
     expect(() => parseProbe('not json')).toThrow('unreadable');
   });
 
+  it('reads the stream length from the DURATION tag when a Matroska or WebM stream has none', () => {
+    expect(
+      parseProbe(
+        JSON.stringify({
+          streams: [
+            {
+              codec_type: 'video',
+              disposition: { attached_pic: 0 },
+              duration: 'N/A',
+              tags: { DURATION: '00:00:08.000000000' },
+            },
+            { codec_type: 'audio', tags: { DURATION: '00:01:05.008000000' } },
+          ],
+          format: { duration: '8.000000' },
+        }),
+      ),
+    ).toMatchObject({ videoDurationUs: 8 * SECOND, audioDurationUs: 65_008_000 });
+    expect(
+      parseProbe(
+        JSON.stringify({
+          streams: [{ codec_type: 'audio', tags: { DURATION: 'garbage' } }],
+          format: { duration: '5' },
+        }),
+      ).audioDurationUs,
+    ).toBeUndefined();
+  });
+
   it('keeps both stream lengths from ffprobe', () => {
     expect(
       parseProbe(

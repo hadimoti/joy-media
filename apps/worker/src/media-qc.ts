@@ -99,6 +99,8 @@ const BLACK_FRAME_YMAX = 40;
 const NEUTRAL_CHROMA = 128;
 /** ffmpeg's answer when a filter is missing from this build. scdet needs FFmpeg 4.4 or later. */
 const UNKNOWN_FILTER_PATTERN = /no such filter|unknown filter|filter not found/i;
+const AV_LENGTHS_UNAVAILABLE =
+  'The file does not state how long its sound and picture streams are, so their lengths were not compared.';
 const SCENE_CUTS_UNAVAILABLE =
   'scene cuts were not checked: this FFmpeg build has no scdet filter (FFmpeg 4.4 or later)';
 /** Audio checks in the order audioFilterChain runs them. */
@@ -1004,8 +1006,16 @@ export function parseProbe(json: string): ProbeResult {
   const streamDurationUs = (stream: Record<string, unknown> | undefined): number | undefined => {
     if (stream === undefined) return undefined;
     const streamSeconds = Number(stream['duration']);
-    return Number.isFinite(streamSeconds) && streamSeconds > 0
-      ? Math.round(streamSeconds * 1_000_000)
+    if (Number.isFinite(streamSeconds) && streamSeconds > 0)
+      return Math.round(streamSeconds * 1_000_000);
+    // Matroska and WebM keep the length in a DURATION tag ("00:00:05.008000000"), not in the stream.
+    const tagged = /^(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$/.exec(
+      String(record(stream['tags'])['DURATION'] ?? '').trim(),
+    );
+    if (tagged === null) return undefined;
+    const taggedSeconds = Number(tagged[1]) * 3600 + Number(tagged[2]) * 60 + Number(tagged[3]);
+    return Number.isFinite(taggedSeconds) && taggedSeconds > 0
+      ? Math.round(taggedSeconds * 1_000_000)
       : undefined;
   };
   const videoDurationUs = streamDurationUs(videoStream);
@@ -1128,7 +1138,7 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
       '-v',
       'error',
       '-show_entries',
-      'format=duration:stream=codec_type,duration:stream_disposition=attached_pic',
+      'format=duration:stream=codec_type,duration:stream_disposition=attached_pic:stream_tags=DURATION',
       '-of',
       'json',
       options.sourcePath,
@@ -1197,15 +1207,19 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
   // Container lengths can hide a shorter sound or picture stream. Only compare actual stream lengths.
   const checkAvLengthMismatch =
     checks.has('av-length-mismatch') && probe.hasVideo && probe.hasAudio;
-  if (checkAvLengthMismatch) checksRun.push('av-length-mismatch');
+  const hasBothStreamLengths =
+    probe.videoDurationUs !== undefined && probe.audioDurationUs !== undefined;
+  if (checkAvLengthMismatch) {
+    if (hasBothStreamLengths) checksRun.push('av-length-mismatch');
+    else truncated.push(AV_LENGTHS_UNAVAILABLE);
+  }
   const videoDurationUs = probe.videoDurationUs ?? durationUs;
   const audioDurationUs = probe.audioDurationUs ?? durationUs;
   const avStreamDurations = checkAvLengthMismatch
     ? {
         videoDurationUs,
         audioDurationUs,
-        hasStreamDurations:
-          probe.videoDurationUs !== undefined && probe.audioDurationUs !== undefined,
+        hasStreamDurations: hasBothStreamLengths,
       }
     : undefined;
 
