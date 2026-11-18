@@ -105,10 +105,11 @@ assert.strictEqual(
   'JOY Media',
   'joy-media.exe FileDescription is not JOY Media',
 );
-assert.strictEqual(
-  exeDetails.ProductVersion,
-  packageVersion,
-  'joy-media.exe ProductVersion is not the app version',
+// Windows reports the numeric product version with four parts, so 1.1.1 reads back as 1.1.1.0.
+assert.ok(
+  exeDetails.ProductVersion === packageVersion ||
+    exeDetails.ProductVersion === `${packageVersion}.0`,
+  `joy-media.exe ProductVersion ${exeDetails.ProductVersion} is not the app version ${packageVersion}`,
 );
 assert.strictEqual(
   exeDetails.FileVersion,
