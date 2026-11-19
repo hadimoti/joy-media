@@ -24,6 +24,23 @@ export type MediaFitSelection = Omit<MediaFitTransformInput, 'mode'> & {
   readonly disabledReason?: string;
 };
 
+/**
+ * The composition a selected clip plays in. A clip on a legacy track is found there. A clip on the
+ * universal timeline is on no legacy track, so it plays in the root composition (defect 207).
+ */
+function clipComposition(
+  project: JoyProjectV1,
+  clipId: string,
+): JoyProjectV1['compositions'][string] | undefined {
+  for (const candidate of Object.values(project.compositions)) {
+    if (candidate.tracks.some((track) => track.clips.some((item) => item.id === clipId)))
+      return candidate;
+  }
+  const onUniversalTimeline =
+    project.universalTimeline?.items.some((item) => item.id === clipId) ?? false;
+  return onUniversalTimeline ? project.compositions[project.rootCompositionId] : undefined;
+}
+
 /** The shared media and composition facts used by the Inspector and Monitor. */
 export function mediaFitSelection(
   project: JoyProjectV1 | undefined,
@@ -33,13 +50,7 @@ export function mediaFitSelection(
   if (project === undefined || object === undefined || selectedClipId === undefined)
     return undefined;
 
-  let composition: JoyProjectV1['compositions'][string] | undefined;
-  for (const candidate of Object.values(project.compositions)) {
-    if (candidate.tracks.some((track) => track.clips.some((item) => item.id === selectedClipId))) {
-      composition = candidate;
-      break;
-    }
-  }
+  const composition = clipComposition(project, selectedClipId);
   if (composition === undefined) return undefined;
 
   const assetId = drawnAssetId(project, object, selectedClipId);

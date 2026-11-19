@@ -399,7 +399,7 @@ import {
 import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
-import { AssetLibraryPanel } from './AssetLibraryPanel.js';
+import { ASSET_LIBRARY_CHANGED_EVENT, AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { BrowserControlPlaneRequestError, type BrowserJob } from './control-plane-client.js';
 import { ProjectDocumentAutosync } from './project-document-autosync.js';
 import { createStorageFlushNotifier, type StorageFlushNotifier } from './storage-flush.js';
@@ -7041,6 +7041,9 @@ function EditorWorkspace({
         }
 
         if (importedAssets.length > 0) {
+          // The Media panel reloads its catalog on this event (defect 206): it reads no prop, because
+          // the dock panels keep the closure they were created with.
+          window.dispatchEvent(new Event(ASSET_LIBRARY_CHANGED_EVENT));
           // A file the library already holds (same content, same id) is not new: the toast must not count it as added.
           const alreadyInLibrary = importedAssets.filter(
             (asset) => context.session.visualProject.assets[asset.id] !== undefined,
@@ -7224,7 +7227,9 @@ function EditorWorkspace({
             rememberImportedAsset(asset);
             return asset;
           }}
-          {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
+          {...(context.droppedImportProgress === undefined
+            ? {}
+            : { droppedImportProgress: context.droppedImportProgress })}
           onCancelDroppedImport={cancelDroppedImport}
           assetDisplayNames={Object.fromEntries(
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
@@ -7399,7 +7404,9 @@ function EditorWorkspace({
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onAddToTimeline={addAssetToTimeline}
           onImportFiles={(files) => handleDroppedFiles(files, { surface: 'media' })}
-          {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
+          {...(context.droppedImportProgress === undefined
+            ? {}
+            : { droppedImportProgress: context.droppedImportProgress })}
           onCancelDroppedImport={cancelDroppedImport}
           onEditWithAi={(asset) => {
             context.attachJoyAgentAsset(asset);
@@ -7495,7 +7502,9 @@ function EditorWorkspace({
           onFilesDrop={(files) =>
             handleDroppedFiles(files, { surface: 'monitor', timeUs: activeTimelinePlayheadUs })
           }
-          {...(droppedImportProgress === undefined ? {} : { droppedImportProgress })}
+          {...(context.droppedImportProgress === undefined
+            ? {}
+            : { droppedImportProgress: context.droppedImportProgress })}
           onCancelDroppedImport={cancelDroppedImport}
           formatMenu={formatMenu}
           missingAssetIds={missingAssetIds}
@@ -8100,6 +8109,9 @@ function EditorWorkspace({
             value={{
               storage,
               state,
+              // Read by the panels through the context, not from a closure: the dock panels keep the
+              // closure of their first render, so a workspace state value would never update there (defect 208).
+              droppedImportProgress,
               previewVideoFrame,
               clipFrameCache: clipFrameCacheRef.current,
               clipFrameTick,

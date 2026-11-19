@@ -1,5 +1,6 @@
 import { createContext } from 'react';
 import type { CreativeBriefV1, EditorContext } from '@joy-media/agent-tools';
+import type { DroppedImportProgressState } from './DroppedImportProgress.js';
 import type {
   ArtifactStore,
   ArtifactTransaction,
@@ -74,6 +75,8 @@ export interface ToastAction {
 export interface EditorPanelContextValue {
   readonly storage: GuardedBrowserStorage;
   readonly state: EditorRuntimeState;
+  /** The dropped-file import in progress, if any (defect 208). */
+  readonly droppedImportProgress?: DroppedImportProgressState | undefined;
   readonly previewVideoFrame: DecodedPreviewFrame | undefined;
   readonly clipFrameCache: ReadonlyMap<string, ImageDataLike>;
   readonly clipFrameTick: number;
