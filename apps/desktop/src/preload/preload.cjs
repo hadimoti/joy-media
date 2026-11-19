@@ -37,23 +37,28 @@ function droppedFileEntry(file) {
   };
 }
 
-function sameDroppedFiles(expected, received) {
+function sameDroppedEntry(left, right) {
   return (
-    expected.length === received.length &&
-    expected.every((entry, index) => {
-      const candidate = received[index];
-      return (
-        candidate !== undefined &&
-        entry.path === candidate.path &&
-        entry.name === candidate.name &&
-        entry.size === candidate.size &&
-        entry.lastModified === candidate.lastModified &&
-        entry.type === candidate.type
-      );
-    })
+    left.path === right.path &&
+    left.name === right.name &&
+    left.size === right.size &&
+    left.lastModified === right.lastModified &&
+    left.type === right.type
   );
 }
 
+// The editor may reorder a drop (it sorts by name; Windows Explorer lists the grabbed
+// file first), so match each received file to one distinct captured file in any order.
+function sameDroppedFiles(expected, received) {
+  if (expected.length !== received.length) return false;
+  const unmatched = [...expected];
+  return received.every((candidate) => {
+    const index = unmatched.findIndex((entry) => sameDroppedEntry(entry, candidate));
+    if (index === -1) return false;
+    unmatched.splice(index, 1);
+    return true;
+  });
+}
 // The editor must consume this capture-phase authorization from its drop handler.
 window.addEventListener(
   'drop',
