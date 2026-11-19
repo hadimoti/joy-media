@@ -53,6 +53,8 @@ jobs:
           node --version
           corepack enable pnpm
           pnpm --version
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
           ffmpeg -version
           ffprobe -version
       - run: pnpm install --frozen-lockfile
@@ -114,6 +116,8 @@ jobs:
           node --version
           corepack enable pnpm
           pnpm --version
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
           ffmpeg -version
           ffprobe -version
       - run: pnpm install --frozen-lockfile
