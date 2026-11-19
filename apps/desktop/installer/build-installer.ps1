@@ -47,6 +47,16 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Successfully built $outExe ($((Get-Item $outExe).Length) bytes)."
 
+# Explorer, Apps & features and the Sandbox receipts read these; ProductVersion must be exactly -Version (1.1.1,
+# never 1.1.1.0 or 0.0.0.0). Setup.cs takes both from InstallerEngine.ProductVersion.
+$setupInfo = (Get-Item -LiteralPath $outExe).VersionInfo
+if ($setupInfo.ProductVersion -ne $Version) {
+    throw "joy-media-setup.exe ProductVersion is '$($setupInfo.ProductVersion)', expected exactly '$Version'."
+}
+if ($setupInfo.FileVersion -ne "$Version.0") {
+    throw "joy-media-setup.exe FileVersion is '$($setupInfo.FileVersion)', expected '$Version.0'."
+}
+
 # The packager writes SHA256SUMS.txt before this script builds the setup, so the setup's digest is added
 # here. The release gate and the download check use that file as the checksum source, so a missing file
 # stops the build. A line for the setup from an earlier build is replaced, because a rebuild gives a new

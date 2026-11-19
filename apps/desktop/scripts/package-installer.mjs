@@ -117,15 +117,19 @@ const bundledCliPath = resolve(cliDestDir, 'joy-media-bundle.mjs');
 await cp(resolve(cliRoot, 'dist', 'joy-media-bundle.mjs'), bundledCliPath);
 console.log('Embedded bundled CLI into resources/app/cli/joy-media-bundle.mjs');
 
-// Create Windows CLI wrappers in standalone distribution root
+// Create Windows CLI wrappers in bin\, the folder the installers put on the user PATH. They must not sit in the
+// install root: that folder holds the GUI joy-media.exe, and PowerShell resolves .exe before .cmd in one folder,
+// so "joy-media doctor" would open the app instead of running the CLI.
 const cliCmdContent = `@echo off
 setlocal
 set "ELECTRON_RUN_AS_NODE=1"
-"%~dp0joy-media.exe" "%~dp0resources\\app\\cli\\joy-media-bundle.mjs" %*
+"%~dp0..\\joy-media.exe" "%~dp0..\\resources\\app\\cli\\joy-media-bundle.mjs" %*
 `;
-await writeFile(resolve(standaloneDir, 'joy.cmd'), cliCmdContent, 'utf8');
-await writeFile(resolve(standaloneDir, 'joy-media.cmd'), cliCmdContent, 'utf8');
-console.log('Generated joy.cmd and joy-media.cmd launchers in distribution root');
+const cliBinDir = resolve(standaloneDir, 'bin');
+await mkdir(cliBinDir, { recursive: true });
+await writeFile(resolve(cliBinDir, 'joy.cmd'), cliCmdContent, 'utf8');
+await writeFile(resolve(cliBinDir, 'joy-media.cmd'), cliCmdContent, 'utf8');
+console.log('Generated bin\\joy.cmd and bin\\joy-media.cmd launchers');
 
 // 3. Generate Windows installer setup script and uninstaller
 console.log('3. Generating Windows installer setup script...');
@@ -173,23 +177,26 @@ $smShortcut.WorkingDirectory = $InstallPath
 $smShortcut.Description = "JOY Media Desktop Application"
 $smShortcut.Save()
 
-# Register InstallPath in User PATH environment variable
-function Get-PathWithInstallDir([string]$PathValue, [string]$Install) {
-    # @() keeps a single entry an array. Without it, "$parts + $Install" joined a one-entry PATH and the
-    # install folder into one string with no separator.
+# Register InstallPath\\bin (the CLI launchers) in the User PATH. An InstallPath entry that v1.1.0 or earlier added
+# is removed: that folder holds the GUI joy-media.exe, which would shadow the joy-media CLI in PowerShell.
+function Get-PathWithCliDir([string]$PathValue, [string]$Install) {
+    # @() keeps a single entry an array. Without it, "$parts + $bin" joined a one-entry PATH and the
+    # bin folder into one string with no separator.
     $parts = @(if ($PathValue) { $PathValue -split ';' | Where-Object { $_ -ne '' } })
-    $target = $Install.TrimEnd('\\')
-    foreach ($part in $parts) {
-        if ($part.TrimEnd('\\') -ieq $target) { return $null }
-    }
-    return (($parts + $Install) -join ';')
+    $root = $Install.TrimEnd('\\')
+    $bin = $root + '\\bin'
+    $kept = @($parts | Where-Object { $_.TrimEnd('\\') -ine $root })
+    $hasBin = @($kept | Where-Object { $_.TrimEnd('\\') -ieq $bin }).Count -gt 0
+    if ($hasBin -and $kept.Count -eq $parts.Count) { return $null }
+    if ($hasBin) { return ($kept -join ';') }
+    return (($kept + $bin) -join ';')
 }
 $userPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
-$newPath = Get-PathWithInstallDir $userPath $InstallPath
+$newPath = Get-PathWithCliDir $userPath $InstallPath
 if ($null -ne $newPath) {
     [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::User)
-    $env:Path = "$env:Path;$InstallPath"
-    Write-Host "Added $InstallPath to User PATH ('joy' and 'joy-media' commands registered globally)." -ForegroundColor Green
+    $env:Path = "$env:Path;$(Join-Path $InstallPath 'bin')"
+    Write-Host "Added $(Join-Path $InstallPath 'bin') to User PATH ('joy' and 'joy-media' commands registered globally)." -ForegroundColor Green
 }
 
 # Register Uninstaller in Windows Registry
@@ -241,7 +248,7 @@ reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JoyMe
 rem Remove the joy:// handler only when it names this install, so another JOY Media build keeps its own.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$k = 'HKCU:\\Software\\Classes\\joy'; $c = (Get-ItemProperty -LiteralPath ($k + '\\shell\\open\\command') -ErrorAction SilentlyContinue).'(default)'; if ($c -and $env:JOY_MEDIA_INSTALL_DIR -and $c.IndexOf($env:JOY_MEDIA_INSTALL_DIR, [StringComparison]::OrdinalIgnoreCase) -ge 0) { Remove-Item -LiteralPath $k -Recurse -Force }" 2>nul
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); $target = $env:JOY_MEDIA_INSTALL_DIR.TrimEnd('\\'); if ($p) { $np = ($p -split ';' | Where-Object { $_ -ne '' -and $_.TrimEnd('\\') -ine $target }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $np, 'User') }" 2>nul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); $target = $env:JOY_MEDIA_INSTALL_DIR.TrimEnd('\\'); $bin = $env:JOY_MEDIA_INSTALL_DIR + '\\bin'; if ($p) { $np = ($p -split ';' | Where-Object { $_ -ne '' -and $_.TrimEnd('\\') -ine $target -and $_.TrimEnd('\\') -ine $bin.TrimEnd('\\') }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $np, 'User') }" 2>nul
 
 echo Cleaning application files...
 
@@ -331,11 +338,11 @@ const releaseManifest = {
       sha256: cliSha256,
     },
     {
-      fileName: 'joy.cmd',
+      fileName: 'bin/joy.cmd',
       type: 'cli-launcher',
     },
     {
-      fileName: 'joy-media.cmd',
+      fileName: 'bin/joy-media.cmd',
       type: 'cli-launcher',
     },
   ],

@@ -44,5 +44,34 @@ namespace JoyMedia.Setup
             if (!present) { result.Add(installPath); changed = true; }
             return changed ? string.Join(";", result.ToArray()) : null;
         }
+        // Returns the new user PATH value with the CLI folder (<install>\bin) present exactly once and no entry for the
+        // install folder itself, or null when the value already says that. The install folder holds the GUI
+        // joy-media.exe; PowerShell resolves .exe before .cmd in one folder, so an install-folder entry (added by
+        // v1.1.0 and earlier) would shadow the joy-media CLI. A glued v1.0.x entry is repaired first.
+        public static string WithCliDir(string path, string installPath)
+        {
+            string root = installPath.TrimEnd('\\');
+            string bin = root + "\\bin";
+            string repaired = WithInstallDir(path, root) ?? path;
+            string[] parts = repaired.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+            System.Collections.Generic.List<string> result = new System.Collections.Generic.List<string>();
+            bool hasBin = false;
+            foreach (string raw in parts)
+            {
+                string p = raw.Trim();
+                if (p.Length == 0) continue;
+                string expanded = Environment.ExpandEnvironmentVariables(p).TrimEnd('\\');
+                if (expanded.Equals(root, StringComparison.OrdinalIgnoreCase)) continue;
+                if (expanded.Equals(bin, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (hasBin) continue;
+                    hasBin = true;
+                }
+                result.Add(p);
+            }
+            if (!hasBin) result.Add(bin);
+            string joined = string.Join(";", result.ToArray());
+            return joined == path ? null : joined;
+        }
     }
 }
