@@ -118,6 +118,70 @@ async function fresh(page, ctx, id) {
   await newProject(page, `${id} ${ctx.runTag ?? ''}`.trim());
 }
 
+/**
+ * media-import.ts gives up on a file's metadata after 10 s (`metadata read timed out`), and the per-file refusal
+ * only follows that. The wait for a refusal must be longer than that timeout.
+ */
+const D_H07_TOAST_WAIT_MS = 15_000;
+
+/** The generic refusal App.tsx shows when the drop is not from the current trusted drop event (App.tsx ~7156). */
+const TRUSTED_DROP_REFUSAL =
+  'Dropped media could not be imported: Dropped files must come from the current trusted drop event';
+
+/**
+ * How a toast of this drop reads, or undefined when it says nothing about this file:
+ * - `content`: a per-file refusal from reading the content (media-import.ts describeTimedMedia: metadata unavailable
+ *   or no duration). Only this proves a content rejection.
+ * - `timeout`: a per-file metadata read timeout (media-import.ts:424). The app refused the import, but the content was
+ *   never judged, so it is inconclusive.
+ * - `untrusted`: the generic trusted-drop refusal. It is not a content judgment and blocks the row at once.
+ * Decode wording (`unable to decode … as <mime>`) is not matched: media-import.ts emits it only for images.
+ */
+function classifyRefusal(text, name) {
+  if (text === TRUSTED_DROP_REFUSAL) return 'untrusted';
+  const prefix = `Failed to import ${name}: `;
+  if (!text.startsWith(prefix)) return undefined;
+  const reason = text.slice(prefix.length);
+  const file = escapeRegExp(name);
+  const content = new RegExp(
+    `^unable to read ${file} metadata: metadata (is unavailable|duration is unavailable)$`,
+    'u',
+  );
+  if (content.test(reason)) return 'content';
+  const timeout = new RegExp(`^unable to read ${file} metadata: metadata read timed out$`, 'u');
+  if (timeout.test(reason)) return 'timeout';
+  return undefined;
+}
+
+/** The texts of every toast on the page, in order. */
+async function toastTexts(page) {
+  return page
+    .locator('.toast-message')
+    .evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? '').trim()));
+}
+
+const countOf = (texts, text) => texts.filter((candidate) => candidate === text).length;
+
+/**
+ * Waits for a refusal of this drop: a classified toast that is new since `baseline` (a toast already on screen before
+ * the drop does not count, and an identical toast counts only when there are more of them). Returns `{ kind, text }`
+ * as soon as one shows, or undefined after the wait. A content, timeout or untrusted refusal ends the wait at once.
+ */
+async function waitForRefusal(page, name, baseline, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const seen = await toastTexts(page);
+    for (const text of seen) {
+      const kind = classifyRefusal(text, name);
+      if (kind !== undefined && countOf(seen, text) > countOf(baseline, text)) {
+        return { kind, text };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  } while (Date.now() < deadline);
+  return undefined;
+}
+
 function fixture(ctx) {
   const path = ctx.media;
   if (!path) throw new Error('BLOCKED D-H04: run with --media <video fixture>');
@@ -334,27 +398,52 @@ export const TIMELINE_DND_H04_ROWS = [
       const path = join(rowScratch(ctx, 'D-H07'), name);
       writeFileSync(path, 'plain text, not an MP4 video');
       const cardsBefore = await mediaCards(page, name).count();
+      const toastsBefore = await toastTexts(page);
       await dropFiles(page, '.timeline-empty-state', [path]);
-      const message = page
-        .locator('.toast-message')
-        .filter({ hasText: /failed|unsupported|invalid|could not|must be/iu })
-        .first();
-      try {
-        await message.waitFor({ state: 'visible', timeout: 10_000 });
-      } catch (error) {
-        if (!isUiTimeout(error)) throw error;
-        if ((await mediaCards(page, name).count()) > cardsBefore) {
+      const refusal = await waitForRefusal(
+        page,
+        name,
+        toastsBefore,
+        ctx.toastWaitMs ?? D_H07_TOAST_WAIT_MS,
+      );
+      // A card or clip may land a little after the refusal. This settles the check for that window only; it does not
+      // prove that no later asynchronous import activity happens.
+      await new Promise((resolve) => setTimeout(resolve, ctx.settleMs ?? 1_500));
+      const cardAdded = (await mediaCards(page, name).count()) > cardsBefore;
+      const after = await readClips(ctx);
+      const clipsAdded = after.length - before.length;
+      if (refusal === undefined) {
+        if (cardAdded)
           throw new Error('invalid MP4 was added to Media without a rejection message');
-        }
+        if (clipsAdded !== 0)
+          throw new Error(`invalid MP4 added ${clipsAdded} clip(s) without a rejection message`);
         throw blockedRow(
           'D-H07',
-          `needs a real mouse drag from Explorer (attended): ${UNTRUSTED_DROP_REASON}, so no message and no Media card appeared`,
+          `needs a real mouse drag from Explorer (attended): ${UNTRUSTED_DROP_REASON}, so no content refusal for ${name} and no Media card appeared`,
         );
       }
-      const after = await readClips(ctx);
-      if (after.length !== before.length)
-        throw new Error(`invalid MP4 added ${after.length - before.length} clip(s)`);
-      return `rejected ${basename(path)} by content with message: ${(await message.innerText()).trim()}`;
+      // A refusal message does not prove the file stayed out of Media: a new card or clip for it is a defect too.
+      if (cardAdded) {
+        throw new Error(
+          `invalid MP4 was added to Media (a new ${name} card) despite the rejection message`,
+        );
+      }
+      if (clipsAdded !== 0) throw new Error(`invalid MP4 added ${clipsAdded} clip(s)`);
+      if (refusal.kind === 'content') {
+        return `rejected ${basename(path)} by content with message: ${refusal.text}`;
+      }
+      if (refusal.kind === 'timeout') {
+        // Inconclusive: the app refused the import, but the timeout does not show the content was judged.
+        throw blockedRow(
+          'D-H07',
+          `inconclusive: the app reports that ${name} metadata read timed out (${refusal.text}); the timeout does not show the file's content was judged, so no content rejection is claimed`,
+        );
+      }
+      // The generic refusal: the drop was not authorized by the current trusted drop event, so the row cannot judge it.
+      throw blockedRow(
+        'D-H07',
+        `needs a real mouse drag from Explorer (attended): ${UNTRUSTED_DROP_REASON}, so the app refused the drop with: ${refusal.text}`,
+      );
     },
   },
   {

@@ -51,10 +51,36 @@ function timeoutError() {
 }
 
 /**
+ * Answers a read of a `.toast-message` locator from the toasts on the page. The `hasText` regex is taken from the
+ * locator path, where the fake records it as `"hasText":"/.../flags"`, so the row's own filter decides what matches.
+ */
+function toastAnswer(toasts, method, path) {
+  const hasText = /"hasText":"\/(.*)\/([a-z]*)"/u.exec(path);
+  const filter = hasText === null ? undefined : new RegExp(hasText[1], hasText[2]);
+  const shown = toasts.filter((text) => filter === undefined || filter.test(text));
+  if (method === 'waitFor') {
+    if (shown.length === 0) throw timeoutError();
+    return undefined;
+  }
+  if (method === 'innerText') return shown[0] ?? '';
+  if (method === 'count') return shown.length;
+  if (method === 'evaluateAll') return shown;
+  return undefined;
+}
+
+/**
  * A fake app for one T-H04 row. Options:
  * - `dropEffect`: what a CDP drop does: `clip` (a timeline clip), `card` (a Media card only) or `none`.
  * - `seedClips`, `cards`: the clips and Media cards that exist before the row starts.
  * - `noToast`: the rejection toast never shows.
+ * - `toasts`: the toast texts already on the page before the drop. A `.toast-message` locator keeps only the texts its
+ *   `hasText` filter matches, as Playwright does (the filter regex is read from the locator path). Unset keeps the
+ *   default toast.
+ * - `toastsOnDrop`: the toast texts the drop shows (a refusal of this drop); they join the page on the drop event.
+ * - `toastsLater`: `{ afterReads, texts }`: the texts join the page on the `afterReads`-th toast read after the drop.
+ * - `maxPollsAfterDrop`: a read budget. A toast read past it throws, so a wait that never stops fails fast, without
+ *   depending on the real clock.
+ * - `toastWaitMs`: the row's toast wait (`ctx.toastWaitMs`); defaults to 300 ms.
  * - `importCardMissing`: an import through the Media dialog never makes a card.
  * - `mangleNames`: the app shows Unicode names with `?` in place of the non-ASCII letters.
  * - `mutateOnImport`: the import changes the source file.
@@ -76,6 +102,11 @@ function makeH04Fake(t, id, options = {}) {
       : [],
     cards = [],
     noToast = false,
+    toasts,
+    toastsOnDrop,
+    toastsLater,
+    maxPollsAfterDrop,
+    toastWaitMs = 300,
     importCardMissing = false,
     mangleNames = false,
     mutateOnImport = false,
@@ -87,7 +118,9 @@ function makeH04Fake(t, id, options = {}) {
   const cardNames = [...cards];
   const drops = [];
   const imports = [];
+  const shownToasts = [...(toasts ?? [])];
   let dropped = false;
+  let dropPolls = 0;
   let locked = false;
   const shownName = (name) => (mangleNames ? name.replace(/[^ -~]/gu, '?') : name);
   const page = createFakePage({
@@ -119,6 +152,25 @@ function makeH04Fake(t, id, options = {}) {
         if (last === undefined || !cardNames.includes(basename(last))) throw timeoutError();
         return undefined;
       }
+      const toastModel =
+        toasts !== undefined ||
+        toastsOnDrop !== undefined ||
+        toastsLater !== undefined ||
+        maxPollsAfterDrop !== undefined;
+      if (toastModel && path.includes('toast-message')) {
+        if (method === 'evaluateAll' && dropped) {
+          dropPolls += 1;
+          if (maxPollsAfterDrop !== undefined && dropPolls > maxPollsAfterDrop) {
+            throw new Error(
+              `toast wait did not stop: ${dropPolls} toast reads after the drop (budget ${maxPollsAfterDrop})`,
+            );
+          }
+          if (toastsLater !== undefined && dropPolls === toastsLater.afterReads) {
+            shownToasts.push(...toastsLater.texts);
+          }
+        }
+        return toastAnswer(shownToasts, method, path);
+      }
       if (method === 'waitFor' && path.includes('toast-message') && noToast) throw timeoutError();
       return undefined;
     },
@@ -132,6 +184,7 @@ function makeH04Fake(t, id, options = {}) {
           drops.push(payload);
           if (payload.type !== 'drop') return {};
           dropped = true;
+          shownToasts.push(...(toastsOnDrop ?? []));
           if (dropEffect === 'card') {
             for (const file of payload.data.files) cardNames.push(shownName(basename(file)));
           }
@@ -159,6 +212,8 @@ function makeH04Fake(t, id, options = {}) {
     media,
     runTag: 'fake',
     clipWaitMs: 300,
+    toastWaitMs,
+    settleMs: 10,
     bridge: {
       async invoke() {
         return { assets: [{ displayName: 'fixture-video.mp4' }] };
@@ -181,6 +236,20 @@ function makeH04Fake(t, id, options = {}) {
 
 const run = (id, page, ctx) => TIMELINE_DND_H04_ROWS_BY_ID[id].run(page, ctx);
 
+// Per-file refusals from reading the file's content (media-import.ts), as App.tsx shows them: `Failed to import`.
+const CONTENT_REFUSAL_TOAST =
+  'Failed to import not-a-video.mp4: unable to read not-a-video.mp4 metadata: metadata is unavailable';
+const DURATION_REFUSAL_TOAST =
+  'Failed to import not-a-video.mp4: unable to read not-a-video.mp4 metadata: metadata duration is unavailable';
+// Not a content refusal of an MP4: media-import.ts only decodes images this way (describeDroppedMedia).
+const IMAGE_DECODE_TOAST =
+  'Failed to import not-a-video.mp4: unable to decode not-a-video.mp4 as image/jpeg';
+const VIDEO_DECODE_TOAST =
+  'Failed to import not-a-video.mp4: unable to decode not-a-video.mp4 as video/mp4';
+// A timeout: the app did refuse the import, but the file's content was never judged (media-import.ts:424).
+const METADATA_TIMEOUT_TOAST =
+  'Failed to import not-a-video.mp4: unable to read not-a-video.mp4 metadata: metadata read timed out';
+
 /** The row must fail as a defect or harness error: its message is not the BLOCKED verdict. */
 function assertNotBlocked(error) {
   assert.doesNotMatch(error.message, /^BLOCKED/u, error.message);
@@ -189,7 +258,11 @@ function assertNotBlocked(error) {
 
 test('each implemented T-H04 row body runs against a fake page', async (t) => {
   for (const id of ['D-H01', 'D-H02', 'D-H06', 'D-H07', 'D-H08', 'D-H10']) {
-    const { page, ctx, drops, imports } = makeH04Fake(t, id);
+    const { page, ctx, drops, imports } = makeH04Fake(
+      t,
+      id,
+      id === 'D-H07' ? { toastsOnDrop: [CONTENT_REFUSAL_TOAST] } : {},
+    );
     const message = await run(id, page, ctx);
     assert.ok(
       message.includes(
@@ -336,6 +409,179 @@ test('D-H07 is a defect, not blocked, when a card appears without a rejection me
     assert.match(error.message, /added to Media without a rejection message/u);
     return true;
   });
+});
+
+test('D-H07 is a defect when the invalid MP4 lands in Media even though a rejection message shows', async (t) => {
+  // The fake app shows the content refusal for this drop and also imports the file as a Media card, with no clip.
+  const { page, ctx } = makeH04Fake(t, 'D-H07', {
+    dropEffect: 'card',
+    toastsOnDrop: [CONTENT_REFUSAL_TOAST],
+  });
+  await assert.rejects(run('D-H07', page, ctx), (error) => {
+    assertNotBlocked(error);
+    assert.match(
+      error.message,
+      /^invalid MP4 was added to Media \(a new not-a-video\.mp4 card\) despite the rejection message$/u,
+    );
+    return true;
+  });
+});
+
+// The app's generic refusal for a drop it cannot trust (wording as read in the source by the reviewer).
+const GENERIC_UNTRUSTED_DROP_TOAST =
+  'Dropped media could not be imported: Dropped files must come from the current trusted drop event';
+
+test('D-H07 is BLOCKED, not a PASS, when only the generic untrusted-drop toast shows', async (t) => {
+  // The drop reached the app as far as the toast says, but nothing shows the file was judged by its content.
+  const { page, ctx } = makeH04Fake(t, 'D-H07', {
+    dropEffect: 'none',
+    toastsOnDrop: [GENERIC_UNTRUSTED_DROP_TOAST],
+  });
+  await assert.rejects(run('D-H07', page, ctx), (error) => {
+    assert.match(
+      error.message,
+      /^BLOCKED D-H07: needs a real mouse drag from Explorer \(attended\)/u,
+    );
+    return true;
+  });
+});
+
+test('D-H07 is never a PASS on an unrelated or stale error toast', async (t) => {
+  // No card and no clip for this drop. Each toast matches the old filter words but is not a content refusal of it.
+  const cases = [
+    { toasts: ['Could not save project settings'] },
+    { toastsOnDrop: ['Export failed: disk full'] },
+    {
+      toastsOnDrop: [
+        'Failed to import other-file.mp4: unable to read other-file.mp4 metadata: metadata is unavailable',
+      ],
+    },
+  ];
+  for (const options of cases) {
+    const { page, ctx } = makeH04Fake(t, 'D-H07', { dropEffect: 'none', ...options });
+    await assert.rejects(run('D-H07', page, ctx), (error) => {
+      assert.match(error.message, /^BLOCKED D-H07:/u, JSON.stringify(options));
+      return true;
+    });
+  }
+});
+
+test('D-H07 is BLOCKED when the matching content refusal was already on screen before the drop', async (t) => {
+  // The refusal was not shown by this drop, so it cannot be attributed to it.
+  const { page, ctx } = makeH04Fake(t, 'D-H07', {
+    dropEffect: 'none',
+    toasts: [CONTENT_REFUSAL_TOAST],
+  });
+  await assert.rejects(run('D-H07', page, ctx), (error) => {
+    assert.match(error.message, /^BLOCKED D-H07:/u);
+    return true;
+  });
+});
+
+test('D-H07 is BLOCKED when this file fails for a reason that is not a content refusal', async (t) => {
+  // A timeout is not proof that the content was judged; an unavailable desktop import says nothing about the file.
+  for (const toast of [
+    'Failed to import not-a-video.mp4: unable to read not-a-video.mp4 metadata: metadata read timed out',
+    'Failed to import not-a-video.mp4: Desktop dropped-file import is unavailable.',
+  ]) {
+    const { page, ctx } = makeH04Fake(t, 'D-H07', { dropEffect: 'none', toastsOnDrop: [toast] });
+    await assert.rejects(run('D-H07', page, ctx), (error) => {
+      assert.match(error.message, /^BLOCKED D-H07:/u, toast);
+      return true;
+    });
+  }
+});
+
+test('D-H07 still passes on a fresh per-file content refusal (control)', async (t) => {
+  // Control: the wording is the media-import.ts content message, as App.tsx shows it for this file.
+  for (const toast of [CONTENT_REFUSAL_TOAST, DURATION_REFUSAL_TOAST]) {
+    const { page, ctx } = makeH04Fake(t, 'D-H07', { dropEffect: 'none', toastsOnDrop: [toast] });
+    const message = await run('D-H07', page, ctx);
+    assert.equal(message, `rejected not-a-video.mp4 by content with message: ${toast}`);
+  }
+});
+
+test('D-H07 never passes on a decode message, which is not an MP4 content refusal', async (t) => {
+  for (const toast of [IMAGE_DECODE_TOAST, VIDEO_DECODE_TOAST]) {
+    const { page, ctx } = makeH04Fake(t, 'D-H07', { dropEffect: 'none', toastsOnDrop: [toast] });
+    await assert.rejects(run('D-H07', page, ctx), (error) => {
+      assert.match(error.message, /^BLOCKED D-H07: /u, toast);
+      return true;
+    });
+  }
+});
+
+test('D-H07 reports a fresh metadata timeout as an inconclusive BLOCKED that names the timeout', async (t) => {
+  // The app refused the import, but the timeout never judged the file's content, so no drop or content claim follows.
+  const { page, ctx } = makeH04Fake(t, 'D-H07', {
+    dropEffect: 'none',
+    toastsOnDrop: [METADATA_TIMEOUT_TOAST],
+  });
+  await assert.rejects(run('D-H07', page, ctx), (error) => {
+    assert.match(error.message, /^BLOCKED D-H07: /u);
+    assert.match(error.message, /inconclusive/u);
+    assert.match(error.message, /metadata read timed out/u);
+    assert.match(error.message, /not-a-video\.mp4/u);
+    assert.doesNotMatch(error.message, /trusted|mouse drag/u);
+    return true;
+  });
+});
+
+test('D-H07 reports a fresh trusted-drop refusal as BLOCKED promptly, without waiting out the toast wait', async (t) => {
+  // The 60 s wait is never reached: the read budget fails the test fast if the row keeps polling after the refusal.
+  const { page, ctx } = makeH04Fake(t, 'D-H07', {
+    dropEffect: 'none',
+    toastsOnDrop: [GENERIC_UNTRUSTED_DROP_TOAST],
+    toastWaitMs: 60_000,
+    maxPollsAfterDrop: 5,
+  });
+  await assert.rejects(run('D-H07', page, ctx), (error) => {
+    assert.match(
+      error.message,
+      /^BLOCKED D-H07: needs a real mouse drag from Explorer \(attended\)/u,
+    );
+    return true;
+  });
+});
+
+test('D-H07 still checks for a new card or clip after a fresh trusted-drop refusal', async (t) => {
+  const card = makeH04Fake(t, 'D-H07', {
+    dropEffect: 'card',
+    toastsOnDrop: [GENERIC_UNTRUSTED_DROP_TOAST],
+    toastWaitMs: 60_000,
+    maxPollsAfterDrop: 5,
+  });
+  await assert.rejects(run('D-H07', card.page, card.ctx), (error) => {
+    assertNotBlocked(error);
+    assert.match(error.message, /^invalid MP4 was added to Media/u);
+    return true;
+  });
+  const clip = makeH04Fake(t, 'D-H07', {
+    dropEffect: 'clip',
+    toastsOnDrop: [GENERIC_UNTRUSTED_DROP_TOAST],
+    toastWaitMs: 60_000,
+    maxPollsAfterDrop: 5,
+  });
+  await assert.rejects(run('D-H07', clip.page, clip.ctx), (error) => {
+    assertNotBlocked(error);
+    assert.match(error.message, /^invalid MP4 added 1 clip\(s\)/u);
+    return true;
+  });
+});
+
+test('D-H07 does not fast-block on a stale trusted-drop toast; a later fresh content refusal still passes', async (t) => {
+  // The stale toast was on screen before the drop, so it cannot end the wait. The content refusal arrives on the third read.
+  const { page, ctx } = makeH04Fake(t, 'D-H07', {
+    dropEffect: 'none',
+    toasts: [GENERIC_UNTRUSTED_DROP_TOAST],
+    toastsLater: { afterReads: 3, texts: [CONTENT_REFUSAL_TOAST] },
+    toastWaitMs: 1_000,
+  });
+  const message = await run('D-H07', page, ctx);
+  assert.equal(
+    message,
+    `rejected not-a-video.mp4 by content with message: ${CONTENT_REFUSAL_TOAST}`,
+  );
 });
 
 test('D-H07 rethrows a read failure instead of reporting blocked', async (t) => {
