@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { access, mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
+import { link, mkdir, readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { DatabaseSync } from 'node:sqlite';
@@ -197,8 +197,10 @@ async function attachProjectFolder(
 
 /**
  * Copies one original into the folder. The bytes are hashed while they are copied, written under a
- * temporary name, and renamed to `assets/<sha256>.bin`. A checksum already stored is kept, so a
- * project holds one file per checksum, and its index keeps the first display name for it.
+ * temporary name, and linked to `assets/<sha256>.bin` without replacing anything there. A stored file with that name is
+ * kept only when its length and SHA-256 match the copy, so a project holds one file per checksum, and its index keeps
+ * the first display name for it.
+ * A stored file that does not match is refused, and it is left as it is.
  */
 export async function importProjectAsset(
   folder: ProjectFolder,
@@ -226,17 +228,7 @@ export async function importProjectAsset(
 
   const fileName = `${copied.sha256}.bin`;
   const target = join(assetsDirectory, fileName);
-  if (await pathExists(target)) {
-    // The same bytes are already stored. Keep that file and drop the copy. Replacing a stored
-    // file that may be open elsewhere fails on Windows, so it is never renamed over.
-    await unlink(partial);
-    const storedBytes = (await stat(target)).size;
-    if (storedBytes !== copied.bytes) {
-      throw new Error(`The stored original ${fileName} does not match its checksum`);
-    }
-  } else {
-    await rename(partial, target);
-  }
+  await publishOriginal(partial, target, fileName, copied);
 
   const assetId = source.assetId ?? `asset-${copied.sha256}`;
   const storedPath = `${PROJECT_ASSETS_DIRECTORY}/${fileName}`;
@@ -378,13 +370,63 @@ async function copyAndHash(from: string, to: string): Promise<{ sha256: string; 
   return { sha256: hash.digest('hex'), bytes };
 }
 
-async function pathExists(path: string): Promise<boolean> {
+/**
+ * Publishes a finished copy under its content-addressed name, and never replaces a file there. A hard link to a name
+ * that exists fails, so no check-then-rename window exists in which another writer's file could be overwritten. When the
+ * name is already taken, the copy is a duplicate only if the stored file has the same length and SHA-256. A stored file
+ * that does not match is refused and left as it is. The partial copy is removed on every path that does not keep it.
+ */
+async function publishOriginal(
+  partial: string,
+  target: string,
+  fileName: string,
+  copied: { readonly sha256: string; readonly bytes: number },
+): Promise<void> {
   try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
+    await link(partial, target);
+  } catch (error) {
+    if (!isErrnoCode(error, 'EEXIST')) {
+      await unlink(partial).catch(() => undefined);
+      throw error;
+    }
+    let matches: boolean;
+    try {
+      matches = await storedFileMatches(target, copied);
+    } catch (readError) {
+      await unlink(partial).catch(() => undefined);
+      throw readError;
+    }
+    await unlink(partial);
+    if (!matches) {
+      throw new Error(`The stored original ${fileName} does not match its checksum`);
+    }
+    return;
   }
+  await unlink(partial);
+}
+
+/**
+ * Whether a stored file holds the copy's length and SHA-256. The length is checked first, so a file of another size is
+ * not read. The file is streamed and hashed in chunks, so an original of any size is never held in memory.
+ */
+async function storedFileMatches(
+  path: string,
+  expected: { readonly sha256: string; readonly bytes: number },
+): Promise<boolean> {
+  if ((await stat(path)).size !== expected.bytes) return false;
+  const stored = await hashFile(path);
+  return stored.bytes === expected.bytes && stored.sha256 === expected.sha256;
+}
+
+async function hashFile(path: string): Promise<{ sha256: string; bytes: number }> {
+  const hash = createHash('sha256');
+  let bytes = 0;
+  for await (const chunk of createReadStream(path)) {
+    const buffer = chunk as Buffer;
+    hash.update(buffer);
+    bytes += buffer.length;
+  }
+  return { sha256: hash.digest('hex'), bytes };
 }
 
 async function isDirectory(path: string): Promise<boolean> {
