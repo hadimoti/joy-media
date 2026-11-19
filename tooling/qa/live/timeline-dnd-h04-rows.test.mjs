@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { appendFileSync, chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -81,6 +89,12 @@ function toastAnswer(toasts, method, path) {
  * - `maxPollsAfterDrop`: a read budget. A toast read past it throws, so a wait that never stops fails fast, without
  *   depending on the real clock.
  * - `toastWaitMs`: the row's toast wait (`ctx.toastWaitMs`); defaults to 300 ms.
+ * - `toastExpiresAfterReads`: the toasts the drop shows (`toastsOnDrop`) leave the page again after this many reads
+ *   of the page after the drop (document reads of a clip wait and toast reads both count, standing in for time), as
+ *   App.tsx dismisses every toast after 4 s; a row that looks only once at the end of a clip wait misses them.
+ * - `baselineToastsExpireAfterReads`: the toasts already on the page (`toasts`) leave it after this many reads of the
+ *   page after the drop, as a stale toast is dismissed while the row waits.
+ * - `onDropPoll`: called with the read number on each toast read after the drop (to inspect files mid-wait).
  * - `importCardMissing`: an import through the Media dialog never makes a card.
  * - `mangleNames`: the app shows Unicode names with `?` in place of the non-ASCII letters.
  * - `mutateOnImport`: the import changes the source file.
@@ -107,6 +121,9 @@ function makeH04Fake(t, id, options = {}) {
     toastsLater,
     maxPollsAfterDrop,
     toastWaitMs = 300,
+    toastExpiresAfterReads,
+    baselineToastsExpireAfterReads,
+    onDropPoll,
     importCardMissing = false,
     mangleNames = false,
     mutateOnImport = false,
@@ -121,6 +138,29 @@ function makeH04Fake(t, id, options = {}) {
   const shownToasts = [...(toasts ?? [])];
   let dropped = false;
   let dropPolls = 0;
+  let dropToastsShown = [];
+  let baselineToastsShown = [...(toasts ?? [])];
+  let ticksAfterDrop = 0;
+  const tickAfterDrop = () => {
+    ticksAfterDrop += 1;
+    if (toastExpiresAfterReads !== undefined && ticksAfterDrop > toastExpiresAfterReads) {
+      for (const text of dropToastsShown) {
+        const at = shownToasts.indexOf(text);
+        if (at >= 0) shownToasts.splice(at, 1);
+      }
+      dropToastsShown = [];
+    }
+    if (
+      baselineToastsExpireAfterReads !== undefined &&
+      ticksAfterDrop > baselineToastsExpireAfterReads
+    ) {
+      for (const text of baselineToastsShown) {
+        const at = shownToasts.indexOf(text);
+        if (at >= 0) shownToasts.splice(at, 1);
+      }
+      baselineToastsShown = [];
+    }
+  };
   let locked = false;
   const shownName = (name) => (mangleNames ? name.replace(/[^ -~]/gu, '?') : name);
   const page = createFakePage({
@@ -168,6 +208,11 @@ function makeH04Fake(t, id, options = {}) {
           if (toastsLater !== undefined && dropPolls === toastsLater.afterReads) {
             shownToasts.push(...toastsLater.texts);
           }
+          onDropPoll?.(dropPolls);
+          // Answer first, then let time pass: a toast is seen by this read and may be gone by the next.
+          const answer = toastAnswer(shownToasts, method, path);
+          tickAfterDrop();
+          return answer;
         }
         return toastAnswer(shownToasts, method, path);
       }
@@ -185,6 +230,7 @@ function makeH04Fake(t, id, options = {}) {
           if (payload.type !== 'drop') return {};
           dropped = true;
           shownToasts.push(...(toastsOnDrop ?? []));
+          dropToastsShown = [...(toastsOnDrop ?? [])];
           if (dropEffect === 'card') {
             for (const file of payload.data.files) cardNames.push(shownName(basename(file)));
           }
@@ -213,6 +259,7 @@ function makeH04Fake(t, id, options = {}) {
     runTag: 'fake',
     clipWaitMs: 300,
     toastWaitMs,
+    copyRestoreDelayMs: 200,
     settleMs: 10,
     bridge: {
       async invoke() {
@@ -221,6 +268,7 @@ function makeH04Fake(t, id, options = {}) {
     },
     async readDocument() {
       if (readError !== undefined && (!readErrorAfterDrop || dropped)) throw readError;
+      if (dropped) tickAfterDrop();
       return {
         document: {
           rootCompositionId: 'root',
@@ -641,16 +689,228 @@ test('D-H04 checks the full ten-minute duration when the drop reaches the app', 
 test('D-H04 is blocked when the synthetic drop reaches neither Media nor the timeline', async (t) => {
   const { page, ctx } = makeH04Fake(t, 'D-H04', { dropEffect: 'none' });
   await assert.rejects(run('D-H04', page, ctx), (error) => {
-    assert.match(
-      error.message,
-      /^BLOCKED D-H04: needs a real mouse drag from Explorer \(attended\)/u,
-    );
+    assert.match(error.message, /^BLOCKED D-H04: inconclusive/u);
     return true;
   });
 });
 
-test('D-H03, D-H05, and D-H09 report their attended-drop limits as BLOCKED', async (t) => {
-  for (const id of ['D-H03', 'D-H05', 'D-H09']) {
+test('D-H04 treats a new Media card without a timeline clip as a defect', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H04', { dropEffect: 'card' });
+  await assert.rejects(run('D-H04', page, ctx), (error) => {
+    assertNotBlocked(error);
+    assert.match(error.message, /reached Media .* but made no clip/u);
+    return true;
+  });
+});
+
+test('D-H04 names a fresh untrusted-drop refusal as inconclusive', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H04', {
+    dropEffect: 'none',
+    toastsOnDrop: [GENERIC_UNTRUSTED_DROP_TOAST],
+  });
+  await assert.rejects(run('D-H04', page, ctx), (error) => {
+    assert.match(error.message, /^BLOCKED D-H04: inconclusive/u);
+    assert.match(error.message, /current trusted drop event/u);
+    return true;
+  });
+});
+
+test('D-H05 exercises the copying-file drop and stays inconclusive when the event is untrusted', async (t) => {
+  const { page, ctx, drops } = makeH04Fake(t, 'D-H05', { dropEffect: 'none' });
+  await assert.rejects(run('D-H05', page, ctx), (error) => {
+    assert.match(error.message, /^BLOCKED D-H05: inconclusive/u);
+    assert.match(error.message, /trusted drop|Explorer/iu);
+    return true;
+  });
+  assert.equal(drops.filter(({ type }) => type === 'drop').length, 1);
+});
+
+// The app's real refusal when a dropped file changes between the drop and the import
+// (apps/desktop/src/main/dropped-media-import.ts), as App.tsx shows it.
+const CHANGED_DURING_IMPORT_TOAST =
+  'Failed to import fixture-video.mp4: The selected media file changed during import';
+
+test("D-H05 passes on the app's real changed-during-import refusal for this file when nothing was imported", async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H05', {
+    dropEffect: 'none',
+    toastsOnDrop: [CHANGED_DURING_IMPORT_TOAST],
+  });
+  const message = await run('D-H05', page, ctx);
+  assert.match(message, /changed during import/u);
+});
+
+test('D-H05 never passes on an unrelated or invented retry toast', async (t) => {
+  for (const text of [
+    'The provider says the usage limit is reached. Try again later.',
+    'The background helper stopped. Try again',
+    'The file is being copied. Try again in a moment.',
+    'Failed to import other-file.mp4: The selected media file changed during import',
+  ]) {
+    const { page, ctx } = makeH04Fake(t, 'D-H05', { dropEffect: 'none', toastsOnDrop: [text] });
+    await assert.rejects(run('D-H05', page, ctx), (error) => {
+      assert.match(error.message, /^BLOCKED D-H05: inconclusive/u, `${text}: ${error.message}`);
+      return true;
+    });
+  }
+});
+
+test('D-H05 keeps the dropped copy partial while the app handles the drop, then completes it', async (t) => {
+  const sizes = [];
+  let droppedPath;
+  const fake = makeH04Fake(t, 'D-H05', {
+    dropEffect: 'none',
+    toastsOnDrop: [CHANGED_DURING_IMPORT_TOAST],
+    onDropPoll: (read) => {
+      droppedPath ??= fake.drops.find(({ type }) => type === 'drop')?.data.files[0];
+      if (read === 1) sizes.push(statSync(droppedPath).size);
+    },
+  });
+  const full = statSync(fake.ctx.media).size;
+  await run('D-H05', fake.page, fake.ctx).catch(() => undefined);
+  assert.ok(droppedPath, 'the row did not drop a file');
+  assert.equal(sizes.length, 1, 'no toast read happened after the drop');
+  assert.ok(
+    sizes[0] < full,
+    `the copy was already complete (${sizes[0]} of ${full} bytes) at the first read after the drop`,
+  );
+});
+
+test('D-H05 is an inconclusive BLOCKED, not a defect, when the file is imported without the refusal', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H05', { dropEffect: 'card' });
+  await assert.rejects(run('D-H05', page, ctx), (error) => {
+    assert.match(error.message, /^BLOCKED D-H05: inconclusive/u);
+    assert.match(error.message, /import window/u);
+    return true;
+  });
+});
+
+test('D-H05 is a defect when the refusal shows but the file still lands in Media', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H05', {
+    dropEffect: 'card',
+    toastsOnDrop: [CHANGED_DURING_IMPORT_TOAST],
+  });
+  await assert.rejects(run('D-H05', page, ctx), (error) => {
+    assertNotBlocked(error);
+    assert.match(error.message, /also imported/u);
+    return true;
+  });
+});
+
+test('D-H09 dispatches a file from a long path and reports an untrusted drop as inconclusive', async (t) => {
+  const { page, ctx, drops } = makeH04Fake(t, 'D-H09', { dropEffect: 'none' });
+  await assert.rejects(run('D-H09', page, ctx), (error) => {
+    assert.match(error.message, /^BLOCKED D-H09: inconclusive/u);
+    assert.match(error.message, /trusted drop|Explorer/iu);
+    return true;
+  });
+  const droppedPath = drops.find(({ type }) => type === 'drop')?.data.files[0];
+  assert.ok(droppedPath, 'the row did not dispatch a file drop');
+  assert.ok(droppedPath.length >= 260, `source path was only ${droppedPath.length} characters`);
+});
+
+test('D-H09 accepts a clear file-specific long-path error', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H09', {
+    dropEffect: 'none',
+    toastsOnDrop: ['Could not open fixture-video.mp4: path is too long.'],
+  });
+  const message = await run('D-H09', page, ctx);
+  assert.match(message, /reported a clear error/u);
+  assert.match(message, /path is too long/u);
+});
+
+test('D-H09 never passes on a generic import failure for this file that says nothing about the path', async (t) => {
+  for (const text of [
+    'Failed to import fixture-video.mp4: The selected media file could not be imported',
+    'Failed to import fixture-video.mp4: unable to read fixture-video.mp4 metadata: metadata read timed out',
+    'Failed to import fixture-video.mp4: The original could not be stored',
+  ]) {
+    const { page, ctx } = makeH04Fake(t, 'D-H09', { dropEffect: 'none', toastsOnDrop: [text] });
+    await assert.rejects(run('D-H09', page, ctx), (error) => {
+      assertNotBlocked(error);
+      assert.match(error.message, /without a clear path error/u, `${text}: ${error.message}`);
+      return true;
+    });
+  }
+});
+
+test('D-H09 never passes on a path error that belongs to another file whose name contains this one', async (t) => {
+  for (const text of [
+    'Failed to import other-fixture-video.mp4: the file path is too long',
+    'Failed to import fixture-video.mp4.bak: the file path is too long',
+  ]) {
+    const { page, ctx } = makeH04Fake(t, 'D-H09', { dropEffect: 'none', toastsOnDrop: [text] });
+    await assert.rejects(run('D-H09', page, ctx), (error) => {
+      assert.match(error.message, /^BLOCKED D-H09: inconclusive/u, `${text}: ${error.message}`);
+      return true;
+    });
+  }
+});
+
+test('D-H09 still sees a path error that was dismissed before the clip wait ended', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H09', {
+    dropEffect: 'none',
+    toastsOnDrop: ['Failed to import fixture-video.mp4: the file path is too long'],
+    toastExpiresAfterReads: 1,
+  });
+  const message = await run('D-H09', page, ctx);
+  assert.match(message, /reported a clear error/u);
+});
+
+test('D-H09 passes on a fresh path error identical to a stale one that was dismissed first', async (t) => {
+  const text = 'Failed to import fixture-video.mp4: the file path is too long';
+  const { page, ctx } = makeH04Fake(t, 'D-H09', {
+    dropEffect: 'none',
+    toasts: [text],
+    baselineToastsExpireAfterReads: 0,
+    toastsLater: { afterReads: 3, texts: [text] },
+    toastWaitMs: 2_000,
+  });
+  const message = await run('D-H09', page, ctx);
+  assert.match(message, /reported a clear error/u);
+});
+
+test('D-H09 names a dismissed trusted-drop refusal as BLOCKED', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H09', {
+    dropEffect: 'none',
+    toastsOnDrop: [GENERIC_UNTRUSTED_DROP_TOAST],
+    toastExpiresAfterReads: 1,
+  });
+  await assert.rejects(run('D-H09', page, ctx), (error) => {
+    assert.match(error.message, /^BLOCKED D-H09:/u);
+    assert.match(error.message, /current trusted drop event/u);
+    return true;
+  });
+});
+
+test('D-H09 reports a fixture it cannot stage as BLOCKED by the environment, not a harness failure', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H09', { dropEffect: 'none' });
+  const scratch = join(ctx.outDir, 'D-H09', 'scratch');
+  mkdirSync(scratch, { recursive: true });
+  writeFileSync(
+    join(scratch, 'long-path-segment-0123456789abcdef'),
+    'a file where a folder is needed',
+  );
+  await assert.rejects(run('D-H09', page, ctx), (error) => {
+    assert.match(error.message, /^BLOCKED D-H09: could not stage/u);
+    return true;
+  });
+});
+
+test('D-H04 still names a trusted-drop refusal that was dismissed before the clip wait ended', async (t) => {
+  const { page, ctx } = makeH04Fake(t, 'D-H04', {
+    dropEffect: 'none',
+    toastsOnDrop: [GENERIC_UNTRUSTED_DROP_TOAST],
+    toastExpiresAfterReads: 1,
+  });
+  await assert.rejects(run('D-H04', page, ctx), (error) => {
+    assert.match(error.message, /^BLOCKED D-H04: inconclusive/u);
+    assert.match(error.message, /current trusted drop event/u);
+    return true;
+  });
+});
+
+test('D-H03 reports its missing-media and attended-drop setup as BLOCKED', async (t) => {
+  for (const id of ['D-H03']) {
     const { page, ctx } = makeH04Fake(t, id);
     await assert.rejects(
       () => run(id, page, ctx),
