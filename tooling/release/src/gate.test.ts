@@ -448,7 +448,7 @@ describe('JOY Media 1.0 release gate', () => {
     expect(acceptance).toContain('JOY_RELEASE_CANDIDATE_SHA: ${{ env.CANDIDATE_SHA }}');
   });
 
-  it('verifies the self-hosted FFmpeg/FFprobe toolchain before CI dependencies', () => {
+  it('verifies the FFmpeg/FFprobe toolchain before CI dependencies on the hosted gate', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),
       'utf8',
@@ -464,7 +464,11 @@ describe('JOY Media 1.0 release gate', () => {
       expect(index, `${command} must be present`).toBeGreaterThan(toolchain);
       expect(index).toBeLessThan(install);
     }
-    expect(workflow).not.toContain('sudo apt-get');
+    // The self-hosted container ships ffmpeg. The GitHub-hosted ubuntu-latest image does not, so the gate
+    // installs it from apt, before the version check and before any dependency install.
+    const aptInstall = workflowLines.indexOf('sudo apt-get install -y -qq ffmpeg');
+    expect(aptInstall, 'the hosted gate must install ffmpeg').toBeGreaterThan(toolchain);
+    expect(aptInstall).toBeLessThan(install);
   });
 
   it('lets Playwright derive ports and output paths from the workflow environment', () => {

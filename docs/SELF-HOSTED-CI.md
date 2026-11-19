@@ -1,18 +1,18 @@
 # JOY Media self-hosted CI
 
-JOY Media's GitHub-hosted Actions minutes are exhausted and cannot be
-purchased from Iran, so the repository CI runs entirely on owner-
-controlled self-hosted runners. Every workflow job in `.github/workflows/`
-must target a self-hosted label tuple; no job may use `ubuntu-latest`,
-`windows-latest`, `macos-latest`, or any other GitHub-hosted label. The
-contract is enforced offline by
+JOY Media's pull-request gates run on GitHub-hosted Actions (`ubuntu-latest`). The repository
+is public, and standard GitHub-hosted runners are free for public repositories, so the gates
+run in GitHub's ephemeral VMs, not on the PC. (The older note that minutes were exhausted and
+could not be bought from Iran applied while the repository was private.) Release and
+acceptance workflows still run only on the owner-controlled self-hosted runners. The contract
+is enforced offline by
 `tooling/release/src/ci-runner-policy.test.ts` and the runner Dockerfile
 / entrypoint / registration-token handling is locked down by
 `tooling/release/src/ci-runner-contract.test.ts`.
 
 ## Self-hosted runner inventory
 
-The active self-hosted runners are Linux Docker containers hosted by the owner-controlled PC. The Windows-Docker runner was retired in P5 because its isolated Windows lane and acceptance evidence producer are no longer part of the release plan. The Linux lanes remain available through WSL2 Ubuntu-24.04 Docker Engine.
+The active self-hosted runners are Linux Docker containers hosted by the owner-controlled PC. They serve the release and acceptance workflows; the PR gates run on GitHub-hosted runners. The Windows-Docker runner was retired in P5 because its isolated Windows lane and acceptance evidence producer are no longer part of the release plan. The Linux lanes remain available through WSL2 Ubuntu-24.04 Docker Engine.
 
 | Runner                    | Labels                                       | Where it runs                                                   | Source of truth                                                     |
 | ------------------------- | -------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
@@ -54,9 +54,9 @@ The runner policy is enforced by two offline test suites:
   persist `RUNNER_TOKEN`, and the explicit
   `--configure-only` / long-running `run.sh` split.
 
-`.github/workflows/ci.yml` runs on explicit `workflow_dispatch` (and is
-superseded by `ci-dev.yml` for the developer feedback loop). Neither
-runs untrusted pull-request code on the self-hosted runners.
+`.github/workflows/ci.yml` runs on manual dispatch, on pull requests, and on pushes to main.
+`.github/workflows/ci-dev.yml` runs on manual dispatch and on pull requests into main. Both run on
+GitHub-hosted `ubuntu-latest`, so pull-request code runs in GitHub's ephemeral VMs, not on the PC.
 
 ```powershell
 pnpm install --frozen-lockfile
