@@ -19,6 +19,7 @@ const TRANSFORM_CHANNELS = ['x', 'y', 'scaleX', 'scaleY', 'rotationDeg'] as cons
 const POSITION_CHANNELS = ['x', 'y'] as const;
 const STATE_EPSILON = 1e-6;
 const NO_PARENT: ParentTransform = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0 };
+const NO_CROP = { left: 0, top: 0, right: 0, bottom: 0 };
 const CENTRE_ANIMATED_MESSAGE =
   'Position is animated or expression-driven, so Centre cannot set it here.';
 const RESET_ANIMATED_MESSAGE =
@@ -171,6 +172,12 @@ function sameResetTransform(a: LocalTransform, b: LocalTransform): boolean {
 function resetLocalValues(
   target: MonitorTransformTarget,
   scale: { readonly scaleX: number; readonly scaleY: number },
+  crop: {
+    readonly left: number;
+    readonly top: number;
+    readonly right: number;
+    readonly bottom: number;
+  },
   frameWidth: number,
   frameHeight: number,
 ): LocalTransform | undefined {
@@ -178,26 +185,43 @@ function resetLocalValues(
   const before = geometry.transform;
   if (Math.abs(before.scaleX) < STATE_EPSILON || Math.abs(before.scaleY) < STATE_EPSILON)
     return undefined;
-  // The box centre relative to the rotation origin, in the object's own unrotated, unscaled units.
-  const fromOrigin = turn(
-    { x: geometry.center.x - geometry.origin.x, y: geometry.center.y - geometry.origin.y },
+  // Measured from the drawn top-left corner, not the rotation origin: the origin is the anchor (the
+  // centre by default), which says nothing about where the object's own position is.
+  const [topLeft] = geometry.corners;
+  const fromTopLeft = turn(
+    { x: geometry.center.x - topLeft.x, y: geometry.center.y - topLeft.y },
     -before.rotationDeg,
   );
-  const offset = { x: fromOrigin.x / before.scaleX, y: fromOrigin.y / before.scaleY };
+  // Half of the drawn (visible) box, in the object's own unrotated, unscaled units.
+  const half = { x: fromTopLeft.x / before.scaleX, y: fromTopLeft.y / before.scaleY };
   const parent = target.parent ?? NO_PARENT;
-  // With rotation 0 and the default scale, the centre sits this far from the origin in canvas space.
-  const centreFromOrigin = turn(
+  // With rotation 0 and the default scale, the visible top-left corner sits this far from the frame centre.
+  const centreFromTopLeft = turn(
     {
-      x: offset.x * scale.scaleX * parent.scaleX,
-      y: offset.y * scale.scaleY * parent.scaleY,
+      x: half.x * scale.scaleX * parent.scaleX,
+      y: half.y * scale.scaleY * parent.scaleY,
     },
     parent.rotationDeg,
   );
-  const origin = {
-    x: frameWidth / 2 - centreFromOrigin.x,
-    y: frameHeight / 2 - centreFromOrigin.y,
+  const visibleTopLeft = {
+    x: frameWidth / 2 - centreFromTopLeft.x,
+    y: frameHeight / 2 - centreFromTopLeft.y,
   };
-  const local = worldDeltaToParentSpace({ x: origin.x - parent.x, y: origin.y - parent.y }, parent);
+  // The position is the top-left of the uncropped source, so move back past the cropped-away part.
+  const keptX = 1 - crop.left - crop.right;
+  const keptY = 1 - crop.top - crop.bottom;
+  const inset = turn(
+    {
+      x: keptX > 0 ? ((2 * half.x) / keptX) * crop.left * scale.scaleX * parent.scaleX : 0,
+      y: keptY > 0 ? ((2 * half.y) / keptY) * crop.top * scale.scaleY * parent.scaleY : 0,
+    },
+    parent.rotationDeg,
+  );
+  const translation = { x: visibleTopLeft.x - inset.x, y: visibleTopLeft.y - inset.y };
+  const local = worldDeltaToParentSpace(
+    { x: translation.x - parent.x, y: translation.y - parent.y },
+    parent,
+  );
   if (local === undefined) return undefined;
   return {
     x: cleanNumber(local.x),
@@ -236,7 +260,13 @@ export function monitorContextTransformState(
     };
   const alreadyCentred = samePosition(target.local, centredLocal);
 
-  const resetLocal = resetLocalValues(target, defaultScale(input), frameWidth, frameHeight);
+  const resetLocal = resetLocalValues(
+    target,
+    defaultScale(input),
+    input.object.transform.crop ?? NO_CROP,
+    frameWidth,
+    frameHeight,
+  );
   const alreadyReset = resetLocal !== undefined && sameResetTransform(target.local, resetLocal);
   const resetDisabledReason = resetBlocked
     ? RESET_ANIMATED_MESSAGE
