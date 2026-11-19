@@ -130,4 +130,36 @@ describe('preload channel allow-list', () => {
     await expect(preload.api.importDroppedFiles([file])).resolves.toEqual({ tickets: [] });
     expect(preload.ipcRenderer.invoke).toHaveBeenCalledOnce();
   });
+
+  it('accepts the trusted drop when the renderer reorders the same files', async () => {
+    // Explorer lists the grabbed file first; the editor sorts dropped files by name.
+    const preload = loadPreloadForTest();
+    const base = { size: 12, lastModified: 1, type: 'image/png' };
+    const poster = { ...base, name: 'poster.png', path: 'C:\\drop\\poster.png' };
+    const texture = { ...base, name: 'texture.png', path: 'C:\\drop\\texture.png' };
+    preload.dropListener?.({ isTrusted: true, dataTransfer: { files: [texture, poster] } });
+
+    await expect(preload.api.importDroppedFiles([poster, texture])).resolves.toEqual({
+      tickets: [],
+    });
+    expect(preload.ipcRenderer.invoke).toHaveBeenCalledOnce();
+    const [, entries] = preload.ipcRenderer.invoke.mock.calls[0] as unknown as [
+      string,
+      { name: string }[],
+    ];
+    expect(entries.map((entry) => entry.name)).toEqual(['poster.png', 'texture.png']);
+  });
+
+  it('still refuses a reordered list that repeats or drops trusted files', async () => {
+    const preload = loadPreloadForTest();
+    const base = { size: 12, lastModified: 1, type: 'image/png' };
+    const poster = { ...base, name: 'poster.png', path: 'C:\\drop\\poster.png' };
+    const texture = { ...base, name: 'texture.png', path: 'C:\\drop\\texture.png' };
+    preload.dropListener?.({ isTrusted: true, dataTransfer: { files: [texture, poster] } });
+    await expect(preload.api.importDroppedFiles([poster, poster])).rejects.toThrow(/drop/i);
+
+    preload.dropListener?.({ isTrusted: true, dataTransfer: { files: [texture, poster] } });
+    await expect(preload.api.importDroppedFiles([poster])).rejects.toThrow(/drop/i);
+    expect(preload.ipcRenderer.invoke).not.toHaveBeenCalled();
+  });
 });
