@@ -39,10 +39,13 @@ permissions:
 jobs:
   static-and-unit:
     name: static + unit/integration (development verification)
-    runs-on: [self-hosted, linux, x64, joy-media-ci]
-    timeout-minutes: 25
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
       - name: Verify runner toolchain
         shell: bash
         run: |
@@ -83,7 +86,7 @@ jobs:
             workers: '1'
             api_port: 4374
             web_port: 4373
-    runs-on: [self-hosted, linux, x64, joy-media-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       CI: true
@@ -101,6 +104,9 @@ jobs:
           echo "PLAYWRIGHT_HTML_REPORT=$RUNNER_TEMP/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
           echo "PLAYWRIGHT_TEST_RESULTS_DIR=$RUNNER_TEMP/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
       - name: Verify runner toolchain
         shell: bash
         run: |
@@ -112,7 +118,7 @@ jobs:
           ffprobe -version
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm exec playwright install chromium
+      - run: pnpm exec playwright install --with-deps chromium
       - name: Run browser audit (${{ matrix.label }})
         run: pnpm exec playwright test ${{ matrix.spec }} --project=${{ matrix.project }} --workers=${{ matrix.workers }}
       - name: Verify no checkout residue
@@ -131,12 +137,15 @@ jobs:
 
   site-build:
     name: landing site build and checks (development verification)
-    runs-on: [self-hosted, linux, x64, joy-media-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       CI: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
       - name: Verify runner toolchain
         shell: bash
         run: |
@@ -149,7 +158,7 @@ jobs:
         run: pnpm --filter @joy-media/site build
       - name: Site source and build checks (vitest)
         run: pnpm exec vitest run apps/site
-      - run: pnpm exec playwright install chromium
+      - run: pnpm exec playwright install --with-deps chromium
       - name: Site runtime checks (Playwright against the wrangler Pages preview)
         run: pnpm exec playwright test --config playwright.site.config.ts
       - name: Verify no checkout residue
@@ -163,9 +172,12 @@ jobs:
     name: development verification summary (NOT release approval)
     needs: [static-and-unit, browser, site-build]
     if: always()
-    runs-on: [self-hosted, linux, x64, joy-media-ci]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
       - name: Require every development lane green
         shell: bash
         env:
