@@ -6,6 +6,7 @@ import {
   mkdirSync,
   rmSync,
   statSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -94,12 +95,22 @@ function mediaCards(page, name) {
     .filter({ hasText: new RegExp(`^${escapeRegExp(name)}$`, 'u') });
 }
 
-async function waitForClips(ctx, predicate, description, timeoutMs = ctx.clipWaitMs ?? 12_000) {
+/**
+ * Polls the timeline until `predicate` holds. `onPoll` runs on every poll (for example to record toasts before App.tsx
+ * dismisses them); when it returns true the wait ends early with the same timeout error, so the row classifies it.
+ */
+async function waitForClips(
+  ctx,
+  predicate,
+  description,
+  { timeoutMs = ctx.clipWaitMs ?? 12_000, onPoll } = {},
+) {
   const deadline = Date.now() + timeoutMs;
   let clips = [];
   do {
     clips = await readClips(ctx);
     if (predicate(clips)) return clips;
+    if (onPoll !== undefined && (await onPoll())) break;
     await new Promise((resolve) => setTimeout(resolve, 150));
   } while (Date.now() < deadline);
   throw new ClipWaitTimeout(
@@ -116,6 +127,134 @@ async function fileDropRow(page, ctx, { filePaths, selector, targetUs, beforeCou
 
 async function fresh(page, ctx, id) {
   await newProject(page, `${id} ${ctx.runTag ?? ''}`.trim());
+}
+
+/**
+ * media-import.ts gives up on a file's metadata after 10 s (`metadata read timed out`), and the per-file refusal
+ * only follows that. The wait for a refusal must be longer than that timeout.
+ */
+const D_H07_TOAST_WAIT_MS = 15_000;
+
+/** The generic refusal App.tsx shows when the drop is not from the current trusted drop event (App.tsx ~7156). */
+const TRUSTED_DROP_REFUSAL =
+  'Dropped media could not be imported: Dropped files must come from the current trusted drop event';
+
+/**
+ * How a toast of this drop reads, or undefined when it says nothing about this file:
+ * - `content`: a per-file refusal from reading the content (media-import.ts describeTimedMedia: metadata unavailable
+ *   or no duration). Only this proves a content rejection.
+ * - `timeout`: a per-file metadata read timeout (media-import.ts:424). The app refused the import, but the content was
+ *   never judged, so it is inconclusive.
+ * - `untrusted`: the generic trusted-drop refusal. It is not a content judgment and blocks the row at once.
+ * Decode wording (`unable to decode … as <mime>`) is not matched: media-import.ts emits it only for images.
+ */
+function classifyRefusal(text, name) {
+  if (text === TRUSTED_DROP_REFUSAL) return 'untrusted';
+  const prefix = `Failed to import ${name}: `;
+  if (!text.startsWith(prefix)) return undefined;
+  const reason = text.slice(prefix.length);
+  const file = escapeRegExp(name);
+  const content = new RegExp(
+    `^unable to read ${file} metadata: metadata (is unavailable|duration is unavailable)$`,
+    'u',
+  );
+  if (content.test(reason)) return 'content';
+  const timeout = new RegExp(`^unable to read ${file} metadata: metadata read timed out$`, 'u');
+  if (timeout.test(reason)) return 'timeout';
+  return undefined;
+}
+
+/** The texts of every toast on the page, in order. */
+async function toastTexts(page) {
+  return (
+    (await page
+      .locator('.toast-message')
+      .evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? '').trim()))) ?? []
+  );
+}
+
+const countOf = (texts, text) => texts.filter((candidate) => candidate === text).length;
+
+/**
+ * Every toast that appeared after `baseline`, kept even after App.tsx dismisses it (toasts leave the page after 4 s,
+ * App.tsx showToast). Call `sample()` while waiting; `texts()` returns each fresh text as often as it was seen at once.
+ * A toast identical to one in the baseline counts only when there are more of them, so stale toasts never count. Once
+ * a stale toast leaves the page it leaves the baseline too, so the same text shown again by this drop counts as fresh.
+ */
+function createToastLog(page, baseline) {
+  const stale = new Map();
+  for (const text of baseline) stale.set(text, (stale.get(text) ?? 0) + 1);
+  const seen = new Map();
+  const texts = () => [...seen.entries()].flatMap(([text, count]) => Array(count).fill(text));
+  return {
+    async sample() {
+      const onPage = new Map();
+      for (const text of await toastTexts(page)) onPage.set(text, (onPage.get(text) ?? 0) + 1);
+      const counts = new Map();
+      for (const [text, count] of onPage) {
+        const fresh = count - Math.min(count, stale.get(text) ?? 0);
+        if (fresh > 0) counts.set(text, fresh);
+      }
+      for (const [text, count] of stale) stale.set(text, Math.min(count, onPage.get(text) ?? 0));
+      for (const [text, count] of counts) {
+        if (count > (seen.get(text) ?? 0)) seen.set(text, count);
+      }
+      return texts();
+    },
+    texts,
+  };
+}
+
+/** Samples `log` until `stop(texts)` holds or the wait ends; returns the fresh texts seen. */
+async function watchToasts(log, stop, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const texts = await log.sample();
+    if (stop(texts)) return texts;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  } while (Date.now() < deadline);
+  return log.sample();
+}
+
+/**
+ * Whether a toast names this exact file: the name must stand alone (start or end of the text, or set off by a space,
+ * colon, quote, bracket or path separator), so `other-clip.mp4` or `clip.mp4.bak` never count as `clip.mp4`.
+ */
+function mentionsFile(text, name) {
+  return new RegExp(
+    `(?:^|[\\s:'"(\\[\\\\/])${escapeRegExp(name)}(?:$|[\\s:'",;)\\]]|\\.(?:\\s|$))`,
+    'u',
+  ).test(text);
+}
+
+/** The app's refusal when a dropped file changes between its drop ticket and the import (dropped-media-import.ts). */
+const CHANGED_DURING_IMPORT = 'The selected media file changed during import';
+
+/**
+ * A clear long-path error names the path or file name as the problem (too long, invalid, not found) or carries the
+ * platform code. A generic failure of this file (App.tsx prefixes every failure with `Failed to import <name>:`) is not.
+ */
+const LONG_PATH_ERROR =
+  /(?:\bpath\b|file ?name)[^.]*?(?:too long|invalid|not found|cannot be found|could not be found)|ENAMETOOLONG|MAX_PATH/iu;
+
+/**
+ * Waits for a refusal of this drop: a classified toast that is new since `baseline` (a toast already on screen before
+ * the drop does not count, and an identical toast counts only when there are more of them). Returns `{ kind, text }`
+ * as soon as one shows, or undefined after the wait. A content, timeout or untrusted refusal ends the wait at once.
+ */
+async function waitForRefusal(page, name, baseline, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const seen = await toastTexts(page);
+    for (const text of seen) {
+      const kind = classifyRefusal(text, name);
+      if (kind !== undefined && countOf(seen, text) > countOf(baseline, text)) {
+        return { kind, text };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  } while (Date.now() < deadline);
+  return undefined;
 }
 
 function fixture(ctx) {
@@ -267,18 +406,29 @@ export const TIMELINE_DND_H04_ROWS = [
       const name = basename(path);
       const before = await readClips(ctx);
       const cardsBefore = await mediaCards(page, name).count();
+      const toasts = createToastLog(page, await toastTexts(page));
       await dropFiles(page, '.timeline-empty-state', [path], 0);
       let clips;
       try {
-        clips = await waitForClips(ctx, (rows) => rows.length > before.length, 'a dropped clip');
+        // Toasts are recorded on every poll: a refusal is dismissed after 4 s, long before the clip wait ends.
+        clips = await waitForClips(ctx, (rows) => rows.length > before.length, 'a dropped clip', {
+          onPoll: async () => (await toasts.sample()).includes(TRUSTED_DROP_REFUSAL),
+        });
       } catch (error) {
         if (!isClipWaitTimeout(error)) throw error;
-        if ((await mediaCards(page, name).count()) > cardsBefore) {
+        const cardsAfter = await mediaCards(page, name).count();
+        if (cardsAfter > cardsBefore) {
           throw new Error(`the simulated drop reached Media (a new ${name} card) but made no clip`);
+        }
+        if ((await toasts.sample()).includes(TRUSTED_DROP_REFUSAL)) {
+          throw blockedRow(
+            'D-H04',
+            `inconclusive: the app refused this simulated drop because it was not from the current trusted drop event (${TRUSTED_DROP_REFUSAL}); the duration was not tested`,
+          );
         }
         throw blockedRow(
           'D-H04',
-          `needs a real mouse drag from Explorer (attended): ${UNTRUSTED_DROP_REASON}, so no clip or Media card appeared`,
+          `inconclusive: no new clip or Media card appeared after a synthetic drop; ${UNTRUSTED_DROP_REASON}`,
         );
       }
       const [clip] = clipsAddedSince(before, clips);
@@ -289,11 +439,78 @@ export const TIMELINE_DND_H04_ROWS = [
       return `clip ${clip.id} kept its full duration (${clip.durationUs} us)`;
     },
   },
-  attendedFileDropRow(
-    'D-H05',
-    'A file drop during copy shows a retry message',
-    'the file must be dragged from Explorer while its copy is still in progress; a synthetic event cannot reproduce that OS state',
-  ),
+  {
+    id: 'D-H05',
+    area: 'timeline file drops',
+    title: 'A file drop during copy shows a retry message',
+    severity: 'major',
+    async run(page, ctx) {
+      await fresh(page, ctx, 'D-H05');
+      const source = fixture(ctx);
+      const name = basename(source);
+      const destination = join(rowScratch(ctx, 'D-H05'), name);
+      const originalSize = statSync(source).size;
+      const partialSize = Math.max(1, Math.floor(originalSize / 2));
+      copyFileSync(source, destination);
+      truncateSync(destination, partialSize);
+      const before = await readClips(ctx);
+      const cardsBefore = await mediaCards(page, name).count();
+      const toasts = createToastLog(page, await toastTexts(page));
+      // Only the app's own refusal of this file counts (App.tsx: `Failed to import <name>: <reason>`).
+      const refusal = `Failed to import ${name}: ${CHANGED_DURING_IMPORT}`;
+      let restored;
+      try {
+        await dropFiles(page, '.timeline-empty-state', [destination]);
+        // The "copy" finishes only after a delay, while the app holds a drop ticket for the partial file. This is a
+        // bounded stand-in for a copy in progress; it does not reproduce Explorer's native transfer or prove a trusted
+        // drop, and the harness cannot see when the app reads the file.
+        restored = new Promise((resolve) =>
+          setTimeout(resolve, ctx.copyRestoreDelayMs ?? 500),
+        ).then(() => copyFileSync(source, destination));
+        await watchToasts(
+          toasts,
+          (texts) => texts.includes(refusal) || texts.includes(TRUSTED_DROP_REFUSAL),
+          ctx.toastWaitMs ?? 6_000,
+        );
+      } finally {
+        if (restored === undefined) copyFileSync(source, destination);
+        else await restored;
+      }
+      // A card or clip may land a little after the refusal; this settles that window only.
+      await new Promise((resolve) => setTimeout(resolve, ctx.settleMs ?? 1_500));
+      const seen = await toasts.sample();
+      const cardAdded = (await mediaCards(page, name).count()) > cardsBefore;
+      const after = await readClips(ctx);
+      const clipsAdded = clipsAddedSince(before, after).length;
+      if (seen.includes(refusal)) {
+        if (cardAdded || clipsAdded > 0) {
+          throw new Error(
+            `D-H05 showed the changed-during-import refusal but also imported ${name}`,
+          );
+        }
+        return `copy-in-progress drop was refused for this file: ${refusal}`;
+      }
+      if (seen.includes(TRUSTED_DROP_REFUSAL)) {
+        throw blockedRow(
+          'D-H05',
+          `inconclusive: needs a real mouse drag from Explorer (attended): the app refused this simulated drop (${TRUSTED_DROP_REFUSAL}), so the copy-in-progress check was not reached`,
+        );
+      }
+      if (cardAdded || clipsAdded > 0) {
+        throw blockedRow(
+          'D-H05',
+          `inconclusive: ${name} was imported without the changed-during-import refusal, but the harness cannot show that the file changed inside the app's import window (it may have read the completed copy), so no defect is claimed`,
+        );
+      }
+      const other = seen.find((text) => mentionsFile(text, name));
+      throw blockedRow(
+        'D-H05',
+        other !== undefined
+          ? `inconclusive: the app refused ${name} for another reason (${other}); the copy-in-progress refusal was not shown`
+          : `inconclusive: the synthetic event produced no fresh refusal for ${name}, Media card, or clip; the app may have rejected an untrusted drop (not from a real Explorer drag) and Explorer's concurrent copy state was not exercised`,
+      );
+    },
+  },
   {
     id: 'D-H06',
     area: 'timeline file drops',
@@ -334,27 +551,52 @@ export const TIMELINE_DND_H04_ROWS = [
       const path = join(rowScratch(ctx, 'D-H07'), name);
       writeFileSync(path, 'plain text, not an MP4 video');
       const cardsBefore = await mediaCards(page, name).count();
+      const toastsBefore = await toastTexts(page);
       await dropFiles(page, '.timeline-empty-state', [path]);
-      const message = page
-        .locator('.toast-message')
-        .filter({ hasText: /failed|unsupported|invalid|could not|must be/iu })
-        .first();
-      try {
-        await message.waitFor({ state: 'visible', timeout: 10_000 });
-      } catch (error) {
-        if (!isUiTimeout(error)) throw error;
-        if ((await mediaCards(page, name).count()) > cardsBefore) {
+      const refusal = await waitForRefusal(
+        page,
+        name,
+        toastsBefore,
+        ctx.toastWaitMs ?? D_H07_TOAST_WAIT_MS,
+      );
+      // A card or clip may land a little after the refusal. This settles the check for that window only; it does not
+      // prove that no later asynchronous import activity happens.
+      await new Promise((resolve) => setTimeout(resolve, ctx.settleMs ?? 1_500));
+      const cardAdded = (await mediaCards(page, name).count()) > cardsBefore;
+      const after = await readClips(ctx);
+      const clipsAdded = after.length - before.length;
+      if (refusal === undefined) {
+        if (cardAdded)
           throw new Error('invalid MP4 was added to Media without a rejection message');
-        }
+        if (clipsAdded !== 0)
+          throw new Error(`invalid MP4 added ${clipsAdded} clip(s) without a rejection message`);
         throw blockedRow(
           'D-H07',
-          `needs a real mouse drag from Explorer (attended): ${UNTRUSTED_DROP_REASON}, so no message and no Media card appeared`,
+          `needs a real mouse drag from Explorer (attended): ${UNTRUSTED_DROP_REASON}, so no content refusal for ${name} and no Media card appeared`,
         );
       }
-      const after = await readClips(ctx);
-      if (after.length !== before.length)
-        throw new Error(`invalid MP4 added ${after.length - before.length} clip(s)`);
-      return `rejected ${basename(path)} by content with message: ${(await message.innerText()).trim()}`;
+      // A refusal message does not prove the file stayed out of Media: a new card or clip for it is a defect too.
+      if (cardAdded) {
+        throw new Error(
+          `invalid MP4 was added to Media (a new ${name} card) despite the rejection message`,
+        );
+      }
+      if (clipsAdded !== 0) throw new Error(`invalid MP4 added ${clipsAdded} clip(s)`);
+      if (refusal.kind === 'content') {
+        return `rejected ${basename(path)} by content with message: ${refusal.text}`;
+      }
+      if (refusal.kind === 'timeout') {
+        // Inconclusive: the app refused the import, but the timeout does not show the content was judged.
+        throw blockedRow(
+          'D-H07',
+          `inconclusive: the app reports that ${name} metadata read timed out (${refusal.text}); the timeout does not show the file's content was judged, so no content rejection is claimed`,
+        );
+      }
+      // The generic refusal: the drop was not authorized by the current trusted drop event, so the row cannot judge it.
+      throw blockedRow(
+        'D-H07',
+        `needs a real mouse drag from Explorer (attended): ${UNTRUSTED_DROP_REASON}, so the app refused the drop with: ${refusal.text}`,
+      );
     },
   },
   {
@@ -403,11 +645,88 @@ export const TIMELINE_DND_H04_ROWS = [
       return `Media preserved both filenames: ${names.join(', ')}`;
     },
   },
-  attendedFileDropRow(
-    'D-H09',
-    'A file drop from a very long path completes or reports a clear error',
-    'a real Explorer drag is needed to prove that Windows transfers the long source path to Electron',
-  ),
+  {
+    id: 'D-H09',
+    area: 'timeline file drops',
+    title: 'A file drop from a very long path completes or reports a clear error',
+    severity: 'major',
+    async run(page, ctx) {
+      await fresh(page, ctx, 'D-H09');
+      const source = fixture(ctx);
+      const name = basename(source);
+      let destination;
+      try {
+        let directory = rowScratch(ctx, 'D-H09');
+        while (join(directory, name).length < 280) {
+          directory = join(directory, 'long-path-segment-0123456789abcdef');
+          mkdirSync(directory, { recursive: true });
+        }
+        destination = join(directory, name);
+        copyFileSync(source, destination);
+      } catch (error) {
+        // Without long-path support (LongPathsEnabled off) or with a blocked scratch folder, the fixture cannot exist.
+        throw blockedRow(
+          'D-H09',
+          `could not stage a long-path fixture in this environment: ${firstLine(error)}`,
+        );
+      }
+      if (destination.length < 260) {
+        throw blockedRow(
+          'D-H09',
+          `could not construct a source path longer than 260 characters (${destination.length})`,
+        );
+      }
+      const before = await readClips(ctx);
+      const cardsBefore = await mediaCards(page, name).count();
+      const toasts = createToastLog(page, await toastTexts(page));
+      await dropFiles(page, '.timeline-empty-state', [destination]);
+      try {
+        // Toasts are recorded on every poll: an error is dismissed after 4 s, long before the clip wait ends.
+        const clips = await waitForClips(
+          ctx,
+          (rows) => rows.length > before.length,
+          'a long-path dropped clip',
+          {
+            onPoll: async () =>
+              (await toasts.sample()).some(
+                (text) => text === TRUSTED_DROP_REFUSAL || mentionsFile(text, name),
+              ),
+          },
+        );
+        const added = clipsAddedSince(before, clips);
+        if (added.length === 0) {
+          throw new Error('long-path drop changed the clip count but added no clip');
+        }
+        return `long-path drop imported ${name} from a ${destination.length}-character path`;
+      } catch (error) {
+        if (!isClipWaitTimeout(error)) throw error;
+        if ((await mediaCards(page, name).count()) > cardsBefore) {
+          throw new Error(`the long-path drop reached Media but made no timeline clip (${name})`);
+        }
+        const seen = await toasts.sample();
+        const fileToasts = seen.filter((text) => mentionsFile(text, name));
+        const clearPathError = fileToasts.find((text) => LONG_PATH_ERROR.test(text));
+        if (clearPathError !== undefined) {
+          return `long-path drop reported a clear error: ${clearPathError}`;
+        }
+        if (fileToasts.length > 0) {
+          throw new Error(
+            `the long-path drop of ${name} failed without a clear path error: ${fileToasts[0]}`,
+          );
+        }
+        if (seen.includes(TRUSTED_DROP_REFUSAL)) {
+          throw blockedRow(
+            'D-H09',
+            `inconclusive: needs a real mouse drag from Explorer (attended): the app refused this simulated drop (${TRUSTED_DROP_REFUSAL})`,
+          );
+        }
+        throw blockedRow(
+          'D-H09',
+          `inconclusive: no clip, Media card, or file-specific error appeared; ${UNTRUSTED_DROP_REASON}`,
+        );
+      }
+    },
+  },
   {
     id: 'D-H10',
     area: 'timeline file drops',
