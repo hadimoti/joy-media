@@ -480,7 +480,11 @@ ${csCases
 console.log('5b2. Checking that uninstall.cmd removes the bin and install-root PATH entries...');
 {
   const uninstallSource = readFileSync(resolve(standaloneDir, 'uninstall.cmd'), 'utf8');
-  assert.match(uninstallSource, /JOY_MEDIA_INSTALL_DIR \+ '\\bin'/, 'uninstall.cmd does not remove the bin PATH entry');
+  assert.match(
+    uninstallSource,
+    /JOY_MEDIA_INSTALL_DIR \+ '\\bin'/,
+    'uninstall.cmd does not remove the bin PATH entry',
+  );
 }
 
 // 5c. The setup exe is built after the packager writes SHA256SUMS.txt, so build-installer.ps1 adds its

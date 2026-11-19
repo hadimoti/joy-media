@@ -14,7 +14,9 @@ type VersionInfoOptions = {
   originalFilename: string;
 };
 // The build script is plain .mjs; it is loaded by URL so the type checker does not pull it into this project.
-const scriptUrl = pathToFileURL(join(import.meta.dirname, '..', 'scripts', 'set-exe-icon.mjs')).href;
+const scriptUrl = pathToFileURL(
+  join(import.meta.dirname, '..', 'scripts', 'set-exe-icon.mjs'),
+).href;
 const { setExecutableVersionInfo } = (await import(scriptUrl)) as {
   setExecutableVersionInfo: (exePath: string, options: VersionInfoOptions) => Promise<void>;
 };
