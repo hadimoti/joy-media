@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
+import type * as FsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createProjectFolder,
   importProjectAsset,
@@ -12,6 +13,32 @@ import {
   projectFolderName,
   type ProjectFolder,
 } from './project-folder.js';
+
+// Fault and race injection at the file-system boundary. The hook runs once, just before the real `link` or `rename`
+// of a publication, and then the real call runs, so the bytes and names on disk are real.
+const hooks = vi.hoisted(() => ({
+  beforePublish: undefined as undefined | ((from: string, to: string) => Promise<void>),
+}));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>();
+  const runHook = async (from: string, to: string): Promise<void> => {
+    const hook = hooks.beforePublish;
+    hooks.beforePublish = undefined;
+    if (hook !== undefined) await hook(from, to);
+  };
+  return {
+    ...actual,
+    link: async (from: string, to: string) => {
+      await runHook(from, to);
+      return actual.link(from, to);
+    },
+    rename: async (from: string, to: string) => {
+      await runHook(from, to);
+      return actual.rename(from, to);
+    },
+  };
+});
 
 const CLIP = Buffer.from(Array.from({ length: 4096 }, (_, index) => (index * 37) % 256));
 const CLIP_NAME = `${sha256(CLIP)}.bin`;
@@ -25,6 +52,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  hooks.beforePublish = undefined;
   for (const folder of opened) folder.close();
   await rm(scratch, { recursive: true, force: true });
 });
@@ -136,6 +164,84 @@ describe('importing originals', () => {
     ).rejects.toThrow();
 
     expect(await readdir(join(folder.root, 'assets'))).toEqual([]);
+  });
+
+  it('refuses a re-import when the stored original has other bytes of the same length, and keeps that file', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Trip'));
+    const path = await writeSource('clip.mp4', CLIP);
+    await importProjectAsset(folder, { path, kind: 'video', displayName: 'clip.mp4' });
+
+    // Same length as CLIP, one byte changed: the size matches, the checksum does not.
+    const corrupt = Buffer.from(
+      Array.from(CLIP, (byte, index) => (index === 0 ? (byte + 1) % 256 : byte)),
+    );
+    expect(corrupt.length).toBe(CLIP.length);
+    expect(corrupt.equals(CLIP)).toBe(false);
+    const storedPath = join(folder.root, 'assets', CLIP_NAME);
+    await writeFile(storedPath, corrupt);
+
+    await expect(
+      importProjectAsset(folder, { path, kind: 'video', displayName: 'clip.mp4' }),
+    ).rejects.toThrow(/checksum/u);
+
+    // No silent overwrite: the corrupt stored file is kept as it was, and no temporary copy is left behind.
+    expect(await readFile(storedPath)).toEqual(corrupt);
+    expect(await readdir(join(folder.root, 'assets'))).toEqual([CLIP_NAME]);
+  });
+
+  it('removes its partial copy when publishing the original fails', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Trip'));
+    const path = await writeSource('clip.mp4', CLIP);
+    hooks.beforePublish = async () => {
+      throw Object.assign(new Error('EPERM: publication refused'), { code: 'EPERM' });
+    };
+
+    await expect(
+      importProjectAsset(folder, { path, kind: 'video', displayName: 'clip.mp4' }),
+    ).rejects.toThrow('publication refused');
+
+    expect(await readdir(join(folder.root, 'assets'))).toEqual([]);
+    expect(folder.assets.get(`asset-${sha256(CLIP)}`)).toBeUndefined();
+  });
+
+  it('never replaces a file that appears under the stored name during the import', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Trip'));
+    const path = await writeSource('clip.mp4', CLIP);
+    // Another writer stores different bytes of the same length under the name, after the import found no file there.
+    const other = Buffer.from(
+      Array.from(CLIP, (byte, index) => (index === 0 ? (byte + 1) % 256 : byte)),
+    );
+    const storedPath = join(folder.root, 'assets', CLIP_NAME);
+    hooks.beforePublish = async (_from, to) => {
+      await writeFile(to, other);
+    };
+
+    await expect(
+      importProjectAsset(folder, { path, kind: 'video', displayName: 'clip.mp4' }),
+    ).rejects.toThrow(/checksum/u);
+
+    expect(await readFile(storedPath)).toEqual(other);
+    expect(await readdir(join(folder.root, 'assets'))).toEqual([CLIP_NAME]);
+    expect(folder.assets.get(`asset-${sha256(CLIP)}`)).toBeUndefined();
+  });
+
+  it('keeps a file that appears under the stored name with the same bytes as the duplicate', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Trip'));
+    const path = await writeSource('clip.mp4', CLIP);
+    hooks.beforePublish = async (_from, to) => {
+      await writeFile(to, CLIP);
+    };
+
+    const imported = await importProjectAsset(folder, {
+      path,
+      kind: 'video',
+      displayName: 'clip.mp4',
+    });
+
+    expect(imported.storedPath).toBe(`assets/${CLIP_NAME}`);
+    expect(await readFile(join(folder.root, 'assets', CLIP_NAME))).toEqual(CLIP);
+    expect(await readdir(join(folder.root, 'assets'))).toEqual([CLIP_NAME]);
+    expect(folder.assets.get(imported.assetId)?.storedPath).toBe(`assets/${CLIP_NAME}`);
   });
 });
 
