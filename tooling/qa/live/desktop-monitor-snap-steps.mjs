@@ -12,10 +12,14 @@
  * guide and readout are removed on release.
  */
 import { join } from 'node:path';
-import { goToProjects } from './desktop-projects-import-steps.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { readLiveVisualProject } from './matrix-core.mjs';
-import { openMenu } from './steps.mjs';
+import {
+  addToTimelineThroughLeftPanel,
+  importThroughLeftPanel,
+  newProject,
+  openMenu,
+} from './steps.mjs';
 
 const ROW_ID = 'D-M06-01';
 /** The element is scaled to this many per cent so it does not cover the whole frame. */
@@ -197,23 +201,42 @@ async function readSnapState(page) {
  * Presses at `from`, moves to `to` in steps, waits for the snap overlay while the mouse is still down, reads the
  * overlay state, then releases. Control is held for the whole gesture when `ctrl` is set.
  */
-async function dragAndObserve(page, from, to, { ctrl }) {
-  if (ctrl) await page.keyboard.down('Control');
+export async function dragAndObserve(page, from, to, { ctrl, onHeld, observe = true }) {
   let observed;
+  let mousePressed = false;
+  let controlPressed = false;
+  let gestureError;
+  const releaseErrors = [];
   try {
+    if (ctrl) {
+      controlPressed = true;
+      await page.keyboard.down('Control');
+    }
     await page.mouse.move(from.x, from.y);
+    mousePressed = true;
     await page.mouse.down();
     await page.mouse.move(to.x, to.y, { steps: 8 });
-    const deadline = Date.now() + OVERLAY_TIMEOUT_MS;
-    observed = await readSnapState(page);
-    while (!observed.overlay && Date.now() < deadline) {
-      await page.waitForTimeout(100);
+    if (observe) {
+      const deadline = Date.now() + OVERLAY_TIMEOUT_MS;
       observed = await readSnapState(page);
+      while (!observed.overlay && Date.now() < deadline) {
+        await page.waitForTimeout(100);
+        observed = await readSnapState(page);
+      }
     }
+    if (onHeld) observed.shot = await onHeld();
+  } catch (error) {
+    gestureError = error;
   } finally {
-    await page.mouse.up().catch(() => undefined);
-    if (ctrl) await page.keyboard.up('Control').catch(() => undefined);
+    if (mousePressed) await page.mouse.up().catch((error) => releaseErrors.push(error));
+    if (controlPressed)
+      await page.keyboard.up('Control').catch((error) => releaseErrors.push(error));
   }
+  if (releaseErrors.length) {
+    const all = gestureError ? [gestureError, ...releaseErrors] : releaseErrors;
+    throw new AggregateError(all, `input release failed: ${all.map(String).join('; ')}`);
+  }
+  if (gestureError) throw gestureError;
   return observed;
 }
 
@@ -233,6 +256,20 @@ async function waitForMoved(page, before) {
 
 const round = (value) => Math.round(value * 100) / 100;
 
+export async function prepareSnapPicture(
+  page,
+  ctx,
+  steps = {
+    newProject,
+    importPicture: importThroughLeftPanel,
+    placePicture: addToTimelineThroughLeftPanel,
+  },
+) {
+  await steps.newProject(page, `Monitor snap ${ctx.runTag ?? 'run'}`);
+  await steps.importPicture(page, ctx.media);
+  await steps.placePicture(page, ctx.media);
+}
+
 const rows = [
   {
     id: ROW_ID,
@@ -247,31 +284,34 @@ const rows = [
         throw new Error(
           `BLOCKED-on-fixture ${ROW_ID}: needs --media <picture file in the fixtures folder>; the row imports it and places it on the timeline`,
         );
-      // A picture imported by the harness is not drawn on the Monitor in a scratch profile, so the row works on the
-      // seeded sample project (its elements are drawn). The first timeline clip is the element that is moved.
-      await goToProjects(page);
-      await page
-        .locator('.project-library-card', { hasText: 'Local editor project' })
-        .first()
-        .click();
+      // A fresh still picture avoids the sample's animated, oversized object and its clipped drag target.
+      await prepareSnapPicture(page, ctx);
       await page.locator('.timeline-clip').first().waitFor({ state: 'visible', timeout: 15_000 });
       // Select the clip on the timeline: the Monitor then draws its outline (the same route the other Monitor rows use).
       await page.locator('.timeline-clip').first().click();
       await waitForSelection(page);
 
-      // The sample's first element is used as it is (typing a scale in the Inspector did not change the document in the harness).
+      await _scaleDown(page);
 
       // Setup (not asserted): move the element off the centre by a clear distance, so the snap drag has a real move.
       const setupOutline = await elementOutline(page);
       const setupFrom = grabOf(setupOutline);
       const beforeSetup = (await readElement(page)).transform;
-      await page.mouse.move(setupFrom.x, setupFrom.y);
-      await page.mouse.down();
-      await page.mouse.move(setupFrom.x + SETUP_OFFSET_PX.x, setupFrom.y + SETUP_OFFSET_PX.y, {
-        steps: 6,
-      });
-      await page.mouse.up();
-      await waitForMoved(page, beforeSetup);
+      await dragAndObserve(
+        page,
+        setupFrom,
+        {
+          x: setupFrom.x + SETUP_OFFSET_PX.x,
+          y: setupFrom.y + SETUP_OFFSET_PX.y,
+        },
+        { ctrl: false, observe: false },
+      );
+      const afterSetup = await waitForMoved(page, beforeSetup);
+      if (
+        Math.abs(afterSetup.transform.x - beforeSetup.x) < 1e-6 &&
+        Math.abs(afterSetup.transform.y - beforeSetup.y) < 1e-6
+      )
+        throw new Error(`${ROW_ID}: the setup drag did not move the picture`);
 
       // Snap drag: the element's unsnapped centre ends SNAP_OFFSET_PX right of the canvas centre, inside the snap range.
       const geometry = await monitorGeometry(page);
@@ -284,7 +324,10 @@ const rows = [
         x: snapFrom.x + (canvasCentre.x + SNAP_OFFSET_PX - centreOf(snapOutline).x),
         y: snapFrom.y + (canvasCentre.y - centreOf(snapOutline).y),
       };
-      const held = await dragAndObserve(page, snapFrom, snapTo, { ctrl: false });
+      const held = await dragAndObserve(page, snapFrom, snapTo, {
+        ctrl: false,
+        onHeld: () => ctx.shot(ROW_ID, 'snapped-held'),
+      });
       const heldReadout = parseReadout(held.readout);
       const lines = [];
       if (!held.overlay)
@@ -308,7 +351,7 @@ const rows = [
         throw new Error(
           `${ROW_ID}: the frame-centre guide is ${round(guideOffsetPx)} px from the canvas centre the row computed; the screen mapping is wrong`,
         );
-      const heldShot = await ctx.shot(ROW_ID, 'snapped-held').catch(() => null);
+      const heldShot = held.shot;
 
       await page.waitForTimeout(150);
       const snappedElement = await waitForMoved(page, element.transform);

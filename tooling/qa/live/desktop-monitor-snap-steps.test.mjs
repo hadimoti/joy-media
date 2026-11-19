@@ -4,9 +4,123 @@ import {
   MONITOR_SNAP_ROWS,
   canvasCentreOnScreen,
   centreFromTransform,
+  dragAndObserve,
   offsetFromFrameCentre,
   parseReadout,
+  prepareSnapPicture,
 } from './desktop-monitor-snap-steps.mjs';
+
+test('snapping starts in a fresh project with the supplied still picture', async () => {
+  const calls = [];
+  const page = {};
+  const steps = {
+    newProject: async (_page, title) => calls.push(['project', title]),
+    importPicture: async (_page, file) => calls.push(['import', file]),
+    placePicture: async (_page, file) => calls.push(['place', file]),
+  };
+  await prepareSnapPicture(page, { media: 'fixture.jpg', runTag: 'abc' }, steps);
+  assert.deepEqual(calls, [
+    ['project', 'Monitor snap abc'],
+    ['import', 'fixture.jpg'],
+    ['place', 'fixture.jpg'],
+  ]);
+});
+
+test('capture runs with the mouse held and input is released even if capture fails', async () => {
+  const events = [];
+  const page = {
+    keyboard: {
+      down: async () => events.push('ctrl down'),
+      up: async () => events.push('ctrl up'),
+    },
+    mouse: {
+      move: async () => events.push('move'),
+      down: async () => events.push('mouse down'),
+      up: async () => events.push('mouse up'),
+    },
+    evaluate: async () => ({ overlay: true, readout: null, guides: [] }),
+  };
+  await assert.rejects(
+    dragAndObserve(
+      page,
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+      {
+        ctrl: true,
+        onHeld: async () => {
+          events.push('capture');
+          throw new Error('capture failed');
+        },
+      },
+    ),
+    /capture failed/u,
+  );
+  assert.deepEqual(events, [
+    'ctrl down',
+    'move',
+    'mouse down',
+    'move',
+    'capture',
+    'mouse up',
+    'ctrl up',
+  ]);
+});
+
+test('release failures are reported while both inputs are released', async () => {
+  const events = [];
+  const page = {
+    keyboard: { down: async () => {}, up: async () => events.push('ctrl up') },
+    mouse: {
+      move: async () => {},
+      down: async () => {},
+      up: async () => {
+        events.push('mouse up');
+        throw new Error('mouse release failed');
+      },
+    },
+    evaluate: async () => ({ overlay: true, readout: null, guides: [] }),
+  };
+  await assert.rejects(
+    dragAndObserve(page, { x: 0, y: 0 }, { x: 1, y: 1 }, { ctrl: true }),
+    /mouse release failed/u,
+  );
+  assert.deepEqual(events, ['mouse up', 'ctrl up']);
+});
+
+test('a failed press still attempts to release inputs', async () => {
+  const events = [];
+  const page = {
+    keyboard: { down: async () => {}, up: async () => events.push('ctrl up') },
+    mouse: {
+      move: async () => {},
+      down: async () => {
+        throw new Error('press failed');
+      },
+      up: async () => events.push('mouse up'),
+    },
+  };
+  await assert.rejects(
+    dragAndObserve(page, { x: 0, y: 0 }, { x: 1, y: 1 }, { ctrl: true }),
+    /press failed/u,
+  );
+  assert.deepEqual(events, ['mouse up', 'ctrl up']);
+});
+
+test('setup drag releases the mouse without waiting for an overlay', async () => {
+  const events = [];
+  const page = {
+    mouse: {
+      move: async () => {},
+      down: async () => events.push('down'),
+      up: async () => events.push('up'),
+    },
+    evaluate: async () => {
+      throw new Error('unexpected overlay read');
+    },
+  };
+  await dragAndObserve(page, { x: 0, y: 0 }, { x: 1, y: 1 }, { ctrl: false, observe: false });
+  assert.deepEqual(events, ['down', 'up']);
+});
 
 test('the snap readout text parses to the box in frame pixels', () => {
   assert.deepEqual(parseReadout('X 540  Y 960  W 270  H 480  A 0°'), {
