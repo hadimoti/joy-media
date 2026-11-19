@@ -1,32 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
 const WORKFLOWS_DIR = join(REPO_ROOT, '.github', 'workflows');
 
 /**
- * Self-hosted-only CI architecture contract.
+ * CI architecture contract.
  *
- * JOY Media's GitHub-hosted Actions minutes/billing are unavailable from Iran,
- * so every workflow job in `.github/workflows/` MUST run on an owner-controlled
- * self-hosted runner. This test enforces that contract offline:
+ * The PR gates (`ci.yml`, `ci-dev.yml`) run on GitHub-hosted `ubuntu-latest`: this repository is
+ * public, and standard GitHub-hosted runners are free for public repositories. Every other workflow
+ * (release and acceptance) must run on an owner-controlled self-hosted runner. This test enforces
+ * that contract offline:
  *
- *   1. No job in any workflow may use `ubuntu-latest`, `windows-latest`,
- *      `macos-latest`, or any other GitHub-hosted label.
- *   2. Every job must list an `allowed` self-hosted label tuple, where the
+ *   1. No job may use `windows-latest`, `macos-latest`, or any other hosted label. The only hosted
+ *      label allowed is `ubuntu-latest`, and only in the two PR gate workflows.
+ *   2. Every other job must list an `allowed` self-hosted label tuple, where the
  *      allowed set is exactly the PC Docker self-hosted runner labels the
  *      repository actually provisions (see ops/self-hosted/linux-runner,
  *      docs/SELF-HOSTED-CI.md).
  *   3. The runner contract lives entirely under `ops/self-hosted/`. Re-adding
  *      a hosted label, or pointing a job at a label without an entry in
  *      `ops/self-hosted/`, fails this test before a CI minute is consumed.
- *
- * The label allowlist is read directly from the README files in each
- * `ops/self-hosted/<runner>/` directory, so a runner added later is honored
- * automatically — but only AFTER its `README.md` declares the label.
  */
 
 const FORBIDDEN_HOSTED_LABEL_PATTERN = new RegExp(
@@ -63,6 +60,10 @@ const ALLOWED_LABEL_TUPLES: ReadonlyArray<readonly string[]> = [
   // joy-media-acceptance (isolated acceptance Linux runner with its own volume)
   ['self-hosted', 'linux', 'x64', 'joy-media-acceptance'],
 ];
+
+// The two PR gate workflows run on GitHub-hosted Linux. Only these may use a hosted label, and only `ubuntu-latest`.
+const HOSTED_GATE_WORKFLOWS: ReadonlySet<string> = new Set(['ci.yml', 'ci-dev.yml']);
+const HOSTED_GATE_LABEL = 'ubuntu-latest';
 
 function normalizeTuple(values: string[]): string[] {
   return [...values]
@@ -209,6 +210,7 @@ describe('self-hosted-only CI architecture contract', () => {
   });
 
   it.each(workflows)('forbids hosted runner labels in %s', (workflowPath) => {
+    const gate = HOSTED_GATE_WORKFLOWS.has(basename(workflowPath));
     const text = readFileSync(workflowPath, 'utf8');
     // Pre-filter obvious comments — GitHub Actions does not honor commented
     // `runs-on:` lines, so we ignore them in the forbidden-label scan but
@@ -228,6 +230,7 @@ describe('self-hosted-only CI architecture contract', () => {
         .split(',')
         .map((s) => s.trim().replace(/^['"]|['"]$/g, ''));
       for (const tok of tokens) {
+        if (gate && tok === HOSTED_GATE_LABEL) continue;
         expect(
           HOSTED_LABEL_TOKENS.has(tok),
           `forbidden hosted runner label "${tok}" on line ${i + 1} of ${workflowPath}`,
@@ -235,7 +238,7 @@ describe('self-hosted-only CI architecture contract', () => {
       }
       // Also reject the regex form (catches ubuntu-22.04 / windows-2022 etc).
       expect(
-        FORBIDDEN_HOSTED_LABEL_PATTERN.test(line),
+        FORBIDDEN_HOSTED_LABEL_PATTERN.test(gate ? line.replace(HOSTED_GATE_LABEL, 'gate') : line),
         `forbidden hosted runner pattern on line ${i + 1} of ${workflowPath}: ${line.trim()}`,
       ).toBe(false);
     }
@@ -247,6 +250,16 @@ describe('self-hosted-only CI architecture contract', () => {
       const text = readFileSync(workflowPath, 'utf8');
       const entries = findRunsOnEntries(text);
       expect(entries.length).toBeGreaterThan(0);
+
+      if (HOSTED_GATE_WORKFLOWS.has(basename(workflowPath))) {
+        for (const entry of entries) {
+          expect(
+            normalizeTuple(entry.tuple),
+            `runs-on on line ${entry.lineNo} of ${workflowPath}`,
+          ).toEqual([HOSTED_GATE_LABEL]);
+        }
+        return;
+      }
 
       for (const entry of entries) {
         const sorted = normalizeTuple(entry.tuple);
