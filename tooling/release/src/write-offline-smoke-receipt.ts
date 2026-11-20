@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   createOfflineSmokeReceipt,
+  localOfflineSmokeRunWindow,
   validateOfflineSmokeReceipt,
   type OfflineSmokeReceiptContext,
   type OfflineSmokeRunEvidence,
@@ -62,7 +63,7 @@ function main(argv: readonly string[]): number {
       candidateSha: context.candidateSha,
       artifactName: context.artifactName,
       artifactSha256: context.artifactSha256,
-      runWindow: { start: evidence.startedAt, end: evidence.finishedAt },
+      runWindow: localOfflineSmokeRunWindow(context, evidence),
     });
     if (!outcome.ok) {
       for (const reason of outcome.reasons) process.stderr.write('offline-smoke: ' + reason + '\n');
