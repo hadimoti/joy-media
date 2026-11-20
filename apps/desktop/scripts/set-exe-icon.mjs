@@ -39,6 +39,11 @@ export async function setExecutableVersionInfo(
   const infos = Resource.VersionInfo.fromEntries(res.entries);
   if (infos.length === 0) throw new Error(`No version resource found in ${exePath}`);
   for (const info of infos) {
+    // resedit's setFileVersion/setProductVersion also rewrite the FileVersion and ProductVersion strings to the
+    // four-part form, so the numbers are set first and the strings after them: ProductVersion must read exactly
+    // major.minor.patch (Explorer and Get-Item VersionInfo.ProductVersion show the string).
+    info.setFileVersion(major, minor, patch, 0);
+    info.setProductVersion(major, minor, patch, 0);
     const languages = info.getAllLanguagesForStringValues();
     const targets = languages.length > 0 ? languages : [{ lang: 1033, codepage: 1200 }];
     for (const language of targets) {
@@ -52,8 +57,6 @@ export async function setExecutableVersionInfo(
         FileVersion: `${version}.0`,
       });
     }
-    info.setFileVersion(major, minor, patch, 0);
-    info.setProductVersion(major, minor, patch, 0);
     info.outputToResourceEntries(res.entries);
   }
   res.outputResource(exe);

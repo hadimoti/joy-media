@@ -72,6 +72,18 @@ export interface OfflineSmokeRunEvidence {
   readonly network: OfflineSmokeNetworkEvidence;
 }
 
+/**
+ * The window a locally written receipt is checked against. It opens at the candidate build, like the CI check
+ * (which opens at the candidate commit), because builtAt always comes before the Sandbox run starts: a window of
+ * the Sandbox run alone refused every receipt with "builtAt is outside the run window".
+ */
+export function localOfflineSmokeRunWindow(
+  context: Pick<OfflineSmokeReceiptContext, 'builtAt'>,
+  evidence: Pick<OfflineSmokeRunEvidence, 'finishedAt'>,
+): OfflineSmokeRunWindow {
+  return { start: context.builtAt, end: evidence.finishedAt };
+}
+
 /** Builds the gate receipt from Sandbox evidence; zero counters are justified only by isolation evidence. */
 export function createOfflineSmokeReceipt(
   context: OfflineSmokeReceiptContext,

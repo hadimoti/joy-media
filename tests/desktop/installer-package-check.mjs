@@ -23,8 +23,11 @@ const releasesDir = resolve(desktopDistDir, 'releases');
 console.log('1. Verifying distribution files in joy-media-win32-x64...');
 const requiredFiles = [
   'joy-media.exe',
-  'joy.cmd',
-  'joy-media.cmd',
+  // The CLI launchers live in bin\, the folder registered on the user PATH. The install root holds the GUI
+  // joy-media.exe, and PowerShell resolves .exe before .cmd in one folder, so a root joy-media.cmd on PATH
+  // would be shadowed: "joy-media doctor" would open the app instead of running the CLI.
+  'bin/joy.cmd',
+  'bin/joy-media.cmd',
   'Setup-JoyMedia.ps1',
   'install.cmd',
   'uninstall.cmd',
@@ -42,11 +45,17 @@ for (const relPath of requiredFiles) {
   const fullPath = resolve(standaloneDir, relPath);
   assert.ok(existsSync(fullPath), `Required distribution file missing: ${relPath}`);
 }
+for (const shadowed of ['joy.cmd', 'joy-media.cmd']) {
+  assert.ok(
+    !existsSync(resolve(standaloneDir, shadowed)),
+    `${shadowed} must not sit next to joy-media.exe in the install root (bin\\ holds the CLI launchers)`,
+  );
+}
 console.log('✔ All required distribution files present.');
 
 // 2. Test Packaged CLI Execution via joy.cmd
 console.log('2. Testing packaged CLI execution (joy.cmd doctor)...');
-const joyCmdPath = resolve(standaloneDir, 'joy.cmd');
+const joyCmdPath = resolve(standaloneDir, 'bin', 'joy.cmd');
 const doctorResult = spawnSync(joyCmdPath, ['doctor'], {
   shell: true,
   encoding: 'utf8',
@@ -105,11 +114,11 @@ assert.strictEqual(
   'JOY Media',
   'joy-media.exe FileDescription is not JOY Media',
 );
-// Windows reports the numeric product version with four parts, so 1.1.1 reads back as 1.1.1.0.
-assert.ok(
-  exeDetails.ProductVersion === packageVersion ||
-    exeDetails.ProductVersion === `${packageVersion}.0`,
-  `joy-media.exe ProductVersion ${exeDetails.ProductVersion} is not the app version ${packageVersion}`,
+// The ProductVersion string must read exactly the app version (1.1.1, never 1.1.1.0); FileVersion has four parts.
+assert.strictEqual(
+  exeDetails.ProductVersion,
+  packageVersion,
+  `joy-media.exe ProductVersion ${exeDetails.ProductVersion} is not exactly the app version ${packageVersion}`,
 );
 assert.strictEqual(
   exeDetails.FileVersion,
@@ -287,7 +296,7 @@ try {
   mkdirSync(fixtureSourceDir, { recursive: true });
   const fixtureFiles = [
     'joy-media.exe',
-    'joy.cmd',
+    'bin/joy.cmd',
     'resources/app/cli/joy-media-bundle.mjs',
     'resources/app/worker/joy-worker.exe',
   ];
@@ -360,18 +369,24 @@ console.log('5b. Testing the user PATH merge in Setup-JoyMedia.ps1 and in the se
   const installDir = 'C:\\Users\\T\\AppData\\Local\\Programs\\JOY Media';
   const apps = 'C:\\Users\\T\\AppData\\Local\\Microsoft\\WindowsApps';
   const setupSource = readFileSync(resolve(standaloneDir, 'Setup-JoyMedia.ps1'), 'utf8');
-  const fnStart = setupSource.indexOf('function Get-PathWithInstallDir');
+  const binDir = `${installDir}\\bin`;
+  const fnStart = setupSource.indexOf('function Get-PathWithCliDir');
   const fnEnd = setupSource.indexOf('$userPath = [Environment]::GetEnvironmentVariable', fnStart);
   assert.ok(
     fnStart >= 0 && fnEnd > fnStart,
-    'Get-PathWithInstallDir was not found in the setup script',
+    'Get-PathWithCliDir was not found in the setup script',
   );
+  // The PATH gets <install>\bin; an <install> entry from v1.1.0 or earlier is dropped, because that folder
+  // holds joy-media.exe (the GUI), which would shadow the joy-media CLI in PowerShell.
   const psCases = [
-    ['', installDir],
-    [apps, `${apps};${installDir}`],
-    [`${apps};C:\\B`, `${apps};C:\\B;${installDir}`],
-    [`${apps};${installDir}`, '<unchanged>'],
-    [`${apps};${installDir.toLowerCase()}\\`, '<unchanged>'],
+    ['', binDir],
+    [apps, `${apps};${binDir}`],
+    [`${apps};C:\\B`, `${apps};C:\\B;${binDir}`],
+    [`${apps};${binDir}`, '<unchanged>'],
+    [`${apps};${binDir.toLowerCase()}\\`, '<unchanged>'],
+    [`${apps};${installDir}`, `${apps};${binDir}`],
+    [`${installDir}\\;${apps};${binDir}`, `${apps};${binDir}`],
+    ['C:\\Programs\\JOY Media Tools', `C:\\Programs\\JOY Media Tools;${binDir}`],
   ];
   const psScript =
     setupSource.slice(fnStart, fnEnd) +
@@ -379,7 +394,7 @@ console.log('5b. Testing the user PATH merge in Setup-JoyMedia.ps1 and in the se
     psCases
       .map(
         ([input]) =>
-          `$r = Get-PathWithInstallDir '${input}' $i; if ($null -eq $r) { '<unchanged>' } else { $r }`,
+          `$r = Get-PathWithCliDir '${input}' $i; if ($null -eq $r) { '<unchanged>' } else { $r }`,
       )
       .join('\n');
   const psRun = spawnSync(
@@ -406,14 +421,18 @@ console.log('5b. Testing the user PATH merge in Setup-JoyMedia.ps1 and in the se
     try {
       const esc = (text) => text.replace(/\\/g, '\\\\');
       const csCases = [
-        ['', installDir],
-        ['C:\\A', `C:\\A;${installDir}`],
-        [`${apps}${installDir}`, `${apps};${installDir}`],
-        [`C:\\X;${apps}${installDir};C:\\Y`, `C:\\X;${apps};${installDir};C:\\Y`],
-        [`${apps};${installDir.toUpperCase()}\\`, '<unchanged>'],
-        [`${installDir};${installDir}`, installDir],
-        ['%LOCALAPPDATA%\\Programs\\JOY Media', '<unchanged>'],
-        ['C:\\Programs\\JOY Media Tools', `C:\\Programs\\JOY Media Tools;${installDir}`],
+        ['', binDir],
+        ['C:\\A', `C:\\A;${binDir}`],
+        // The v1.0.x glued entry is split back, and its install-root half is replaced by bin.
+        [`${apps}${installDir}`, `${apps};${binDir}`],
+        [`C:\\X;${apps}${installDir};C:\\Y`, `C:\\X;${apps};C:\\Y;${binDir}`],
+        [`${apps};${binDir.toUpperCase()}\\`, '<unchanged>'],
+        [`${binDir};${binDir}`, binDir],
+        ['%LOCALAPPDATA%\\Programs\\JOY Media\\bin', '<unchanged>'],
+        // The v1.1.0 entry (the install root) is dropped and bin is added.
+        [`${apps};${installDir}`, `${apps};${binDir}`],
+        ['%LOCALAPPDATA%\\Programs\\JOY Media', binDir],
+        ['C:\\Programs\\JOY Media Tools', `C:\\Programs\\JOY Media Tools;${binDir}`],
       ];
       const harness = `using System;
 using JoyMedia.Setup;
@@ -424,7 +443,7 @@ static class T {
 ${csCases
   .map(
     ([input]) =>
-      `    { string r = UserPathEditor.WithInstallDir("${esc(input)}", i); Console.WriteLine(r == null ? "<unchanged>" : r); }`,
+      `    { string r = UserPathEditor.WithCliDir("${esc(input)}", i); Console.WriteLine(r == null ? "<unchanged>" : r); }`,
   )
   .join('\n')}
   }
@@ -455,6 +474,17 @@ ${csCases
     }
   }
   console.log('✔ User PATH merge passed.');
+}
+
+// 5b2. The uninstaller removes both the bin entry and a legacy install-root entry from the user PATH.
+console.log('5b2. Checking that uninstall.cmd removes the bin and install-root PATH entries...');
+{
+  const uninstallSource = readFileSync(resolve(standaloneDir, 'uninstall.cmd'), 'utf8');
+  assert.match(
+    uninstallSource,
+    /JOY_MEDIA_INSTALL_DIR \+ '\\bin'/,
+    'uninstall.cmd does not remove the bin PATH entry',
+  );
 }
 
 // 5c. The setup exe is built after the packager writes SHA256SUMS.txt, so build-installer.ps1 adds its

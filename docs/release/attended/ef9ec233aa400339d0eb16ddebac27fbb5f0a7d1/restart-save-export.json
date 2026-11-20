@@ -1,0 +1,65 @@
+{
+  "schema": "joy-media.attended-receipt/1",
+  "scenario": {
+    "id": "desktop.app.restart-save-export",
+    "status": "passed",
+    "firstAttemptPassed": true,
+    "retries": 0
+  },
+  "candidateSha": "ef9ec233aa400339d0eb16ddebac27fbb5f0a7d1",
+  "app": {
+    "exeSha256": "982b6e8f77edd9adbce6d57fbf303510fd6b7e5f80caa9c4216a3f4b6391684f",
+    "unpackedDir": "C:\\jgp\\attended-ef9ec233-20261120\\app\\joy-media-win32-x64"
+  },
+  "run": {
+    "id": "14d5e0d7-9d1c-4c49-ad2f-be551d39456e",
+    "attempt": 1,
+    "startedAt": "2026-11-20T10:57:23.637Z",
+    "finishedAt": "2026-11-20T10:57:32.406Z",
+    "operator": "owner-at-pc",
+    "mode": "scripted",
+    "manual": false
+  },
+  "guards": {
+    "joyKeyBefore": "af05be55222c86fece27e738b7e8a931cb4261c9797261c67dde3c71a4e5cac0",
+    "joyKeyAfter": "af05be55222c86fece27e738b7e8a931cb4261c9797261c67dde3c71a4e5cac0",
+    "ownerLibraryFilesBefore": 3221,
+    "ownerLibraryFilesAfter": 3221,
+    "installedFolderTouched": false
+  },
+  "checks": [
+    {
+      "name": "project-saved",
+      "status": "passed",
+      "detail": "saved local-revision:v1:6281558f-fa04-404e-829b-05de4a9928c4:timeline=1:document=7:graph=0:artifacts=0:looks=0 with the title \"Attended restart check 14d5e0d7\""
+    },
+    {
+      "name": "app-restarted",
+      "status": "passed",
+      "detail": "process 23860 started after 3528 closed"
+    },
+    {
+      "name": "project-reopened-after-restart",
+      "status": "passed",
+      "detail": "revision local-revision:v1:6281558f-fa04-404e-829b-05de4a9928c4:timeline=1:document=7:graph=0:artifacts=0:looks=0 and its title read back after the restart"
+    },
+    {
+      "name": "export-completed",
+      "status": "passed",
+      "detail": "job 3218d8ee-424c-49f4-835e-f26d5001ecde done from revision local-revision:v1:6281558f-fa04-404e-829b-05de4a9928c4:timeline=1:document=7:graph=0:artifacts=0:looks=0; export.mp4 is 3828606 bytes, sha256 fa485e2753bc32fc48f4b75fd71e129d7e0450c443f106f56fbdf2e13ed0fd48"
+    },
+    {
+      "name": "export-probed-playable",
+      "status": "passed",
+      "detail": "mp4 with one h264 1080x1920 stream and one aac stream, 3.000 s"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "export.mp4",
+      "path": "export.mp4",
+      "sha256": "fa485e2753bc32fc48f4b75fd71e129d7e0450c443f106f56fbdf2e13ed0fd48",
+      "bytes": 3828606
+    }
+  ]
+}

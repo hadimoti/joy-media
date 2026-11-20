@@ -7,6 +7,15 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
+// The setup exe's version resource: Explorer and Get-Item VersionInfo.ProductVersion read the informational
+// version, which must be exactly the app version (1.1.1); the file version has the fourth part.
+[assembly: AssemblyTitle("JOY Media Setup")]
+[assembly: AssemblyProduct("JOY Media")]
+[assembly: AssemblyCompany("JOY Team")]
+[assembly: AssemblyInformationalVersion(JoyMedia.Setup.InstallerEngine.ProductVersion)]
+[assembly: AssemblyFileVersion(JoyMedia.Setup.InstallerEngine.ProductVersion + ".0")]
+[assembly: AssemblyVersion(JoyMedia.Setup.InstallerEngine.ProductVersion + ".0")]
+
 namespace JoyMedia.Setup
 {
     static class Program
@@ -121,6 +130,14 @@ namespace JoyMedia.Setup
                 }
             }
 
+            // v1.1.0 and earlier put the CLI launchers in the install folder; they now live in bin\. The old copies
+            // would shadow nothing once that folder leaves PATH, but they are removed so only one launcher set exists.
+            foreach (string legacyLauncher in new string[] { "joy.cmd", "joy-media.cmd" })
+            {
+                string legacyPath = Path.Combine(installPath, legacyLauncher);
+                try { if (File.Exists(legacyPath)) File.Delete(legacyPath); } catch { }
+            }
+
             if (progressCallback != null) progressCallback(90, "Creating shortcuts...");
             CreateShortcuts(installPath);
 
@@ -168,7 +185,7 @@ namespace JoyMedia.Setup
                     if (envKey != null)
                     {
                         string path = envKey.GetValue("Path", "", RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
-                        string updated = UserPathEditor.WithInstallDir(path, installPath);
+                        string updated = UserPathEditor.WithCliDir(path, installPath);
                         if (updated != null)
                         {
                             envKey.SetValue("Path", updated, RegistryValueKind.ExpandString);

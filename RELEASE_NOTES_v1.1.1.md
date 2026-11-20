@@ -151,6 +151,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - **GPU.** An NVIDIA hardware-encoder crash was seen on one machine before v1.1.0. Its cause is not known. The graphics card path of the colour engine is not yet checked on screen.
 - **Icon cache after upgrading from v1.0.2.** The Desktop shortcut can keep its old icon. This is the Windows icon cache, not JOY Media.
 - **Providers.** Kimi and xAI model answers and the Get a key and API docs links on the provider cards may not work as expected.
+- **Command line in PowerShell.** Use `joy-media` in PowerShell. There, `joy` opens the Windows Game Controllers panel, because Windows finds its own joy.cpl before the JOY Media folder on the PATH. In Command Prompt, `joy` and `joy-media` both run the JOY Media command line.
 - **Export.** The command line has 3 export choices (MP4, WebM, ProRes). The app has 5 presets, so the same request can give different files. Some effects may not appear in exported videos.
 - **Effect previews.** Some effect cards play the wrong preview loop, so the card may not show the effect as it looks.
 - **Some drags.** One clip dragged from the asset panel showed on the timeline but was missing from the saved project; this is not yet explained. Dropping an image from the Asset Library onto the filter layer can do nothing, with no message.

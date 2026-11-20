@@ -254,7 +254,8 @@ if ($Kind -eq 'lifecycle' -and $OfflineSmoke) {
         '--receipt', $offlineReceipt,
         '--sums', $sumsPath,
         '--artifact', $context.artifactName,
-        '--window-start', $evidence.startedAt,
+        # The window opens at the build, as in write-offline-smoke-receipt.ts: builtAt precedes the Sandbox run.
+        '--window-start', $context.builtAt,
         '--window-end', $evidence.finishedAt
     )
     & node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types $checker @checkerArguments

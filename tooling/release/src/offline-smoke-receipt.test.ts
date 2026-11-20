@@ -264,3 +264,65 @@ describe('offline-smoke receipt (joy-media.offline-smoke/1)', () => {
     expect(validateOfflineSmokeReceiptText(JSON.stringify(baseline()), expected).ok).toBe(true);
   });
 });
+
+describe('local Sandbox run window (write-offline-smoke-receipt, run-sandbox.ps1)', () => {
+  const context = {
+    candidateSha: CANDIDATE,
+    workflowSha: 'c'.repeat(40),
+    runId: 'local-sandbox',
+    attempt: 1,
+    artifactName: ARTIFACT_NAME,
+    artifactSha256: ARTIFACT_SHA,
+    builtAt: '2026-11-20T09:49:55.481Z',
+  };
+  const evidence = {
+    startedAt: '2026-11-20T09:56:35.000Z',
+    finishedAt: '2026-11-20T09:56:50.000Z',
+    steps: [
+      { id: 'launch', result: 'pass' as const },
+      { id: 'import', result: 'pass' as const },
+      { id: 'export', result: 'pass' as const },
+      { id: 'doctor', result: 'pass' as const },
+      { id: 'render', result: 'pass' as const },
+    ],
+    network: {
+      networkingDisabled: true,
+      adapterPresent: false,
+      adapterCount: 0,
+      reason: 'Windows Sandbox networking was disabled; adapter enumeration returned zero.',
+    },
+  };
+
+  it('opens at the build, so a candidate built before the Sandbox run is accepted', () => {
+    const receipt = offlineSmokeReceipt.createOfflineSmokeReceipt(
+      context,
+      evidence,
+      'adapters: 0\n',
+    );
+    const runWindow = offlineSmokeReceipt.localOfflineSmokeRunWindow(context, evidence);
+    expect(runWindow).toEqual({ start: context.builtAt, end: evidence.finishedAt });
+    expect(
+      validateOfflineSmokeReceipt(receipt, {
+        candidateSha: CANDIDATE,
+        artifactName: ARTIFACT_NAME,
+        artifactSha256: ARTIFACT_SHA,
+        runWindow,
+      }),
+    ).toEqual({ ok: true, reasons: [] });
+  });
+
+  it('the Sandbox run alone is too narrow: builtAt always falls before it', () => {
+    const receipt = offlineSmokeReceipt.createOfflineSmokeReceipt(
+      context,
+      evidence,
+      'adapters: 0\n',
+    );
+    const result = validateOfflineSmokeReceipt(receipt, {
+      candidateSha: CANDIDATE,
+      artifactName: ARTIFACT_NAME,
+      artifactSha256: ARTIFACT_SHA,
+      runWindow: { start: evidence.startedAt, end: evidence.finishedAt },
+    });
+    expect(result.reasons).toContain('builtAt is outside the run window');
+  });
+});
