@@ -70,6 +70,93 @@ describe('Monitor snap targets', () => {
     ]);
   });
 
+  it.each([
+    {
+      label: 'left canvas edge',
+      box: { x: 5, y: 200, width: 20, height: 20 },
+      otherBoxes: [],
+      guides: [],
+      axis: 'x',
+      position: 0,
+      kind: 'frame-edge',
+      expected: { x: 0, y: 200, width: 20, height: 20 },
+    },
+    {
+      label: 'right canvas edge',
+      box: { x: 974, y: 200, width: 20, height: 20 },
+      otherBoxes: [],
+      guides: [],
+      axis: 'x',
+      position: 1000,
+      kind: 'frame-edge',
+      expected: { x: 980, y: 200, width: 20, height: 20 },
+    },
+    {
+      label: 'title-safe margin',
+      box: { x: 56, y: 200, width: 20, height: 20 },
+      otherBoxes: [],
+      guides: [],
+      axis: 'x',
+      position: 50,
+      kind: 'title-safe',
+      expected: { x: 50, y: 200, width: 20, height: 20 },
+    },
+    {
+      label: 'action-safe margin',
+      box: { x: 100, y: 11.5, width: 20, height: 2 },
+      otherBoxes: [],
+      guides: [],
+      axis: 'y',
+      position: 17.5,
+      kind: 'action-safe',
+      expected: { x: 100, y: 15.5, width: 20, height: 2 },
+    },
+    {
+      label: 'user guide',
+      box: { x: 127, y: 200, width: 20, height: 20 },
+      otherBoxes: [],
+      guides: [{ axis: 'x' as const, position: 123 }],
+      axis: 'x',
+      position: 123,
+      kind: 'user-guide',
+      expected: { x: 123, y: 200, width: 20, height: 20 },
+    },
+    {
+      label: 'other element edge',
+      box: { x: 104, y: 200, width: 20, height: 20 },
+      otherBoxes: [{ x: 100, y: 40, width: 80, height: 60 }],
+      guides: [],
+      axis: 'x',
+      position: 100,
+      kind: 'element-edge',
+      expected: { x: 100, y: 200, width: 20, height: 20 },
+    },
+    {
+      label: 'other element centre',
+      box: { x: 129, y: 200, width: 20, height: 20 },
+      otherBoxes: [{ x: 100, y: 40, width: 80, height: 60 }],
+      guides: [],
+      axis: 'x',
+      position: 140,
+      kind: 'element-centre',
+      expected: { x: 130, y: 200, width: 20, height: 20 },
+    },
+  ])(
+    'snaps to the $label at the exact target position',
+    ({ box, otherBoxes, guides, axis, position, kind, expected }) => {
+      const targets = collectSnapTargets(FRAME, otherBoxes, guides);
+      const result = snapMove(box, targets, 1);
+
+      expect(result.box.x).toBeCloseTo(expected.x, 10);
+      expect(result.box.y).toBeCloseTo(expected.y, 10);
+      expect(result.box.width).toBe(expected.width);
+      expect(result.box.height).toBe(expected.height);
+      const guide = result.guides.find((candidate) => candidate.axis === axis);
+      expect(guide?.kind).toBe(kind);
+      expect(guide?.position).toBeCloseTo(position, 10);
+    },
+  );
+
   it('moves the dragged scale edge to a target while holding its opposite edge', () => {
     const initial: SnapBox = { x: 10, y: 10, width: 90, height: 40 };
     const candidate: SnapBox = { x: 10, y: 10, width: 94, height: 40 };
