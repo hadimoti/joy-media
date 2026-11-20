@@ -3,8 +3,10 @@ import type { RenderFrameIR, RenderNode } from '@joy-media/render-ir';
 import { layoutTemplatedCaptionNodes, rtlStressCues } from '@joy-media/captions-core';
 import { visualObjectToRenderNode } from '@joy-media/visual-object-renderer';
 import type { ResolvedObject } from '@joy-media/visual-object-renderer';
-import { createBrowserPixiRenderer } from '@joy-media/renderer-pixi/browser';
-import { pixiTextDirectionOf } from '../../../packages/renderer-pixi/src/pixi-text-direction.js';
+import {
+  createBrowserPixiRenderer,
+  pixiTextDirectionOf,
+} from '@joy-media/renderer-pixi/browser';
 import { withCaptionBurnIn, withCaptionBurnInNodes } from './caption-burn-in.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { TEXT_TEMPLATES } from './text-template-catalog.js';

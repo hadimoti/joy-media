@@ -69,6 +69,7 @@ import {
 import { createGlTransitionFilter, type GlTransitionFilterHandle } from './gl-transition-filter.js';
 import { dualTextureBitmapsReady } from './transition-bitmaps.js';
 import { registerPixiTextDirection } from './pixi-text-direction.js';
+export { pixiTextDirectionOf } from './pixi-text-direction.js';
 import { layoutTextSpanOffsets } from './text-span-layout.js';
 import {
   canvasFontFamilyStack,

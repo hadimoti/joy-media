@@ -1,13 +1,12 @@
 # Phase 1 re-check (T-D16, C-122 and C-123)
 
-Checked against the code on branch `v111/recs` (16 Nov 2026). Line numbers are in
-`apps/editor-web/src/` unless a path is given. The tracker (`02-TRACKER.md`) says T-D03,
+Checked against fetched `origin/main` (`fde36485`) on branch `codex/t-d16-screenshots`
+on 20 Nov 2026. Line numbers are in `apps/editor-web/src/` unless a path is given. The tracker (`02-TRACKER.md`) says T-D03,
 T-D05, T-D06, T-D07, T-D11, T-D12, T-D13 and T-D14 are merged, so their rows are checked
 against the code here.
 
-**No screenshot was taken for this check.** Every "done" row below means "the code does it";
-none is marked as seen on screen. The live look is still owed (tracker T-L03 and the owner's
-own check).
+**Visual re-check:** all eight rows were inspected on an isolated unpacked build from
+`origin/main`, using a fresh profile and scratch library. Screenshots are listed below.
 
 Status key: **DONE** = the code does it. **FIXED** = it was missing and this pass fixed it.
 
@@ -20,7 +19,22 @@ Status key: **DONE** = the code does it. **FIXED** = it was missing and this pas
 | 5   | P1-5: three empty states on first run (C-107)                                               | DONE   | `AssetLibraryPanel.tsx:1173-1185` (one drop zone, one Import button); `app.css:16014-16027` (`.asset-library-drop-zone`); `TimelineEmptyState.tsx:140` (timeline empty state); `InspectorPanel.tsx:1306` (one line, "Select a clip", when nothing is selected)                                                                                       | T-D05 merged 13 Nov. Dead CSS: `app.css:4499` (`.timeline-empty-hint`) has no user in any `.tsx` file; it can go in a cleanup. Not seen on screen.                                                                                                          |
 | 6   | P1-6: Joy Code with no model (C-108)                                                        | DONE   | `joy-code-connect-model-card.tsx:9-12` (one message, one action "Connect a model"); `:24-43` (the card); `:63-91` (`JoyCodeReadinessSlot`, shared by Edit, Recipes and Looks); `AgentPanel.tsx:70,3948,3992,4429` (slot used); `app.css:9544-9562` (`.joy-code-connect-card`)                                                                        | T-D06 merged. The old note gave `app.css:8909` and `AgentPanel.tsx:3555`; both stale. Not seen on screen.                                                                                                                                                   |
 | 7   | P1-7: raw ids in the Inspector; clip name in place of "V1" (C-098, C-109)                   | FIXED  | Track row: `App.tsx:6519-6527` (now `professionalTrackLabel`, was the raw `track.id`); helper: `timeline-track-family.ts:98` (row name, else V1 or A1 code, same order as the Timeline); title: `InspectorPanel.tsx:661-662` (kind or "Clip", never an id). Test: `timeline-track-family.test.ts` (new case "labels a row by its name or its code"). | Was OPEN: the Inspector showed `track-0` in the Track row and could show an object id in the title. T-D03 had not closed this. Not seen on screen.                                                                                                          |
-| 8   | P2-11: media card actions always visible (C-113)                                            | FIXED  | Hidden by default and shown on hover or focus: `app.css:7771-7796` (`.asset-card-actions` opacity 0; `.asset-card:hover` opacity 1). The override that made them always visible is removed: `app.css:15762-15770` (`opacity: 1` deleted from the large and medium rule). List view was already hover-only: `app.css:15974-15989`.                    | Was wrongly marked DONE. The default library view is `medium` (`ui-preferences.ts:61`), so every card showed its actions. Not seen on screen.                                                                                                               |
+| 8   | P2-11: media card actions always visible (C-113)                                            | FIXED  | Hidden by default and shown on hover or focus: `app.css:7771-7796` (`.asset-card-actions` opacity 0; `.asset-card:hover` opacity 1). The override that made them always visible is removed: `app.css:15762-15770` (`opacity: 1` deleted from the large and medium rule). List view was already hover-only: `app.css:15974-15989`.                    | Was wrongly marked DONE. The default library view is `medium` (`ui-preferences.ts:61`), so every card showed its actions.                                                                                                                                     |
+
+## Screenshot evidence (20 Nov 2026)
+
+Each image is from the isolated unpacked build, scratch profile and scratch library. The paths below are under `C:\jgp\v111\evidence\T-D16\2026-11-20\`.
+
+| # | File and line | Visual result | Screenshot path |
+| --- | --- | --- | --- |
+| 1 | `app.css:1311-1319`, `app.css:8183-8192`, `app.css:8370-8377` | PASS — settings dialog buttons and padding | `C:\jgp\v111\evidence\T-D16\2026-11-20\row-01-dialog-padding.png` |
+| 2 | `ui-preferences.ts:55-56`, `ui-preferences.ts:103-117`, `dock-layout.ts:85` | PASS — preview-first editor | `C:\jgp\v111\evidence\T-D16\2026-11-20\row-02-preview-first.png` |
+| 3 | `timeline-linked-audio-source.ts:30,46`, `app.css:3824-3849`, `timeline-media.ts:11,73` | PASS — linked A1 audio strip and video clip colour; strip appeared after reopening the saved scratch project | `C:\jgp\v111\evidence\T-D16\2026-11-20\row-03-audio-strip-and-clip-colour-reopened.png` |
+| 4 | `ProjectLibrary.tsx:540-568`, `app.css:11673-11692`, `app.css:11759`, `project-card.ts` | PASS — project cards | `C:\jgp\v111\evidence\T-D16\2026-11-20\row-04-project-cards.png` |
+| 5 | `AssetLibraryPanel.tsx:1173-1185`, `app.css:16014-16027`, `TimelineEmptyState.tsx:140`, `InspectorPanel.tsx:1306` | PASS — Media, Timeline and Inspector empty states | `C:\jgp\v111\evidence\T-D16\2026-11-20\row-05-empty-states.png` |
+| 6 | `joy-code-connect-model-card.tsx:9-12,24-43,63-91`, `AgentPanel.tsx:70,3948,3992,4429`, `app.css:9544-9562` | PASS — no-model Joy Code state | `C:\jgp\v111\evidence\T-D16\2026-11-20\row-06-joy-code-no-model.png` |
+| 7 | `App.tsx:6519-6527`, `timeline-track-family.ts:98`, `InspectorPanel.tsx:661-662` | PASS — Inspector shows “Visual 1,” not a raw track ID | `C:\jgp\v111\evidence\T-D16\2026-11-20\row-07-inspector-track-label.png` |
+| 8 | `app.css:7771-7796`, `app.css:15762-15770`, `app.css:15974-15989` | PASS — media-card actions hidden at rest | `C:\jgp\v111\evidence\T-D16\2026-11-20\row-08-media-actions-hidden.png` |
 
 ## Type, space and motion (the rest of T-D16)
 
