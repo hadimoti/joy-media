@@ -109,6 +109,30 @@ export interface TimelineQcCanvas {
 
 export type TimelineQcCanvasFactory = (width: number, height: number) => TimelineQcCanvas;
 
+/** Reuses the timeline QC JPEG encoder for an already-decoded RGBA frame. */
+export async function encodeTimelineQcFrameJpeg(frame: {
+  readonly outputTimeUs: number;
+  readonly width: number;
+  readonly height: number;
+  readonly rgba: Uint8Array | Uint8ClampedArray;
+}): Promise<{ readonly jpeg: Blob; readonly width: number; readonly height: number }> {
+  if (
+    !Number.isSafeInteger(frame.outputTimeUs) ||
+    frame.outputTimeUs < 0 ||
+    !Number.isSafeInteger(frame.width) ||
+    frame.width < 1 ||
+    !Number.isSafeInteger(frame.height) ||
+    frame.height < 1 ||
+    frame.rgba.length !== frame.width * frame.height * 4
+  )
+    throw new TimelineQcSamplerError('invalid-plan');
+  const options = normalizeSamplerOptions({});
+  const encoded = await encodeJpeg(frame, options);
+  if (encoded.jpeg.size > options.maxFrameBytes)
+    throw new TimelineQcSamplerError('byte-budget-exceeded');
+  return encoded;
+}
+
 export interface TimelineQcSamplerOptions {
   readonly canvasFactory?: TimelineQcCanvasFactory;
   readonly maxWidth?: number;
@@ -478,7 +502,9 @@ function createOffscreenCanvas(width: number, height: number): TimelineQcCanvas 
 }
 
 function encodeJpeg(
-  frame: CapturedCompositionEvidence,
+  frame: Pick<CapturedCompositionEvidence, 'outputTimeUs' | 'width' | 'height'> & {
+    readonly rgba: Uint8Array | Uint8ClampedArray;
+  },
   options: NormalizedTimelineQcSamplerOptions,
 ): Promise<{ readonly jpeg: Blob; readonly width: number; readonly height: number }> {
   const scale = Math.min(1, options.maxWidth / frame.width, options.maxHeight / frame.height);

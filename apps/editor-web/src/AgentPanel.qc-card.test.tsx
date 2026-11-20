@@ -219,4 +219,13 @@ describe('AgentPanel: QC report card', () => {
     expect(built).toHaveLength(0);
     expect(host.querySelector('[aria-label="QC report"]')).toBeNull();
   });
+
+  it('wires consent and the private frame transport only for a QC run', async () => {
+    await sendPrompt('Run a quality check on my film', () => undefined);
+    expect(built).toHaveLength(2);
+    expect(built[0]!.requestConsent).toBeTypeOf('function');
+    expect(built[0]!.transport?.analyze).toBeTypeOf('function');
+    expect(built[1]!.requestConsent).toBeTypeOf('function');
+    expect(built[1]!.transport?.analyze).toBeTypeOf('function');
+  });
 });
