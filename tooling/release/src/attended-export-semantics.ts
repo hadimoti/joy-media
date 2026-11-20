@@ -406,14 +406,22 @@ export function timelineFactsFrom(stores: Stores): TimelineFacts {
 
   const names = assetNames(documents);
   const clips: FactClip[] = [];
-  for (const track of Array.isArray(root.tracks) ? root.tracks : []) {
-    if (!isRecord(track) || typeof track.id !== 'string' || !Array.isArray(track.clips)) continue;
-    const trackFamily =
+  const tracks = Array.isArray(root.tracks) ? root.tracks : [];
+  const trackFamilies = new Map<string, string>();
+  for (const track of tracks) {
+    if (!isRecord(track) || typeof track.id !== 'string') continue;
+    trackFamilies.set(
+      track.id,
       typeof track.family === 'string'
         ? track.family
         : typeof track.kind === 'string'
           ? track.kind
-          : 'video';
+          : 'video',
+    );
+  }
+  for (const track of tracks) {
+    if (!isRecord(track) || typeof track.id !== 'string' || !Array.isArray(track.clips)) continue;
+    const trackFamily = trackFamilies.get(track.id) ?? 'video';
     for (const clip of track.clips) {
       if (
         !isRecord(clip) ||
@@ -435,6 +443,40 @@ export function timelineFactsFrom(stores: Stores): TimelineFacts {
         durationUs: clip.durationUs,
         sourceInUs: isTime(clip.sourceInUs) ? clip.sourceInUs : 0,
       });
+    }
+  }
+  const clipIds = new Set(clips.map((clip) => clip.id));
+  const universalTimeline = timeline.universalTimeline;
+  if (isRecord(universalTimeline) && Array.isArray(universalTimeline.items)) {
+    for (const item of universalTimeline.items) {
+      if (
+        !isRecord(item) ||
+        item.compositionId !== rootId ||
+        typeof item.id !== 'string' ||
+        typeof item.trackId !== 'string' ||
+        !isTime(item.startUs) ||
+        !isTime(item.durationUs) ||
+        !isRecord(item.source) ||
+        item.source.kind !== 'asset' ||
+        typeof item.source.id !== 'string' ||
+        clipIds.has(item.id)
+      ) {
+        continue;
+      }
+      const assetId = item.source.id;
+      const displayName = names.get(assetId);
+      clips.push({
+        id: item.id,
+        trackId: item.trackId,
+        trackFamily:
+          trackFamilies.get(item.trackId) ?? (item.elementKind === 'audio' ? 'audio' : 'video'),
+        assetId,
+        ...(displayName === undefined ? {} : { displayName }),
+        startUs: item.startUs,
+        durationUs: item.durationUs,
+        sourceInUs: isTime(item.sourceInUs) ? item.sourceInUs : 0,
+      });
+      clipIds.add(item.id);
     }
   }
   const preset =
