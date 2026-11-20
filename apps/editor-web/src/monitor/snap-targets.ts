@@ -108,6 +108,11 @@ interface AxisMatch {
   readonly distance: number;
 }
 
+/** Treat sub-pixel floating-point noise at the inclusive six-pixel edge as on the boundary. */
+function withinSnapDistance(distance: number): boolean {
+  return distance <= SNAP_DISTANCE_SCREEN_PX + 1e-9;
+}
+
 function nearestMatch(
   positions: readonly number[],
   targets: readonly SnapTarget[],
@@ -119,7 +124,7 @@ function nearestMatch(
     for (const target of targets) {
       if (target.axis !== axis || !Number.isFinite(target.position)) continue;
       const distance = Math.abs(position - target.position) * zoom;
-      if (distance <= SNAP_DISTANCE_SCREEN_PX && (best === undefined || distance < best.distance))
+      if (withinSnapDistance(distance) && (best === undefined || distance < best.distance))
         best = { target, sourcePosition: position, distance };
     }
   }
@@ -197,7 +202,7 @@ function scaleAxis(
       const distance = Math.abs(match.source - target.position) * zoom;
       const nextSize = movesStart ? fixed - match.result : match.result - fixed;
       if (
-        distance <= SNAP_DISTANCE_SCREEN_PX &&
+        withinSnapDistance(distance) &&
         nextSize > 0 &&
         (best === undefined || distance < best.distance)
       )
