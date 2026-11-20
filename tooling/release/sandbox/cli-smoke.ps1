@@ -24,6 +24,37 @@ function Invoke-Cli([string]$CommandName, [string[]]$Arguments) {
     }
 }
 
+# The `joy` check runs in Command Prompt, not in this PowerShell. Windows PowerShell adds .CPL to PATHEXT,
+# and the machine PATH (System32) comes before the user PATH, so here `joy` resolves to System32\joy.cpl
+# (Game Controllers) and never reaches bin\joy.cmd: the check came back empty in every Sandbox run.
+# A new Command Prompt uses the system PATHEXT, where `joy` is the JOY Media CLI.
+function Invoke-CommandPromptCli([string]$CommandName, [string[]]$Arguments) {
+    try {
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = Join-Path $env:SystemRoot 'System32\cmd.exe'
+        $startInfo.Arguments = '/d /c ' + (@($CommandName) + @($Arguments) -join ' ')
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $pathExt = [Environment]::GetEnvironmentVariable('PATHEXT', 'Machine')
+        if (-not $pathExt) { $pathExt = '.COM;.EXE;.BAT;.CMD' }
+        $startInfo.EnvironmentVariables['PATHEXT'] = $pathExt
+        $startInfo.EnvironmentVariables['Path'] = $env:Path
+        $process = [System.Diagnostics.Process]::Start($startInfo)
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(120000)) {
+            try { $process.Kill() } catch { }
+            return [ordered]@{ exitCode = 1; output = 'Command Prompt timed out after 120 s' }
+        }
+        $process.WaitForExit()
+        return [ordered]@{ exitCode = $process.ExitCode; output = ($stdout.Result + $stderr.Result).Trim() }
+    } catch {
+        return [ordered]@{ exitCode = 1; output = $_.Exception.Message }
+    }
+}
+
 function Parse-JsonOutput([string]$Output) {
     try { return $Output | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
 }
@@ -53,7 +84,7 @@ $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $env:Path = (@($machinePath, $userPath) | Where-Object { $_ }) -join ';'
 $env:JOY_MEDIA_EDGE_URL = 'off'
 
-$joyVersion = Invoke-Cli 'joy' @('--version')
+$joyVersion = Invoke-CommandPromptCli 'joy' @('--version')
 Add-Check 'joy-cmd-version-reported' (
     $joyVersion.exitCode -eq 0 -and $joyVersion.output -match '^JOY Media CLI v\d+\.\d+\.\d+$'
 ) $joyVersion.output
