@@ -439,6 +439,58 @@ describe('QC host adapter: timeline check and report', () => {
       ),
     ).toBe(false);
   });
+
+  it('serves report-listed final-export JPEG frames through consent and refuses them without consent', async () => {
+    const report = {
+      version: 1,
+      reportId: 'qc-export-1',
+      assetDigest: 'a'.repeat(64),
+      target: { kind: 'file' },
+      findings: [],
+      frames: [
+        { frameId: 'export-frame-1000000', timeUs: 1_000_000 },
+        { frameId: 'export-frame-2000000', timeUs: 2_000_000 },
+      ],
+    };
+    const frames = report.frames.map(({ frameId, timeUs }) => ({
+      frameId,
+      timestampUs: timeUs,
+      jpeg: new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type: 'image/jpeg' }),
+      width: 2,
+      height: 2,
+    }));
+
+    const allowed = createFixture({ consent: true });
+    expect(allowed.adapter.storeFileReport(report, frames)).toBe('qc-export-1');
+    const allowedRequest = frameRequest(
+      'qc-export-1',
+      frames.map((frame) => frame.frameId),
+    );
+    await expect(allowed.adapter.hasApprovedConsent(allowedRequest, context())).resolves.toBe(true);
+    await expect(allowed.adapter.reviewFrames(allowedRequest, context())).resolves.toMatchObject({
+      ok: true,
+      framesSent: 2,
+      submittedFrameIds: frames.map((frame) => frame.frameId),
+    });
+    expect(allowed.transport.analyze).toHaveBeenCalledTimes(1);
+    expect(allowed.transport.analyze.mock.calls[0]![0].frames).toHaveLength(2);
+
+    const refused = createFixture({ consent: false });
+    expect(refused.adapter.storeFileReport(report, frames)).toBe('qc-export-1');
+    const refusedRequest = frameRequest(
+      'qc-export-1',
+      frames.map((frame) => frame.frameId),
+    );
+    await expect(refused.adapter.hasApprovedConsent(refusedRequest, context())).resolves.toBe(
+      false,
+    );
+    await expect(refused.adapter.reviewFrames(refusedRequest, context())).resolves.toMatchObject({
+      ok: false,
+      code: 'JOY_AGENT_QC_CONSENT_REQUIRED',
+      framesSent: 0,
+    });
+    expect(refused.transport.analyze).not.toHaveBeenCalled();
+  });
 });
 
 describe('QC host adapter: gates in front of every frame', () => {

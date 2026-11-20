@@ -21,9 +21,8 @@
  * The editor supplies an isolated composition capture, measured title/caption
  * boxes, a redacted consent card, and the Worker-owned private image transport.
  * A build without those optional ports refuses clearly and sends no pixels.
- * Finished-export frame evidence is still separate: the export decoder is not
- * yet connected to this adapter, so file reports list no frames and frame tools
- * refuse for them.
+ * Finished-export evidence enters through `storeFileReport` as report-listed
+ * JPEG artifacts. Decoder pixels are never accepted by this adapter.
  */
 
 import { QC_DEFAULT_RUN_FRAME_BUDGET } from './qc-request-intent.js';
@@ -251,9 +250,21 @@ export interface QcHostAdapter extends JoyAgentQcToolAdapter {
   ): Promise<QcTimelineCheckResult>;
   /** The stored report with that id (or `latest`), as the tools would read it. */
   storedReport(reportId: string): { readonly [key: string]: HostRpcJson } | undefined;
-  /** Keeps a file report (the Worker's output) so it can be read back. It lists no frames. */
-  storeFileReport(report: Readonly<Record<string, unknown>>): string | undefined;
+  /** Keeps a file report and optional report-listed final-export JPEG evidence. */
+  storeFileReport(
+    report: Readonly<Record<string, unknown>>,
+    frames?: readonly QcFileEvidenceFrame[],
+  ): string | undefined;
   dispose(): void;
+}
+
+/** JPEG-only boundary for frames extracted from the final encoded export. */
+export interface QcFileEvidenceFrame {
+  readonly frameId: string;
+  readonly timestampUs: number;
+  readonly jpeg: Blob;
+  readonly width: number;
+  readonly height: number;
 }
 
 interface StoredReport {
@@ -642,19 +653,113 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
 
     storedReport: (reportId) => (disposed ? undefined : resolveStored(reportId)?.stored.report),
 
-    storeFileReport(report) {
+    storeFileReport(report, frames = []) {
       if (disposed) return undefined;
       const reportId = report['reportId'];
       if (
         typeof reportId !== 'string' ||
         report['version'] !== 1 ||
-        !Array.isArray(report['findings'])
+        !Array.isArray(report['findings']) ||
+        (report['frames'] !== undefined && !Array.isArray(report['frames'])) ||
+        frames.length > MAX_QC_REPORT_FRAMES
       )
         return undefined;
+      const listed = new Map<string, number>();
+      for (const item of (report['frames'] as readonly unknown[] | undefined) ?? []) {
+        if (typeof item !== 'object' || item === null || Array.isArray(item)) return undefined;
+        const entry = item as Record<string, unknown>;
+        if (
+          typeof entry['frameId'] !== 'string' ||
+          !Number.isSafeInteger(entry['timeUs']) ||
+          (entry['timeUs'] as number) < 0 ||
+          listed.has(entry['frameId'])
+        )
+          return undefined;
+        listed.set(entry['frameId'], entry['timeUs'] as number);
+      }
+      if (
+        frames.length !== listed.size ||
+        frames.some(
+          (frame) =>
+            listed.get(frame.frameId) !== frame.timestampUs ||
+            frame.jpeg.type !== 'image/jpeg' ||
+            !Number.isSafeInteger(frame.width) ||
+            frame.width < 1 ||
+            !Number.isSafeInteger(frame.height) ||
+            frame.height < 1,
+        )
+      )
+        return undefined;
+
+      let lookup: EvidenceManifestLookup | undefined;
+      const frameIds = new Set(frames.map((frame) => frame.frameId));
+      if (frames.length > 0) {
+        const current = deps.identity();
+        const assetDigest = report['assetDigest'];
+        if (
+          current === undefined ||
+          typeof assetDigest !== 'string' ||
+          !/^[a-f0-9]{64}$/i.test(assetDigest)
+        )
+          return undefined;
+        const scope: EvidenceManifestLookup['scope'] = {
+          runId: current.runId,
+          identity: {
+            projectId: current.projectId,
+            assetDigest,
+            projectRevision: current.revision,
+            modelId: current.modelId.length > 0 ? current.modelId : QC_FALLBACK_MODEL_ID,
+            promptPolicyDigest:
+              current.promptPolicyDigest.length > 0 ? current.promptPolicyDigest : QC_POLICY_DIGEST,
+          },
+        };
+        lookup = { manifestId: `final-export-${reportId}`, scope };
+        try {
+          deps.evidenceStore.createManifest({
+            id: lookup.manifestId,
+            scope,
+            mode: 'overview',
+            persistence: 'ephemeral',
+            intendedFrameIdPages: chunk([...frameIds], 512),
+          });
+          if (
+            !deps.evidenceStore.recordFrames({
+              ...lookup,
+              stage: 'decoded',
+              frameIds: [...frameIds],
+            })
+          ) {
+            deps.evidenceStore.setStatus({ ...lookup, status: 'failed' });
+            return undefined;
+          }
+          for (const frame of frames) {
+            const recorded = deps.evidenceStore.recordFrameArtifact({
+              ...lookup,
+              ...frame,
+              coverage: {
+                sourceDurationUs: Math.max(1, ...frames.map((item) => item.timestampUs + 1)),
+                sampledFrameCount: frames.length,
+                sampledCutCount: 0,
+                totalCutCount: 0,
+                completeSourceCoverage: false,
+              },
+            });
+            if (!recorded) {
+              deps.evidenceStore.setStatus({ ...lookup, status: 'failed' });
+              return undefined;
+            }
+          }
+          deps.evidenceStore.setStatus({ ...lookup, status: 'complete' });
+        } catch {
+          if (deps.evidenceStore.readManifest(lookup) !== undefined)
+            deps.evidenceStore.setStatus({ ...lookup, status: 'failed' });
+          return undefined;
+        }
+      }
       remember(reportId, {
         report: report as { readonly [key: string]: HostRpcJson },
-        lookup: undefined,
-        frameIds: new Set(),
+        lookup,
+        frameIds,
         approvedFrameIds: new Set(),
       });
       return reportId;
