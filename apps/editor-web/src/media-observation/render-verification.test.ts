@@ -141,6 +141,78 @@ function actualDecoder(
 }
 
 describe('final encoded export verification', () => {
+  it('stores exactly the report-listed JPEG frames after a verified export', async () => {
+    class FakeOffscreenCanvas {
+      constructor(
+        readonly width: number,
+        readonly height: number,
+      ) {}
+      getContext() {
+        return {
+          createImageData: (width: number, height: number) => ({
+            width,
+            height,
+            data: new Uint8ClampedArray(width * height * 4),
+          }),
+          putImageData: () => undefined,
+          drawImage: () => undefined,
+        };
+      }
+      async convertToBlob({ type }: { readonly type: string }) {
+        return new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type });
+      }
+    }
+    vi.stubGlobal('OffscreenCanvas', FakeOffscreenCanvas);
+    const decoder = actualDecoder(decoded());
+    const stored: {
+      readonly report: Readonly<Record<string, unknown>>;
+      readonly frames: readonly unknown[];
+    }[] = [];
+    const storeFileReport = (
+      storedReport: Readonly<Record<string, unknown>>,
+      frames: readonly unknown[],
+    ) => {
+      stored.push({ report: storedReport, frames });
+      return 'qc-export-1';
+    };
+    const verifier = createFinalEncodedExportVerifier({ decoder });
+    const report = {
+      version: 1,
+      reportId: 'qc-export-1',
+      assetDigest: 'a'.repeat(64),
+      target: { kind: 'file' },
+      findings: [],
+      frames: [
+        { frameId: 'export-frame-0', timeUs: 0 },
+        { frameId: 'export-frame-1000000', timeUs: 1_000_000 },
+      ],
+    };
+
+    const result = await verifier.verify({
+      ...request(),
+      qcEvidence: { report, storeFileReport },
+    });
+
+    expect(result.status).toBe('verified');
+    expect(decoder.decode).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedPixelPtsUs: [0, 1_000_000] }),
+    );
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      report,
+      frames: [
+        { frameId: 'export-frame-0', timestampUs: 0, width: 2, height: 2 },
+        { frameId: 'export-frame-1000000', timestampUs: 1_000_000, width: 2, height: 2 },
+      ],
+    });
+    expect(
+      (stored[0]!.frames as { readonly jpeg: Blob }[]).every(
+        (frame) => frame.jpeg.type === 'image/jpeg',
+      ),
+    ).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
   it('proves the final decoded container, streams, PTS, pixels, title/effect and audio impulse together', async () => {
     const decoder = actualDecoder(decoded());
     const verifier = createFinalEncodedExportVerifier({ decoder });
