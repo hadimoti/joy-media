@@ -391,6 +391,97 @@ describe('timelineFactsFrom', () => {
     ]);
   });
 
+  it('reads video clips persisted only in the universal timeline', () => {
+    const universalOnly = {
+      ...TIMELINE,
+      schemaVersion: 1,
+      compositions: {
+        root: { ...TIMELINE.compositions.root, tracks: [{ id: 'v1', family: 'video', clips: [] }] },
+      },
+      universalTimeline: {
+        schemaVersion: 1,
+        items: [
+          {
+            id: 'semantics-video',
+            compositionId: 'root',
+            trackId: 'v1',
+            elementKind: 'video',
+            startUs: 0,
+            durationUs: 3_000_000,
+            sourceInUs: 0,
+            source: { kind: 'asset', id: 'video-asset' },
+            withinTrackOrder: 0,
+          },
+        ],
+      },
+    };
+    const visual = {
+      assets: { 'video-asset': { id: 'video-asset', displayName: 'semantics-clip-test.mp4' } },
+    };
+
+    const clip = clipNamed(
+      timelineFactsFrom(stores(universalOnly, visual)),
+      'semantics-clip-test.mp4',
+    );
+
+    expect(clip).toMatchObject({
+      id: 'semantics-video',
+      trackId: 'v1',
+      trackFamily: 'video',
+      displayName: 'semantics-clip-test.mp4',
+    });
+  });
+
+  it('does not count a universal item twice when its legacy projection is present', () => {
+    const withBothRepresentations = {
+      ...TIMELINE,
+      schemaVersion: 1,
+      compositions: {
+        root: {
+          ...TIMELINE.compositions.root,
+          tracks: [
+            {
+              id: 'v1',
+              family: 'video',
+              clips: [
+                {
+                  id: 'semantics-video',
+                  assetId: 'video-asset',
+                  startUs: 0,
+                  durationUs: 3_000_000,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      universalTimeline: {
+        schemaVersion: 1,
+        items: [
+          {
+            id: 'semantics-video',
+            compositionId: 'root',
+            trackId: 'v1',
+            elementKind: 'video',
+            startUs: 0,
+            durationUs: 3_000_000,
+            source: { kind: 'asset', id: 'video-asset' },
+            withinTrackOrder: 0,
+          },
+        ],
+      },
+    };
+    const visual = {
+      assets: { 'video-asset': { id: 'video-asset', displayName: 'semantics-clip-test.mp4' } },
+    };
+
+    const facts = timelineFactsFrom(stores(withBothRepresentations, visual));
+
+    expect(
+      facts.clips.filter((clip) => clip.displayName === 'semantics-clip-test.mp4'),
+    ).toHaveLength(1);
+  });
+
   it('takes the editor export rate when the composition has none', () => {
     const noRate = {
       ...TIMELINE,
