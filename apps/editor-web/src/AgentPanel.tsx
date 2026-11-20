@@ -117,7 +117,9 @@ import {
   createEditorQcAdapter,
   createQcHostAdapterSharedState,
   type QcHostAdapter,
+  type QcFrameConsentRequest,
 } from './joy-agent/qc-host-adapter.js';
+import { createQcPrivateFrameTransport } from './joy-agent/qc-private-frame-transport.js';
 import { createQcRepairHost, timelineQcCheckPort } from './joy-agent/qc-repair-host.js';
 import type { QcRepairPlan } from './joy-agent/qc-repair-plan.js';
 import { audioStateFromProject } from './timeline-presentation.js';
@@ -804,6 +806,55 @@ export function AgentPanel({
   // unmount disposes the previous one so its report and frame store do not outlive it.
   const qcAdapterRef = useRef<QcHostAdapter | undefined>(undefined);
   const qcApprovalWaiterRef = useRef<((approved: boolean) => void) | undefined>(undefined);
+  const [qcFrameConsent, setQcFrameConsent] = useState<
+    Pick<QcFrameConsentRequest, 'frameCount' | 'approximateBytes' | 'range'> | undefined
+  >();
+  const qcFrameConsentWaiterRef = useRef<
+    | {
+        readonly request: QcFrameConsentRequest;
+        readonly signal: AbortSignal;
+        readonly resolve: (approved: boolean) => void;
+        readonly onAbort: () => void;
+      }
+    | undefined
+  >(undefined);
+  const settleQcFrameConsent = useCallback((approved: boolean): void => {
+    const waiter = qcFrameConsentWaiterRef.current;
+    if (waiter === undefined) return;
+    qcFrameConsentWaiterRef.current = undefined;
+    waiter.signal.removeEventListener('abort', waiter.onAbort);
+    setQcFrameConsent(undefined);
+    waiter.resolve(approved);
+  }, []);
+  const requestQcFrameConsent = useCallback(
+    (request: QcFrameConsentRequest, signal: AbortSignal): Promise<boolean> =>
+      new Promise((resolve) => {
+        if (
+          signal.aborted ||
+          qcFrameConsentWaiterRef.current !== undefined ||
+          request.approximateBytes < 1 ||
+          request.approximateBytes > MAX_PRIVATE_OBSERVATION_FIRST_RELEASE_BYTES
+        ) {
+          resolve(false);
+          return;
+        }
+        const onAbort = (): void => {
+          const waiter = qcFrameConsentWaiterRef.current;
+          if (waiter?.request !== request) return;
+          qcFrameConsentWaiterRef.current = undefined;
+          setQcFrameConsent(undefined);
+          resolve(false);
+        };
+        qcFrameConsentWaiterRef.current = { request, signal, resolve, onAbort };
+        setQcFrameConsent({
+          frameCount: request.frameCount,
+          approximateBytes: request.approximateBytes,
+          range: request.range,
+        });
+        signal.addEventListener('abort', onAbort, { once: true });
+      }),
+    [],
+  );
   // One report card per QC report, kept beside the conversation by message id. The message itself is an
   // ordinary assistant line (the summary), so a reload shows that line and ordinary chat is unchanged.
   const [qcCards, setQcCards] = useState<
@@ -824,6 +875,7 @@ export function AgentPanel({
     (): boolean => latestSettingsRef.current.privacyMode !== 'local-only',
     [],
   );
+  useEffect(() => () => settleQcFrameConsent(false), [settleQcFrameConsent]);
   const observationReviewLeaseRef = useRef<PrivateObservationReviewLease | undefined>(undefined);
   const observationReviewControllerRef = useRef<ObservationReviewController | undefined>(undefined);
   const observationReviewRegistrationRef = useRef(0);
@@ -2308,6 +2360,25 @@ export function AgentPanel({
               getTimeline: () => latestSessionRef.current.timelineProject,
               isCachedImageSupported: qcImageSupported,
               isPrivacyModeAllowed: qcPrivacyAllowed,
+              requestConsent: requestQcFrameConsent,
+              transport: createQcPrivateFrameTransport({
+                engineClient: joyAgentEngineClient,
+                currentAuthority: () => {
+                  if (
+                    activeObservationRun === undefined ||
+                    activeObservationRun.runId !== runId ||
+                    capturedModelId === undefined
+                  )
+                    return undefined;
+                  return {
+                    projectId: contextInput.projectId,
+                    revision: latestSessionRef.current.projectRevisionId,
+                    run: activeObservationRun,
+                    modelId: capturedModelId,
+                    promptPolicyDigest: capturedPolicyDigest,
+                  };
+                },
+              }),
               onReport: onQcReport,
               sharedState: createQcHostAdapterSharedState(),
             };
@@ -4466,6 +4537,35 @@ export function AgentPanel({
                   </p>
                 )}
               </section>
+            )}
+            {qcFrameConsent !== undefined && (
+              <AgentObservationConsent
+                scope={{
+                  providerName:
+                    joyAgentEngineClient?.getStatus()?.provider === 'openrouter'
+                      ? 'OpenRouter'
+                      : 'OpenAI-compatible provider',
+                  modelName: 'Connected model',
+                  availability: 'ready',
+                  selectedEvidenceCount: qcFrameConsent.frameCount,
+                  modalities: ['image'],
+                  range: {
+                    domain: 'composition',
+                    startUs: qcFrameConsent.range.startUs,
+                    endUs: qcFrameConsent.range.endUs,
+                  },
+                  maxRequests: 1,
+                  maxBytes: Math.max(1, qcFrameConsent.approximateBytes),
+                  estimatedCost: 'unknown',
+                  ...(joyAgentEngineClient?.getStatus()?.provider === 'openrouter'
+                    ? { policyHref: OPENROUTER_PRIVACY_POLICY_HREF }
+                    : {}),
+                }}
+                onApprove={() => settleQcFrameConsent(true)}
+                onNarrow={() => settleQcFrameConsent(false)}
+                onCancel={() => settleQcFrameConsent(false)}
+                narrow
+              />
             )}
             <div ref={messagesEndRef} />
           </div>

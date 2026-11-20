@@ -18,23 +18,11 @@
  *    desktop QC job route (the file check). Nothing in the editor feeds it an
  *    export reference yet.
  *
- * What remains (nothing below is faked; each missing port refuses with a plain
- * reason):
- *  1. Composition capture. The editor has no isolated RenderFrameIR evaluator and
- *     renderer for evidence capture yet, so `timeline().composition` is supplied
- *     by the host as `undefined` today and the timeline check refuses with
- *     `composition-unavailable`. It will run as soon as the host supplies that
- *     request. The editor also has no projection of title and caption boxes from
- *     the document, so `textBoxes` is empty until one exists.
- *  2. The private one-shot image transport (`transport`) and the consent card
- *     (`requestConsent`). The existing worker transfer accepts source ranges
- *     only, and a QC frame is a composition frame, so it needs a composition
- *     range and a QC lease. Without both ports the image probe gate reports
- *     "unavailable" and no consent card is ever shown.
- *  3. The final export path. `final-encoded-export-decoder.ts` is not called
- *     here: an export has no reference the editor can hand to the Worker QC job
- *     and no decoded frame list. A file report is stored with
- *     `storeFileReport` and lists no frames, so frame tools refuse for it.
+ * The editor supplies an isolated composition capture, measured title/caption
+ * boxes, a redacted consent card, and the Worker-owned private image transport.
+ * A build without those optional ports refuses clearly and sends no pixels.
+ * Finished-export evidence enters through `storeFileReport` as report-listed
+ * JPEG artifacts. Decoder pixels are never accepted by this adapter.
  */
 
 import { QC_DEFAULT_RUN_FRAME_BUDGET } from './qc-request-intent.js';
@@ -147,6 +135,7 @@ export interface QcFrameConsentRequest {
   readonly frameCount: number;
   readonly approximateBytes: number;
   readonly modelId: string;
+  readonly range: { readonly startUs: number; readonly endUs: number };
 }
 
 export interface QcFrameTransportInput {
@@ -261,9 +250,21 @@ export interface QcHostAdapter extends JoyAgentQcToolAdapter {
   ): Promise<QcTimelineCheckResult>;
   /** The stored report with that id (or `latest`), as the tools would read it. */
   storedReport(reportId: string): { readonly [key: string]: HostRpcJson } | undefined;
-  /** Keeps a file report (the Worker's output) so it can be read back. It lists no frames. */
-  storeFileReport(report: Readonly<Record<string, unknown>>): string | undefined;
+  /** Keeps a file report and optional report-listed final-export JPEG evidence. */
+  storeFileReport(
+    report: Readonly<Record<string, unknown>>,
+    frames?: readonly QcFileEvidenceFrame[],
+  ): string | undefined;
   dispose(): void;
+}
+
+/** JPEG-only boundary for frames extracted from the final encoded export. */
+export interface QcFileEvidenceFrame {
+  readonly frameId: string;
+  readonly timestampUs: number;
+  readonly jpeg: Blob;
+  readonly width: number;
+  readonly height: number;
 }
 
 interface StoredReport {
@@ -652,19 +653,113 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
 
     storedReport: (reportId) => (disposed ? undefined : resolveStored(reportId)?.stored.report),
 
-    storeFileReport(report) {
+    storeFileReport(report, frames = []) {
       if (disposed) return undefined;
       const reportId = report['reportId'];
       if (
         typeof reportId !== 'string' ||
         report['version'] !== 1 ||
-        !Array.isArray(report['findings'])
+        !Array.isArray(report['findings']) ||
+        (report['frames'] !== undefined && !Array.isArray(report['frames'])) ||
+        frames.length > MAX_QC_REPORT_FRAMES
       )
         return undefined;
+      const listed = new Map<string, number>();
+      for (const item of (report['frames'] as readonly unknown[] | undefined) ?? []) {
+        if (typeof item !== 'object' || item === null || Array.isArray(item)) return undefined;
+        const entry = item as Record<string, unknown>;
+        if (
+          typeof entry['frameId'] !== 'string' ||
+          !Number.isSafeInteger(entry['timeUs']) ||
+          (entry['timeUs'] as number) < 0 ||
+          listed.has(entry['frameId'])
+        )
+          return undefined;
+        listed.set(entry['frameId'], entry['timeUs'] as number);
+      }
+      if (
+        frames.length !== listed.size ||
+        frames.some(
+          (frame) =>
+            listed.get(frame.frameId) !== frame.timestampUs ||
+            frame.jpeg.type !== 'image/jpeg' ||
+            !Number.isSafeInteger(frame.width) ||
+            frame.width < 1 ||
+            !Number.isSafeInteger(frame.height) ||
+            frame.height < 1,
+        )
+      )
+        return undefined;
+
+      let lookup: EvidenceManifestLookup | undefined;
+      const frameIds = new Set(frames.map((frame) => frame.frameId));
+      if (frames.length > 0) {
+        const current = deps.identity();
+        const assetDigest = report['assetDigest'];
+        if (
+          current === undefined ||
+          typeof assetDigest !== 'string' ||
+          !/^[a-f0-9]{64}$/i.test(assetDigest)
+        )
+          return undefined;
+        const scope: EvidenceManifestLookup['scope'] = {
+          runId: current.runId,
+          identity: {
+            projectId: current.projectId,
+            assetDigest,
+            projectRevision: current.revision,
+            modelId: current.modelId.length > 0 ? current.modelId : QC_FALLBACK_MODEL_ID,
+            promptPolicyDigest:
+              current.promptPolicyDigest.length > 0 ? current.promptPolicyDigest : QC_POLICY_DIGEST,
+          },
+        };
+        lookup = { manifestId: `final-export-${reportId}`, scope };
+        try {
+          deps.evidenceStore.createManifest({
+            id: lookup.manifestId,
+            scope,
+            mode: 'overview',
+            persistence: 'ephemeral',
+            intendedFrameIdPages: chunk([...frameIds], 512),
+          });
+          if (
+            !deps.evidenceStore.recordFrames({
+              ...lookup,
+              stage: 'decoded',
+              frameIds: [...frameIds],
+            })
+          ) {
+            deps.evidenceStore.setStatus({ ...lookup, status: 'failed' });
+            return undefined;
+          }
+          for (const frame of frames) {
+            const recorded = deps.evidenceStore.recordFrameArtifact({
+              ...lookup,
+              ...frame,
+              coverage: {
+                sourceDurationUs: Math.max(1, ...frames.map((item) => item.timestampUs + 1)),
+                sampledFrameCount: frames.length,
+                sampledCutCount: 0,
+                totalCutCount: 0,
+                completeSourceCoverage: false,
+              },
+            });
+            if (!recorded) {
+              deps.evidenceStore.setStatus({ ...lookup, status: 'failed' });
+              return undefined;
+            }
+          }
+          deps.evidenceStore.setStatus({ ...lookup, status: 'complete' });
+        } catch {
+          if (deps.evidenceStore.readManifest(lookup) !== undefined)
+            deps.evidenceStore.setStatus({ ...lookup, status: 'failed' });
+          return undefined;
+        }
+      }
       remember(reportId, {
         report: report as { readonly [key: string]: HostRpcJson },
-        lookup: undefined,
-        frameIds: new Set(),
+        lookup,
+        frameIds,
         approvedFrameIds: new Set(),
       });
       return reportId;
@@ -702,8 +797,15 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       if (input.frameIds.every((frameId) => stored.approvedFrameIds.has(frameId))) return true;
       const lookup = stored.lookup!;
       let bytes = 0;
-      for (const frameId of input.frameIds)
-        bytes += deps.evidenceStore.readFrameArtifact({ ...lookup, frameId })?.jpeg.size ?? 0;
+      let startUs = Number.MAX_SAFE_INTEGER;
+      let endUs = 0;
+      for (const frameId of input.frameIds) {
+        const frame = deps.evidenceStore.readFrameArtifact({ ...lookup, frameId });
+        if (frame === undefined) return false;
+        bytes += frame.jpeg.size;
+        startUs = Math.min(startUs, frame.timestampUs);
+        endUs = Math.max(endUs, frame.timestampUs + 1);
+      }
       const approved = await deps.requestConsent(
         {
           reportId: resolveStored(input.reportId)!.id,
@@ -712,6 +814,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
           frameCount: input.frameIds.length,
           approximateBytes: bytes,
           modelId: deps.identity()?.modelId ?? '',
+          range: { startUs, endUs },
         },
         context.signal,
       );
@@ -860,6 +963,10 @@ export interface EditorQcAdapterInput {
   readonly getTimeline: () => QcTimelineLike;
   readonly isCachedImageSupported: () => boolean;
   readonly isPrivacyModeAllowed: () => boolean;
+  /** Explicit per-request consent UI; absent means frame review stays unavailable. */
+  readonly requestConsent?: QcHostAdapterDeps['requestConsent'];
+  /** Private, one-shot image transport; absent means frame review stays unavailable. */
+  readonly transport?: QcHostAdapterDeps['transport'];
   /** The host's composition request. Absent today; see the note at the top of this file. */
   readonly getComposition?: () =>
     QcTimelineSource['composition'] | Promise<QcTimelineSource['composition']>;
@@ -914,6 +1021,8 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
     sampler: createTimelineQcSampler(),
     isCachedImageSupported: input.isCachedImageSupported,
     isPrivacyModeAllowed: input.isPrivacyModeAllowed,
+    ...(input.requestConsent === undefined ? {} : { requestConsent: input.requestConsent }),
+    ...(input.transport === undefined ? {} : { transport: input.transport }),
     ...(input.onReport === undefined ? {} : { onReport: input.onReport }),
   });
 }
