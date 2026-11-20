@@ -18,23 +18,12 @@
  *    desktop QC job route (the file check). Nothing in the editor feeds it an
  *    export reference yet.
  *
- * What remains (nothing below is faked; each missing port refuses with a plain
- * reason):
- *  1. Composition capture. The editor has no isolated RenderFrameIR evaluator and
- *     renderer for evidence capture yet, so `timeline().composition` is supplied
- *     by the host as `undefined` today and the timeline check refuses with
- *     `composition-unavailable`. It will run as soon as the host supplies that
- *     request. The editor also has no projection of title and caption boxes from
- *     the document, so `textBoxes` is empty until one exists.
- *  2. The private one-shot image transport (`transport`) and the consent card
- *     (`requestConsent`). The existing worker transfer accepts source ranges
- *     only, and a QC frame is a composition frame, so it needs a composition
- *     range and a QC lease. Without both ports the image probe gate reports
- *     "unavailable" and no consent card is ever shown.
- *  3. The final export path. `final-encoded-export-decoder.ts` is not called
- *     here: an export has no reference the editor can hand to the Worker QC job
- *     and no decoded frame list. A file report is stored with
- *     `storeFileReport` and lists no frames, so frame tools refuse for it.
+ * The editor supplies an isolated composition capture, measured title/caption
+ * boxes, a redacted consent card, and the Worker-owned private image transport.
+ * A build without those optional ports refuses clearly and sends no pixels.
+ * Finished-export frame evidence is still separate: the export decoder is not
+ * yet connected to this adapter, so file reports list no frames and frame tools
+ * refuse for them.
  */
 
 import { QC_DEFAULT_RUN_FRAME_BUDGET } from './qc-request-intent.js';
@@ -147,6 +136,7 @@ export interface QcFrameConsentRequest {
   readonly frameCount: number;
   readonly approximateBytes: number;
   readonly modelId: string;
+  readonly range: { readonly startUs: number; readonly endUs: number };
 }
 
 export interface QcFrameTransportInput {
@@ -702,8 +692,15 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       if (input.frameIds.every((frameId) => stored.approvedFrameIds.has(frameId))) return true;
       const lookup = stored.lookup!;
       let bytes = 0;
-      for (const frameId of input.frameIds)
-        bytes += deps.evidenceStore.readFrameArtifact({ ...lookup, frameId })?.jpeg.size ?? 0;
+      let startUs = Number.MAX_SAFE_INTEGER;
+      let endUs = 0;
+      for (const frameId of input.frameIds) {
+        const frame = deps.evidenceStore.readFrameArtifact({ ...lookup, frameId });
+        if (frame === undefined) return false;
+        bytes += frame.jpeg.size;
+        startUs = Math.min(startUs, frame.timestampUs);
+        endUs = Math.max(endUs, frame.timestampUs + 1);
+      }
       const approved = await deps.requestConsent(
         {
           reportId: resolveStored(input.reportId)!.id,
@@ -712,6 +709,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
           frameCount: input.frameIds.length,
           approximateBytes: bytes,
           modelId: deps.identity()?.modelId ?? '',
+          range: { startUs, endUs },
         },
         context.signal,
       );
@@ -860,6 +858,10 @@ export interface EditorQcAdapterInput {
   readonly getTimeline: () => QcTimelineLike;
   readonly isCachedImageSupported: () => boolean;
   readonly isPrivacyModeAllowed: () => boolean;
+  /** Explicit per-request consent UI; absent means frame review stays unavailable. */
+  readonly requestConsent?: QcHostAdapterDeps['requestConsent'];
+  /** Private, one-shot image transport; absent means frame review stays unavailable. */
+  readonly transport?: QcHostAdapterDeps['transport'];
   /** The host's composition request. Absent today; see the note at the top of this file. */
   readonly getComposition?: () =>
     QcTimelineSource['composition'] | Promise<QcTimelineSource['composition']>;
@@ -914,6 +916,8 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
     sampler: createTimelineQcSampler(),
     isCachedImageSupported: input.isCachedImageSupported,
     isPrivacyModeAllowed: input.isPrivacyModeAllowed,
+    ...(input.requestConsent === undefined ? {} : { requestConsent: input.requestConsent }),
+    ...(input.transport === undefined ? {} : { transport: input.transport }),
     ...(input.onReport === undefined ? {} : { onReport: input.onReport }),
   });
 }

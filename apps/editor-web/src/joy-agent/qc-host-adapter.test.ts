@@ -852,6 +852,23 @@ describe('editor QC adapter', () => {
     });
   });
 
+  it('forwards the consent and private transport ports to the editor adapter', () => {
+    const transport = { analyze: vi.fn() };
+    const requestConsent = vi.fn();
+    const adapter = createEditorQcAdapter({
+      ...IDENTITY,
+      isCurrent: () => true,
+      getTimeline: () => ({ rootCompositionId: 'root', compositions: {} }),
+      isCachedImageSupported: () => true,
+      isPrivacyModeAllowed: () => true,
+      requestConsent,
+      transport,
+    });
+
+    expect(adapter.isCachedImageSupported(context())).toBe(true);
+    adapter.dispose();
+  });
+
   it('turns a throwing composition loader into composition-unavailable', async () => {
     const adapter = createEditorQcAdapter({
       ...IDENTITY,
