@@ -56,7 +56,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 
 ## Joy Code
 
-- Every failure has a plain message that says what happened. If the provider gave a reason, the message keeps it.
+- When Joy Code fails, the message says what happened. A usage limit is named as one. A model answer that ran out of room has its own message.
 - Joy Code does not start a run when no model is chosen.
 - A sign-in that stopped can be started again.
 - Joy Code Settings use one layout. The temperature and token fields are replaced by an effort level: Auto, Low, Medium or High. Older saved numbers show as Custom.
@@ -70,10 +70,12 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Drag files from Windows onto a timeline lane, onto the area under the tracks (this makes a new track), onto the Monitor, or onto the Media panel. A locked track refuses the drop. A dashed outline shows the target.
 - Dropping on the Media panel only imports. It does not place clips.
 - The import message counts only new files: "N files added to the media library, M already there."
+- Several files dragged from Windows Explorer at once now import, whichever file you grab first. Earlier builds refused some of these drops.
+- Asset Library cards show a picture for files that are only in the library folder, not in this profile's storage.
 - A project reopens with the playhead where you left it.
 - When a project points to files that are not on this computer, a "Missing media" banner appears with a Review button. The list lets you relink each file (the new file must have the same size and checksum), choose several files at once with "Match files...", or use "Use different file" for a file of the same kind (Undo reverses it). A file of another kind, for example a picture for a missing video, is refused and the message says why.
 - A saved project reopens with the same clips, tracks, titles, captions, curves and markers.
-- Export MP4 was checked on a 71-second project: H.264 1920x1080, AAC stereo, it decodes without error, and six frames match the Monitor.
+- Export MP4 was checked on a 6-second test project: H.264 video at 1920x1080 and AAC audio. Frames at 1, 2, 4 and 5 seconds were compared with the Monitor. They were close, within a small tolerance.
 
 ## Fixes
 
@@ -100,7 +102,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Dragging an effect or filter card onto a clip no longer starts the browser's picture drag.
 - The Monitor zoom keys Ctrl+0, Ctrl+1, Ctrl++ and Ctrl+- did not work. Fixed.
 - A short clip next to a cut could not be clicked, because an invisible drop target sat over it. Fixed.
-- A title was hidden behind the video in the Monitor (the picture drew it, the exported video did not). It is drawn over the video now. This also fixes Persian and Arabic titles that looked missing.
+- A title was not drawn in the Monitor when a video clip lay under it. The exported video was already correct. Titles are drawn over the video now. This also fixed Persian titles that were missing from the Monitor.
 
 ### Menus and panels
 
@@ -142,7 +144,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - Temporary files from exports are cleaned up at the next export or app start. Files younger than two hours are left alone, so another window's export is not interrupted.
 - The sample project "Local editor project" no longer carries the two clips that had no media behind them, and it now exports (seen working on 18 Nov). An export that is refused for missing media now names the clips.
 - The colour of an exported video no longer changes when you export a second time in the browser version.
-- The export quality is higher. In the desktop app the final video is encoded with almost no loss. Measured on a 10-minute 1080p export: it takes about the same time, and the file is about 390 MB instead of 220 MB.
+- The export quality is higher. In the desktop app the final video is encoded with almost no loss. Measured on a 10-minute 1080p export in our tests: it took between about 5 and 15 minutes, and the file was about 390 MB instead of 220 MB.
 - The export no longer reports false errors after a job ends. A cancel during the last steps is honoured: the job shows cancelled, not failed. If a needed video tool is missing, the message gives the real reason.
 
 ## Known limits
@@ -151,10 +153,13 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - **GPU.** An NVIDIA hardware-encoder crash was seen on one machine before v1.1.0. Its cause is not known. The graphics card path of the colour engine is not yet checked on screen.
 - **Icon cache after upgrading from v1.0.2.** The Desktop shortcut can keep its old icon. This is the Windows icon cache, not JOY Media.
 - **Providers.** Kimi and xAI model answers and the Get a key and API docs links on the provider cards may not work as expected.
+- **MiniMax in Joy Code.** MiniMax can still spend its room thinking and send no answer. The app now says so. A normal message can also be refused as looking like it holds a key. The text that caused it is not known.
 - **Command line in PowerShell.** Use `joy-media` in PowerShell. There, `joy` opens the Windows Game Controllers panel, because Windows finds its own joy.cpl before the JOY Media folder on the PATH. In Command Prompt, `joy` and `joy-media` both run the JOY Media command line.
-- **Export.** The command line has 3 export choices (MP4, WebM, ProRes). The app has 5 presets, so the same request can give different files. Some effects may not appear in exported videos.
+- **Export.** The command line has 3 export choices (MP4, WebM, ProRes). The app has 5 presets, so the same request can give different files. In our tests, Drop Shadow and CRT / Retro differ from the Monitor by more than the export check allows (see Known limits).
+- **Two effects differ in exports.** In our tests, Drop Shadow and CRT / Retro differ from the Monitor by more than the test allows in the exported video. Whether they are missing or only changed was not checked. The other 31 effects in the test passed.
+- **Timecode in the picture.** Burned-in timecode can be one pixel off between the Monitor and the exported video. The test allows for this.
 - **Effect previews.** Some effect cards play the wrong preview loop, so the card may not show the effect as it looks.
-- **Some drags.** One clip dragged from the asset panel showed on the timeline but was missing from the saved project; this is not yet explained. Dropping an image from the Asset Library onto the filter layer can do nothing, with no message.
+- **Some drags.** In one early test, a clip dragged from the asset panel was not found in the saved project. Later tests found it saved. This has not been seen by hand. Dropping an image from the Asset Library onto the filter layer can do nothing, with no message.
 - **Export size.** Export size may follow the selected preset instead of the canvas size.
 - **Projects page when maximised.** The bottom of the Projects page can sit behind the Windows taskbar.
 - **Persian and Arabic text.** Titles and captions are drawn joined, right to left and in the right place (a Persian title was seen working in the Monitor on 18 Nov). Letter spacing is not applied to Persian and Arabic letters, so joined letters stay joined. Right-to-left captions in an exported video were tested in code only.
@@ -193,6 +198,7 @@ These are built and tested in code. They were not yet seen working in the runnin
 - Audio fades in the Audio panel.
 - Workspace presets keep their own layout when you switch between Edit, Automate and the others.
 - **A clean install and upgrades from v1.0.2 and v1.1.0 were not tested in a clean Windows for this build.** Windows Sandbox on the build PC refused the unsigned installer. If an install or an upgrade fails for you, please report it.
+- Joy Code with MiniMax, after the larger output room. It has not been tried live.
 
 ## Download and check
 
