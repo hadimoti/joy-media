@@ -16,6 +16,17 @@ export function currentMissingAssetIds(
   return contextIds ?? capturedIds;
 }
 
+/** Resolves a drawn overlay node to its editable visual object. */
+export function resolveMonitorOverlayObject(
+  project: Pick<JoyProjectV1, 'visualObjects'>,
+  nodeId: string,
+  targets: readonly { readonly objectId?: string; readonly nodeId: string }[],
+): { readonly objectId: string; readonly object: VisualObjectV1 } | undefined {
+  const objectId = targets.find((target) => target.nodeId === nodeId)?.objectId ?? nodeId;
+  const object = project.visualObjects[objectId];
+  return object === undefined ? undefined : { objectId, object };
+}
+
 /** A video crop edits its bound object but draws its box on the clip node. */
 export function monitorCropOverlayNodeId(
   objectId: string | undefined,

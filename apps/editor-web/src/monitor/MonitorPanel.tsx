@@ -126,6 +126,7 @@ import {
   monitorCropAvailable,
   currentMissingAssetIds,
   monitorCropOverlayNodeId,
+  resolveMonitorOverlayObject,
   sameMonitorOverlay,
   buildMonitorContextMenuItems,
   type MonitorContextAction,
@@ -1110,10 +1111,15 @@ function MonitorPanelContent({
       ? undefined
       : transformOverlays.find((overlay) => overlay.elementId === editingTextId);
   const selectedMediaOverlay = transformOverlays.length === 1 ? transformOverlays[0] : undefined;
-  const selectedMediaObject =
+  const selectedMediaResolution =
     selectedMediaOverlay === undefined
       ? undefined
-      : visualProject.visualObjects[selectedMediaOverlay.elementId];
+      : resolveMonitorOverlayObject(
+          visualProject,
+          selectedMediaOverlay.elementId,
+          transformTargets,
+        );
+  const selectedMediaObject = selectedMediaResolution?.object;
   const selectedTimelineClip =
     state.selectedIds.length !== 1
       ? undefined
@@ -1135,11 +1141,13 @@ function MonitorPanelContent({
   const selectedCropTarget =
     selectedCropOverlay === undefined
       ? undefined
-      : transformTargets.find((target) => target.nodeId === selectedCropOverlay.elementId);
+      : resolveMonitorOverlayObject(visualProject, selectedCropOverlay.elementId, transformTargets);
   const cropTargetId =
     cropObjectId ?? selectedCropTarget?.objectId ?? selectedCropOverlay?.elementId;
   const cropTargetObject =
-    cropTargetId === undefined ? undefined : visualProject.visualObjects[cropTargetId];
+    cropObjectId === undefined
+      ? selectedCropTarget?.object
+      : visualProject.visualObjects[cropObjectId];
   const cropOverlayNodeId =
     monitorCropOverlayNodeId(cropTargetId, transformTargets) ?? cropTargetId;
   const cropOverlay =
@@ -1520,7 +1528,7 @@ function MonitorPanelContent({
             setCropMode(false);
             setCropObjectId(undefined);
           } else if (selectedCropOverlay !== undefined) {
-            setCropObjectId(selectedCropOverlay.elementId);
+            setCropObjectId(selectedCropTarget?.objectId ?? selectedCropOverlay.elementId);
             setCropMode(true);
           }
         }}

@@ -24,6 +24,16 @@ import {
   type MonitorSelectionSetters,
 } from './monitor-selection.js';
 
+const resolveMonitorOverlayObject = (
+  monitorSelectionExports as unknown as {
+    resolveMonitorOverlayObject?: (
+      project: JoyProjectV1,
+      nodeId: string,
+      targets: readonly { readonly nodeId: string; readonly objectId?: string }[],
+    ) => { readonly objectId: string; readonly object: VisualObjectV1 } | undefined;
+  }
+).resolveMonitorOverlayObject;
+
 type ContextMenuAction = 'fit' | 'fill' | 'crop' | 'relink' | 'centre' | 'reset';
 type MonitorContextMenuBuilder = (input: {
   readonly objectId: string;
@@ -60,6 +70,25 @@ const objectTransform = {
 };
 
 describe('Monitor context menu actions', () => {
+  it('resolves a video overlay node to its object and keeps the overlay node id', () => {
+    expect(resolveMonitorOverlayObject).toBeTypeOf('function');
+    const project = visualProject();
+    const videoObject = {
+      id: 'media-controller-video',
+      kind: 'null',
+      transform: objectTransform,
+    } as unknown as VisualObjectV1;
+    const videoProject = {
+      ...project,
+      visualObjects: { ...project.visualObjects, [videoObject.id]: videoObject },
+    };
+    const targets = [{ nodeId: 'clip-video', objectId: 'media-controller-video' }];
+    const resolved = resolveMonitorOverlayObject!(videoProject, 'clip-video', targets);
+
+    expect(resolved).toEqual({ objectId: 'media-controller-video', object: videoObject });
+    expect(monitorCropOverlayNodeId(resolved?.objectId, targets)).toBe('clip-video');
+  });
+
   it('uses the current panel context missing-media set instead of a cached panel closure', () => {
     const cached = new Set<string>();
     const current = new Set(['asset-missing']);
