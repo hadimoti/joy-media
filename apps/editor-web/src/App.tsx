@@ -16,6 +16,7 @@ import { PanelTab } from './PanelTab.js';
 import { PanelHeaderActions } from './PanelHeaderMenu.js';
 import {
   EditorPanelContext,
+  currentMissingMediaReviewRequested,
   type AnimationGraphFocusRequest,
   type DecodedPreviewFrame,
   type EditorRuntimeState,
@@ -6551,7 +6552,7 @@ function EditorWorkspace({
           }
           selectedSourceMissing={
             selectedTimelineVideo !== undefined &&
-            missingAssetIds.has(selectedTimelineVideo.clip.assetId)
+            context.missingAssetIds.has(selectedTimelineVideo.clip.assetId)
           }
           onRelinkSelectedSource={() => {
             setMissingReviewRequested(true);
@@ -7210,7 +7211,7 @@ function EditorWorkspace({
                 onDispatchArtifacts: context.dispatchArtifacts,
               })}
           onOpenAssetLibrary={() => context.activatePanel('media')}
-          missingAssetIds={missingAssetIds}
+          missingAssetIds={context.missingAssetIds}
           onRelinkMissing={() => {
             // The same path as the export's Relink: the Assets panel's Review dialog opens (T-R03).
             setMissingReviewRequested(true);
@@ -7424,8 +7425,11 @@ function EditorWorkspace({
               setRevision((current) => current + 1);
               setMissingMediaTick((current) => current + 1);
             },
-            reviewRequested: missingReviewRequested,
-            onReviewRequestHandled: () => setMissingReviewRequested(false),
+            reviewRequested: currentMissingMediaReviewRequested(
+              context.missingReviewRequested,
+              missingReviewRequested,
+            ),
+            onReviewRequestHandled: context.onMissingReviewRequestHandled,
           }}
         />,
       );
@@ -8112,6 +8116,9 @@ function EditorWorkspace({
               // Read by the panels through the context, not from a closure: the dock panels keep the
               // closure of their first render, so a workspace state value would never update there (defect 208).
               droppedImportProgress,
+              missingAssetIds,
+              missingReviewRequested,
+              onMissingReviewRequestHandled: () => setMissingReviewRequested(false),
               previewVideoFrame,
               clipFrameCache: clipFrameCacheRef.current,
               clipFrameTick,

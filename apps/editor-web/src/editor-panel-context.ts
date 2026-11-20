@@ -77,6 +77,11 @@ export interface EditorPanelContextValue {
   readonly state: EditorRuntimeState;
   /** The dropped-file import in progress, if any (defect 208). */
   readonly droppedImportProgress?: DroppedImportProgressState | undefined;
+  /** Missing project media, kept current for dock panels with first-render closures. */
+  readonly missingAssetIds: ReadonlySet<string>;
+  /** Opens the Missing media review from dock-panel relink actions. */
+  readonly missingReviewRequested: boolean;
+  readonly onMissingReviewRequestHandled: () => void;
   readonly previewVideoFrame: DecodedPreviewFrame | undefined;
   readonly clipFrameCache: ReadonlyMap<string, ImageDataLike>;
   readonly clipFrameTick: number;
@@ -198,3 +203,11 @@ export interface EditorPanelContextValue {
 }
 
 export const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
+
+/** Prefer the live context value when a dock panel still holds first-render props. */
+export function currentMissingMediaReviewRequested(
+  contextRequested: boolean | undefined,
+  capturedRequested: boolean,
+): boolean {
+  return contextRequested ?? capturedRequested;
+}

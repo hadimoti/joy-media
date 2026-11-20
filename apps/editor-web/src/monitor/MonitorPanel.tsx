@@ -123,6 +123,10 @@ import {
   monitorMarqueeAction,
   monitorMarqueeClipIds,
   monitorSelectionOverlay,
+  monitorCropAvailable,
+  currentMissingAssetIds,
+  monitorCropOverlayNodeId,
+  resolveMonitorOverlayObject,
   sameMonitorOverlay,
   buildMonitorContextMenuItems,
   type MonitorContextAction,
@@ -195,7 +199,7 @@ export function MonitorPanel({
       onCancelDroppedImport={onCancelDroppedImport}
       formatMenu={formatMenu}
       mediaOfflineName={mediaOfflineName}
-      missingAssetIds={missingAssetIds}
+      missingAssetIds={currentMissingAssetIds(context.missingAssetIds, missingAssetIds)}
       onRelinkMissing={onRelinkMissing}
     />
   );
@@ -682,7 +686,7 @@ function MonitorPanelContent({
       objectId: object.id,
       clipId,
       canFit: mediaFit !== undefined && mediaFit.disabledReason === undefined,
-      canCrop: object.kind === 'image',
+      canCrop: monitorCropAvailable(object, previewVisualProject.assets[assetId ?? '']?.kind),
       missing,
       showTransformActions: transformableVisual,
       ...(transformDisabledReason === undefined ? {} : { transformDisabledReason }),
@@ -1106,18 +1110,50 @@ function MonitorPanelContent({
     editingTextId === undefined
       ? undefined
       : transformOverlays.find((overlay) => overlay.elementId === editingTextId);
-  const selectedImageOverlay =
-    transformOverlays.length === 1 &&
-    visualProject.visualObjects[transformOverlays[0]!.elementId]?.kind === 'image'
-      ? transformOverlays[0]
-      : undefined;
-  const cropTargetId = cropObjectId ?? selectedImageOverlay?.elementId;
-  const cropTargetObject =
-    cropTargetId === undefined ? undefined : visualProject.visualObjects[cropTargetId];
-  const cropOverlay =
-    cropTargetId === undefined
+  const selectedMediaOverlay = transformOverlays.length === 1 ? transformOverlays[0] : undefined;
+  const selectedMediaResolution =
+    selectedMediaOverlay === undefined
       ? undefined
-      : transformOverlays.find((overlay) => overlay.elementId === cropTargetId);
+      : resolveMonitorOverlayObject(
+          visualProject,
+          selectedMediaOverlay.elementId,
+          transformTargets,
+        );
+  const selectedMediaObject = selectedMediaResolution?.object;
+  const selectedTimelineClip =
+    state.selectedIds.length !== 1
+      ? undefined
+      : Object.values(timelineProject.compositions)
+          .flatMap((entry) => entry.tracks.flatMap((track) => track.clips))
+          .find((clip) => clip.id === state.selectedIds[0]);
+  const selectedMediaAssetId =
+    selectedMediaObject?.assetId ??
+    (selectedTimelineClip?.kind === 'video' ? selectedTimelineClip.assetId : undefined);
+  const selectedMediaAssetKind =
+    selectedMediaAssetId === undefined
+      ? undefined
+      : previewVisualProject.assets[selectedMediaAssetId]?.kind;
+  const selectedCropOverlay =
+    selectedMediaObject !== undefined &&
+    monitorCropAvailable(selectedMediaObject, selectedMediaAssetKind)
+      ? selectedMediaOverlay
+      : undefined;
+  const selectedCropTarget =
+    selectedCropOverlay === undefined
+      ? undefined
+      : resolveMonitorOverlayObject(visualProject, selectedCropOverlay.elementId, transformTargets);
+  const cropTargetId =
+    cropObjectId ?? selectedCropTarget?.objectId ?? selectedCropOverlay?.elementId;
+  const cropTargetObject =
+    cropObjectId === undefined
+      ? selectedCropTarget?.object
+      : visualProject.visualObjects[cropObjectId];
+  const cropOverlayNodeId =
+    monitorCropOverlayNodeId(cropTargetId, transformTargets) ?? cropTargetId;
+  const cropOverlay =
+    cropOverlayNodeId === undefined
+      ? undefined
+      : transformOverlays.find((overlay) => overlay.elementId === cropOverlayNodeId);
   useEffect(() => {
     if (!cropMode || cropObjectId === undefined) return;
     if (resolveObjectIdForSelection(visualProject, state.selectedIds) === cropObjectId) return;
@@ -1154,7 +1190,21 @@ function MonitorPanelContent({
   const commitMonitorCrop = (crop: CropInsets) => {
     if (cropTargetId === undefined) return;
     const object = session.visualProject.visualObjects[cropTargetId];
-    if (object?.kind !== 'image' || JSON.stringify(object.transform.crop) === JSON.stringify(crop))
+    const selectedClip =
+      state.selectedIds.length !== 1
+        ? undefined
+        : Object.values(timelineProject.compositions)
+            .flatMap((entry) => entry.tracks.flatMap((track) => track.clips))
+            .find((clip) => clip.id === state.selectedIds[0]);
+    const assetId =
+      object?.assetId ?? (selectedClip?.kind === 'video' ? selectedClip.assetId : undefined);
+    const assetKind =
+      assetId === undefined ? undefined : session.visualProject.assets[assetId]?.kind;
+    if (
+      object === undefined ||
+      !monitorCropAvailable(object, assetKind) ||
+      JSON.stringify(object.transform.crop) === JSON.stringify(crop)
+    )
       return;
     dispatchProject({
       label: 'Crop',
@@ -1396,20 +1446,23 @@ function MonitorPanelContent({
             onClose={() => setEditingTextId(undefined)}
           />
         )}
-        {cropMode && cropTargetObject?.kind === 'image' && cropOverlay !== undefined && (
-          <MonitorCropBox
-            key={cropTargetObject.id}
-            crop={cropTargetObject.transform.crop}
-            overlay={cropOverlay}
-            view={monitorView.view}
-            viewportSize={monitorView.viewportSize}
-            onCommit={commitMonitorCrop}
-            onClose={() => {
-              setCropMode(false);
-              setCropObjectId(undefined);
-            }}
-          />
-        )}
+        {cropMode &&
+          cropTargetObject !== undefined &&
+          monitorCropAvailable(cropTargetObject, selectedMediaAssetKind) &&
+          cropOverlay !== undefined && (
+            <MonitorCropBox
+              key={cropTargetObject.id}
+              crop={cropTargetObject.transform.crop}
+              overlay={cropOverlay}
+              view={monitorView.view}
+              viewportSize={monitorView.viewportSize}
+              onCommit={commitMonitorCrop}
+              onClose={() => {
+                setCropMode(false);
+                setCropObjectId(undefined);
+              }}
+            />
+          )}
         <MonitorSnapOverlay
           feedback={snapFeedback}
           view={monitorView.view}
@@ -1469,13 +1522,13 @@ function MonitorPanelContent({
         viewOptions={viewOptions}
         onViewOptionsChange={setViewOptions}
         cropMode={cropMode}
-        cropAvailable={selectedImageOverlay !== undefined}
+        cropAvailable={selectedCropOverlay !== undefined}
         onCropToggle={() => {
           if (cropMode) {
             setCropMode(false);
             setCropObjectId(undefined);
-          } else if (selectedImageOverlay !== undefined) {
-            setCropObjectId(selectedImageOverlay.elementId);
+          } else if (selectedCropOverlay !== undefined) {
+            setCropObjectId(selectedCropTarget?.objectId ?? selectedCropOverlay.elementId);
             setCropMode(true);
           }
         }}

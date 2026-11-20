@@ -22,6 +22,7 @@ import { LIVE_ROWS } from './matrix.mjs';
 import { abandonedRow, restartAppOnto, runRows } from './rows.mjs';
 
 import { MATRIX_IDS, MATRIX_ROWS, createMatrixContext } from './desktop-matrix-rows.mjs';
+import { isMonitorEditMediaRow, MONITOR_EDIT_ROWS } from './desktop-monitor-edit-steps.mjs';
 import { createBridge, createBridgeLog, executeRow, readDocument } from './matrix-core.mjs';
 
 const LAB = labRoots();
@@ -111,6 +112,9 @@ export function parseArgs(argv) {
   if (options.testIds.includes('D-002') && !options.media) {
     throw new Error('D-002 requires --media <scratch-file>');
   }
+  if (options.testIds.some(isMonitorEditMediaRow) && !options.media) {
+    throw new Error('D-M07 media rows require --media <scratch fixture>');
+  }
   if (options.testIds.some((id) => id.startsWith('D-A10-')) && !options.media) {
     throw new Error('D-A10 rows require --media <stereo video fixture>');
   }
@@ -138,24 +142,28 @@ export async function run(argv = process.argv.slice(2)) {
   }
   const runId = randomUUID();
   const liveTest = options.testIds.some((id) => LIVE_ROWS.some((row) => row.id === id));
+  const monitorEdit = options.testIds.some((id) => MONITOR_EDIT_ROWS.some((row) => row.id === id));
   // Rows that export need the driver in test mode: the file is then saved in the scratch download folder (without
   // it Electron shows a Save window and the row sees no file). D-A05-60 exports the sample project.
   const exportMatrix = options.testIds.some((id) => id.startsWith('D-A10-'));
   const sampleExport = options.testIds.includes('D-A05-60');
   const testMode =
     liveTest ||
+    monitorEdit ||
     options.testIds.some((id) => id.startsWith('D-A09-')) ||
     exportMatrix ||
     sampleExport;
-  const evidenceTask = liveTest
-    ? 'T-A07-A08'
-    : sampleExport
-      ? 'T-A05'
-      : exportMatrix
-        ? 'T-A10'
-        : options.testIds.some((id) => id.startsWith('D-A09-'))
-          ? 'T-A09'
-          : 'T-A02';
+  const evidenceTask = monitorEdit
+    ? 'T-M07'
+    : liveTest
+      ? 'T-A07-A08'
+      : sampleExport
+        ? 'T-A05'
+        : exportMatrix
+          ? 'T-A10'
+          : options.testIds.some((id) => id.startsWith('D-A09-'))
+            ? 'T-A09'
+            : 'T-A02';
   const outDir = resolve(options.out ?? join(LAB.evidence, evidenceTask, runId));
   const scratchRoot = LAB.scratch;
   const profileDir = join(scratchRoot, 'profiles', runId);
