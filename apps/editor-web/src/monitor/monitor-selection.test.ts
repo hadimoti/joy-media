@@ -12,6 +12,7 @@ import * as monitorSelectionExports from './monitor-selection.js';
 import {
   applyMonitorSelection,
   buildMonitorElements,
+  monitorCropAvailable,
   monitorClickAction,
   monitorHitClipIds,
   monitorMarqueeAction,
@@ -57,6 +58,14 @@ const objectTransform = {
 };
 
 describe('Monitor context menu actions', () => {
+  it('offers Crop for image and video clip children that have media assets', () => {
+    expect(monitorCropAvailable({ kind: 'image' }, 'image')).toBe(true);
+    expect(monitorCropAvailable({ kind: 'null' }, 'video')).toBe(true);
+    expect(monitorCropAvailable({ kind: 'null' }, 'image')).toBe(true);
+    expect(monitorCropAvailable({ kind: 'null' }, 'audio')).toBe(false);
+    expect(monitorCropAvailable({ kind: 'text' }, 'video')).toBe(false);
+  });
+
   it('routes each available action to the object or clip under the pointer', () => {
     expect(buildMonitorContextMenuItems).toBeTypeOf('function');
     const onAction = vi.fn();

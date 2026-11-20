@@ -1,4 +1,4 @@
-import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
+import type { JoyProjectV1, SpikeProject, VisualObjectV1 } from '@joy-media/project-schema';
 import {
   flattenRenderNodes,
   type EditorOverlayIR,
@@ -184,6 +184,17 @@ export interface MonitorContextMenuItem {
   readonly action: () => void;
   readonly disabled?: boolean;
   readonly disabledReason?: string;
+}
+
+/** Whether the existing Monitor crop tool can edit this drawn media object. */
+export function monitorCropAvailable(
+  object: Pick<VisualObjectV1, 'kind'>,
+  assetKind: string | undefined,
+): boolean {
+  return (
+    object.kind === 'image' ||
+    (object.kind === 'null' && (assetKind === 'image' || assetKind === 'video'))
+  );
 }
 
 /** The context actions that have a matching editor command for this element. */
