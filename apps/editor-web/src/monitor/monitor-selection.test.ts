@@ -19,6 +19,8 @@ import {
   monitorMarqueeClipIds,
   monitorSelectionOverlay,
   sameMonitorOverlay,
+  currentMissingAssetIds,
+  monitorCropOverlayNodeId,
   type MonitorSelectionSetters,
 } from './monitor-selection.js';
 
@@ -58,6 +60,20 @@ const objectTransform = {
 };
 
 describe('Monitor context menu actions', () => {
+  it('uses the current panel context missing-media set instead of a cached panel closure', () => {
+    const cached = new Set<string>();
+    const current = new Set(['asset-missing']);
+    expect(currentMissingAssetIds(current, cached)).toBe(current);
+  });
+
+  it('maps a video document object to the video clip node drawn by the Monitor', () => {
+    expect(
+      monitorCropOverlayNodeId('media-controller-video', [
+        { objectId: 'media-controller-video', nodeId: 'clip-video' },
+      ]),
+    ).toBe('clip-video');
+  });
+
   it('offers Crop for image and video clip children that have media assets', () => {
     expect(monitorCropAvailable({ kind: 'image' }, 'image')).toBe(true);
     expect(monitorCropAvailable({ kind: 'null' }, 'video')).toBe(true);

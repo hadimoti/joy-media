@@ -124,6 +124,8 @@ import {
   monitorMarqueeClipIds,
   monitorSelectionOverlay,
   monitorCropAvailable,
+  currentMissingAssetIds,
+  monitorCropOverlayNodeId,
   sameMonitorOverlay,
   buildMonitorContextMenuItems,
   type MonitorContextAction,
@@ -196,7 +198,7 @@ export function MonitorPanel({
       onCancelDroppedImport={onCancelDroppedImport}
       formatMenu={formatMenu}
       mediaOfflineName={mediaOfflineName}
-      missingAssetIds={missingAssetIds}
+      missingAssetIds={currentMissingAssetIds(context.missingAssetIds, missingAssetIds)}
       onRelinkMissing={onRelinkMissing}
     />
   );
@@ -1130,13 +1132,20 @@ function MonitorPanelContent({
     monitorCropAvailable(selectedMediaObject, selectedMediaAssetKind)
       ? selectedMediaOverlay
       : undefined;
-  const cropTargetId = cropObjectId ?? selectedCropOverlay?.elementId;
+  const selectedCropTarget =
+    selectedCropOverlay === undefined
+      ? undefined
+      : transformTargets.find((target) => target.nodeId === selectedCropOverlay.elementId);
+  const cropTargetId =
+    cropObjectId ?? selectedCropTarget?.objectId ?? selectedCropOverlay?.elementId;
   const cropTargetObject =
     cropTargetId === undefined ? undefined : visualProject.visualObjects[cropTargetId];
+  const cropOverlayNodeId =
+    monitorCropOverlayNodeId(cropTargetId, transformTargets) ?? cropTargetId;
   const cropOverlay =
-    cropTargetId === undefined
+    cropOverlayNodeId === undefined
       ? undefined
-      : transformOverlays.find((overlay) => overlay.elementId === cropTargetId);
+      : transformOverlays.find((overlay) => overlay.elementId === cropOverlayNodeId);
   useEffect(() => {
     if (!cropMode || cropObjectId === undefined) return;
     if (resolveObjectIdForSelection(visualProject, state.selectedIds) === cropObjectId) return;

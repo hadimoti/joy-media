@@ -8,6 +8,24 @@ import {
 import { renderNodeIdToClipId } from './monitor-ids.js';
 import { hitTestElements, marqueeSelect, type HitTestElement } from './monitor-hit-test.js';
 
+/** Dock panels may keep their first render's props; prefer the live context value. */
+export function currentMissingAssetIds(
+  contextIds: ReadonlySet<string> | undefined,
+  capturedIds: ReadonlySet<string> | undefined,
+): ReadonlySet<string> | undefined {
+  return contextIds ?? capturedIds;
+}
+
+/** A video crop edits its bound object but draws its box on the clip node. */
+export function monitorCropOverlayNodeId(
+  objectId: string | undefined,
+  targets: readonly { readonly objectId?: string; readonly nodeId: string }[],
+): string | undefined {
+  return objectId === undefined
+    ? undefined
+    : targets.find((target) => target.objectId === objectId)?.nodeId;
+}
+
 /**
  * Monitor selection (ADR-0046 section 4, T-M04). The Monitor keeps no
  * selection of its own: it reads the timeline's `state.selectedIds` (clip
