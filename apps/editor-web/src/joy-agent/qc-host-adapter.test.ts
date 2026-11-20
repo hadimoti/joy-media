@@ -839,11 +839,11 @@ describe('QC host adapter: gates in front of every frame', () => {
     const { adapter, reportId, frames } = await checked({
       onReport: (report) => reports.push(report as Record<string, unknown>),
     });
-    expect(reports[0]).toMatchObject({ run: { frameBudget: 16 } });
+    expect(reports[0]).toMatchObject({ run: { frameBudget: 12 } });
     const request = frameRequest(reportId, frames.slice(0, 3));
     await adapter.hasApprovedConsent(request, context());
     await adapter.reviewFrames(request, context());
-    expect(reports[1]).toMatchObject({ run: { framesSent: 3, frameBudget: 16 } });
+    expect(reports[1]).toMatchObject({ run: { framesSent: 3, frameBudget: 12 } });
   });
 
   it('still returns the review when the report cannot be updated after the model answered', async () => {
