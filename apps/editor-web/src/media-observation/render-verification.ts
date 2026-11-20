@@ -1,3 +1,9 @@
+import {
+  DEFAULT_TIMELINE_QC_TOTAL_BYTES,
+  MAX_TIMELINE_QC_FRAMES,
+  encodeTimelineQcFrameJpeg,
+} from './qc-sampler.js';
+
 /**
  * Final-export verification deliberately sits after composition capture.
  *
@@ -5,7 +11,7 @@
  * not evidence that the encoded file is correct. This boundary accepts only a
  * decoder explicitly labelled as an actual encoded-export decoder, asks it for
  * bounded final-artifact facts/pixels/audio samples, and exposes only safe
- * aggregate verification facts to callers.
+ * aggregate verification facts plus optional report-listed JPEG artifacts.
  *
  * Scope: this verifier expects every JOY encoded export to carry at least one
  * video stream. `audioStreamCount` defaults to 1; pass `audioStreamCount: 0`
@@ -106,6 +112,22 @@ export interface FinalEncodedExportVerificationRequest {
   readonly artifact: FinalEncodedExportArtifact;
   readonly expected: FinalEncodedExportExpectation;
   readonly signal?: AbortSignal;
+  /** Optional, report-scoped JPEG evidence sink. RGBA stays inside verification. */
+  readonly qcEvidence?: FinalEncodedExportQcEvidenceRequest;
+}
+
+export interface FinalEncodedExportQcEvidenceRequest {
+  readonly report: Readonly<Record<string, unknown>>;
+  readonly storeFileReport: (
+    report: Readonly<Record<string, unknown>>,
+    frames: readonly {
+      readonly frameId: string;
+      readonly timestampUs: number;
+      readonly jpeg: Blob;
+      readonly width: number;
+      readonly height: number;
+    }[],
+  ) => string | undefined;
 }
 
 /** Limits are supplied to the decoder and rechecked against its response. */
@@ -350,6 +372,7 @@ interface NormalizedVerificationRequest {
   readonly artifact: FinalEncodedExportArtifact;
   readonly expected: NormalizedExpectation;
   readonly signal?: AbortSignal;
+  readonly qcEvidence?: FinalEncodedExportQcEvidenceRequest;
 }
 
 interface NormalizedDecodedFinalEncodedExport {
@@ -482,7 +505,45 @@ export function createFinalEncodedExportVerifier(
           return failed('invalid-decoder-output');
         }
         if (controller.signal.aborted) return cancelled();
-        return verifyDecodedFinalExport(decoded, request.expected);
+        const verification = verifyDecodedFinalExport(decoded, request.expected);
+        if (verification.status !== 'verified' || request.qcEvidence === undefined)
+          return verification;
+        try {
+          const video = decoded.videoStreams[0];
+          if (video === undefined) return failed('missing-decoded-frame');
+          const framesByPts = new Map(video.frames.map((frame) => [frame.ptsUs, frame]));
+          const evidenceFrames = [];
+          let totalJpegBytes = 0;
+          for (const listed of getQcReportFrames(request.qcEvidence.report)) {
+            const frame = framesByPts.get(listed.timeUs);
+            if (frame === undefined) return failed('missing-decoded-frame');
+            const jpeg = await encodeTimelineQcFrameJpeg({
+              outputTimeUs: frame.ptsUs,
+              width: frame.width,
+              height: frame.height,
+              rgba: frame.rgba,
+            });
+            totalJpegBytes += jpeg.jpeg.size;
+            if (totalJpegBytes > DEFAULT_TIMELINE_QC_TOTAL_BYTES)
+              return failed('decoded-pixel-budget-exceeded');
+            evidenceFrames.push({
+              frameId: listed.frameId,
+              timestampUs: listed.timeUs,
+              jpeg: jpeg.jpeg,
+              width: frame.width,
+              height: frame.height,
+            });
+          }
+          const reportId = request.qcEvidence.storeFileReport(
+            request.qcEvidence.report,
+            evidenceFrames,
+          );
+          if (typeof reportId !== 'string' || reportId.length < 1)
+            return failed('invalid-decoder-output');
+        } catch {
+          return failed('invalid-decoder-output');
+        }
+        return verification;
       } finally {
         request.signal?.removeEventListener('abort', abortFromCaller);
       }
@@ -560,21 +621,80 @@ function normalizeRequest(
   try {
     if (
       !isPlainRecord(input) ||
-      !hasOnlyKeys(input, ['artifact', 'expected', 'signal'], ['artifact', 'expected']) ||
+      !hasOnlyKeys(
+        input,
+        ['artifact', 'expected', 'signal', 'qcEvidence'],
+        ['artifact', 'expected'],
+      ) ||
       !isAbortSignal(input.signal)
     )
       throw new Error();
     const artifact = normalizeArtifact(input.artifact);
-    const expected = normalizeExpectation(input.expected, options.limits);
+    const qcEvidence =
+      input.qcEvidence === undefined ? undefined : normalizeQcEvidence(input.qcEvidence);
+    const qcFramePtsUs =
+      qcEvidence === undefined
+        ? []
+        : getQcReportFrames(qcEvidence.report).map((frame) => frame.timeUs);
+    const expected = normalizeExpectation(input.expected, options.limits, qcFramePtsUs);
+    if (qcFramePtsUs.some((ptsUs) => !expected.expectedVideoPtsUs.includes(ptsUs)))
+      throw new Error();
     return Object.freeze({
       artifact,
       expected,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(qcEvidence === undefined ? {} : { qcEvidence }),
     });
   } catch (error) {
     if (error instanceof FinalEncodedExportVerificationError) throw error;
     throw new FinalEncodedExportVerificationError('invalid-request');
   }
+}
+
+function normalizeQcEvidence(input: unknown): FinalEncodedExportQcEvidenceRequest {
+  if (
+    !isPlainRecord(input) ||
+    !hasExactKeys(input, ['report', 'storeFileReport']) ||
+    !isPlainRecord(input.report) ||
+    typeof input.storeFileReport !== 'function'
+  )
+    throw new Error();
+  const report = input.report as Readonly<Record<string, unknown>>;
+  getQcReportFrames(report);
+  return Object.freeze({
+    report,
+    storeFileReport:
+      input.storeFileReport as FinalEncodedExportQcEvidenceRequest['storeFileReport'],
+  });
+}
+
+function getQcReportFrames(
+  report: Readonly<Record<string, unknown>>,
+): readonly { readonly frameId: string; readonly timeUs: number }[] {
+  if (
+    report.version !== 1 ||
+    !Array.isArray(report.frames) ||
+    report.frames.length < 1 ||
+    report.frames.length > MAX_TIMELINE_QC_FRAMES
+  )
+    throw new Error();
+  const ids = new Set<string>();
+  const times = new Set<number>();
+  const frames = report.frames.map((value) => {
+    if (
+      !isPlainRecord(value) ||
+      typeof value.frameId !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._=-]{0,127}$/.test(value.frameId) ||
+      !isNonNegativeSafeInteger(value.timeUs) ||
+      ids.has(value.frameId) ||
+      times.has(value.timeUs)
+    )
+      throw new Error();
+    ids.add(value.frameId);
+    times.add(value.timeUs);
+    return Object.freeze({ frameId: value.frameId, timeUs: value.timeUs });
+  });
+  return Object.freeze(frames);
 }
 
 function normalizeArtifact(input: unknown): FinalEncodedExportArtifact {
@@ -591,6 +711,7 @@ function normalizeArtifact(input: unknown): FinalEncodedExportArtifact {
 function normalizeExpectation(
   input: unknown,
   limits: FinalEncodedExportDecodeLimits,
+  qcFramePtsUs: readonly number[] = [],
 ): NormalizedExpectation {
   if (
     !isPlainRecord(input) ||
@@ -685,6 +806,7 @@ function normalizeExpectation(
       ...new Set([
         ...requiredVideoDecodePtsUs,
         ...visualPredicates.map((predicate) => predicate.ptsUs),
+        ...qcFramePtsUs,
       ]),
     ].sort((left, right) => left - right),
   );

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createEvidenceStore } from '../media-observation/evidence-store.js';
+import { createFinalEncodedExportVerifier } from '../media-observation/render-verification.js';
 import {
   createTimelineQcSampler,
   type TimelineQcCanvasFactory,
@@ -490,6 +491,116 @@ describe('QC host adapter: timeline check and report', () => {
       framesSent: 0,
     });
     expect(refused.transport.analyze).not.toHaveBeenCalled();
+  });
+});
+
+describe('final encoded export QC evidence integration', () => {
+  it('stores two report-listed verified JPEG frames and keeps consent refusal effective', async () => {
+    class FakeOffscreenCanvas {
+      constructor(
+        readonly width: number,
+        readonly height: number,
+      ) {}
+      getContext() {
+        return {
+          createImageData: (width: number, height: number) => ({
+            width,
+            height,
+            data: new Uint8ClampedArray(width * height * 4),
+          }),
+          putImageData: () => undefined,
+          drawImage: () => undefined,
+        };
+      }
+      async convertToBlob({ type }: { readonly type: string }) {
+        return new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type });
+      }
+    }
+    vi.stubGlobal('OffscreenCanvas', FakeOffscreenCanvas);
+    const report = {
+      version: 1,
+      reportId: 'qc-export-integrated',
+      assetDigest: 'a'.repeat(64),
+      target: { kind: 'file' },
+      findings: [],
+      frames: [
+        { frameId: 'export-frame-1000000', timeUs: 1_000_000 },
+        { frameId: 'export-frame-2000000', timeUs: 2_000_000 },
+      ],
+    };
+    const decodedExport = {
+      container: 'mp4',
+      durationUs: 3_000_000,
+      videoStreams: [
+        {
+          streamId: 'video-0',
+          codec: 'h264',
+          width: 2,
+          height: 2,
+          durationUs: 3_000_000,
+          presentationPtsUs: [0, 1_000_000, 2_000_000],
+          presentationPtsComplete: true as const,
+          frames: [0, 1_000_000, 2_000_000].map((ptsUs) => ({
+            ptsUs,
+            width: 2,
+            height: 2,
+            rgba: new Uint8Array(16),
+          })),
+        },
+      ],
+      audioStreams: [],
+    };
+    const makeVerifier = () =>
+      createFinalEncodedExportVerifier({
+        decoder: {
+          kind: 'actual-encoded-export-decoder',
+          version: 'qc-integration-decoder-v1',
+          decode: async () => ({ status: 'decoded' as const, decoded: decodedExport }),
+        },
+      });
+    const verifyTo = async (adapter: Fixture['adapter']) =>
+      makeVerifier().verify({
+        artifact: { artifactId: 'export-artifact-1', encoded: new Blob(['encoded']) },
+        expected: {
+          container: 'mp4',
+          width: 2,
+          height: 2,
+          durationUs: 3_000_000,
+          expectedVideoPtsUs: [0, 1_000_000, 2_000_000],
+          videoCodec: 'h264',
+          audioStreamCount: 0,
+          visualPredicates: [],
+          audioSyncPredicates: [],
+        },
+        qcEvidence: {
+          report,
+          storeFileReport: (value, frames) => adapter.storeFileReport(value, frames),
+        },
+      });
+
+    const allowed = createFixture({ consent: true });
+    await expect(verifyTo(allowed.adapter)).resolves.toMatchObject({ status: 'verified' });
+    const allowedRequest = frameRequest('qc-export-integrated', [
+      'export-frame-1000000',
+      'export-frame-2000000',
+    ]);
+    await expect(allowed.adapter.hasApprovedConsent(allowedRequest, context())).resolves.toBe(true);
+    await expect(allowed.adapter.reviewFrames(allowedRequest, context())).resolves.toMatchObject({
+      ok: true,
+      framesSent: 2,
+    });
+    expect(allowed.transport.analyze).toHaveBeenCalledTimes(1);
+    expect(allowed.transport.analyze.mock.calls[0]![0].frames).toHaveLength(2);
+
+    const refused = createFixture({ consent: false });
+    await expect(verifyTo(refused.adapter)).resolves.toMatchObject({ status: 'verified' });
+    await expect(refused.adapter.reviewFrames(allowedRequest, context())).resolves.toMatchObject({
+      ok: false,
+      code: 'JOY_AGENT_QC_CONSENT_REQUIRED',
+      framesSent: 0,
+    });
+    expect(refused.transport.analyze).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });
 
