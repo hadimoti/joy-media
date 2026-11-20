@@ -1,0 +1,66 @@
+{
+  "schema": "joy-media.attended-receipt/1",
+  "scenario": {
+    "id": "project.persistence.fresh-process",
+    "status": "passed",
+    "firstAttemptPassed": true,
+    "retries": 0
+  },
+  "candidateSha": "ef9ec233aa400339d0eb16ddebac27fbb5f0a7d1",
+  "app": {
+    "exeSha256": "982b6e8f77edd9adbce6d57fbf303510fd6b7e5f80caa9c4216a3f4b6391684f",
+    "unpackedDir": "C:\\jgp\\attended-ef9ec233-20261120\\app\\joy-media-win32-x64"
+  },
+  "run": {
+    "id": "1dfa1fbc-3eef-4d61-bb39-6535a911aee6",
+    "attempt": 1,
+    "startedAt": "2026-11-20T10:49:18.503Z",
+    "finishedAt": "2026-11-20T10:49:30.405Z",
+    "operator": "owner-at-pc",
+    "mode": "scripted",
+    "manual": false
+  },
+  "guards": {
+    "joyKeyBefore": "af05be55222c86fece27e738b7e8a931cb4261c9797261c67dde3c71a4e5cac0",
+    "joyKeyAfter": "af05be55222c86fece27e738b7e8a931cb4261c9797261c67dde3c71a4e5cac0",
+    "ownerLibraryFilesBefore": 3221,
+    "ownerLibraryFilesAfter": 3221,
+    "installedFolderTouched": false
+  },
+  "checks": [
+    {
+      "name": "editable-project-exported",
+      "status": "passed",
+      "detail": "FreshProcess-1dfa1fbc with fresh-process-1dfa1fbc.mp4 exported as export-package.joyproject.json (1462261 bytes); the source profile's saved state holds both"
+    },
+    {
+      "name": "fresh-profile-started",
+      "status": "passed",
+      "detail": "a new profile started on the scratch library C:\\jgp\\attended-ef9ec233-20261120\\library; host project FreshProcessHost-1dfa1fbc is open"
+    },
+    {
+      "name": "project-imported-in-fresh-profile",
+      "status": "passed",
+      "detail": "imported FreshProcess-1dfa1fbc as the open project; the fresh profile's saved state holds the project and a fresh-process-1dfa1fbc.mp4 clip; the app showed no notice"
+    },
+    {
+      "name": "export-from-fresh-profile-probed",
+      "status": "passed",
+      "detail": "the app verified an MP4 rendered from the imported project: 1920x1080 video stream, 3.000 s, the imported clip's 3.000 s"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "export-package.joyproject.json",
+      "path": "export-package.joyproject.json",
+      "sha256": "37dc164bffa4f21614bb01ac552483aa524c6fc4d204afa8563ad06e5a1ac408",
+      "bytes": 1462261
+    },
+    {
+      "name": "export.mp4",
+      "path": "export.mp4",
+      "sha256": "592827c5a19374ad1f50572800b0ab302211af919acdaf5c388960253865e843",
+      "bytes": 2283003
+    }
+  ]
+}
