@@ -128,12 +128,14 @@ test('the snap readout text parses to the box in frame pixels', () => {
     y: 960,
     width: 270,
     height: 480,
+    angle: 0,
   });
-  assert.deepEqual(parseReadout('X -12  Y 0  W 5  H 6  A -0°'), {
+  assert.deepEqual(parseReadout('X -12  Y 0  W 5  H 6  A -12.5°'), {
     x: -12,
     y: 0,
     width: 5,
     height: 6,
+    angle: -12.5,
   });
   assert.equal(parseReadout('no readout'), null);
   assert.equal(parseReadout(null), null);
@@ -158,4 +160,20 @@ test('the row refuses without --media before it touches the page', async () => {
   const row = MONITOR_SNAP_ROWS.find((item) => item.id === 'D-M06-01');
   assert.ok(row, 'D-M06-01 is registered');
   await assert.rejects(row.run(null, { media: undefined }), /^Error: BLOCKED-on-fixture D-M06-01/u);
+});
+
+test('the target rows cover both canvas corners, both safe areas, user guides, and other element edges and centres', () => {
+  assert.deepEqual(
+    MONITOR_SNAP_ROWS.map((row) => row.id),
+    [
+      'D-M06-01',
+      'D-M06-02',
+      'D-M06-03',
+      'D-M06-04',
+      'D-M06-05',
+      'D-M06-06',
+      'D-M06-07',
+      'D-M06-08',
+    ],
+  );
 });
