@@ -155,7 +155,7 @@ JOY Media v1.1.1 is an update to v1.1.0. It is still a local desktop video edito
 - **Providers.** Kimi and xAI model answers and the Get a key and API docs links on the provider cards may not work as expected.
 - **MiniMax in Joy Code.** MiniMax can still spend its room thinking and send no answer. The app now says so. A normal message can also be refused as looking like it holds a key. The text that caused it is not known.
 - **Command line in PowerShell.** Use `joy-media` in PowerShell. There, `joy` opens the Windows Game Controllers panel, because Windows finds its own joy.cpl before the JOY Media folder on the PATH. In Command Prompt, `joy` and `joy-media` both run the JOY Media command line.
-- **Export.** The command line has 3 export choices (MP4, WebM, ProRes). The app has 5 presets, so the same request can give different files. In our tests, Drop Shadow and CRT / Retro differ from the Monitor by more than the export check allows (see Known limits).
+- **Export.** The command line has 3 export choices (MP4, WebM, ProRes). The app has 5 presets, so the same request can give different files.
 - **Two effects differ in exports.** In our tests, Drop Shadow and CRT / Retro differ from the Monitor by more than the test allows in the exported video. Whether they are missing or only changed was not checked. The other 31 effects in the test passed.
 - **Timecode in the picture.** Burned-in timecode can be one pixel off between the Monitor and the exported video. The test allows for this.
 - **Effect previews.** Some effect cards play the wrong preview loop, so the card may not show the effect as it looks.
