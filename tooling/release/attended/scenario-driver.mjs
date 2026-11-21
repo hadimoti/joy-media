@@ -642,7 +642,10 @@ function freshEditorPageOf(base) {
         30_000,
       );
       if (!panelOpen) {
-        await button('View').click();
+        await page
+          .locator('button.app-menu-trigger')
+          .filter({ hasText: /^View$/ })
+          .click();
         await menuItem('Media').click();
       }
       await button('Import media').first().click();
@@ -859,11 +862,27 @@ function semanticsEditorPageOf(base) {
   const visible = (locator) =>
     withinTime(locator.isVisible(), 'a visibility check', 30_000).catch(() => false);
 
-  /** Opens a panel from the View menu when its control is not on screen yet. */
+  /** Opens a panel from the View menu (or Enhance sub-tab for Transitions) when its control is not on screen yet. */
   async function showPanel(control, panelName) {
     if (await visible(control)) return;
-    await button('View').click();
-    await menuItem(panelName).click();
+    if (panelName === 'Transitions') {
+      const tab = page.locator('[role="tab"][data-feature-tool="transitions"]').first();
+      if (!(await visible(tab))) {
+        await page
+          .locator('button.app-menu-trigger')
+          .filter({ hasText: /^View$/ })
+          .click();
+        await menuItem('Enhance').click();
+        await tab.waitFor({ state: 'visible', timeout: 30_000 });
+      }
+      await tab.click();
+    } else {
+      await page
+        .locator('button.app-menu-trigger')
+        .filter({ hasText: /^View$/ })
+        .click();
+      await menuItem(panelName).click();
+    }
     await control.waitFor({ state: 'visible', timeout: 30_000 });
   }
 
