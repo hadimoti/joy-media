@@ -3,6 +3,7 @@ import type { BrowserControlPlaneClient } from '../control-plane-client.js';
 import type { EditorSession } from '../editor-session.js';
 import { attachGeneratedJob, type AttachableGenerationJob } from '../generation-attach.js';
 import type { MediaImportOptions } from '../media-import.js';
+import { revokeDetachedObjectUrl } from '../media-object-url.js';
 import type { JoyCodeMediaPartsProps } from '../joy-code-media-parts.js';
 import type {
   JoyAgentAttachGeneratedMediaRequest,
@@ -107,7 +108,8 @@ export function createDesktopGenerationHost(
       // fall back to local OPFS cache + project registration so library/timeline attach still works.
       const sha = jobRecord.sha256 ?? '';
       const offlineClient: typeof options.client = {
-        ensureProject: async () => ({ id: options.projectId, title: options.projectTitle }) as never,
+        ensureProject: async () =>
+          ({ id: options.projectId, title: options.projectTitle }) as never,
         registerAsset: async (_projectId, reg) =>
           ({ ...reg, projectId: options.projectId }) as never,
         assets: async () => [],
@@ -203,7 +205,7 @@ export function createDesktopGenerationHost(
             document.body.appendChild(link);
             link.click();
             link.remove();
-            window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+            window.setTimeout(() => revokeDetachedObjectUrl(url), 10_000);
           })
           .catch((error) => {
             console.error('[joy-generation] Save as failed:', error);

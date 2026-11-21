@@ -4138,7 +4138,6 @@ export function AgentPanel({
     liveAgentPhase !== 'completed' &&
     liveAgentPhase !== 'failed' &&
     liveAgentPhase !== 'cancelled';
-  const activeRunId = selectActiveJoyAgentRunId(agentRunId, presenceState, runLifecycle.run);
 
   const uploadJoyCodeFiles = async (fileList: FileList | null) => {
     if (fileList === null || fileList.length === 0 || onAttachAsset === undefined) return;
