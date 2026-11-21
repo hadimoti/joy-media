@@ -4220,59 +4220,6 @@ export function AgentPanel({
           }
         }}
       >
-        {/* A failed run is shown by its failure card in the chat, not by this strip. */}
-        {liveAgentPhase !== undefined && liveAgentPhase !== 'failed' && (
-          <div
-            className={`joy-agent-live-status is-${liveAgentPhase}`}
-            role="status"
-            aria-live="polite"
-          >
-            <span className="joy-agent-live-mark" aria-hidden="true" />
-            <strong>
-              {liveAgentPhase === 'awaiting-approval'
-                ? 'Needs approval'
-                : `JOY ${liveAgentPhase.replaceAll('-', ' ')}`}
-            </strong>
-            <span>
-              {liveAgentPhase === 'previewing' || liveAgentPhase === 'planning'
-                ? 'Previewing changes in the editor'
-                : 'Live engine activity'}
-            </span>
-            {pending === undefined &&
-              (liveAgentPhase === 'thinking' ||
-                liveAgentPhase === 'connecting' ||
-                liveAgentPhase === 'planning' ||
-                liveAgentPhase === 'previewing') &&
-              joyAgentEngineClient !== undefined && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const recipeCancelled = cancelRecipeInvocation(activeRunId);
-                    if (!recipeCancelled && activeRunId !== undefined) {
-                      cancelRunLifecycle(activeRunId);
-                      void joyAgentEngineClient.cancel(activeRunId);
-                    }
-                    // Stop revokes activeModelRunIdRef before the async engine iterator can
-                    // deliver its terminal event, so keep the confirmation on the action.
-                    if (recipeCancelled || activeRunId !== undefined) {
-                      appendMessage(
-                        activeThread.id,
-                        'assistant',
-                        'JOY run cancelled. No edits were applied.',
-                      );
-                    }
-                    activeModelRunIdRef.current = undefined;
-                    discardPreparedModelChange(activeRunId);
-                    setAgentPhase('cancelled');
-                    clearAgentPreviewForSourceRun(activeRunId);
-                    agentPresenceStore?.clear();
-                  }}
-                >
-                  Stop
-                </button>
-              )}
-          </div>
-        )}
         <section
           className={`joy-code-composer is-${composerCapability} ${
             liveAgentBusy ? 'is-agent-busy' : ''

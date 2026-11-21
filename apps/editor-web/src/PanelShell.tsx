@@ -168,7 +168,7 @@ function PanelSectionTab({
           {tab.count}
         </span>
       )}
-      {panelId !== undefined && presence.active && (
+      {panelId !== undefined && panelId !== 'agent' && presence.active && (
         <span
           className="joy-panel-tab-agent-marker"
           aria-label={

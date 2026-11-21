@@ -81,14 +81,14 @@ export function createDesktopGenerationHost(
       throw new Error('The generation job is not ready to attach.');
     const fileBytes = new Uint8Array(generated.bytes).buffer.slice(0) as ArrayBuffer;
     const file = new File([fileBytes], generated.fileName, { type: generated.mimeType });
-    const attached = await attachGeneratedJob({
+    const jobRecord = { ...job, ...generated.job, id: job.id, state: job.state };
+    const baseAttachOptions = {
       projectId: options.projectId,
       projectTitle: options.projectTitle,
-      job: { ...job, ...generated.job, id: job.id, state: job.state },
+      job: jobRecord,
       file,
       session: options.session,
       audioState: options.audioState,
-      client: options.client,
       ...(options.originalAssetCache === undefined
         ? {}
         : { originalAssetCache: options.originalAssetCache }),
@@ -98,7 +98,24 @@ export function createDesktopGenerationHost(
           ? Math.round(input.atSeconds * 1_000_000)
           : options.getPlayheadUs(),
       ...(options.describeMedia === undefined ? {} : { describeMedia: options.describeMedia }),
-    });
+    };
+    let attached: Awaited<ReturnType<typeof attachGeneratedJob>>;
+    try {
+      attached = await attachGeneratedJob({ ...baseAttachOptions, client: options.client });
+    } catch {
+      // Desktop offline sessions may not have a running HTTP control-plane server;
+      // fall back to local OPFS cache + project registration so library/timeline attach still works.
+      const sha = jobRecord.sha256 ?? '';
+      const offlineClient: typeof options.client = {
+        ensureProject: async () => ({ id: options.projectId, title: options.projectTitle }) as never,
+        registerAsset: async (_projectId, reg) =>
+          ({ ...reg, projectId: options.projectId }) as never,
+        assets: async () => [],
+        uploadAssetOriginal: async (_projectId, assetId, uploadedFile) =>
+          ({ assetId, sha256: sha, bytes: uploadedFile.size }) as never,
+      };
+      attached = await attachGeneratedJob({ ...baseAttachOptions, client: offlineClient });
+    }
     options.onAudioState(attached.audioState);
     return { assetId: attached.assetId, placed: attached.clipId !== undefined };
   };
@@ -164,8 +181,34 @@ export function createDesktopGenerationHost(
           : { bytes: result.bytes, mimeType: result.mimeType };
       },
       onCancel: (jobId) => void cancel(jobId),
-      onAddToLibrary: (jobId) => void attach({ jobId, target: 'library' }),
-      onPlaceOnTimeline: (jobId) => void attach({ jobId, target: 'timeline' }),
+      onAddToLibrary: (jobId) => {
+        void attach({ jobId, target: 'library' }).catch((error) => {
+          console.error('[joy-generation] Add to library failed:', error);
+        });
+      },
+      onPlaceOnTimeline: (jobId) => {
+        void attach({ jobId, target: 'timeline' }).catch((error) => {
+          console.error('[joy-generation] Place on timeline failed:', error);
+        });
+      },
+      onSaveAs: (jobId) => {
+        void bytes(jobId)
+          .then((generated) => {
+            if (generated === undefined || typeof document === 'undefined') return;
+            const blob = new Blob([new Uint8Array(generated.bytes)], { type: generated.mimeType });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = generated.fileName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+          })
+          .catch((error) => {
+            console.error('[joy-generation] Save as failed:', error);
+          });
+      },
     },
   };
 }
