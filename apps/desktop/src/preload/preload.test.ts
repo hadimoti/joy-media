@@ -60,6 +60,7 @@ describe('preload channel allow-list', () => {
         'desktop.generation.status',
         'desktop.generation.cancel',
         'desktop.generation.list',
+        'desktop.generation.bytes',
       ]),
     );
   });

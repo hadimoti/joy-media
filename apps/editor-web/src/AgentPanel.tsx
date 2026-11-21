@@ -87,6 +87,9 @@ import {
 import {
   createJoyAgentHostRpcMethodsForSnapshot,
   type JoyAgentLibraryEntry,
+  type JoyAgentGenerateMediaRequest,
+  type JoyAgentGenerationToolAdapter,
+  type JoyAgentGenerationJobSnapshot,
 } from './joy-agent/tool-bridge.js';
 import type { JoyAgentObservationAdapterFactory } from './joy-agent/observation-host-factory.js';
 import type {
@@ -131,6 +134,7 @@ import {
   type JoyAgentComposerHostLease,
 } from './joy-agent/composer-host-lease.js';
 import type { JoyAgentPhase } from './joy-agent/protocol.js';
+import type { HostRpcHandlerContext } from './joy-agent/host-rpc.js';
 import {
   createJoyAgentRunController,
   type JoyAgentRunController,
@@ -219,6 +223,7 @@ import {
   type PreparedJoyCodeApplyOutcome,
 } from './joy-agent/prepared-apply-outcome.js';
 import { inferJoyAgentTaskKind, targetForJoyAgentTask } from './agent-ui-targets.js';
+import type { JoyCodeJobState, JoyCodeMessagePart } from './joy-code-history.js';
 
 /** Every edit this panel commits is attributed to the built-in JOY engine. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'joy-agent' };
@@ -244,20 +249,21 @@ const LEGACY_JOY_AGENT_TOOL_NAMES = Object.freeze([
 
 /**
 /**
- * Generation (T-C04) tools are in the shared catalog, but this panel does not pass their host
- * dependencies into createJoyAgentHostRpcMethodsForSnapshot. Offering them would let the model call a
- * tool that no host answers. Drop a name here only in the same change that registers its host method.
- *
  * The three QC tools (T-B04) are left out of an observation run for a different reason: they are
  * offered only to a run that asked for a quality check and has a QC adapter (T-B04b).
  */
-const HOST_UNREGISTERED_TOOL_NAMES: ReadonlySet<JoyAgentHostToolName> =
-  new Set<JoyAgentHostToolName>(['generate_media', 'attach_generated_media']);
 const OBSERVATION_JOY_AGENT_TOOL_NAMES: readonly JoyAgentHostToolName[] = Object.freeze(
   JOY_AGENT_HOST_TOOL_NAMES.filter(
-    (name) => !isQcHostToolName(name) && !HOST_UNREGISTERED_TOOL_NAMES.has(name),
+    (name) =>
+      !isQcHostToolName(name) && name !== 'generate_media' && name !== 'attach_generated_media',
   ),
 );
+
+interface PendingGenerationCostRequest {
+  readonly requestId: string;
+  readonly request: JoyAgentGenerateMediaRequest;
+  readonly context: HostRpcHandlerContext;
+}
 
 /** A Worker approval event held until the staged preview has actually rendered. */
 interface DeferredPreviewApproval {
@@ -596,6 +602,7 @@ export function AgentPanel({
   storage,
   onOpenSettings,
   generatedMedia,
+  generationAdapter,
   onSeek,
 }: {
   readonly project: SpikeProject;
@@ -643,6 +650,8 @@ export function AgentPanel({
    * Discard. Absent handlers do nothing (T-C06 wires the real ones).
    */
   readonly generatedMedia?: Omit<JoyCodeMediaPartsProps, 'parts'>;
+  /** Present only when this host can safely start, inspect, and attach generated jobs. */
+  readonly generationAdapter?: JoyAgentGenerationToolAdapter;
   /** Moves the editor playhead (microseconds). A QC report card's timecodes call it. */
   readonly onSeek?: (timeUs: number) => void;
 }) {
@@ -737,6 +746,21 @@ export function AgentPanel({
   const [conversation, setConversation] = useState<JoyCodeConversation>(() =>
     initialJoyCodeConversation(storage, project.id),
   );
+  const conversationRef = useRef(conversation);
+  conversationRef.current = conversation;
+  const generationAdapterRef = useRef(generationAdapter);
+  generationAdapterRef.current = generationAdapter;
+  const generationProjectRef = useRef(project.id);
+  generationProjectRef.current = project.id;
+  const pendingGenerationRequestsRef = useRef(new Map<string, PendingGenerationCostRequest>());
+  const generationPollsRef = useRef(
+    new Map<string, { stopped: boolean; timer: number | undefined; statusErrors: number }>(),
+  );
+  const startGenerationPollingRef = useRef<
+    (jobId: string, mediaKind: 'image' | 'video', messageId: string, startedAt: string) => void
+  >(() => undefined);
+  const [generationCostRequest, setGenerationCostRequest] =
+    useState<PendingGenerationCostRequest>();
   const [recipeRunningId, setRecipeRunningId] = useState<string | undefined>(undefined);
   const recipeRunScopeRef = useRef<CreativeSkillRunScope | undefined>(undefined);
   // Shared invocation fence for deterministic recipes and Living Looks. Every
@@ -1800,6 +1824,68 @@ export function AgentPanel({
   }, [conversation, project.id, storage]);
 
   useEffect(() => {
+    const pendingRequests = pendingGenerationRequestsRef.current;
+    const polls = generationPollsRef.current;
+    pendingRequests.clear();
+    setGenerationCostRequest(undefined);
+    const adapter = generationAdapterRef.current;
+    if (adapter?.list === undefined || adapter.status === undefined) return undefined;
+    let disposed = false;
+    void adapter
+      .list()
+      .then((jobs) => {
+        if (disposed || generationProjectRef.current !== project.id) return;
+        const jobsById = new Map(jobs.map((job) => [job.id, job]));
+        for (const message of conversationRef.current.messages) {
+          for (const part of message.parts ?? []) {
+            if (part.kind !== 'job' || !isActiveGenerationState(part.state)) continue;
+            const job = jobsById.get(part.jobId);
+            if (job === undefined) continue;
+            if (job.state === 'completed') {
+              updateGenerationPart(message.id, { kind: job.kind, jobId: job.id });
+            } else if (isTerminalGenerationState(job.state)) {
+              updateGenerationPart(message.id, {
+                ...part,
+                state: job.state,
+                endedAt: new Date().toISOString(),
+                reason: job.error ?? generationFailureReason(job.state),
+              });
+            } else if (part.state !== job.state) {
+              updateGenerationPart(message.id, { ...part, state: job.state });
+            }
+          }
+        }
+        const activeJobs = jobs.filter((job) => isActiveGenerationState(job.state));
+        for (const job of activeJobs) {
+          const existing = conversationRef.current.messages.find((message) =>
+            message.parts?.some((part) => part.kind === 'job' && part.jobId === job.id),
+          );
+          const existingPart = existing?.parts?.find(
+            (part): part is Extract<JoyCodeMessagePart, { kind: 'job' }> =>
+              part.kind === 'job' && part.jobId === job.id,
+          );
+          const startedAt = existingPart?.startedAt ?? job.createdAt;
+          const messageId =
+            existing?.id ??
+            appendMessageWithParts(`Generating ${job.kind === 'image' ? 'picture' : 'video'}…`, [
+              { kind: 'job', jobId: job.id, mediaKind: job.kind, state: job.state, startedAt },
+            ]);
+          startGenerationPollingRef.current(job.id, job.kind, messageId, startedAt);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      pendingRequests.clear();
+      for (const poll of polls.values()) {
+        poll.stopped = true;
+        if (poll.timer !== undefined) window.clearTimeout(poll.timer);
+      }
+      polls.clear();
+    };
+  }, [project.id, session]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'nearest' });
   }, [conversation.messages.length, pending, lastRun, thinkingThreadId]);
 
@@ -1882,6 +1968,211 @@ export function AgentPanel({
         createdAt: now,
       }),
     );
+  }
+
+  function appendMessageWithParts(body: string, parts: readonly JoyCodeMessagePart[]): string {
+    const id = makeJoyCodeId('message');
+    const createdAt = new Date().toISOString();
+    setConversation((current) =>
+      addJoyCodeConversationMessage(current, { id, role: 'assistant', body, createdAt, parts }),
+    );
+    return id;
+  }
+
+  function updateGenerationPart(messageId: string, part: JoyCodeMessagePart): void {
+    setConversation((current) => ({
+      ...current,
+      updatedAt: new Date().toISOString(),
+      messages: current.messages.map((message) =>
+        message.id !== messageId
+          ? message
+          : {
+              ...message,
+              parts: (message.parts ?? []).map((currentPart) =>
+                currentPart.kind === 'job' && currentPart.jobId === partJobId(part)
+                  ? part
+                  : currentPart,
+              ),
+            },
+      ),
+    }));
+  }
+
+  function startGenerationPolling(
+    jobId: string,
+    mediaKind: 'image' | 'video',
+    messageId: string,
+    startedAt: string,
+  ): void {
+    if (generationPollsRef.current.has(jobId)) return;
+    const poll = { stopped: false, timer: undefined as number | undefined, statusErrors: 0 };
+    generationPollsRef.current.set(jobId, poll);
+    const tick = async (): Promise<void> => {
+      if (
+        poll.stopped ||
+        generationProjectRef.current !== project.id ||
+        generationPollsRef.current.get(jobId) !== poll
+      )
+        return;
+      const adapter = generationAdapterRef.current;
+      if (adapter?.status === undefined) return;
+      let job: JoyAgentGenerationJobSnapshot | undefined;
+      let statusFailed = false;
+      try {
+        job = await adapter.status(jobId);
+        if (job === undefined) {
+          statusFailed = true;
+          poll.statusErrors += 1;
+        } else {
+          poll.statusErrors = 0;
+        }
+      } catch {
+        statusFailed = true;
+        poll.statusErrors += 1;
+      }
+      if (
+        poll.stopped ||
+        generationPollsRef.current.get(jobId) !== poll ||
+        generationProjectRef.current !== project.id
+      )
+        return;
+      if (statusFailed && poll.statusErrors <= 3) {
+        poll.timer = window.setTimeout(() => void tick(), 500);
+        return;
+      }
+      const endedAt = new Date().toISOString();
+      if (job?.state === 'completed' && job.kind === mediaKind) {
+        updateGenerationPart(messageId, { kind: mediaKind, jobId });
+        generationPollsRef.current.delete(jobId);
+        return;
+      }
+      if (job === undefined || isTerminalGenerationState(job.state)) {
+        const state: JoyCodeJobState =
+          job?.state === 'cancelled'
+            ? 'cancelled'
+            : job?.state === 'abandoned-locally'
+              ? 'abandoned-locally'
+              : job?.state === 'timed-out'
+                ? 'timed-out'
+                : 'failed';
+        updateGenerationPart(messageId, {
+          kind: 'job',
+          jobId,
+          mediaKind,
+          state,
+          startedAt,
+          endedAt,
+          reason: generationFailureReason(state),
+        });
+        generationPollsRef.current.delete(jobId);
+        return;
+      }
+      updateGenerationPart(messageId, {
+        kind: 'job',
+        jobId,
+        mediaKind,
+        state: job.state,
+        startedAt,
+      });
+      poll.timer = window.setTimeout(() => void tick(), 500);
+    };
+    void tick();
+  }
+  startGenerationPollingRef.current = startGenerationPolling;
+
+  async function allowGeneration(requestId: string): Promise<void> {
+    const pendingRequest = pendingGenerationRequestsRef.current.get(requestId);
+    pendingGenerationRequestsRef.current.delete(requestId);
+    setGenerationCostRequest(undefined);
+    const adapter = generationAdapterRef.current;
+    if (pendingRequest === undefined || adapter === undefined) return;
+    const projectId = generationProjectRef.current;
+    try {
+      const jobId = await adapter.start(pendingRequest.request, pendingRequest.context);
+      if (generationProjectRef.current !== projectId) return;
+      const startedAt = new Date().toISOString();
+      const messageId = appendMessageWithParts(
+        `Generating ${pendingRequest.request.kind === 'image' ? 'picture' : 'video'}…`,
+        [
+          {
+            kind: 'job',
+            jobId,
+            mediaKind: pendingRequest.request.kind,
+            state: 'queued',
+            startedAt,
+          },
+        ],
+      );
+      startGenerationPolling(jobId, pendingRequest.request.kind, messageId, startedAt);
+    } catch {
+      appendMessage(
+        activeThread.id,
+        'assistant',
+        'JOY could not start generation. Nothing was sent to your provider.',
+      );
+    }
+  }
+
+  function declineGeneration(requestId: string): void {
+    pendingGenerationRequestsRef.current.delete(requestId);
+    setGenerationCostRequest(undefined);
+    appendMessage(
+      activeThread.id,
+      'assistant',
+      'Generation declined. Nothing was sent to your provider.',
+    );
+  }
+
+  async function cancelGeneration(jobId: string): Promise<void> {
+    const adapter = generationAdapterRef.current;
+    if (adapter?.cancel === undefined) return;
+    const poll = generationPollsRef.current.get(jobId);
+    if (poll !== undefined) {
+      poll.stopped = true;
+      if (poll.timer !== undefined) window.clearTimeout(poll.timer);
+      poll.timer = undefined;
+      generationPollsRef.current.delete(jobId);
+    }
+    try {
+      const cancelled = await adapter.cancel(jobId);
+      const job = cancelled ?? (await adapter.status?.(jobId));
+      const message = conversationRef.current.messages.find((candidate) =>
+        candidate.parts?.some((part) => part.kind === 'job' && part.jobId === jobId),
+      );
+      const current = message?.parts?.find(
+        (part): part is Extract<JoyCodeMessagePart, { kind: 'job' }> =>
+          part.kind === 'job' && part.jobId === jobId,
+      );
+      if (message !== undefined && current !== undefined && job !== undefined) {
+        if (job.state === 'completed' && job.kind === current.mediaKind) {
+          updateGenerationPart(message.id, { kind: job.kind, jobId: job.id });
+        } else if (isTerminalGenerationState(job.state)) {
+          updateGenerationPart(message.id, {
+            ...current,
+            state: job.state,
+            endedAt: new Date().toISOString(),
+            reason: job.error ?? generationFailureReason(job.state),
+          });
+        } else if (poll !== undefined) {
+          updateGenerationPart(message.id, { ...current, state: job.state });
+          startGenerationPolling(jobId, current.mediaKind, message.id, current.startedAt);
+        }
+      } else if (poll !== undefined && message !== undefined && current !== undefined) {
+        startGenerationPolling(jobId, current.mediaKind, message.id, current.startedAt);
+      }
+    } catch {
+      // Keep polling after a transient cancel error; the job may still be active.
+      const message = conversationRef.current.messages.find((candidate) =>
+        candidate.parts?.some((part) => part.kind === 'job' && part.jobId === jobId),
+      );
+      const current = message?.parts?.find(
+        (part): part is Extract<JoyCodeMessagePart, { kind: 'job' }> =>
+          part.kind === 'job' && part.jobId === jobId,
+      );
+      if (poll !== undefined && message !== undefined && current !== undefined) {
+        startGenerationPolling(jobId, current.mediaKind, message.id, current.startedAt);
+      }
+    }
   }
 
   /**
@@ -2166,6 +2457,8 @@ export function AgentPanel({
     if (intent === undefined && joyAgentEngineClient !== undefined) {
       const failedPrompt: JoyCodeRetryRequest = { kind: 'prompt', prompt: body };
       const connectionStatus = joyAgentEngineClient.getStatus();
+      const planOnlyGenerationRequest =
+        generationAdapter?.enqueue !== undefined && isExplicitGenerationPrompt(body);
       if (connectionStatus === undefined) {
         // No model is connected. The calm card above the composer already says
         // so, so the chat stays quiet instead of repeating it (OB-13c).
@@ -2174,7 +2467,7 @@ export function AgentPanel({
       if (
         connectionStatus.capability === 'incompatible' ||
         connectionStatus.capability === 'untested' ||
-        connectionStatus.capability === 'plan-only'
+        (connectionStatus.capability === 'plan-only' && !planOnlyGenerationRequest)
       ) {
         let message: string;
         if (connectionStatus.capability === 'incompatible') {
@@ -2615,59 +2908,86 @@ export function AgentPanel({
             setAgentPhase(receiptExists ? 'failed' : 'cancelled');
             appendMessage(threadId, 'assistant', display);
           };
-          const host = !structured
-            ? undefined
-            : {
-                methods: createJoyAgentHostRpcMethodsForSnapshot(
-                  contextInput,
-                  createJoyAgentProposalStagingHandler({
-                    runId,
-                    baseRevision,
-                    contextProjectId: contextInput.projectId,
-                    capturedSession: session,
-                    latestSessionRef,
-                    hasHostAuthority: (rpcRun) =>
-                      activeComposerHostLease !== undefined &&
-                      activeComposerHostLease.run.runId === rpcRun.runId &&
-                      activeComposerHostLease.run.epoch === rpcRun.epoch &&
-                      isJoyAgentComposerHostLeaseCurrent(activeComposerHostLease),
-                    isRunCurrent: () => activeModelRunIdRef.current === runId,
-                    selectedEntityReference,
-                    preparedChanges,
-                    currentPreparedAuthority,
-                    agentPreviewStore,
-                    proposalTargetsRef,
-                    onStaged: (changeSetId) => {
-                      stagedChangeSetId = changeSetId;
-                    },
-                  }),
-                  observationBridge?.tools,
-                  observationBridge === undefined
-                    ? undefined
-                    : async (result) => {
-                        await registerObservationReviewCandidate(
-                          undefined,
-                          observationBridge!,
-                          result.observationId,
-                        );
-                      },
-                  async () => {
-                    const catalog = await getDesktopAssetLibraryCatalog();
-                    return catalog.assets.map((asset) => asset as JoyAgentLibraryEntry);
+          const generationRpcAdapter =
+            generationAdapter?.enqueue === undefined
+              ? undefined
+              : {
+                  ...generationAdapter,
+                  enqueue: (
+                    request: JoyAgentGenerateMediaRequest,
+                    rpcContext: HostRpcHandlerContext,
+                  ) => {
+                    const requestId = generationAdapter.enqueue!(request, rpcContext);
+                    pendingGenerationRequestsRef.current.set(requestId, {
+                      requestId,
+                      request,
+                      context: rpcContext,
+                    });
+                    return requestId;
                   },
-                  qcAdapter,
-                ),
-                allowedToolNames: [
-                  ...(observationBridge === undefined
-                    ? LEGACY_JOY_AGENT_TOOL_NAMES
-                    : OBSERVATION_JOY_AGENT_TOOL_NAMES),
-                  ...(qcAdapter === undefined ? [] : QC_HOST_TOOL_NAMES),
-                ],
-                onCancelled: () => {
-                  revokeStagedChange();
-                  qcAdapter?.dispose();
-                },
-              };
+                };
+          const host =
+            !structured && generationRpcAdapter === undefined
+              ? undefined
+              : {
+                  methods: createJoyAgentHostRpcMethodsForSnapshot(
+                    contextInput,
+                    createJoyAgentProposalStagingHandler({
+                      runId,
+                      baseRevision,
+                      contextProjectId: contextInput.projectId,
+                      capturedSession: session,
+                      latestSessionRef,
+                      hasHostAuthority: (rpcRun) =>
+                        activeComposerHostLease !== undefined &&
+                        activeComposerHostLease.run.runId === rpcRun.runId &&
+                        activeComposerHostLease.run.epoch === rpcRun.epoch &&
+                        isJoyAgentComposerHostLeaseCurrent(activeComposerHostLease),
+                      isRunCurrent: () => activeModelRunIdRef.current === runId,
+                      selectedEntityReference,
+                      preparedChanges,
+                      currentPreparedAuthority,
+                      agentPreviewStore,
+                      proposalTargetsRef,
+                      onStaged: (changeSetId) => {
+                        stagedChangeSetId = changeSetId;
+                      },
+                    }),
+                    observationBridge?.tools,
+                    observationBridge === undefined
+                      ? undefined
+                      : async (result) => {
+                          await registerObservationReviewCandidate(
+                            undefined,
+                            observationBridge!,
+                            result.observationId,
+                          );
+                        },
+                    async () => {
+                      const catalog = await getDesktopAssetLibraryCatalog();
+                      return catalog.assets.map((asset) => asset as JoyAgentLibraryEntry);
+                    },
+                    qcAdapter,
+                    generationRpcAdapter,
+                  ),
+                  ...(structured
+                    ? {
+                        allowedToolNames: [
+                          ...(observationBridge === undefined
+                            ? LEGACY_JOY_AGENT_TOOL_NAMES
+                            : OBSERVATION_JOY_AGENT_TOOL_NAMES),
+                          ...(qcAdapter === undefined ? [] : QC_HOST_TOOL_NAMES),
+                          ...(generationRpcAdapter === undefined
+                            ? []
+                            : (['generate_media', 'attach_generated_media'] as const)),
+                        ],
+                      }
+                    : {}),
+                  onCancelled: () => {
+                    revokeStagedChange();
+                    qcAdapter?.dispose();
+                  },
+                };
           const contextSnapshot = structured
             ? undefined
             : createJoyAgentContextSnapshot(contextInput);
@@ -2850,15 +3170,28 @@ export function AgentPanel({
             // adapter rejects the draft.
             if (!awaitingPreviewRender) agentPresenceStore?.dispatch(presenceEvent);
             if (event.phase === 'completed') {
+              const generationHandoff = generationHandoffFromResult(event.result);
+              const pendingGeneration =
+                generationHandoff === undefined
+                  ? undefined
+                  : pendingGenerationRequestsRef.current.get(generationHandoff.requestId);
+              if (
+                pendingGeneration !== undefined &&
+                pendingGeneration.request.kind === generationHandoff?.mediaKind
+              ) {
+                setGenerationCostRequest(pendingGeneration);
+              }
               const resultText = boundedAgentResultText(event.result);
-              appendMessage(
-                threadId,
-                'assistant',
-                resultText ??
-                  (event.proposal === undefined
-                    ? 'The model response was received safely.'
-                    : 'The model response was received. JOY keeps edits in preview until you approve them.'),
-              );
+              if (pendingGeneration === undefined) {
+                appendMessage(
+                  threadId,
+                  'assistant',
+                  resultText ??
+                    (event.proposal === undefined
+                      ? 'The model response was received safely.'
+                      : 'The model response was received. JOY keeps edits in preview until you approve them.'),
+                );
+              }
             }
             if (event.phase === 'failed') {
               // The run error code picks the entry; an unknown or missing code gets the generic one.
@@ -4226,7 +4559,13 @@ export function AgentPanel({
                               )}
                             </p>
                           )}
-                        <JoyCodeMediaParts {...generatedMedia} parts={message.parts} />
+                        <JoyCodeMediaParts
+                          {...generatedMedia}
+                          {...(generationAdapter?.cancel === undefined
+                            ? {}
+                            : { onCancel: (jobId: string) => void cancelGeneration(jobId) })}
+                          parts={message.parts}
+                        />
                       </>
                     ) : (
                       <p
@@ -4247,6 +4586,41 @@ export function AgentPanel({
                 </article>
               );
             })}
+
+            {generationCostRequest !== undefined && (
+              <section
+                className="joy-code-plan-card joy-code-generation-cost-card"
+                aria-label="Generation Cost Card"
+              >
+                <div className="joy-code-plan-head">
+                  <div>
+                    <span>Generation Cost Card</span>
+                    <strong>
+                      {generationCostRequest.request.kind === 'image' ? 'Picture' : 'Video'}
+                    </strong>
+                  </div>
+                </div>
+                <p>{generationCostRequest.request.prompt}</p>
+                <p>Provider pricing applies; JOY Media does not estimate the charge.</p>
+                <div className="joy-code-plan-actions">
+                  <button
+                    type="button"
+                    aria-label="Allow generation"
+                    onClick={() => void allowGeneration(generationCostRequest.requestId)}
+                  >
+                    Allow
+                  </button>
+                  <button
+                    type="button"
+                    className="is-subtle"
+                    aria-label="Decline generation"
+                    onClick={() => declineGeneration(generationCostRequest.requestId)}
+                  >
+                    Decline
+                  </button>
+                </div>
+              </section>
+            )}
 
             {isThinking && (
               <article
@@ -4677,5 +5051,51 @@ export function AgentPanel({
         <TimelineContextMenu menu={textMenu} onClose={() => setTextMenu(undefined)} />
       )}
     </PanelShell>
+  );
+}
+
+function generationHandoffFromResult(
+  value: unknown,
+): { readonly requestId: string; readonly mediaKind: 'image' | 'video' } | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const result = value as Record<string, unknown>;
+  if (
+    result.kind !== 'generation' ||
+    typeof result.requestId !== 'string' ||
+    (result.mediaKind !== 'image' && result.mediaKind !== 'video')
+  )
+    return undefined;
+  return { requestId: result.requestId, mediaKind: result.mediaKind };
+}
+
+function partJobId(part: JoyCodeMessagePart): string | undefined {
+  return part.kind === 'text' ? undefined : part.jobId;
+}
+
+function isActiveGenerationState(state: JoyAgentGenerationJobSnapshot['state']): boolean {
+  return state === 'queued' || state === 'running' || state === 'downloading';
+}
+
+function isTerminalGenerationState(state: JoyAgentGenerationJobSnapshot['state']): boolean {
+  return !isActiveGenerationState(state);
+}
+
+function generationFailureReason(state: JoyCodeJobState): string {
+  switch (state) {
+    case 'cancelled':
+      return 'Generation was cancelled.';
+    case 'abandoned-locally':
+      return 'Generation stopped on this computer.';
+    case 'timed-out':
+      return 'Generation took too long. Nothing was attached.';
+    default:
+      return 'Generation failed. Nothing was attached.';
+  }
+}
+
+function isExplicitGenerationPrompt(prompt: string): boolean {
+  return (
+    /\b(?:generate|create|make|draw|produce)\b/i.test(prompt) &&
+    /\b(?:image|picture|illustration|video)\b/i.test(prompt)
   );
 }
