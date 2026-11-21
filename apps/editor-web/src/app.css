@@ -11008,7 +11008,8 @@ label {
 }
 .agent-activity-rail--active {
   border-color: color-mix(in srgb, var(--joy-accent) 62%, var(--joy-border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--joy-accent) 22%, transparent),
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--joy-accent) 22%, transparent),
     0 2px 12px rgb(0 0 0 / 32%);
 }
 .agent-activity-rail--awaiting-approval,
