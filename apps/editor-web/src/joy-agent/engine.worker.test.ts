@@ -554,7 +554,7 @@ describe('JOY Agent Engine Worker V2', () => {
     });
     expect(providerBodies).toHaveLength(3);
     for (const body of providerBodies) {
-      expect(body).toMatchObject({ model: 'fixture-model', max_tokens: 8 });
+      expect(body).toMatchObject({ model: 'fixture-model', max_tokens: 1024 });
       expect(body.tools).toBeUndefined();
       expect(body.tool_choice).toBeUndefined();
       const content = (body.messages as readonly Record<string, unknown>[])[0]?.content;
@@ -679,6 +679,135 @@ describe('JOY Agent Engine Worker V2', () => {
     port.close();
   });
 
+  it('completes private image review when encoded base64 JSON exceeds raw evidence maxBytes', async () => {
+    const worker = await mountedWorker(
+      structuredProvider((body, _index, init) => {
+        const content = (body.messages as readonly Record<string, unknown>[])[0]?.content;
+        if (Array.isArray(content)) {
+          const textPart = content[0] as { readonly text?: string } | undefined;
+          const answer = textPart?.text?.includes(PROVIDER_MEDIA_CAPABILITY_PROBE_ACK)
+            ? PROVIDER_MEDIA_CAPABILITY_PROBE_ACK
+            : 'Frame review observed clean frames.';
+          return providerResponse({ role: 'assistant', content: answer });
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      }),
+    );
+    await verifyStructuredConnection(worker);
+    const port = worker.bindPrivateObservationPort();
+    const authority = {
+      projectId: 'project-1',
+      revision: 'revision-1',
+      run: { runId: 'private-review-budget-run', epoch: 1 },
+      modelId: 'fixture-model',
+      promptPolicyDigest: 'policy-1',
+    } as const;
+    const range = { domain: 'composition' as const, startUs: 0, endUs: 1_000_000 };
+    const evidenceIds = ['qc-contact-1'] as const;
+    const expiresAtMs = Date.now() + 60_000;
+
+    await vi.waitFor(() =>
+      expect(port.output).toContainEqual(
+        expect.objectContaining({ type: 'session-ready', sessionEpoch: 1 }),
+      ),
+    );
+    worker.send({
+      protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+      type: 'probe-media-capabilities',
+      requestId: 'private-port-budget-capability',
+    });
+    await expect(
+      waitForMediaCapabilityReport(worker, 'private-port-budget-capability'),
+    ).resolves.toMatchObject({
+      image: 'supported',
+    });
+
+    run(worker, { runId: authority.run.runId, prompt: 'hold this run', mode: 'plan-only' });
+    await vi.waitFor(() => expect(worker.fetcher).toHaveBeenCalledTimes(7));
+    port.send({
+      type: 'register-review-lease',
+      requestId: 'private-budget-lease',
+      sessionEpoch: 1,
+      authority,
+      manifestId: 'manifest-budget',
+      range,
+      evidenceIds,
+      expiresAtMs,
+    });
+    await vi.waitFor(() =>
+      expect(port.output).toContainEqual(
+        expect.objectContaining({ type: 'lease-registered', requestId: 'private-budget-lease' }),
+      ),
+    );
+    const lease = port.output.find(
+      (
+        message,
+      ): message is Extract<
+        PrivateObservationWorkerToMainMessage,
+        { readonly type: 'lease-registered' }
+      > => message.type === 'lease-registered' && message.requestId === 'private-budget-lease',
+    );
+    if (lease === undefined) throw new Error('Expected a private review lease');
+
+    const rawBytes = new Uint8Array(4_096).fill(0xab);
+    port.send({
+      type: 'start',
+      transferId: 'private-budget-transfer',
+      sessionEpoch: 1,
+      leaseId: lease.leaseId,
+      authority,
+      range,
+      evidenceIds,
+      maxBytes: rawBytes.byteLength,
+      expiresAtMs,
+      prompt: 'Review the supplied contact sheet.',
+    });
+    await vi.waitFor(() =>
+      expect(port.output).toContainEqual(
+        expect.objectContaining({
+          type: 'need-evidence',
+          transferId: 'private-budget-transfer',
+        }),
+      ),
+    );
+    port.send({
+      type: 'evidence',
+      transferId: 'private-budget-transfer',
+      sessionEpoch: 1,
+      evidence: [{ evidenceId: 'qc-contact-1', mimeType: 'image/jpeg', data: rawBytes.buffer }],
+    });
+    await vi.waitFor(() =>
+      expect(port.output).toContainEqual(
+        expect.objectContaining({
+          type: 'result',
+          transferId: 'private-budget-transfer',
+          result: expect.objectContaining({
+            ok: true,
+            analysis: {
+              text: 'Frame review observed clean frames.',
+              submittedEvidenceIds: ['qc-contact-1'],
+            },
+          }),
+        }),
+      ),
+    );
+
+    worker.send({
+      protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+      type: 'cancel',
+      runId: authority.run.runId,
+      runEpoch: authority.run.epoch,
+    });
+    await waitForRunFinished(worker, authority.run.runId, authority.run.epoch);
+    port.close();
+  });
+
   it('fails closed for hostile media responses without exposing provider data', async () => {
     const secret = 'sk-owner-secret-must-not-appear';
     const worker = await mountedWorker((body) => {
@@ -727,7 +856,7 @@ describe('JOY Agent Engine Worker V2', () => {
       requestId: 'media-timeout',
     });
 
-    await vi.advanceTimersByTimeAsync(4_001);
+    await vi.advanceTimersByTimeAsync(20_001);
     await Promise.resolve();
 
     expect(await waitForMediaCapabilityReport(worker, 'media-timeout')).toEqual({

@@ -317,7 +317,7 @@ function parseConnection(value: unknown): ByokSessionConfig | undefined {
   if (!isRecord(value) || !hasExactKeys(value, CONNECTION_KEYS)) return undefined;
   const { provider, baseUrl, modelId, profileId } = value;
   if (
-    (provider !== 'openrouter' && provider !== 'openai-compatible') ||
+    (provider !== 'openrouter' && provider !== 'openai-compatible' && provider !== 'custom') ||
     typeof baseUrl !== 'string' ||
     baseUrl.length === 0 ||
     baseUrl.length > 2_048 ||

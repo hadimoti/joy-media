@@ -379,4 +379,25 @@ describe('multimodal direct-provider transport', () => {
     expect(JSON.stringify(result)).not.toContain('fixture-byok-key');
     expect(JSON.stringify(result)).not.toContain('not-json');
   });
+
+  it('accepts custom provider mode alongside openrouter and openai-compatible', async () => {
+    const fetcher = vi.fn(async () =>
+      providerSuccess('Custom provider frame observation'),
+    ) as unknown as FakeProviderFetch;
+    const transport = createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) });
+    transport.grant(issue());
+
+    const result = await transport.send({
+      ...request(),
+      connection: {
+        ...request().connection,
+        provider: 'custom',
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      analysis: { text: 'Custom provider frame observation', submittedEvidenceIds: ['frame-1'] },
+    });
+  });
 });

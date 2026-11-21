@@ -337,4 +337,20 @@ describe('QC repair plan: titles and the rest', () => {
     expect(JSON.stringify(second.timelineCommands)).toBe(JSON.stringify(first.timelineCommands));
     expect(second.visualCommands).toEqual(first.visualCommands);
   });
+
+  it('resolves title-occurrence box ids back to the underlying visual object', () => {
+    const base = input([{ id: 'f1', type: 'safe-area', startUs: 5 * S, endUs: 7 * S }]);
+    const box = base.textBoxes![0]!;
+    const plan = planQcRepairs({
+      ...base,
+      textBoxes: [{ ...box, id: `title-occurrence:${box.id.length}:${box.id}:clip-1` }],
+    });
+    expect(plan.notRepairable).toEqual([]);
+    expect(plan.repairedTypes).toEqual(['safe-area']);
+    expect(plan.visualCommands).toHaveLength(1);
+    expect(plan.visualCommands[0]).toMatchObject({
+      type: 'object.setTransformProperty',
+      payload: { objectId: box.id },
+    });
+  });
 });
