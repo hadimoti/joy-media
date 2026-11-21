@@ -25,6 +25,8 @@ export const MINIMAX_GENERATION_SETTINGS = {
     resolution: '480P',
     /** P7: 4 seconds is the shortest length the cheapest price names. */
     durationSeconds: 4,
+    /** V2 /v2/video_generation aspect ratio for text-to-video. */
+    ratio: '16:9',
     /** P8: the legacy video model. */
     legacyModel: 'MiniMax-Hailuo-02',
     /** P8: the legacy resolution. */
