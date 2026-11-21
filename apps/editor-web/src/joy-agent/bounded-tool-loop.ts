@@ -8,6 +8,7 @@ import { TEXT_TEMPLATES } from '../text-template-catalog.js';
 import { HostRpcError, type HostRpcJson } from './host-rpc.js';
 import { QC_DEFAULT_RUN_FRAME_BUDGET } from './qc-request-intent.js';
 import { MAX_JOY_AGENT_RUN_BUDGET_V1 } from './run-budget.js';
+import { isSafeJoyAgentRunOpaqueId } from './run-events.js';
 import {
   GENERATION_ASPECTS,
   GENERATION_MAX_SECONDS,
@@ -32,6 +33,11 @@ export interface BrowserPreparedProposal {
 
 export type BrowserToolExchangeOutcome =
   | { readonly kind: 'prepared'; readonly proposal: BrowserPreparedProposal }
+  | {
+      readonly kind: 'generation';
+      readonly requestId: string;
+      readonly mediaKind: 'image' | 'video';
+    }
   | { readonly kind: 'answer'; readonly text: string }
   | { readonly kind: 'clarification'; readonly question: string };
 
@@ -620,9 +626,10 @@ const LOOK_TOOLS: Readonly<
 };
 
 /**
- * Generated media (T-C04). `generate_media` always raises a cost card in the
- * host and waits for the user; no provider request is made before "Allow".
- * `attach_generated_media` may only place a job that this run completed.
+ * Generated media (T-C04). `generate_media` is either handed to the host's
+ * durable queue or follows the cost-card path; that legacy path sends no
+ * provider request before "Allow". `attach_generated_media` may place only a
+ * completed job from this run or one explicitly authorized by the host.
  * Both are non-strict because `seconds`, `atSeconds` and `track` are optional.
  */
 const GENERATE_MEDIA_TOOL: BrowserAgentToolDefinition = {
@@ -630,7 +637,7 @@ const GENERATE_MEDIA_TOOL: BrowserAgentToolDefinition = {
   function: {
     name: 'generate_media',
     description:
-      'Ask the user to approve one generated picture or video made with the user’s own provider account. JOY shows a cost card first and sends nothing unless the user allows it. A run may start at most 4 pictures and 1 video. Returns the job id and, when the job ends, its status.',
+      'Request one generated picture or video through the host. The host may queue it for approval and return a request id, or show a cost card and wait for the job. A run may start at most 4 pictures and 1 video.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -650,7 +657,7 @@ const ATTACH_GENERATED_MEDIA_TOOL: BrowserAgentToolDefinition = {
   function: {
     name: 'attach_generated_media',
     description:
-      'Place a picture or video that a completed generate_media job in this run produced: into the library, or onto the timeline at a time as one undo step. Jobs from earlier runs or unfinished jobs are refused.',
+      'Place a completed generated picture or video into the library, or onto the timeline at a time as one undo step. Jobs from earlier runs are accepted only when the host confirms attachment is allowed.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -1063,6 +1070,21 @@ export async function runBoundedToolExchange(
         }
         const hostResult = await callHost(name, args);
         options.signal?.throwIfAborted();
+        if (
+          name === 'generate_media' &&
+          isRecord(hostResult) &&
+          hostResult.ok === true &&
+          hostResult.terminal === 'generation' &&
+          typeof hostResult.requestId === 'string' &&
+          hostResult.requestId.length <= 128 &&
+          isSafeJoyAgentRunOpaqueId(hostResult.requestId) &&
+          (hostResult.kind === 'image' || hostResult.kind === 'video')
+        )
+          return {
+            kind: 'generation',
+            requestId: hostResult.requestId,
+            mediaKind: hostResult.kind,
+          };
         if (name === 'read_project_context') {
           contextRead = true;
           if (contextReadStep < 0) contextReadStep = step;
