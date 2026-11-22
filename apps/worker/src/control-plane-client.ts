@@ -2,7 +2,11 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { DeviceIdentity } from './runtime.js';
-import type { GpuPreviewFrameRequest, GpuPreviewFrameResponse } from '@joy-media/job-protocol';
+import type {
+  GpuPreviewFrameRequest,
+  GpuPreviewFrameResponse,
+  SpeechSynthesisTiming,
+} from '@joy-media/job-protocol';
 
 export interface WorkerSessionStore {
   loadWorkerSession(): string | undefined;
@@ -36,7 +40,10 @@ export interface WorkerJobResult {
     | 'mask.video'
     | 'text'
     | 'image'
-    | 'media.qc';
+    | 'media.qc'
+    | 'speech.transcribe'
+    | 'speech.synthesize';
+  readonly speech?: SpeechSynthesisTiming;
   readonly assetId?: string;
   /** The QC report of a `media.qc` job (ADR-0045). It travels in the result, not as a derivative file. */
   readonly report?: unknown;

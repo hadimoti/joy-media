@@ -24,6 +24,7 @@ import {
   localAssetSourcesFromEnvironment,
 } from './runtime.js';
 import type { RealThumbnailReceipt, UnsupportedWorkerJobError } from './runtime.js';
+import type { SpeechAvailability, SpeechModelRunner } from './local-speech.js';
 import { ffmpegFilterPath, gpuDerivativeLocalRef, rnnoiseFilter } from './local-gpu.js';
 import { renderFixture } from '@joy-media/export-core';
 
@@ -499,6 +500,43 @@ describe('Worker runtime', () => {
         { cancelled: () => false, progress: async () => undefined },
       ),
     ).rejects.toThrow('asset asset-1 is not available on this Worker');
+  });
+
+  it('advertises only configured ready speech models and reads a verified speech derivative', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-worker-speech-'));
+    const runner: SpeechModelRunner = {
+      runner: { command: process.execPath, prefixArgs: [] },
+      modelPath: root,
+      scriptPath: join(root, 'runner.py'),
+    };
+    const speech: SpeechAvailability = {
+      transcribe: runner,
+      synthesis: { 'kokoro-82m': runner, 'chatterbox-fa': runner },
+    };
+    const runtime = new WorkerRuntime(
+      { workerId: 'speech-worker', createdAt: '2026-11-22T00:00:00.000Z' },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiBroker: false, speech },
+      { derivativeDirectory: root },
+    );
+    try {
+      const capabilities = runtime.hello('win32', 'x64').capabilities;
+      expect(capabilities).toContain('speech.transcribe');
+      expect(capabilities).toContain('speech.synthesize');
+      expect(capabilities).toContain('speech.model.kokoro-82m');
+      expect(capabilities).toContain('speech.model.chatterbox-fa');
+      const bytes = Buffer.from('{"transcript":true}');
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
+      const localRef = `speech-job-${sha256.slice(0, 16)}`;
+      writeFileSync(join(root, `${localRef}.json`), bytes);
+      expect(runtime.readDerivative({
+        kind: 'speech.transcribe', sha256, bytes: bytes.length, localRef,
+        descriptor: { mimeType: 'application/json' },
+      })).toEqual(bytes);
+      expect(() => runtime.readDerivative({
+        kind: 'speech.transcribe', sha256: '0'.repeat(64), bytes: bytes.length, localRef,
+        descriptor: { mimeType: 'application/json' },
+      })).toThrow('integrity check failed');
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   it('asks the desktop for a mask job source that is not in its own registry, before the runner starts', async () => {

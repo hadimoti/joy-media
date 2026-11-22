@@ -41,6 +41,15 @@ import {
 import { executeLeasedExportAsync, exportJobPayload } from './export-job.js';
 import { runMediaQc, type MediaQcReceipt } from './media-qc.js';
 import { verifyExport } from '@joy-media/export-core';
+import type { SpeechConsentRequest } from '@joy-media/job-protocol';
+import {
+  readSpeechDerivative,
+  runSpeechJob,
+  speechAvailabilityFromEnvironment,
+  SpeechWorkerError,
+  type SpeechAvailability,
+  type SpeechWorkerDerivative,
+} from './local-speech.js';
 
 export interface DeviceIdentity {
   readonly workerId: string;
@@ -119,6 +128,8 @@ export interface ToolAvailability {
   readonly masking?: MaskingAvailability;
   /** Explicit image/video upscaling runners; omitted means enhancement is unavailable. */
   readonly upscaling?: UpscalingAvailability;
+  /** Preinstalled offline speech models; absent means speech is unavailable. */
+  readonly speech?: SpeechAvailability;
 }
 
 /** A queued provider job cannot run until the API can durably verify its result. */
@@ -205,6 +216,7 @@ export function detectMediaTools(
     aiBroker: options.aiBroker === true,
     masking: maskingAvailabilityFromEnvironment(),
     upscaling: upscalingAvailabilityFromEnvironment(),
+    speech: speechAvailabilityFromEnvironment(process.env),
   };
 }
 
@@ -257,6 +269,11 @@ export class WorkerRuntime {
       capabilities.push('mask.video');
     if (this.tools.mlDenoise && mlDenoiseRunnable()) capabilities.push('audio.ml-denoise');
     if (this.tools.aiBroker) capabilities.push('text.lm-studio');
+    if (this.tools.speech?.transcribe !== undefined) capabilities.push('speech.transcribe');
+    const synthesis = this.tools.speech?.synthesis ?? {};
+    if (Object.keys(synthesis).length > 0) capabilities.push('speech.synthesize');
+    for (const modelId of Object.keys(synthesis))
+      capabilities.push(`speech.model.${modelId}` as WorkerCapability);
     return {
       protocolVersion: WORKER_PROTOCOL_VERSION,
       workerId: this.identity.workerId,
@@ -281,6 +298,7 @@ export class WorkerRuntime {
         readonly negativePrompt?: string;
         readonly imageAssetId?: string;
         readonly fixture?: boolean;
+        readonly consent?: SpeechConsentRequest;
         readonly params?: Record<string, unknown>;
       };
     },
@@ -297,6 +315,38 @@ export class WorkerRuntime {
   > {
     if (UNSUPPORTED_PROVIDER_JOB_TYPES.has(job.type)) throw new UnsupportedWorkerJobError(job.type);
     if (job.type === 'fixture.thumbnail') return this.runFixtureThumbnail(job.id, options);
+    if (job.type === 'speech.transcribe' || job.type === 'speech.synthesize') {
+      if (this.tools.speech === undefined)
+        throw new SpeechWorkerError('SETUP_REQUIRED', 'Local speech setup is required on this Worker');
+      const derivativeDirectory =
+        this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
+      this.log.write(`job ${job.id} started (${job.type})`);
+      try {
+        const result = await runSpeechJob({
+          jobId: job.id,
+          jobType: job.type,
+          payload: job.payload,
+          availability: this.tools.speech,
+          derivativeDirectory,
+          cancelled: options.cancelled,
+          progress: options.progress,
+          ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
+          ...(job.leaseToken === undefined ? {} : { leaseToken: job.leaseToken }),
+          ...(job.payload?.consent === undefined ? {} : { consent: job.payload.consent }),
+          ...(this.options.downloadJobAsset === undefined
+            ? {}
+            : { downloadJobAsset: this.options.downloadJobAsset }),
+        });
+        this.log.write(`job ${job.id} completed`);
+        return { state: 'completed', result };
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'CANCELED') {
+          this.log.write(`job ${job.id} canceled`);
+          return { state: 'canceled' };
+        }
+        throw error;
+      }
+    }
     if (job.type === 'render.export') {
       if (!this.tools.ffmpeg || !this.tools.ffprobe)
         throw new Error('FFmpeg and FFprobe are required for render.export');
@@ -703,6 +753,10 @@ export class WorkerRuntime {
       const directory = this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       return readMaskDerivative(directory, result);
     }
+    if (result.kind === 'speech.transcribe' || result.kind === 'speech.synthesize') {
+      const directory = this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
+      return readSpeechDerivative(directory, result);
+    }
     if (result.kind === 'upscale.image' || result.kind === 'upscale.video') {
       const directory = this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       return readUpscaleDerivative(directory, result);
@@ -768,7 +822,8 @@ export type WorkerDerivativeReceipt =
   | LocalAiReceipt
   | MediaQcReceipt
   | MaskWorkerDerivative
-  | UpscaleWorkerDerivative;
+  | UpscaleWorkerDerivative
+  | SpeechWorkerDerivative;
 
 function modelInventory(
   upscaling: UpscalingAvailability | undefined,

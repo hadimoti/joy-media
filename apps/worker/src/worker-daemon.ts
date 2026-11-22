@@ -115,7 +115,9 @@ export class WorkerDaemon {
             result.result.kind === 'mask.image' ||
             result.result.kind === 'mask.video' ||
             result.result.kind === 'upscale.image' ||
-            result.result.kind === 'upscale.video'
+            result.result.kind === 'upscale.video' ||
+            result.result.kind === 'speech.transcribe' ||
+            result.result.kind === 'speech.synthesize'
           ) {
             // An export is sent from its file; the other derivatives are small enough to send as bytes.
             const body =
