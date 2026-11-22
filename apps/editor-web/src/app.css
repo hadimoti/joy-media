@@ -3724,6 +3724,9 @@ label {
   background: transparent;
   /* Keeps every layer of the tracks below the titles resize handle. */
   isolation: isolate;
+  /* Defect 209: a press-and-hold on a clip must not select text. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 .timeline-tracks-inner {
   position: relative;
@@ -3772,6 +3775,11 @@ label {
   outline: none;
 }
 .timeline-clip {
+  /* Defect 209: no text selection or native image/text drag on a clip, so a press-and-hold
+     never turns into a browser copy-drag (the arrow with a small '+'). */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
   position: absolute;
   top: 0.2rem;
   bottom: 0.2rem;
@@ -3998,6 +4006,16 @@ label {
   background:
     repeating-linear-gradient(135deg, rgb(255 255 255 / 7%) 0 5px, transparent 5px 10px),
     var(--clip-tint);
+}
+.timeline-tracks input,
+.timeline-tracks textarea,
+.timeline-tracks [contenteditable='true'] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.timeline-clip img,
+.timeline-clip canvas {
+  -webkit-user-drag: none;
 }
 .timeline-clip::before {
   content: '';
@@ -4519,6 +4537,8 @@ label {
   background: transparent;
   border-radius: var(--radius-sm);
   cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .timeline-marquee-selection {
   position: absolute;

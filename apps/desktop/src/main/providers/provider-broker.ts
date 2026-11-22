@@ -225,6 +225,7 @@ export interface StartedVideo {
 export interface VideoTaskStatus {
   readonly status: VideoStatus;
   readonly fileId?: string | undefined;
+  readonly downloadUrl?: string | undefined;
 }
 
 export interface ProviderBrokerDeps {

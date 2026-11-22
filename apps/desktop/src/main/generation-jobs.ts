@@ -463,13 +463,23 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
 
   const finishVideo = async (
     job: GenerationJobRecord,
-    fileId: string,
+    target: { readonly fileId?: string | undefined; readonly downloadUrl?: string | undefined },
     signal: AbortSignal,
   ): Promise<void> => {
-    const profile = options.getProfile(job.profileId);
-    if (profile === undefined) throw new Error('The provider profile is no longer available.');
-    const link = await options.broker.videoFileLink({ profileId: profile.id, fileId });
-    if (!link.ok) throw new Error(link.message);
+    let downloadUrl = target.downloadUrl;
+    if (downloadUrl === undefined) {
+      const profile = options.getProfile(job.profileId);
+      if (profile === undefined) throw new Error('The provider profile is no longer available.');
+      if (target.fileId === undefined) {
+        throw new Error('The provider completed the task without a media link or file id.');
+      }
+      const link = await options.broker.videoFileLink({
+        profileId: profile.id,
+        fileId: target.fileId,
+      });
+      if (!link.ok) throw new Error(link.message);
+      downloadUrl = link.data.downloadUrl;
+    }
     if (!active(read(job.id))) return;
     clearJobTimers(job.id);
     const current = read(job.id);
@@ -501,7 +511,7 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
         downloadAbort.abort(limitError);
       }, GENERATION_DOWNLOAD_TIMEOUT_MS);
       restartIdleTimer();
-      const downloaded = await options.download(link.data.downloadUrl, downloadAbort.signal);
+      const downloaded = await options.download(downloadUrl, downloadAbort.signal);
       if (!active(read(job.id))) return;
       const saved = await saveMedia(
         job,
@@ -585,13 +595,18 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
           clearJobTimers(jobId);
           save(job, 'cancelled');
           return;
-        case 'succeeded':
-          if (result.data.fileId === undefined) {
-            markFailed(jobId, new Error('The provider completed the task without a file id.'));
+        case 'succeeded': {
+          const { fileId, downloadUrl } = result.data;
+          if (downloadUrl === undefined && fileId === undefined) {
+            markFailed(
+              jobId,
+              new Error('The provider completed the task without a media link or file id.'),
+            );
             return;
           }
-          await finishVideo(job, result.data.fileId, controller.signal);
+          await finishVideo(job, { fileId, downloadUrl }, controller.signal);
           return;
+        }
       }
     } catch (error) {
       if (!controller.signal.aborted) markFailed(jobId, error);

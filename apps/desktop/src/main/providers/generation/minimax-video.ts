@@ -44,9 +44,10 @@ export function prepareVideoCreate(route: GenerationRoute, input: MiniMaxVideoIn
     route === 'current'
       ? {
           model: settings.model,
-          prompt: input.prompt,
+          content: [{ type: 'text', text: input.prompt }],
           resolution: settings.resolution,
           duration: settings.durationSeconds,
+          ratio: settings.ratio,
         }
       : {
           model: settings.legacyModel,
@@ -111,7 +112,7 @@ export function prepareVideoFile(input: {
 /** The task id a create reply names. It goes into a URL path later, so it must be a safe id. */
 export function readVideoCreate(text: string): GenerationOutcome<{ readonly taskId: string }> {
   const parsed = parseReply(text);
-  const taskId = parsed?.task_id;
+  const taskId = parsed?.task_id ?? (isRecord(parsed?.task) ? parsed.task.id : undefined);
   if (!isSafePathId(taskId)) return invalid('The video reply had no usable task id.');
   return { ok: true, data: { taskId } };
 }
@@ -131,18 +132,37 @@ const STATUS_WORDS: Readonly<Record<string, VideoStatus>> = {
   canceled: 'cancelled',
 };
 
-export function readVideoStatus(
-  text: string,
-): GenerationOutcome<{ readonly status: VideoStatus; readonly fileId?: string }> {
+export interface VideoStatusData {
+  readonly status: VideoStatus;
+  readonly fileId?: string;
+  readonly downloadUrl?: string;
+}
+
+export function readVideoStatus(text: string): GenerationOutcome<VideoStatusData> {
   const parsed = parseReply(text);
   if (parsed === undefined) return invalid('The video status reply was not understood.');
-  const word = typeof parsed.status === 'string' ? parsed.status.toLowerCase() : '';
+  const taskRecord = isRecord(parsed.task) ? parsed.task : parsed;
+  const word = typeof taskRecord.status === 'string' ? taskRecord.status.toLowerCase() : '';
   const status = STATUS_WORDS[word];
   if (status === undefined) return invalid('The video status reply named no known status.');
-  const fileId = parsed.file_id;
-  return isSafePathId(fileId)
-    ? { ok: true, data: { status, fileId } }
-    : { ok: true, data: { status } };
+
+  const rawFileId = taskRecord.file_id ?? parsed.file_id;
+  const rawUrl = extractTaskDownloadUrl(taskRecord) ?? extractTaskDownloadUrl(parsed);
+  let downloadUrl: string | undefined;
+  if (rawUrl !== undefined && rawUrl !== null && rawUrl !== '') {
+    const checked = readHttpsDownloadUrl(rawUrl);
+    if (!checked.ok) return checked;
+    downloadUrl = checked.data.downloadUrl;
+  }
+
+  return {
+    ok: true,
+    data: {
+      status,
+      ...(isSafePathId(rawFileId) ? { fileId: rawFileId } : {}),
+      ...(downloadUrl !== undefined ? { downloadUrl } : {}),
+    },
+  };
 }
 
 /** The download link of a finished file. It is valid for one hour (fact P8). */
@@ -150,6 +170,19 @@ export function readVideoFile(text: string): GenerationOutcome<{ readonly downlo
   const parsed = parseReply(text);
   const file = parsed?.file;
   const url = isRecord(file) ? file.download_url : undefined;
+  return readHttpsDownloadUrl(url);
+}
+
+function extractTaskDownloadUrl(record: Record<string, unknown>): unknown {
+  const content = record.content;
+  if (isRecord(content) && content.url !== undefined) return content.url;
+  if (Array.isArray(content) && isRecord(content[0]) && content[0].url !== undefined) {
+    return content[0].url;
+  }
+  return record.video_url;
+}
+
+function readHttpsDownloadUrl(url: unknown): GenerationOutcome<{ readonly downloadUrl: string }> {
   if (typeof url !== 'string') return invalid('The file reply had no download link.');
   try {
     const parsedUrl = new URL(url);

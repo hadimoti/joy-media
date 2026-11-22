@@ -22,9 +22,10 @@ describe('MiniMax video requests', () => {
     expect(call.url).toBe('https://api.minimax.io/v2/video_generation');
     expect(JSON.parse(call.body ?? '')).toEqual({
       model: 'MiniMax-H3-Lite',
-      prompt: 'a slow pan',
+      content: [{ type: 'text', text: 'a slow pan' }],
       resolution: '480P',
       duration: 4,
+      ratio: '16:9',
     });
     expect(call.headers.authorization).toBe(`Bearer ${KEY}`);
     expect(call.body).not.toContain(KEY);
@@ -106,6 +107,43 @@ describe('MiniMax video replies', () => {
       ok: true,
       data: { status: 'running' },
     });
+  });
+
+  it('reads a V2 task-wrapped status with direct content url', () => {
+    expect(
+      readVideoStatus(
+        JSON.stringify({
+          task: {
+            id: 'task-9',
+            status: 'succeeded',
+            content: { url: 'https://cdn.hailuoai.com/prod/out.mp4' },
+          },
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      data: { status: 'succeeded', downloadUrl: 'https://cdn.hailuoai.com/prod/out.mp4' },
+    });
+  });
+
+  it('rejects a V2 task content url that is not HTTPS', () => {
+    expect(
+      readVideoStatus(
+        JSON.stringify({
+          task: { status: 'succeeded', content: { url: 'http://cdn.hailuoai.com/out.mp4' } },
+        }),
+      ),
+    ).toMatchObject({ ok: false, code: 'RESPONSE_INVALID' });
+  });
+
+  it('ignores empty content url strings on non-terminal V2 status replies', () => {
+    expect(
+      readVideoStatus(
+        JSON.stringify({
+          task: { status: 'queued', content: { url: '' } },
+        }),
+      ),
+    ).toEqual({ ok: true, data: { status: 'queued' } });
   });
 
   it('reads the legacy status words', () => {
