@@ -51,7 +51,35 @@ export function renderFrameOptions(
     ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
     clipTimes: transitionClipTimes(timeline),
     ...(imageSizesByObjectId !== undefined ? { imageSizesByObjectId } : {}),
+    zIndexByObjectId: trackLayerOrder(project, timeline),
   };
+}
+
+/**
+ * Layer order from the timeline (ADR-0035): the top row is in front. An object takes the place of the track its
+ * clip sits on, so moving a track up or down changes what covers what, in the Monitor and in the export.
+ * Objects with no clip on the timeline are left out and keep the frame's own order.
+ */
+export function trackLayerOrder(
+  project: JoyProjectV1,
+  timeline: SpikeProject,
+): Readonly<Record<string, number>> {
+  const raw = project.pluginData?.['joy.clipObjects'];
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const objectByClipId = raw as Readonly<Record<string, unknown>>;
+  const tracks = [
+    ...Object.values(timeline.compositions).flatMap((composition) => composition.tracks),
+  ];
+  const order: Record<string, number> = {};
+  tracks.forEach((track, row) => {
+    // Row 0 is the top row and must get the highest value; 1 keeps every placed object above the video layer.
+    const layer = tracks.length - row;
+    for (const clip of track.clips) {
+      const objectId = objectByClipId[clip.id];
+      if (typeof objectId === 'string') order[objectId] = layer;
+    }
+  });
+  return order;
 }
 
 export function imageSizesFromCache(
