@@ -231,14 +231,32 @@ describe('provider capability probes', () => {
       },
     });
 
+    expect(assessment.modalities).toEqual(['image', 'audio']);
+    expect(Object.isFrozen(assessment)).toBe(true);
+    expect(Object.isFrozen(assessment.modalities)).toBe(true);
+  });
+
+  it('accepts a media ACK wrapped in whitespace or a leading think block while still blocking trailing text', () => {
+    const assessment = assessProviderMediaCapabilities({
+      image: {
+        response: providerResponse({
+          role: 'assistant',
+          content: `<think>checking image</think>\n${PROVIDER_MEDIA_CAPABILITY_PROBE_ACK}\n`,
+        }),
+      },
+      audio: {
+        response: providerResponse({
+          role: 'assistant',
+          content: `  ${PROVIDER_MEDIA_CAPABILITY_PROBE_ACK}  `,
+        }),
+      },
+    });
     expect(assessment).toEqual({
       image: 'supported',
       audio: 'supported',
       video: 'unavailable',
       modalities: ['image', 'audio'],
     });
-    expect(Object.isFrozen(assessment)).toBe(true);
-    expect(Object.isFrozen(assessment.modalities)).toBe(true);
   });
 
   it('fails closed for malformed or hostile media responses and redacts their input', () => {

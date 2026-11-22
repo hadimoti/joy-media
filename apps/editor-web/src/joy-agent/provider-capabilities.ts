@@ -355,12 +355,12 @@ function isPlanOnlyProbeValid(probe: unknown): boolean {
 function isMediaProbeResponseValid(probe: unknown): boolean {
   if (!isRecord(probe) || !Object.prototype.hasOwnProperty.call(probe, 'response')) return false;
   const message = extractProviderMessage(probe.response);
-  return (
-    message !== undefined &&
-    message.role === 'assistant' &&
-    message.content === PROVIDER_MEDIA_CAPABILITY_PROBE_ACK &&
-    message.tool_calls === undefined
-  );
+  if (message === undefined || message.role !== 'assistant' || message.tool_calls !== undefined)
+    return false;
+  if (typeof message.content !== 'string') return false;
+  // Reasoning models may prepend <think>...</think> blocks or wrap with whitespace around the exact ACK.
+  const normalized = message.content.replace(/^(?:\s*<think>[\s\S]*?<\/think>\s*)+/, '').trim();
+  return normalized === PROVIDER_MEDIA_CAPABILITY_PROBE_ACK;
 }
 
 function extractProviderMessage(value: unknown): Readonly<Record<string, unknown>> | undefined {

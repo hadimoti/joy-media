@@ -119,11 +119,16 @@ import {
 import {
   createEditorQcAdapter,
   createQcHostAdapterSharedState,
+  runDesktopMediaQc,
   type QcHostAdapter,
   type QcFrameConsentRequest,
 } from './joy-agent/qc-host-adapter.js';
 import { createQcPrivateFrameTransport } from './joy-agent/qc-private-frame-transport.js';
-import { createQcRepairHost, timelineQcCheckPort } from './joy-agent/qc-repair-host.js';
+import {
+  createQcRepairHost,
+  findingsFromQcReport,
+  timelineQcCheckPort,
+} from './joy-agent/qc-repair-host.js';
 import type { QcRepairPlan } from './joy-agent/qc-repair-plan.js';
 import { audioStateFromProject } from './timeline-presentation.js';
 import {
@@ -2644,6 +2649,7 @@ export function AgentPanel({
           qcAdapterRef.current = undefined;
           let qcAdapter: QcHostAdapter | undefined;
           if (structured && isQcCheckRequest(body)) {
+            const desktopBridge = typeof window !== 'undefined' ? window.joyDesktop : undefined;
             const qcAdapterInput = {
               runId,
               projectId: contextInput.projectId,
@@ -2654,6 +2660,21 @@ export function AgentPanel({
               isCachedImageSupported: qcImageSupported,
               isPrivacyModeAllowed: qcPrivacyAllowed,
               requestConsent: requestQcFrameConsent,
+              ...(desktopBridge === undefined
+                ? {}
+                : {
+                    checkAsset: (assetId: string, qcSignal: AbortSignal) =>
+                      runDesktopMediaQc(desktopBridge, {
+                        refId: assetId,
+                        signal: qcSignal,
+                        pollMs: 100,
+                      }),
+                  }),
+              getMasterGain: () => {
+                const audio = audioStateFromProject(latestSessionRef.current.visualProject);
+                const master = audio.buses.find((bus) => bus.id === 'master') ?? audio.buses[0];
+                return master?.gain ?? 1;
+              },
               transport: createQcPrivateFrameTransport({
                 engineClient: joyAgentEngineClient,
                 currentAuthority: () => {
@@ -2677,9 +2698,12 @@ export function AgentPanel({
             };
             // This adapter belongs to the active model run, so approved QC repairs may advance
             // the project revision without invalidating later tool calls in that same run.
+            // Both adapters share the composition ports so cached text boxes from the first check
+            // feed the repair planner when `initialFindings` are reused; checks queue sequentially.
+            const qcCompositionPorts = createQcCompositionPorts();
             qcAdapter = createEditorQcAdapter({
               ...qcAdapterInput,
-              ...createQcCompositionPorts(),
+              ...qcCompositionPorts,
               getRevision: () => latestSessionRef.current.projectRevisionId,
               isCurrent: () =>
                 activeModelRunIdRef.current === runId &&
@@ -2689,10 +2713,9 @@ export function AgentPanel({
             // It has its own adapter: the QC tools above never see this relaxed identity.
             // The timeline check only ever runs through this adapter (the repair loop's check), so it is the one
             // that needs the frame capture; each check releases its own capture.
-            const repairCompositionPorts = createQcCompositionPorts();
             const repairQcAdapter = createEditorQcAdapter({
               ...qcAdapterInput,
-              ...repairCompositionPorts,
+              ...qcCompositionPorts,
               getRevision: () => latestSessionRef.current.projectRevisionId,
               isCurrent: () =>
                 activeModelRunIdRef.current === runId &&
@@ -2711,9 +2734,17 @@ export function AgentPanel({
               checks: [timelineQcCheckPort(repairQcAdapter)],
               getAudio: () => audioStateFromProject(latestSessionRef.current.visualProject),
               onAudioApplied: (audio) => onQcAudioApplied?.(audio),
-              textBoxes: repairCompositionPorts.getTextBoxes,
+              textBoxes: qcCompositionPorts.getTextBoxes,
               maxRounds: latestSettingsRef.current.qualityCheck.fixRounds,
-              onApplied: () => onProjectRevision?.(),
+              onApplied: () => {
+                // Keep sessionScopeRef aligned with this run's own approved repair commit so
+                // the project-transition guard does not abort the re-check and final reply.
+                sessionScopeRef.current = {
+                  ...sessionScopeRef.current,
+                  revision: latestSessionRef.current.projectRevisionId,
+                };
+                onProjectRevision?.();
+              },
               approve: (plan, round, signal) =>
                 new Promise<boolean>((resolve) => {
                   let settled = false;
@@ -2819,7 +2850,10 @@ export function AgentPanel({
                 }),
             });
             qcAdapter.runRepair = async ({ signal }) => {
-              const result = await repairHost.run(signal);
+              const priorReport = toolAdapter.storedReport('latest');
+              const initialFindings =
+                priorReport === undefined ? undefined : findingsFromQcReport(priorReport);
+              const result = await repairHost.run(signal, initialFindings);
               if (result.stop === 'check-failed')
                 return {
                   ok: false,
@@ -2988,6 +3022,10 @@ export function AgentPanel({
                     qcAdapter?.dispose();
                   },
                 };
+          if (qcAdapter !== undefined) {
+            // Start Layer 1 immediately so FFmpeg/composition sampling runs in parallel with the model's first turn.
+            void qcAdapter.runTimelineCheck(new AbortController().signal).catch(() => undefined);
+          }
           const contextSnapshot = structured
             ? undefined
             : createJoyAgentContextSnapshot(contextInput);

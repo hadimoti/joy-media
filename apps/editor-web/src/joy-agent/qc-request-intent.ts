@@ -18,7 +18,7 @@ export const QC_HOST_TOOL_NAMES = Object.freeze([
  * Frames one quality-check run may send to a model when nothing sets a smaller or larger budget. The tool
  * loop enforces it; the report card shows the frames used against it.
  */
-export const QC_DEFAULT_RUN_FRAME_BUDGET = 16;
+export const QC_DEFAULT_RUN_FRAME_BUDGET = 12;
 
 const QC_HOST_TOOL_NAME_SET: ReadonlySet<string> = new Set(QC_HOST_TOOL_NAMES);
 
@@ -33,6 +33,9 @@ const FA_PROBLEM = '(?:مشکل|ایراد|اشکال)';
 
 const CHECK_FOR_PROBLEMS = new RegExp(
   `\\b(?:check|review|inspect|audit|scan)\\b[^.\\n]{0,40}\\bfor\\b[^.\\n]{0,20}\\b${PROBLEM}\\b`,
+);
+const CHECK_AND_FIX_MEDIA = new RegExp(
+  `\\b(?:check|review|inspect|audit|scan)\\b[^.\\n]{0,40}\\b${MEDIA}\\b[^.\\n]{0,30}\\b(?:and fix|what you find|what is wrong)\\b`,
 );
 const DETECT_PROBLEMS = new RegExp(
   `\\b(?:find|spot|detect|look for|are there|is there|any)\\b[^.\\n]{0,30}\\b${PROBLEM}\\b`,
@@ -56,8 +59,9 @@ export function isQcCheckRequest(prompt: string): boolean {
   return (
     // Explicit quality-check wording.
     /\b(?:qc|quality[- ]?(?:check|control|review|assurance))\b/.test(value) ||
-    // "check ... for problems", "find problems in the cut", "does the film have errors?".
+    // "check ... for problems", "check this timeline and fix what you find", "find problems in the cut", "does the film have errors?".
     CHECK_FOR_PROBLEMS.test(value) ||
+    CHECK_AND_FIX_MEDIA.test(value) ||
     (DETECT_PROBLEMS.test(value) && MEDIA_WORD.test(value)) ||
     MEDIA_HAS_PROBLEMS.test(value) ||
     // Persian: quality control / quality check, quality of the video, problems in the video.

@@ -366,7 +366,7 @@ const QC_REPORT_READ_TOOL: BrowserAgentToolDefinition = {
   function: {
     name: 'qc_report_read',
     description:
-      'Read an owner-saved QC report. Use its reportId and listed frameIds as the only authority for later frame review. This tool never sends media.',
+      'Read an owner-saved QC report (pass reportId "latest" for the most recent report). Use its reportId and listed frameIds as the only authority for later frame review. This tool never sends media.',
     strict: true,
     parameters: {
       type: 'object',
@@ -423,7 +423,6 @@ const MEDIA_FRAMES_VIEW_TOOL: BrowserAgentToolDefinition = {
           type: 'array',
           minItems: 1,
           maxItems: MAX_QC_FRAMES_PER_TOOL_CALL,
-          uniqueItems: true,
           items: {
             type: 'string',
             minLength: 1,
@@ -459,7 +458,6 @@ const MEDIA_CONTACT_SHEET_TOOL: BrowserAgentToolDefinition = {
           type: 'array',
           minItems: 1,
           maxItems: MAX_QC_FRAMES_PER_TOOL_CALL,
-          uniqueItems: true,
           items: {
             type: 'string',
             minLength: 1,
