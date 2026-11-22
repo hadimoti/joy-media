@@ -1081,7 +1081,7 @@ interface ProbeResult {
   readonly videoHeight?: number;
 }
 
-/** Reads `ffprobe -of json` output. A cover-art picture inside an audio file is not a video stream. */
+/** Reads `ffprobe -of json` output. Cover art and thumbnail streams are not video streams (ffmpeg's `0:V` skips them too). */
 export function parseProbe(json: string): ProbeResult {
   let value: unknown;
   try {
@@ -1097,7 +1097,9 @@ export function parseProbe(json: string): ProbeResult {
   const streams = Array.isArray(root['streams']) ? (root['streams'] as unknown[]).map(record) : [];
   const videoStream = streams.find(
     (stream) =>
-      stream['codec_type'] === 'video' && record(stream['disposition'])['attached_pic'] !== 1,
+      stream['codec_type'] === 'video' &&
+      record(stream['disposition'])['attached_pic'] !== 1 &&
+      record(stream['disposition'])['timed_thumbnails'] !== 1,
   );
   const audioStream = streams.find((stream) => stream['codec_type'] === 'audio');
   const hasVideo = videoStream !== undefined;
@@ -1255,7 +1257,7 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
       '-v',
       'error',
       '-show_entries',
-      'format=duration:stream=codec_type,duration,width,height:stream_disposition=attached_pic:stream_tags=DURATION',
+      'format=duration:stream=codec_type,duration,width,height:stream_disposition=attached_pic,timed_thumbnails:stream_tags=DURATION',
       '-of',
       'json',
       options.sourcePath,
