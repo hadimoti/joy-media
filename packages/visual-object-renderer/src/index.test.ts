@@ -453,6 +453,18 @@ describe('buildRenderFrameIR', () => {
     expect(a).toEqual(b);
   });
 
+  it('keeps a picture and a title on the same layer so the title is not hidden behind the photo', () => {
+    const image = resolved(makeObject({ id: 'photo', kind: 'image' }));
+    const title = resolved(makeObject({ id: 'title', kind: 'text', text: 'Hello' }));
+    const frame = buildRenderFrameIR('c', 0, 1920, 1080, [image, title], {
+      imageSizesByObjectId: { photo: { width: 1920, height: 1080 } },
+    });
+    const zIndexOf = (id: string) => frame.nodes.find((node) => node.id === id)?.zIndex;
+    expect(zIndexOf('photo')).toBe(zIndexOf('title'));
+    // Equal layers draw in the order of the frame: the title comes after the picture, so it is on top.
+    expect(frame.nodes.map((node) => node.id)).toEqual(['photo', 'title']);
+  });
+
   it('accepts track-plan z-order without kind-specific image priority', () => {
     const image = resolved(makeObject({ id: 'image-layer', kind: 'image' }));
     const text = resolved(makeObject({ id: 'text-layer', kind: 'text', text: 'layer' }));
