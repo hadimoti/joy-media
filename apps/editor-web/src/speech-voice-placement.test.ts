@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Composition } from '@joy-media/project-schema';
-import { buildSpeechVoicePlacement } from './speech-voice-placement.js';
+import { buildSpeechVoicePlacement, speechCaptionOffsetUs } from './speech-voice-placement.js';
 
 const audio = {
   id: 'voice-asset',
@@ -10,6 +10,10 @@ const audio = {
 };
 
 describe('buildSpeechVoicePlacement', () => {
+  it('uses the captured Generate position relative to the caption layer start', () => {
+    expect(speechCaptionOffsetUs(5_000_000, 1_000_000)).toBe(4_000_000);
+  });
+
   it('chooses the first unlocked compatible track without overlap', () => {
     const transaction = buildSpeechVoicePlacement({
       composition: composition(),

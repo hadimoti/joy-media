@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { applyCaptionProjectCommand } from '@joy-media/captions-core';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 
@@ -226,7 +226,9 @@ describe('CaptionsPanel cue keyboard editing', () => {
     const container = document.createElement('div');
     document.body.append(container);
     let project = INITIAL_EDITOR_PROJECT;
+    const transactions: VisualObjectTransaction[] = [];
     const { root, render } = renderPanel(container, (transaction) => {
+      transactions.push(transaction);
       const command = transaction.commands[0];
       if (command?.type === 'caption.replaceDocument') {
         project = {
@@ -266,6 +268,111 @@ describe('CaptionsPanel cue keyboard editing', () => {
     expect(document.activeElement).toBe(editor);
     expect(editor?.value).toBe('Welcome to JOY Media Studio');
     expect(editor?.selectionStart).toBe('Welcome to JOY '.length);
+    await act(async () => {
+      setTextareaValue(editor!, 'Merged cue edited');
+      editor!.blur();
+      editor!.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
+    });
+    expect(transactions).toHaveLength(2);
+    expect(transactions[1]?.commands[0]?.type).toBe('caption.setSegmentText');
+    expect(transactions[1]?.commands[0]).toMatchObject({
+      payload: { textOverride: 'Merged cue edited' },
+    });
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('adds generated captions without replacing existing cues and one undo restores the project', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const project = INITIAL_EDITOR_PROJECT;
+    const capturedStartUs = 5_000_000;
+    const onDispatch = vi.fn<(transaction: VisualObjectTransaction) => void>();
+    const render = (playheadUs: number) =>
+      root.render(
+        <CaptionsPanel
+          project={project}
+          playheadUs={playheadUs}
+          onSeek={() => undefined}
+          onDispatch={onDispatch}
+          onTranscribe={async () => undefined}
+          transcriptionError={undefined}
+          onProjectChange={() => undefined}
+          speechModelStatus={[
+            { modelId: 'kokoro-82m', state: 'ready' },
+            { modelId: 'faster-whisper-large-v3-turbo', state: 'ready' },
+          ]}
+          onGenerateSpeech={async () => ({
+            availability: 'ready',
+            insertionStartUs: capturedStartUs,
+            timing: {
+              durationUs: 2_000_000,
+              timingSource: 'native',
+              words: [
+                { text: 'Generated', startUs: 100_000, endUs: 500_000 },
+                { text: 'words', startUs: 600_000, endUs: 900_000 },
+              ],
+            },
+          })}
+        />,
+      );
+    await act(async () => render(0));
+
+    const generateTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      (button) => button.textContent === 'Generate',
+    )!;
+    await act(async () => generateTab.click());
+    const text = container.querySelector<HTMLTextAreaElement>('.speech-generation-panel textarea')!;
+    const checkbox = container.querySelectorAll<HTMLInputElement>(
+      '.speech-consent-group input[type="checkbox"]',
+    )[1]!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        text,
+        'Generated words',
+      );
+      text.dispatchEvent(new Event('input', { bubbles: true }));
+      checkbox.click();
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.speech-action-row button[type="submit"]')!.click();
+    });
+    expect(container.textContent).toContain('Speech generation complete.');
+
+    // Move the playhead after Generate completed; captions must keep the captured start.
+    await act(async () => render(8_000_000));
+    await act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>('.speech-action-row button')]
+        .find((button) => button.textContent === 'Add captions')!
+        .click();
+    });
+
+    expect(onDispatch).toHaveBeenCalledTimes(1);
+    const transaction = onDispatch.mock.calls[0]![0];
+    expect(transaction.commands).toHaveLength(1);
+    const command = transaction.commands[0]!;
+    expect(command.type).toBe('caption.replaceDocument');
+    if (command.type === 'caption.replaceDocument') {
+      const before = project.captionDocuments[command.payload.documentId]!;
+      const generatedWords = Object.values(command.payload.document.words).filter((word) =>
+        word.text.startsWith('Generated') || word.text === 'words',
+      );
+      expect(generatedWords.map(({ startUs, endUs }) => [startUs, endUs])).toEqual([
+        [capturedStartUs - 1_000_000 + 100_000, capturedStartUs - 1_000_000 + 500_000],
+        [capturedStartUs - 1_000_000 + 600_000, capturedStartUs - 1_000_000 + 900_000],
+      ]);
+      expect(command.payload.document.segments).toEqual(expect.arrayContaining([...before.segments]));
+      expect(Object.keys(command.payload.document.words)).toEqual(
+        expect.arrayContaining(Object.keys(before.words)),
+      );
+      const applied = applyCaptionProjectCommand(project, command);
+      expect(applied.project.captionDocuments).toHaveProperty('captions-fa');
+      expect(Object.keys(applied.project.captionDocuments)).toEqual(
+        Object.keys(project.captionDocuments),
+      );
+      expect(applyCaptionProjectCommand(applied.project, applied.inverse).project).toEqual(project);
+    }
     await act(async () => root.unmount());
     container.remove();
   });

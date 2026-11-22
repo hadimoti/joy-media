@@ -54,6 +54,7 @@ import type { SpeechModelStatus, SpeechGenerationOptions } from './SpeechGenerat
 import type { SpeechSynthesizeV1 } from '@joy-media/job-protocol';
 import type { SpeechSynthesisTiming } from './local-media-client.js';
 import { buildSpeechCaptionCues } from './speech-caption-cues.js';
+import { speechCaptionOffsetUs } from './speech-voice-placement.js';
 
 type CaptionsTab = 'transcript' | 'style' | 'generate';
 
@@ -163,9 +164,14 @@ export function CaptionsPanel({
   readonly onGenerateSpeech?: (
     request: SpeechSynthesizeV1,
     options: SpeechGenerationOptions,
-  ) => Promise<{ availability: 'ready' | 'setup-required'; timing?: SpeechSynthesisTiming }>;
+  ) => Promise<{
+    availability: 'ready' | 'setup-required';
+    timing?: SpeechSynthesisTiming;
+    insertionStartUs: number;
+  }>;
   readonly onOpenLocalAssets?: () => void;
 }) {
+  const generatedSpeechStartUsRef = useRef<number | undefined>(undefined);
   const [query, setQuery] = useState('');
   const [activeTab, setActiveTab] = useState<CaptionsTab>('transcript');
   const composition = project.compositions[project.rootCompositionId];
@@ -260,7 +266,12 @@ export function CaptionsPanel({
                 referenceAssets={Object.values(project.assets)
                   .filter((asset) => asset.kind === 'audio')
                   .map((asset) => ({ id: asset.id, label: asset.displayName }))}
-                onGenerate={onGenerateSpeech}
+                onGenerate={async (request, options) => {
+                  generatedSpeechStartUsRef.current = undefined;
+                  const result = await onGenerateSpeech(request, options);
+                  generatedSpeechStartUsRef.current = result.insertionStartUs;
+                  return result;
+                }}
                 onAddCaptions={(timing) => {
                   const slot = slots[0];
                   if (
@@ -269,14 +280,20 @@ export function CaptionsPanel({
                     timing.words.length === 0
                   )
                     return;
-                  const offsetUs = Math.max(0, playheadUs - slot.clip.startUs);
+                  const capturedStartUs = generatedSpeechStartUsRef.current;
+                  if (capturedStartUs === undefined) return;
+                  const offsetUs = speechCaptionOffsetUs(capturedStartUs, slot.clip.startUs);
                   const words: Record<string, CaptionWordV1> = {};
+                  const generationId =
+                    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+                      ? crypto.randomUUID()
+                      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
                   timing.words.forEach((word, index) => {
                     const startUs = Math.max(0, Math.min(timing.durationUs - 1, word.startUs));
                     const endUs = Math.max(startUs + 1, Math.min(timing.durationUs, word.endUs));
                     if (word.endUs <= 0 || word.startUs >= timing.durationUs || endUs <= startUs)
                       return;
-                    const id = `speech-word-${index + 1}`;
+                    const id = `speech-word-${generationId}-${index + 1}`;
                     words[id] = {
                       id,
                       text: word.text,
@@ -285,11 +302,18 @@ export function CaptionsPanel({
                       ...(word.confidence === undefined ? {} : { confidence: word.confidence }),
                     };
                   });
-                  const document = buildSpeechCaptionCues({
+                  const generatedDocument = buildSpeechCaptionCues({
                     ...slot.document,
                     words,
                     segments: [],
                   });
+                  const document = {
+                    ...generatedDocument,
+                    words: { ...slot.document.words, ...generatedDocument.words },
+                    segments: [...slot.document.segments, ...generatedDocument.segments].sort(
+                      (left, right) => left.startUs - right.startUs || left.endUs - right.endUs,
+                    ),
+                  };
                   onDispatch({
                     label: 'Add speech captions',
                     commands: [

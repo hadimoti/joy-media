@@ -3822,7 +3822,11 @@ function EditorWorkspace({
       });
       dispatchTimeline(transaction);
       setRevision((revision) => revision + 1);
-      return { availability: 'ready' as const, timing: generated.timing };
+      return {
+        availability: 'ready' as const,
+        timing: generated.timing,
+        insertionStartUs: capturedPlayheadUs,
+      };
     },
     [
       controlPlaneProject.controlPlaneProjectId,
