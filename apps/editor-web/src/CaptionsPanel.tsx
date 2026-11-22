@@ -511,7 +511,13 @@ function CaptionSlotEditor({
   ) => {
     if (edit === undefined) return;
     pendingFocus.current = { cueId: edit.focusCueId, caret: edit.caret };
-    for (const id of affectedIds) suppressedBlurIds.current.add(id);
+    // Only the currently focused editor is about to blur. The merge target is
+    // focused after the document update and must remain able to commit edits.
+    const activeEditor = window.document.activeElement;
+    for (const id of affectedIds) {
+      if (editorRefs.current.get(id) === activeEditor) suppressedBlurIds.current.add(id);
+      else suppressedBlurIds.current.delete(id);
+    }
     clearDrafts(...affectedIds);
     onDispatch({
       label: 'Edit caption cues',
