@@ -21,7 +21,10 @@ const SCOPE_PREFIXES = ['toolbar.', 'track-list.', 'track-row.'];
 const SOURCE_CLAIMS = {
   [PANEL]: [
     { fragment: 'aria-label={`Gap in ', static: 'role="note" gap marker, not interactive' },
-    { fragment: 'aria-label={`${label}, ${durationLabel}', labels: ['<clip label>, <duration>, <start>–<end>'] },
+    {
+      fragment: 'aria-label={`${label}, ${durationLabel}',
+      labels: ['<clip label>, <duration>, <start>–<end>'],
+    },
     { fragment: 'aria-label={`Trim start of ${label}`}', labels: ['Trim start of <clip label>'] },
     { fragment: 'aria-label={`Trim end of ${label}`}', labels: ['Trim end of <clip label>'] },
     {
@@ -57,18 +60,30 @@ const SOURCE_CLAIMS = {
     { fragment: 'aria-label="Timeline zoom"', labels: ['Timeline zoom'] },
     { fragment: 'aria-label="Zoom in"', labels: ['Zoom in'] },
     { fragment: 'aria-label="Fit timeline to width"', labels: ['Fit timeline to width'] },
-    { fragment: "aria-label={autoFit ? 'Fit mode' : 'Follow mode'}", static: 'zoom mode status span' },
-    { fragment: 'aria-label={`${trackCode} ${trackName} track`}', static: 'role=group track container' },
+    {
+      fragment: "aria-label={autoFit ? 'Fit mode' : 'Follow mode'}",
+      static: 'zoom mode status span',
+    },
+    {
+      fragment: 'aria-label={`${trackCode} ${trackName} track`}',
+      static: 'role=group track container',
+    },
     { fragment: 'aria-label="Noise reduction (DeepFilterNet) active"', static: 'status pill span' },
-    { fragment: 'aria-label="Loudness normalization (EBU R128) active"', static: 'status pill span' },
-    { fragment: 'aria-label={`${trackCode} track controls`}', static: 'group wrapper for track buttons' },
+    {
+      fragment: 'aria-label="Loudness normalization (EBU R128) active"',
+      static: 'status pill span',
+    },
+    {
+      fragment: 'aria-label={`${trackCode} track controls`}',
+      static: 'group wrapper for track buttons',
+    },
     {
       fragment: 'aria-label={`Change label color for ${trackName}`}',
       labels: ['Change label color for <track name>'],
     },
     { fragment: 'aria-label={`Lock ${trackCode}`}', labels: ['Lock <track code>'] },
     {
-      fragment: 'aria-label={`${track.muted ? \'Unmute\' : \'Mute\'} ${trackCode}`}',
+      fragment: "aria-label={`${track.muted ? 'Unmute' : 'Mute'} ${trackCode}`}",
       labels: ['Mute <track code>', 'Unmute <track code>'],
     },
     { fragment: 'aria-label={`Solo ${trackCode}`}', labels: ['Solo <track code>'] },
@@ -81,7 +96,10 @@ const SOURCE_CLAIMS = {
       labels: ['<marker label>. Delete to remove.'],
     },
     { fragment: 'aria-label={`Remove ${marker.label}`}', labels: ['Remove <marker label>'] },
-    { fragment: 'aria-label="Add an empty track"', static: 'role=group wrapper for add-track buttons' },
+    {
+      fragment: 'aria-label="Add an empty track"',
+      static: 'role=group wrapper for add-track buttons',
+    },
     { fragment: 'aria-label="Add track"', labels: ['Add track'] },
     { fragment: 'aria-label="Add audio track"', labels: ['Add audio track'] },
   ],
@@ -161,7 +179,10 @@ test('repeated labels have distinct scopes', () => {
     assert.equal(new Set(scopes).size, scopes.length, `"${label}" repeats in one scope: ${scopes}`);
   }
   // The toolbar and track-list copies of "Add audio track" are the known repeat.
-  const addAudio = byLabel.get('Add audio track').map((r) => r.scope).sort();
+  const addAudio = byLabel
+    .get('Add audio track')
+    .map((r) => r.scope)
+    .sort();
   assert.deepEqual(addAudio, ['toolbar.add', 'track-list.add-empty-track']);
 });
 
@@ -195,14 +216,20 @@ test('track eye, color, lock, mute, solo and insertion each have a row per state
 test('both Add audio track placements and the Add video track placements are inventoried', () => {
   const addAudio = timelineControlCases.filter((c) => c.label === 'Add audio track');
   assert.equal(addAudio.length, 2);
-  assert.deepEqual(addAudio.map((c) => c.scope).sort(), ['toolbar.add', 'track-list.add-empty-track']);
+  assert.deepEqual(addAudio.map((c) => c.scope).sort(), [
+    'toolbar.add',
+    'track-list.add-empty-track',
+  ]);
   assert.ok(caseLabels.includes('Add video track'));
   assert.ok(caseLabels.includes('Add track'));
 });
 
 test('the color menu lists every COLOR_LABELS choice plus Default', () => {
   const src = read(COLOR_MENU);
-  const block = src.slice(src.indexOf('const COLOR_LABELS'), src.indexOf('};', src.indexOf('const COLOR_LABELS')));
+  const block = src.slice(
+    src.indexOf('const COLOR_LABELS'),
+    src.indexOf('};', src.indexOf('const COLOR_LABELS')),
+  );
   const names = [...block.matchAll(/:\s*'([A-Za-z]+)'/g)].map((m) => m[1]).sort();
   assert.ok(names.length >= 8, 'COLOR_LABELS block parsed');
   const colorRows = timelineControlCases
@@ -232,7 +259,10 @@ test('every aria-label attribute in the inventoried files is claimed, and each c
       `${file}: aria-label count changed; inventory the new control or mark it static`,
     );
     for (const claim of claims) {
-      assert.ok(src.includes(claim.fragment), `${file}: claimed fragment not found: ${claim.fragment}`);
+      assert.ok(
+        src.includes(claim.fragment),
+        `${file}: claimed fragment not found: ${claim.fragment}`,
+      );
     }
   }
 });
@@ -248,14 +278,27 @@ test('every control claim names only inventoried labels', () => {
 
 test('every inventoried case label is claimed by source or by a menu', () => {
   const claimed = new Set(claimedLabels());
-  for (const label of ['Default', 'Violet', 'Iris', 'Caribbean', 'Lavender', 'Cerulean', 'Forest', 'Rose', 'Mango']) {
+  for (const label of [
+    'Default',
+    'Violet',
+    'Iris',
+    'Caribbean',
+    'Lavender',
+    'Cerulean',
+    'Forest',
+    'Rose',
+    'Mango',
+  ]) {
     claimed.add(label);
   }
   claimed.add('Remove Track');
   claimed.add('Hide Track');
   claimed.add('Show Track');
   for (const { file, fragment, label } of TEXT_NAMED_CONTROLS) {
-    assert.ok(read(file).includes(fragment), `${file}: text-named control anchor not found: ${fragment}`);
+    assert.ok(
+      read(file).includes(fragment),
+      `${file}: text-named control anchor not found: ${fragment}`,
+    );
     claimed.add(label);
   }
   // Pending rows are absent from source by design; the absence test above covers them.
