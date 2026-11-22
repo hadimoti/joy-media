@@ -3,6 +3,7 @@ import {
   TransientPropertyInteraction,
   type PropertyInteractionHost,
 } from '../property-interaction.js';
+import { useNumberScrub } from './useNumberScrub.js';
 
 export interface TransientControlAdapter<T> {
   readonly begin: () => void;
@@ -98,6 +99,7 @@ export interface NumericPropertyControlProps {
   readonly max?: number | undefined;
   readonly step?: number | undefined;
   readonly disabled?: boolean | undefined;
+  readonly scrub?: boolean | undefined;
 }
 
 export function NumericPropertyControl({
@@ -109,10 +111,14 @@ export function NumericPropertyControl({
   max,
   step,
   disabled = false,
+  scrub = false,
 }: NumericPropertyControlProps) {
+  const scrubBindings = useNumberScrub({ value, adapter, min, max, step, disabled });
   const preview = (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.currentTarget.valueAsNumber;
-    if (Number.isFinite(next)) adapter.preview(next);
+    if (!Number.isFinite(next)) return;
+    adapter.begin();
+    adapter.preview(next);
   };
   return (
     <input
@@ -125,11 +131,28 @@ export function NumericPropertyControl({
       step={step}
       value={value}
       disabled={disabled}
-      onFocus={adapter.begin}
+      style={{ cursor: scrub ? scrubBindings.cursorStyle : undefined }}
       onChange={preview}
-      onBlur={adapter.commit}
+      onBlur={(event) => {
+        const input = event.currentTarget;
+        const next = input.valueAsNumber;
+        const invalid =
+          !Number.isFinite(next) ||
+          (min !== undefined && next < min) ||
+          (max !== undefined && next > max) ||
+          input.validity.stepMismatch;
+        if (invalid) adapter.cancel();
+        else adapter.commit();
+      }}
+      onPointerDown={scrub ? scrubBindings.onPointerDown : undefined}
+      onPointerMove={scrub ? scrubBindings.onPointerMove : undefined}
+      onPointerUp={scrub ? scrubBindings.onPointerUp : undefined}
+      onPointerCancel={scrub ? scrubBindings.onPointerCancel : undefined}
+      onLostPointerCapture={scrub ? scrubBindings.onLostPointerCapture : undefined}
+      onClickCapture={scrub ? scrubBindings.onClickCapture : undefined}
       onKeyDown={(event) => {
-        cancelOnEscape(event, adapter);
+        const handled = scrub && scrubBindings.onKeyDown(event);
+        if (!handled) cancelOnEscape(event, adapter);
         commitOnEnter(event, adapter);
       }}
     />
