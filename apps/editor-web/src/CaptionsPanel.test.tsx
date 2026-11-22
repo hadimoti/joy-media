@@ -350,16 +350,19 @@ describe('CaptionsPanel cue keyboard editing', () => {
     )!;
     await act(async () => generateTab.click());
     const text = container.querySelector<HTMLTextAreaElement>('.speech-generation-panel textarea')!;
-    const checkbox = container.querySelectorAll<HTMLInputElement>(
-      '.speech-consent-group input[type="checkbox"]',
-    )[1]!;
+    // Built-in speech needs no reference rights; tick whichever consent boxes the panel currently shows.
+    const checkboxes = [
+      ...container.querySelectorAll<HTMLInputElement>(
+        '.speech-consent-group input[type="checkbox"]',
+      ),
+    ];
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
         text,
         'Generated words',
       );
       text.dispatchEvent(new Event('input', { bubbles: true }));
-      checkbox.click();
+      for (const checkbox of checkboxes) if (!checkbox.checked) checkbox.click();
     });
     await act(async () => {
       container
