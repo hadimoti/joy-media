@@ -51,7 +51,10 @@ interface MountOptions {
   readonly dataLanes?: ComponentProps<typeof TimelinePanel>['dataLanes'];
 }
 
-function project(locked = false, muted = false) {
+function project(
+  locked = false,
+  muted = false,
+): ComponentProps<typeof TimelinePanel>['project'] {
   const base = emptySpikeProject({ trackCount: 1, durationUs: 10 * SECOND_US });
   const composition = base.compositions.root!;
   return {
@@ -75,7 +78,8 @@ async function mount(options: MountOptions = {}): Promise<Mounted> {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
-  let currentProject = options.customProject ?? project(options.locked, options.muted);
+  let currentProject: ComponentProps<typeof TimelinePanel>['project'] =
+    options.customProject ?? project(options.locked, options.muted);
   const callbacks = {
     seek: vi.fn(),
     togglePlayback: vi.fn(),
@@ -95,18 +99,20 @@ async function mount(options: MountOptions = {}): Promise<Mounted> {
     root.render(
       <TimelinePanel
         project={currentProject}
-        activeCompositionId={options.activeCompositionId}
+        {...(options.activeCompositionId === undefined
+          ? {}
+          : { activeCompositionId: options.activeCompositionId })}
         onActiveCompositionChange={callbacks.activeCompositionChange}
         playheadUs={options.playheadUs ?? 3 * SECOND_US}
         playing={options.playing ?? false}
         selectedIds={options.selectedIds ?? ['clip-a']}
-        markers={options.markers}
-        dataLanes={options.dataLanes}
+        {...(options.markers === undefined ? {} : { markers: options.markers })}
+        {...(options.dataLanes === undefined ? {} : { dataLanes: options.dataLanes })}
         viewport={{ originUs: 0, pixelsPerSecond: 20 }}
         onViewportChange={callbacks.viewportChange}
         autoFit={options.autoFit ?? false}
         onAutoFitChange={callbacks.autoFitChange}
-        snapping={options.snapping}
+        {...(options.snapping === undefined ? {} : { snapping: options.snapping })}
         onSnappingChange={callbacks.snappingChange}
         onTogglePlayback={callbacks.togglePlayback}
         onSeek={callbacks.seek}

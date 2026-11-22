@@ -189,8 +189,12 @@ describe('CaptionsPanel cue keyboard editing', () => {
 
     expect(transactions).toHaveLength(1);
     expect(transactions[0]!.commands).toHaveLength(1);
-    expect(transactions[0]!.commands[0]!.type).toBe('caption.replaceDocument');
-    const replacement = transactions[0]!.commands[0]!.payload.document;
+    const command = transactions[0]!.commands[0]!;
+    expect(command.type).toBe('caption.replaceDocument');
+    if (command.type !== 'caption.replaceDocument') {
+      throw new Error('Expected caption replacement');
+    }
+    const replacement = command.payload.document;
     expect(
       replacement.segments.map((segment: { textOverride?: string }) => segment.textOverride),
     ).toEqual(['Welcome ', 'to JOY', undefined]);
@@ -273,7 +277,7 @@ describe('CaptionsPanel cue keyboard editing', () => {
     const original = INITIAL_EDITOR_PROJECT;
     const captionDocument = original.captionDocuments['captions-fa']!;
     const first = captionDocument.segments[0]!;
-    let project = {
+    let project: typeof INITIAL_EDITOR_PROJECT = {
       ...original,
       captionDocuments: {
         ...original.captionDocuments,

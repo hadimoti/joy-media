@@ -4,7 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
-import { BrowserControlPlaneClient, type BrowserWorker } from './control-plane-client.js';
+import type { BrowserControlPlaneClient, BrowserWorker } from './control-plane-client.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { EditorSession, type EditorSessionWriter } from './editor-session.js';
 import { MaskInspector } from './MaskInspector.js';

@@ -179,7 +179,9 @@ describe('SpeechGenerationPanel', () => {
   });
 
   it('requires explicit purpose opt-in and consent before Generate', async () => {
-    const onGenerate = vi.fn(async () => ({ availability: 'ready' as const }));
+    const onGenerate = vi.fn<SpeechGenerationPanelProps['onGenerate']>(async () => ({
+      availability: 'ready',
+    }));
     const view = await render(makeProps({ onGenerate }));
     const text = view.querySelector<HTMLTextAreaElement>('textarea')!;
     await setValue(text, 'Hello there');
@@ -210,7 +212,7 @@ describe('SpeechGenerationPanel', () => {
 
   it('passes the selected reference once and aborts the in-flight request on Cancel', async () => {
     let finish: ((value: SpeechGenerationResult) => void) | undefined;
-    const onGenerate = vi.fn(
+    const onGenerate = vi.fn<SpeechGenerationPanelProps['onGenerate']>(
       () =>
         new Promise<SpeechGenerationResult>((resolve) => {
           finish = resolve;
