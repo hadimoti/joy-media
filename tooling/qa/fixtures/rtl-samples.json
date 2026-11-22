@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "note": "Persian and Arabic samples for T-A18. Every `text` is exact; lines are separated by \\n. `kind` says what the sample is meant to prove.",
+  "samples": [
+    {
+      "id": "S01",
+      "kind": "persian-sentence",
+      "lang": "fa",
+      "text": "جوی مدیا ۱.۱.۱ — سفری به کوهستان"
+    },
+    {
+      "id": "S02",
+      "kind": "persian-three-lines",
+      "lang": "fa",
+      "text": "نمای شفق قطبی\nدر شب‌های زمستان\nبر فراز دریاچه"
+    },
+    {
+      "id": "S03",
+      "kind": "persian-english-number",
+      "lang": "fa",
+      "text": "فیلم جدید Joy Media 2026"
+    },
+    {
+      "id": "S04",
+      "kind": "arabic-diacritics",
+      "lang": "ar",
+      "text": "مُحَرِّرُ الْفِيدْيُو الِاحْتِرَافِيُّ"
+    },
+    { "id": "S05", "kind": "persian-digits", "lang": "fa", "text": "۰۱۲۳۴۵۶۷۸۹ — ۱۴۰۵" },
+    {
+      "id": "S06",
+      "kind": "arabic-sentence",
+      "lang": "ar",
+      "text": "مرحباً بكم في محرر الفيديو المحلي"
+    },
+    { "id": "S07", "kind": "arabic-digits", "lang": "ar", "text": "٠١٢٣٤٥٦٧٨٩ — ٢٠٢٦" },
+    {
+      "id": "S08",
+      "kind": "persian-zwnj",
+      "lang": "fa",
+      "text": "می‌خواهم فیلم‌های کوهستانی بسازم"
+    },
+    {
+      "id": "S09",
+      "kind": "mixed-date-url-brackets",
+      "lang": "fa",
+      "text": "نسخه (۱.۱.۱) در 2026-11-22 از https://joyst.ir"
+    },
+    {
+      "id": "S10",
+      "kind": "persian-long-wrap",
+      "lang": "fa",
+      "text": "این یک جملهٔ بلند فارسی است که باید در چند خط شکسته شود و هیچ کلمه‌ای نباید از وسط بریده یا حروف آن از هم جدا شوند"
+    },
+    {
+      "id": "S11",
+      "kind": "arabic-long-wrap",
+      "lang": "ar",
+      "text": "هذه جملة عربية طويلة يجب أن تنكسر إلى عدة أسطر دون أن تنقطع أي كلمة من منتصفها أو تنفصل حروفها"
+    }
+  ]
+}
