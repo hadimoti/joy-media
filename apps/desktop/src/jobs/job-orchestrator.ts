@@ -484,7 +484,9 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
       if (jobType === 'speech.transcribe' || jobType === 'speech.synthesize') {
         const speechPayload = JSON.parse(payloadResult.json ?? '{}') as Record<string, unknown>;
         const engineFlag = `speech.model.${String(speechPayload.modelId)}`;
-        if (!presence?.capabilities.includes(engineFlag)) {
+        // Only synthesis engines carry a per-model worker flag. The worker advertises speech.transcribe after it
+        // verified Whisper, and the dispatch requirement for the job type checks that capability.
+        if (jobType === 'speech.synthesize' && !presence?.capabilities.includes(engineFlag)) {
           return {
             ok: false,
             code: 'SETUP_REQUIRED',

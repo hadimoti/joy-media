@@ -776,8 +776,13 @@ export function createMediaChannelHandlers(
       ok: true,
       data: {
         models: models.map(([modelId, jobCapability]) => {
-          const modelReady = presence?.capabilities.includes(`speech.model.${modelId}`) === true;
           const jobReady = presence?.capabilities.includes(jobCapability) === true;
+          // Only the synthesis engines have a worker flag per model; speech.transcribe already means the Whisper
+          // model and its dependencies were verified.
+          const modelReady =
+            jobCapability === 'speech.transcribe'
+              ? jobReady
+              : presence?.capabilities.includes(`speech.model.${modelId}`) === true;
           const state =
             modelReady && jobReady
               ? 'ready'
@@ -836,7 +841,11 @@ export function createMediaChannelHandlers(
         ? parseSpeechTranscribeV1(input)
         : parseSpeechSynthesizeV1(input);
     if (parsed === undefined) return { ok: false, error: 'Invalid media request' };
-    const engineReady = presence?.capabilities.includes(`speech.model.${parsed.modelId}`) === true;
+    // The worker advertises speech.transcribe only after it verified the Whisper model and its dependencies, and it
+    // has no per-model flag for Whisper (only the synthesis engines do), so speech.transcribe is the whole signal.
+    const engineReady =
+      jobType === 'speech.transcribe' ||
+      presence?.capabilities.includes(`speech.model.${parsed.modelId}`) === true;
     const capability = jobType;
     if (!engineReady || presence?.capabilities.includes(capability) !== true) {
       return { ok: false, error: 'SETUP_REQUIRED' };

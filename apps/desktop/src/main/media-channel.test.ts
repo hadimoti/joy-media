@@ -173,6 +173,28 @@ describe('desktop.media channels', () => {
       ok: true,
       data: {
         models: [
+          // The real worker has no per-model flag for Whisper: speech.transcribe alone means it is ready.
+          { modelId: 'faster-whisper-large-v3-turbo', state: 'ready' },
+          { modelId: 'kokoro-82m', state: 'ready' },
+          { modelId: 'chatterbox-en', state: 'setup-required' },
+          { modelId: 'chatterbox-fa', state: 'setup-required' },
+        ],
+      },
+    });
+  });
+
+  it('reports Whisper as setup-required when the worker does not advertise speech.transcribe', () => {
+    const { db, handlers } = setup();
+    db.jobDispatch.savePresence({
+      workerId: 'worker-1',
+      capabilities: ['speech.synthesize', 'speech.model.kokoro-82m'],
+      lastHelloAt: 'T0',
+    });
+
+    expect(handlers['desktop.media.speech.status']({})).toMatchObject({
+      ok: true,
+      data: {
+        models: [
           { modelId: 'faster-whisper-large-v3-turbo', state: 'setup-required' },
           { modelId: 'kokoro-82m', state: 'ready' },
           { modelId: 'chatterbox-en', state: 'setup-required' },
@@ -193,7 +215,8 @@ describe('desktop.media channels', () => {
     });
     db.jobDispatch.savePresence({
       workerId: 'worker-1',
-      capabilities: ['speech.transcribe', 'speech.model.faster-whisper-large-v3-turbo'],
+      // Exactly what the real worker advertises for speech-to-text (it has no Whisper model flag).
+      capabilities: ['speech.transcribe'],
       lastHelloAt: 'T0',
     });
 
@@ -220,7 +243,8 @@ describe('desktop.media channels', () => {
     await handlers['desktop.media.asset.upload-original']({ assetId: 'staged-audio', bytes });
     db.jobDispatch.savePresence({
       workerId: 'worker-1',
-      capabilities: ['speech.transcribe', 'speech.model.faster-whisper-large-v3-turbo'],
+      // Exactly what the real worker advertises for speech-to-text (it has no Whisper model flag).
+      capabilities: ['speech.transcribe'],
       lastHelloAt: 'T0',
     });
 

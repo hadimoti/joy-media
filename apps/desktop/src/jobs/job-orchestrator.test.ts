@@ -114,14 +114,27 @@ describe('job orchestrator', () => {
         payload: { schemaVersion: 1, language: 'fa-IR', modelId: 'faster-whisper-large-v3-turbo' },
       };
       expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
+      // A worker that only reports a synthesis engine cannot transcribe.
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
+      // The real worker advertises speech.transcribe once Whisper is verified; it has no Whisper model flag.
       orchestrator.hello(WORKER, ['speech.transcribe']);
+      expect(orchestrator.submit(request)).toMatchObject({ ok: true });
+    });
+
+    it('still requires the exact engine flag for synthesis', () => {
+      const orchestrator = orchestratorFor(database);
+      const request = {
+        jobType: 'speech.synthesize',
+        kind: 'speech.synthesize',
+        refId: 'speech-output',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      };
+      orchestrator.hello(WORKER, ['speech.synthesize']);
       expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
-      orchestrator.hello(WORKER, ['speech.transcribe', 'speech.model.kokoro-82m']);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.chatterbox-en']);
       expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
-      orchestrator.hello(WORKER, [
-        'speech.transcribe',
-        'speech.model.faster-whisper-large-v3-turbo',
-      ]);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
       expect(orchestrator.submit(request)).toMatchObject({ ok: true });
     });
 
