@@ -4,11 +4,22 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { applyCaptionProjectCommand } from '@joy-media/captions-core';
+import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
+import { EditorSession } from './editor-session.js';
+import { withSpeechCaptionClipPlacement } from './speech-voice-placement.js';
+
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  };
+}
 
 describe('CaptionsPanel empty state', () => {
   it('offers an accessible caption-track action when no slot exists', () => {
@@ -282,20 +293,21 @@ describe('CaptionsPanel cue keyboard editing', () => {
     container.remove();
   });
 
-  it('adds generated captions without replacing existing cues and one undo restores the project', async () => {
+  it('repositions generated captions before the first clip and one undo restores both changes', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
     const project = INITIAL_EDITOR_PROJECT;
-    const capturedStartUs = 5_000_000;
-    const onDispatch = vi.fn<(transaction: VisualObjectTransaction) => void>();
+    const capturedStartUs = 0;
+    const timelineProject = buildReferenceSpikeProject();
+    const session = new EditorSession(memoryStorage(), timelineProject, project);
     const render = (playheadUs: number) =>
       root.render(
         <CaptionsPanel
           project={project}
           playheadUs={playheadUs}
           onSeek={() => undefined}
-          onDispatch={onDispatch}
+          onDispatch={() => undefined}
           onTranscribe={async () => undefined}
           transcriptionError={undefined}
           onProjectChange={() => undefined}
@@ -315,6 +327,20 @@ describe('CaptionsPanel cue keyboard editing', () => {
               ],
             },
           })}
+          onAddSpeechCaptions={(documentId, document, clipId, clipStartUs, clipEndUs) => {
+            const placedProject = withSpeechCaptionClipPlacement(
+              project,
+              clipId,
+              clipStartUs,
+              clipEndUs,
+            );
+            session.dispatchCompound('Add speech captions', {
+              document: {
+                ...placedProject,
+                captionDocuments: { ...placedProject.captionDocuments, [documentId]: document },
+              },
+            });
+          }}
         />,
       );
     await act(async () => render(0));
@@ -350,33 +376,53 @@ describe('CaptionsPanel cue keyboard editing', () => {
         .click();
     });
 
-    expect(onDispatch).toHaveBeenCalledTimes(1);
-    const transaction = onDispatch.mock.calls[0]![0];
-    expect(transaction.commands).toHaveLength(1);
-    const command = transaction.commands[0]!;
-    expect(command.type).toBe('caption.replaceDocument');
-    if (command.type === 'caption.replaceDocument') {
-      const before = project.captionDocuments[command.payload.documentId]!;
-      const generatedWords = Object.values(command.payload.document.words).filter(
-        (word) => word.text.startsWith('Generated') || word.text === 'words',
-      );
-      expect(generatedWords.map(({ startUs, endUs }) => [startUs, endUs])).toEqual([
-        [capturedStartUs - 1_000_000 + 100_000, capturedStartUs - 1_000_000 + 500_000],
-        [capturedStartUs - 1_000_000 + 600_000, capturedStartUs - 1_000_000 + 900_000],
-      ]);
-      expect(command.payload.document.segments).toEqual(
-        expect.arrayContaining([...before.segments]),
-      );
-      expect(Object.keys(command.payload.document.words)).toEqual(
-        expect.arrayContaining(Object.keys(before.words)),
-      );
-      const applied = applyCaptionProjectCommand(project, command);
-      expect(applied.project.captionDocuments).toHaveProperty('captions-fa');
-      expect(Object.keys(applied.project.captionDocuments)).toEqual(
-        Object.keys(project.captionDocuments),
-      );
-      expect(applyCaptionProjectCommand(applied.project, applied.inverse).project).toEqual(project);
-    }
+    expect(session.canUndo).toBe(true);
+    const updatedDocument = session.visualProject.captionDocuments['captions-fa']!;
+    const generatedWords = Object.values(updatedDocument.words).filter(
+      (word) => word.text.startsWith('Generated') || word.text === 'words',
+    );
+    expect(generatedWords.map(({ startUs, endUs }) => [startUs, endUs])).toEqual([
+      [100_000, 500_000],
+      [600_000, 900_000],
+    ]);
+    const originalDocument = project.captionDocuments['captions-fa']!;
+    expect(
+      updatedDocument.segments.filter((segment) =>
+        originalDocument.segments.some((original) => original.id === segment.id),
+      ),
+    ).toEqual(
+      originalDocument.segments.map((segment) => ({
+        ...segment,
+        startUs: segment.startUs + 1_000_000,
+        endUs: segment.endUs + 1_000_000,
+      })),
+    );
+    expect(
+      Object.fromEntries(
+        Object.entries(originalDocument.words).map(([id, word]) => [
+          id,
+          {
+            ...word,
+            startUs: word.startUs + 1_000_000,
+            endUs: word.endUs + 1_000_000,
+          },
+        ]),
+      ),
+    ).toEqual(
+      Object.fromEntries(
+        Object.keys(originalDocument.words).map((id) => [id, updatedDocument.words[id]]),
+      ),
+    );
+    expect(Object.keys(updatedDocument.words)).toEqual(
+      expect.arrayContaining(Object.keys(project.captionDocuments['captions-fa']!.words)),
+    );
+    const updatedClip = Object.values(session.visualProject.compositions)
+      .flatMap((composition) => composition.tracks.flatMap((track) => track.clips))
+      .find((clip) => clip.id === 'caption-clip-1');
+    expect(updatedClip).toMatchObject({ startUs: 0, durationUs: 5_000_000 });
+    session.undo();
+    expect(session.visualProject).toEqual(project);
+    expect(session.timelineProject).toEqual(timelineProject);
     await act(async () => root.unmount());
     container.remove();
   });

@@ -496,7 +496,10 @@ import { getOrCreateControlPlaneProjectBinding } from './project-control-plane.j
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { placeTranscriptOnTimeline } from './caption-transcript-timing.js';
 import { buildSpeechCaptionCues } from './speech-caption-cues.js';
-import { buildSpeechVoicePlacement } from './speech-voice-placement.js';
+import {
+  buildSpeechVoicePlacement,
+  withSpeechCaptionClipPlacement,
+} from './speech-voice-placement.js';
 import type { SpeechModelStatus, SpeechGenerationOptions } from './SpeechGenerationPanel.js';
 import type { SpeechSynthesizeV1 } from '@joy-media/job-protocol';
 import { ProjectMediaResolver } from './project-media-resolver.js';
@@ -7106,6 +7109,25 @@ function EditorWorkspace({
           onCreateCaptionTrack={context.addCaptionLayer}
           speechModelStatus={speechModelStatus}
           onGenerateSpeech={generateSpeech}
+          onAddSpeechCaptions={(documentId, document, clipId, clipStartUs, clipEndUs) => {
+            const placedProject = withSpeechCaptionClipPlacement(
+              session.visualProject,
+              clipId,
+              clipStartUs,
+              clipEndUs,
+            );
+            const nextProject = {
+              ...placedProject,
+              captionDocuments: {
+                ...placedProject.captionDocuments,
+                [documentId]: document,
+              },
+            };
+            session.dispatchCompound('Add speech captions', { document: nextProject });
+            invalidateAgentPreviewAfterEdit(session);
+            resyncTimelineMedia();
+            setRevision((revision) => revision + 1);
+          }}
           onOpenLocalAssets={() => context.activatePanel('media')}
         />,
       );

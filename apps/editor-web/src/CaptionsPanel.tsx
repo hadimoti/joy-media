@@ -54,7 +54,7 @@ import type { SpeechModelStatus, SpeechGenerationOptions } from './SpeechGenerat
 import type { SpeechSynthesizeV1 } from '@joy-media/job-protocol';
 import type { SpeechSynthesisTiming } from './local-media-client.js';
 import { buildSpeechCaptionCues } from './speech-caption-cues.js';
-import { speechCaptionOffsetUs } from './speech-voice-placement.js';
+import { speechCaptionPlacement } from './speech-voice-placement.js';
 
 type CaptionsTab = 'transcript' | 'style' | 'generate';
 
@@ -149,6 +149,7 @@ export function CaptionsPanel({
   onCreateCaptionTrack,
   speechModelStatus,
   onGenerateSpeech,
+  onAddSpeechCaptions,
   onOpenLocalAssets,
 }: {
   readonly project: JoyProjectV1;
@@ -169,6 +170,13 @@ export function CaptionsPanel({
     timing?: SpeechSynthesisTiming;
     insertionStartUs: number;
   }>;
+  readonly onAddSpeechCaptions?: (
+    documentId: string,
+    document: CaptionDocumentV1,
+    clipId: string,
+    clipStartUs: number,
+    clipEndUs: number,
+  ) => void;
   readonly onOpenLocalAssets?: () => void;
 }) {
   const generatedSpeechStartUsRef = useRef<number | undefined>(undefined);
@@ -260,7 +268,8 @@ export function CaptionsPanel({
           ))}
           {activeTab === 'generate' &&
             speechModelStatus !== undefined &&
-            onGenerateSpeech !== undefined && (
+            onGenerateSpeech !== undefined &&
+            onAddSpeechCaptions !== undefined && (
               <SpeechGenerationPanel
                 modelStatus={speechModelStatus}
                 referenceAssets={Object.values(project.assets)
@@ -282,7 +291,31 @@ export function CaptionsPanel({
                     return;
                   const capturedStartUs = generatedSpeechStartUsRef.current;
                   if (capturedStartUs === undefined) return;
-                  const offsetUs = speechCaptionOffsetUs(capturedStartUs, slot.clip.startUs);
+                  const placement = speechCaptionPlacement(
+                    slot.clip.startUs,
+                    slot.clip.durationUs,
+                    capturedStartUs,
+                    timing.durationUs,
+                  );
+                  const existingShiftUs = slot.clip.startUs - placement.clipStartUs;
+                  const existingDocument: CaptionDocumentV1 = {
+                    ...slot.document,
+                    words: Object.fromEntries(
+                      Object.entries(slot.document.words).map(([id, word]) => [
+                        id,
+                        {
+                          ...word,
+                          startUs: word.startUs + existingShiftUs,
+                          endUs: word.endUs + existingShiftUs,
+                        },
+                      ]),
+                    ),
+                    segments: slot.document.segments.map((segment) => ({
+                      ...segment,
+                      startUs: segment.startUs + existingShiftUs,
+                      endUs: segment.endUs + existingShiftUs,
+                    })),
+                  };
                   const words: Record<string, CaptionWordV1> = {};
                   const generationId =
                     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -297,32 +330,30 @@ export function CaptionsPanel({
                     words[id] = {
                       id,
                       text: word.text,
-                      startUs: offsetUs + startUs,
-                      endUs: offsetUs + endUs,
+                      startUs: placement.offsetUs + startUs,
+                      endUs: placement.offsetUs + endUs,
                       ...(word.confidence === undefined ? {} : { confidence: word.confidence }),
                     };
                   });
                   const generatedDocument = buildSpeechCaptionCues({
-                    ...slot.document,
+                    ...existingDocument,
                     words,
                     segments: [],
                   });
                   const document = {
                     ...generatedDocument,
-                    words: { ...slot.document.words, ...generatedDocument.words },
-                    segments: [...slot.document.segments, ...generatedDocument.segments].sort(
+                    words: { ...existingDocument.words, ...generatedDocument.words },
+                    segments: [...existingDocument.segments, ...generatedDocument.segments].sort(
                       (left, right) => left.startUs - right.startUs || left.endUs - right.endUs,
                     ),
                   };
-                  onDispatch({
-                    label: 'Add speech captions',
-                    commands: [
-                      {
-                        type: 'caption.replaceDocument',
-                        payload: { documentId: slot.document.id, document },
-                      },
-                    ],
-                  });
+                  onAddSpeechCaptions(
+                    slot.document.id,
+                    document,
+                    slot.clip.id,
+                    placement.clipStartUs,
+                    placement.clipEndUs,
+                  );
                 }}
                 onOpenLocalAssets={onOpenLocalAssets ?? (() => undefined)}
               />
