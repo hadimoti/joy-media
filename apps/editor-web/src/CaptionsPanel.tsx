@@ -210,7 +210,10 @@ export function CaptionsPanel({
       // pointer-events:none, which would make the only recovery action dead.
       inactive={false}
       {...(idle
-        ? { note: 'Add a caption track to start transcription.' }
+        ? // The Generate tab makes a voice and needs no caption track; only the caption tabs do.
+          activeTab === 'generate'
+          ? {}
+          : { note: 'Add a caption track to start transcription.' }
         : transcriptionError !== undefined
           ? { note: `${transcriptionError} You can continue editing captions manually.` }
           : {})}
@@ -229,7 +232,7 @@ export function CaptionsPanel({
         </button>
       }
     >
-      {idle ? (
+      {idle && activeTab !== 'generate' ? (
         <div className="caption-empty-state">
           <p className="empty-hint">
             Add a caption track to begin editing, importing, or transcribing captions.
@@ -281,99 +284,121 @@ export function CaptionsPanel({
                   generatedSpeechStartUsRef.current = result.insertionStartUs;
                   return result;
                 }}
-                onAddCaptions={(timing) => {
-                  const slot = slots[0];
-                  if (
-                    slot === undefined ||
-                    timing.timingSource === 'unavailable' ||
-                    timing.words.length === 0
-                  )
-                    return;
-                  const capturedStartUs = generatedSpeechStartUsRef.current;
-                  if (capturedStartUs === undefined) return;
-                  const placement = speechCaptionPlacement(
-                    slot.clip.startUs,
-                    slot.clip.durationUs,
-                    capturedStartUs,
-                    timing.durationUs,
-                  );
-                  const existingShiftUs = slot.clip.startUs - placement.clipStartUs;
-                  const documentIsShared = Object.values(project.compositions).some((candidate) =>
-                    candidate.tracks.some((track) =>
-                      track.clips.some(
-                        (clip) =>
-                          clip.kind === 'caption' &&
-                          clip.id !== slot.clip.id &&
-                          clip.captionDocumentId === slot.document.id,
-                      ),
-                    ),
-                  );
-                  const documentId =
-                    documentIsShared && existingShiftUs !== 0
-                      ? `captions-${
+                {...(idle
+                  ? {}
+                  : {
+                      onAddCaptions: (timing: SpeechSynthesisTiming) => {
+                        const slot = slots[0];
+                        if (
+                          slot === undefined ||
+                          timing.timingSource === 'unavailable' ||
+                          timing.words.length === 0
+                        )
+                          return;
+                        const capturedStartUs = generatedSpeechStartUsRef.current;
+                        if (capturedStartUs === undefined) return;
+                        const placement = speechCaptionPlacement(
+                          slot.clip.startUs,
+                          slot.clip.durationUs,
+                          capturedStartUs,
+                          timing.durationUs,
+                        );
+                        const existingShiftUs = slot.clip.startUs - placement.clipStartUs;
+                        const documentIsShared = Object.values(project.compositions).some(
+                          (candidate) =>
+                            candidate.tracks.some((track) =>
+                              track.clips.some(
+                                (clip) =>
+                                  clip.kind === 'caption' &&
+                                  clip.id !== slot.clip.id &&
+                                  clip.captionDocumentId === slot.document.id,
+                              ),
+                            ),
+                        );
+                        const documentId =
+                          documentIsShared && existingShiftUs !== 0
+                            ? `captions-${
+                                typeof crypto !== 'undefined' &&
+                                typeof crypto.randomUUID === 'function'
+                                  ? crypto.randomUUID()
+                                  : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+                              }`
+                            : slot.document.id;
+                        const existingDocument: CaptionDocumentV1 = {
+                          ...slot.document,
+                          id: documentId,
+                          words: Object.fromEntries(
+                            Object.entries(slot.document.words).map(([id, word]) => [
+                              id,
+                              {
+                                ...word,
+                                startUs: word.startUs + existingShiftUs,
+                                endUs: word.endUs + existingShiftUs,
+                              },
+                            ]),
+                          ),
+                          segments: slot.document.segments.map((segment) => ({
+                            ...segment,
+                            startUs: segment.startUs + existingShiftUs,
+                            endUs: segment.endUs + existingShiftUs,
+                          })),
+                        };
+                        const words: Record<string, CaptionWordV1> = {};
+                        const generationId =
                           typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
                             ? crypto.randomUUID()
-                            : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-                        }`
-                      : slot.document.id;
-                  const existingDocument: CaptionDocumentV1 = {
-                    ...slot.document,
-                    id: documentId,
-                    words: Object.fromEntries(
-                      Object.entries(slot.document.words).map(([id, word]) => [
-                        id,
-                        {
-                          ...word,
-                          startUs: word.startUs + existingShiftUs,
-                          endUs: word.endUs + existingShiftUs,
-                        },
-                      ]),
-                    ),
-                    segments: slot.document.segments.map((segment) => ({
-                      ...segment,
-                      startUs: segment.startUs + existingShiftUs,
-                      endUs: segment.endUs + existingShiftUs,
-                    })),
-                  };
-                  const words: Record<string, CaptionWordV1> = {};
-                  const generationId =
-                    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-                      ? crypto.randomUUID()
-                      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-                  timing.words.forEach((word, index) => {
-                    const startUs = Math.max(0, Math.min(timing.durationUs - 1, word.startUs));
-                    const endUs = Math.max(startUs + 1, Math.min(timing.durationUs, word.endUs));
-                    if (word.endUs <= 0 || word.startUs >= timing.durationUs || endUs <= startUs)
-                      return;
-                    const id = `speech-word-${generationId}-${index + 1}`;
-                    words[id] = {
-                      id,
-                      text: word.text,
-                      startUs: placement.offsetUs + startUs,
-                      endUs: placement.offsetUs + endUs,
-                      ...(word.confidence === undefined ? {} : { confidence: word.confidence }),
-                    };
-                  });
-                  const generatedDocument = buildSpeechCaptionCues({
-                    ...existingDocument,
-                    words,
-                    segments: [],
-                  });
-                  const document = {
-                    ...generatedDocument,
-                    words: { ...existingDocument.words, ...generatedDocument.words },
-                    segments: [...existingDocument.segments, ...generatedDocument.segments].sort(
-                      (left, right) => left.startUs - right.startUs || left.endUs - right.endUs,
-                    ),
-                  };
-                  onAddSpeechCaptions(
-                    documentId,
-                    document,
-                    slot.clip.id,
-                    placement.clipStartUs,
-                    placement.clipEndUs,
-                  );
-                }}
+                            : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+                        timing.words.forEach((word, index) => {
+                          const startUs = Math.max(
+                            0,
+                            Math.min(timing.durationUs - 1, word.startUs),
+                          );
+                          const endUs = Math.max(
+                            startUs + 1,
+                            Math.min(timing.durationUs, word.endUs),
+                          );
+                          if (
+                            word.endUs <= 0 ||
+                            word.startUs >= timing.durationUs ||
+                            endUs <= startUs
+                          )
+                            return;
+                          const id = `speech-word-${generationId}-${index + 1}`;
+                          words[id] = {
+                            id,
+                            text: word.text,
+                            startUs: placement.offsetUs + startUs,
+                            endUs: placement.offsetUs + endUs,
+                            ...(word.confidence === undefined
+                              ? {}
+                              : { confidence: word.confidence }),
+                          };
+                        });
+                        const generatedDocument = buildSpeechCaptionCues({
+                          ...existingDocument,
+                          words,
+                          segments: [],
+                        });
+                        const document = {
+                          ...generatedDocument,
+                          words: { ...existingDocument.words, ...generatedDocument.words },
+                          segments: [
+                            ...existingDocument.segments,
+                            ...generatedDocument.segments,
+                          ].sort(
+                            (left, right) =>
+                              left.startUs - right.startUs || left.endUs - right.endUs,
+                          ),
+                        };
+                        onAddSpeechCaptions(
+                          documentId,
+                          document,
+                          slot.clip.id,
+                          placement.clipStartUs,
+                          placement.clipEndUs,
+                        );
+                      },
+                    })}
                 onOpenLocalAssets={onOpenLocalAssets ?? (() => undefined)}
               />
             )}

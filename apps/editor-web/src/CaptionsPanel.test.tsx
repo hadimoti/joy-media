@@ -48,6 +48,55 @@ describe('CaptionsPanel empty state', () => {
     expect(markup).toContain('aria-label="Add caption track"');
   });
 
+  it('shows the Generate voice panel without a caption track and offers no Add captions there', async () => {
+    const rootComposition = INITIAL_EDITOR_PROJECT.compositions.root!;
+    const project = {
+      ...INITIAL_EDITOR_PROJECT,
+      captionDocuments: {},
+      compositions: {
+        ...INITIAL_EDITOR_PROJECT.compositions,
+        root: {
+          ...rootComposition,
+          tracks: rootComposition.tracks.filter((track) => track.kind !== 'caption'),
+        },
+      },
+    };
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <CaptionsPanel
+          project={project}
+          playheadUs={0}
+          onSeek={() => undefined}
+          onDispatch={() => undefined}
+          onTranscribe={async () => undefined}
+          transcriptionError={undefined}
+          onProjectChange={() => undefined}
+          speechModelStatus={[{ modelId: 'kokoro-82m', state: 'ready' }]}
+          onGenerateSpeech={async () => ({ availability: 'setup-required', insertionStartUs: 0 })}
+          onAddSpeechCaptions={() => undefined}
+        />,
+      ),
+    );
+    // The caption tabs still explain that they need a caption track.
+    expect(container.textContent).toContain('Add caption track');
+    expect(container.querySelector('.speech-generation-panel')).toBeNull();
+
+    const generateTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      (button) => button.textContent === 'Generate',
+    )!;
+    await act(async () => generateTab.click());
+
+    // A voice does not need captions: the panel is there, and the caption-track prompt is not.
+    expect(container.querySelector('.speech-generation-panel')).not.toBeNull();
+    expect(container.textContent).not.toContain('Add a caption track to start transcription');
+    expect(container.querySelector('[aria-label="Add caption track"]')).toBeNull();
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it('renders the editable display override with accessible edit and revert controls', () => {
     const document = INITIAL_EDITOR_PROJECT.captionDocuments['captions-fa']!;
     const first = document.segments[0]!;
