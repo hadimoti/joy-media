@@ -1427,7 +1427,8 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
   let crop: QcCropDetection | undefined;
   if (videoSize !== undefined && checks.has('aspect-mismatch')) {
     await options.progress(85);
-    const seconds = durationUs / 1_000_000;
+    // The picture's own length: a short picture with a long sound track must still get its frames.
+    const seconds = (probe.videoDurationUs ?? durationUs) / 1_000_000;
     // Frames spread over the whole file, but never fewer than about eight, so a short clip that fades in from
     // black is still seen lit. Capped like the picture check.
     const fps = Math.max(
@@ -1446,7 +1447,8 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
       '-i',
       options.sourcePath,
       '-map',
-      '0:v:0',
+      // `V` leaves out cover art, the same stream the probe judged.
+      '0:V:0',
       '-an',
       '-sn',
       '-dn',
