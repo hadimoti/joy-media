@@ -51,34 +51,40 @@ export function renderFrameOptions(
     ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
     clipTimes: transitionClipTimes(timeline),
     ...(imageSizesByObjectId !== undefined ? { imageSizesByObjectId } : {}),
-    zIndexByObjectId: trackLayerOrder(project, timeline),
+    zIndexByObjectId: trackLayerOrder(project, timeline, timeUs),
   };
 }
 
 /**
- * Layer order from the timeline (ADR-0035): the top row is in front. An object takes the place of the track its
- * clip sits on, so moving a track up or down changes what covers what, in the Monitor and in the export.
- * Objects with no clip on the timeline are left out and keep the frame's own order.
+ * Layer order from the timeline (ADR-0035): the top visual row is in front. The renderer's order is bottom to
+ * top and the Timeline lists visual rows in descending `Track.order`, so an object takes the `order` of the track
+ * its clip sits on at this moment. Moving a row changes `order`, and with it what covers what, in the Monitor and
+ * in the export. Only the root composition is read: the children of a merged timeline keep the frame's own order.
+ * Objects with no clip playing now are left out. The result is at least 1, which keeps them above the video layer.
  */
 export function trackLayerOrder(
   project: JoyProjectV1,
   timeline: SpikeProject,
+  timeUs = 0,
 ): Readonly<Record<string, number>> {
   const raw = project.pluginData?.['joy.clipObjects'];
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const objectByClipId = raw as Readonly<Record<string, unknown>>;
-  const tracks = [
-    ...Object.values(timeline.compositions).flatMap((composition) => composition.tracks),
-  ];
+  const root =
+    timeline.compositions[project.rootCompositionId] ??
+    timeline.compositions['root'] ??
+    Object.values(timeline.compositions)[0];
+  if (root === undefined) return {};
   const order: Record<string, number> = {};
-  tracks.forEach((track, row) => {
-    // Row 0 is the top row and must get the highest value; 1 keeps every placed object above the video layer.
-    const layer = tracks.length - row;
+  for (const track of root.tracks) {
+    const layer = track.order + 1;
     for (const clip of track.clips) {
+      if (timeUs < clip.startUs || timeUs >= clip.startUs + clip.durationUs) continue;
       const objectId = objectByClipId[clip.id];
-      if (typeof objectId === 'string') order[objectId] = layer;
+      if (typeof objectId !== 'string') continue;
+      order[objectId] = Math.max(order[objectId] ?? 0, layer);
     }
-  });
+  }
   return order;
 }
 
