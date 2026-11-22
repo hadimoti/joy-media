@@ -52,6 +52,7 @@ import {
   SliderPropertyControl,
   useTransientPropertyControl,
 } from './components/PropertyControlAdapters.js';
+import { useNumberScrub } from './components/useNumberScrub.js';
 import { audioKeyframeState, audioKeyframeTransaction } from './audio-keyframes.js';
 import type { BrowserJob } from './control-plane-client.js';
 import { MaskInspector } from './MaskInspector.js';
@@ -505,6 +506,7 @@ function TransformPropertyRow({
               max={isOpacity ? 100 : property.max}
               step={1}
               disabled={disabled}
+              scrub
             />
             {isOpacity && <span className="inspector-unit">%</span>}
           </div>
@@ -523,6 +525,91 @@ function TransformPropertyRow({
       </PropertyRow>
       {children}
     </div>
+  );
+}
+
+function CropPropertyControl({
+  objectId,
+  edge,
+  value,
+  crop,
+  onDispatch,
+}: {
+  readonly objectId: string;
+  readonly edge: 'left' | 'top' | 'right' | 'bottom';
+  readonly value: number;
+  readonly crop: VisualObjectV1['transform']['crop'];
+  readonly onDispatch: InspectorPanelProps['onDispatch'];
+}) {
+  const [previewValue, setPreviewValue] = useState(value);
+  useEffect(() => setPreviewValue(value), [value]);
+  const adapter = useTransientPropertyControl(
+    {
+      read: () => previewValue,
+      preview: (next) =>
+        setPreviewValue(Math.round(Math.min(0.49, Math.max(0, next)) * 100) / 100),
+      restore: setPreviewValue,
+      commit: ({ next }) =>
+        onDispatch({
+          label: `Crop ${edge}`,
+          commands: [
+            {
+              type: 'object.setCrop',
+              payload: {
+                objectId,
+                crop: {
+                  ...crop,
+                  [edge]: Math.round(Math.min(0.49, Math.max(0, next)) * 100) / 100,
+                },
+              },
+            },
+          ],
+        }),
+    },
+    `Crop ${edge}`,
+  );
+  const scrub = useNumberScrub({
+    value: previewValue,
+    adapter,
+    min: 0,
+    max: 0.49,
+    step: 0.01,
+    normalize: (next) => Math.round(Math.min(0.49, Math.max(0, next)) * 100) / 100,
+  });
+
+  return (
+    <input
+      id={`crop-${edge}`}
+      type="number"
+      min={0}
+      max={0.49}
+      step={0.01}
+      value={round(previewValue)}
+      style={{ cursor: scrub.cursorStyle }}
+      onChange={(event) => {
+        const next = event.currentTarget.valueAsNumber;
+        if (!Number.isFinite(next)) return;
+        adapter.begin();
+        adapter.preview(next);
+      }}
+      onBlur={() => adapter.commit()}
+      onPointerDown={scrub.onPointerDown}
+      onPointerMove={scrub.onPointerMove}
+      onPointerUp={scrub.onPointerUp}
+      onPointerCancel={scrub.onPointerCancel}
+      onLostPointerCapture={scrub.onLostPointerCapture}
+      onClickCapture={scrub.onClickCapture}
+      onKeyDown={(event) => {
+        if (scrub.onKeyDown(event)) return;
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          adapter.cancel();
+        } else if (event.key === 'Enter') {
+          event.preventDefault();
+          adapter.commit();
+        }
+      }}
+    />
   );
 }
 
@@ -1092,33 +1179,12 @@ export function InspectorPanel({
           {(['left', 'top', 'right', 'bottom'] as const).map((edge) => (
             <div key={edge} className="inspector-grid-row-plain">
               <label htmlFor={`crop-${edge}`}>{edge}</label>
-              <input
-                id={`crop-${edge}`}
-                type="number"
-                min={0}
-                max={0.49}
-                step={0.01}
-                value={round(target.transform.crop[edge])}
-                disabled={idle}
-                onChange={(event) => {
-                  const next = event.currentTarget.valueAsNumber;
-                  if (!Number.isFinite(next)) return;
-                  onDispatch({
-                    label: `Crop ${edge}`,
-                    commands: [
-                      {
-                        type: 'object.setCrop',
-                        payload: {
-                          objectId: target.id,
-                          crop: {
-                            ...target.transform.crop,
-                            [edge]: Math.min(0.49, Math.max(0, next)),
-                          },
-                        },
-                      },
-                    ],
-                  });
-                }}
+              <CropPropertyControl
+                objectId={target.id}
+                edge={edge}
+                value={target.transform.crop[edge]}
+                crop={target.transform.crop}
+                onDispatch={onDispatch}
               />
             </div>
           ))}
@@ -1771,6 +1837,7 @@ function EffectNumericParamControl({
             min={param.min}
             max={param.max}
             step={param.step}
+            scrub
           />
           {param.unit !== undefined && param.unit !== '' && (
             <span className="inspector-unit">{param.unit}</span>
@@ -1843,8 +1910,11 @@ export function SpeedSection({
   const rampHintId = `insp-speed-ramp-support-${clipId}`;
   const [draftRate, setDraftRate] = useState(String(rate));
   const [rateError, setRateError] = useState<string | undefined>();
+  const rateCommittedRef = useRef(false);
+  const scrubDirectionRef = useRef(1);
 
   useEffect(() => {
+    rateCommittedRef.current = false;
     setDraftRate(String(rate));
     setRateError(undefined);
     setDraftRemapStartUs(String(remapStartUs));
@@ -1860,12 +1930,14 @@ export function SpeedSection({
       );
       return;
     }
+    rateCommittedRef.current = true;
     setRateError(undefined);
     setDraftRate(String(valid));
     onChange?.({ rate: valid }, `Speed ${clipId} → ${formatInspectorSpeedRate(valid)}`);
   };
 
   const commitDraftRate = () => {
+    if (rateCommittedRef.current) return;
     const next = Number(draftRate);
     const valid = validInspectorSpeedRate(next, supportsReverse);
     if (valid === undefined) {
@@ -1874,8 +1946,38 @@ export function SpeedSection({
       );
       return;
     }
+    rateCommittedRef.current = true;
     requestRate(valid);
   };
+
+  const rateAdapter = useTransientPropertyControl(
+    {
+      read: () => Number(draftRate),
+      preview: (next) => setDraftRate(String(next)),
+      restore: (previous) => setDraftRate(String(previous)),
+      commit: ({ next }) => {
+        const valid = validInspectorSpeedRate(next, supportsReverse);
+        if (valid === undefined) return;
+        rateCommittedRef.current = true;
+        requestRate(valid);
+      },
+    },
+    `Speed ${clipId}`,
+  );
+  const rateScrub = useNumberScrub({
+    value: Number(draftRate),
+    adapter: rateAdapter,
+    min: rateInputMin,
+    max: rateInputMax,
+    step: 0.05,
+    disabled: !canChange,
+    normalize: (next) => {
+      const direction = scrubDirectionRef.current;
+      return direction < 0
+        ? Math.min(-MIN_INSPECTOR_SPEED_RATE, next)
+        : Math.max(MIN_INSPECTOR_SPEED_RATE, next);
+    },
+  });
 
   const requestRamp = (ramp: SpeedRampPreset) => {
     // The Inspector always shows the selected clip, so the history names it that way.
@@ -1907,6 +2009,49 @@ export function SpeedSection({
       `Remap source time for ${clipId}`,
     );
   };
+
+  const remapStartAdapter = useTransientPropertyControl(
+    {
+      read: () => Number(draftRemapStartUs),
+      preview: (next) =>
+        setDraftRemapStartUs(
+          String(Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(next)))),
+        ),
+      restore: (previous) => setDraftRemapStartUs(String(previous)),
+      commit: () => undefined,
+    },
+    `Draft remap start for ${clipId}`,
+  );
+  const remapEndAdapter = useTransientPropertyControl(
+    {
+      read: () => Number(draftRemapEndUs),
+      preview: (next) =>
+        setDraftRemapEndUs(
+          String(Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(next)))),
+        ),
+      restore: (previous) => setDraftRemapEndUs(String(previous)),
+      commit: () => undefined,
+    },
+    `Draft remap end for ${clipId}`,
+  );
+  const remapStartScrub = useNumberScrub({
+    value: Number(draftRemapStartUs),
+    adapter: remapStartAdapter,
+    min: 0,
+    max: Number.MAX_SAFE_INTEGER,
+    step: 1,
+    disabled: !canChange,
+    normalize: (next) => Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(next))),
+  });
+  const remapEndScrub = useNumberScrub({
+    value: Number(draftRemapEndUs),
+    adapter: remapEndAdapter,
+    min: 0,
+    max: Number.MAX_SAFE_INTEGER,
+    step: 1,
+    disabled: !canChange,
+    normalize: (next) => Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(next))),
+  });
 
   return (
     <section className="inspector-section inspector-speed-section" aria-label="Speed">
@@ -1971,14 +2116,32 @@ export function SpeedSection({
                   inputMode="decimal"
                   value={draftRate}
                   disabled={!canChange}
+                  style={{ cursor: rateScrub.cursorStyle }}
                   aria-describedby={rateOutputId}
                   onChange={(event) => {
+                    rateCommittedRef.current = false;
                     setDraftRate(event.currentTarget.value);
                     setRateError(undefined);
                   }}
                   onBlur={commitDraftRate}
+                  onPointerDown={(event) => {
+                    scrubDirectionRef.current = Math.sign(Number(draftRate)) || 1;
+                    rateScrub.onPointerDown(event);
+                  }}
+                  onPointerMove={rateScrub.onPointerMove}
+                  onPointerUp={rateScrub.onPointerUp}
+                  onPointerCancel={rateScrub.onPointerCancel}
+                  onLostPointerCapture={rateScrub.onLostPointerCapture}
+                  onClickCapture={rateScrub.onClickCapture}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter') commitDraftRate();
+                    if (rateScrub.onKeyDown(event)) return;
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      rateAdapter.cancel();
+                    } else if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitDraftRate();
+                    }
                   }}
                 />
                 <button
@@ -2031,7 +2194,15 @@ export function SpeedSection({
                 step={1}
                 value={draftRemapStartUs}
                 disabled={!canChange}
+                style={{ cursor: remapStartScrub.cursorStyle }}
                 onChange={(event) => setDraftRemapStartUs(event.currentTarget.value)}
+                onPointerDown={remapStartScrub.onPointerDown}
+                onPointerMove={remapStartScrub.onPointerMove}
+                onPointerUp={remapStartScrub.onPointerUp}
+                onPointerCancel={remapStartScrub.onPointerCancel}
+                onLostPointerCapture={remapStartScrub.onLostPointerCapture}
+                onClickCapture={remapStartScrub.onClickCapture}
+                onKeyDown={remapStartScrub.onKeyDown}
               />
             </div>
             <div className="inspector-grid-row-plain">
@@ -2043,7 +2214,15 @@ export function SpeedSection({
                 step={1}
                 value={draftRemapEndUs}
                 disabled={!canChange}
+                style={{ cursor: remapEndScrub.cursorStyle }}
                 onChange={(event) => setDraftRemapEndUs(event.currentTarget.value)}
+                onPointerDown={remapEndScrub.onPointerDown}
+                onPointerMove={remapEndScrub.onPointerMove}
+                onPointerUp={remapEndScrub.onPointerUp}
+                onPointerCancel={remapEndScrub.onPointerCancel}
+                onLostPointerCapture={remapEndScrub.onLostPointerCapture}
+                onClickCapture={remapEndScrub.onClickCapture}
+                onKeyDown={remapEndScrub.onKeyDown}
               />
             </div>
             <div className="inspector-speed-actions">
@@ -2110,6 +2289,78 @@ export function SpeedSection({
   );
 }
 
+function AudioNumericControl({
+  id,
+  clipId,
+  property,
+  value,
+  dispatch,
+}: {
+  readonly id: 'insp-gain' | 'insp-pan';
+  readonly clipId: string;
+  readonly property: 'gain' | 'pan';
+  readonly value: number;
+  readonly dispatch: (command: AudioCommand, label: string) => void;
+}) {
+  const min = property === 'gain' ? 0 : -1;
+  const max = property === 'gain' ? 2 : 1;
+  const [previewValue, setPreviewValue] = useState(value);
+  useEffect(() => setPreviewValue(value), [value]);
+  const normalize = (next: number) =>
+    Math.round(Math.min(max, Math.max(min, next)) * 100) / 100;
+  const adapter = useTransientPropertyControl(
+    {
+      read: () => previewValue,
+      preview: (next) => setPreviewValue(normalize(next)),
+      restore: setPreviewValue,
+      commit: ({ next }) =>
+        dispatch(
+          property === 'gain'
+            ? { type: 'audioClip.setGain', payload: { clipId, gain: normalize(next) } }
+            : { type: 'audioClip.setPan', payload: { clipId, pan: normalize(next) } },
+          `${property === 'gain' ? 'Gain' : 'Pan'} ${clipId}`,
+        ),
+    },
+    `${property} ${clipId}`,
+  );
+  const scrub = useNumberScrub({ value: previewValue, adapter, min, max, step: 0.01, normalize });
+
+  return (
+    <input
+      id={id}
+      type="number"
+      min={min}
+      max={max}
+      step={0.01}
+      value={round(previewValue)}
+      style={{ cursor: scrub.cursorStyle }}
+      onChange={(event) => {
+        const next = event.currentTarget.valueAsNumber;
+        if (!Number.isFinite(next)) return;
+        adapter.begin();
+        adapter.preview(next);
+      }}
+      onBlur={() => adapter.commit()}
+      onPointerDown={scrub.onPointerDown}
+      onPointerMove={scrub.onPointerMove}
+      onPointerUp={scrub.onPointerUp}
+      onPointerCancel={scrub.onPointerCancel}
+      onLostPointerCapture={scrub.onLostPointerCapture}
+      onClickCapture={scrub.onClickCapture}
+      onKeyDown={(event) => {
+        if (scrub.onKeyDown(event)) return;
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          adapter.cancel();
+        } else if (event.key === 'Enter') {
+          event.preventDefault();
+          adapter.commit();
+        }
+      }}
+    />
+  );
+}
+
 function AudioSection({
   open,
   onToggle,
@@ -2165,22 +2416,12 @@ function AudioSection({
             controlId="insp-gain"
             {...keyframe('gain', clip.gain)}
           >
-            <input
+            <AudioNumericControl
               id="insp-gain"
-              type="number"
-              min={0}
-              max={2}
-              step={0.01}
-              value={round(clip.gain)}
-              onChange={(event) =>
-                dispatch(
-                  {
-                    type: 'audioClip.setGain',
-                    payload: { clipId, gain: event.currentTarget.valueAsNumber },
-                  },
-                  `Gain ${clipId}`,
-                )
-              }
+              clipId={clipId}
+              property="gain"
+              value={clip.gain}
+              dispatch={dispatch}
             />
           </PropertyRow>
           <PropertyRow
@@ -2189,22 +2430,12 @@ function AudioSection({
             controlId="insp-pan"
             {...keyframe('pan', clip.pan)}
           >
-            <input
+            <AudioNumericControl
               id="insp-pan"
-              type="number"
-              min={-1}
-              max={1}
-              step={0.01}
-              value={round(clip.pan)}
-              onChange={(event) =>
-                dispatch(
-                  {
-                    type: 'audioClip.setPan',
-                    payload: { clipId, pan: event.currentTarget.valueAsNumber },
-                  },
-                  `Pan ${clipId}`,
-                )
-              }
+              clipId={clipId}
+              property="pan"
+              value={clip.pan}
+              dispatch={dispatch}
             />
           </PropertyRow>
           <PropertyRow layout="grid" label="Mute" {...keyframe('mute', clip.mute)}>
