@@ -39,7 +39,13 @@ function runtimeStatus(
       nowMs - worker.lastSeenAt < WORKER_FRESHNESS_MS,
   );
   const capable = online.filter((worker) => worker.capabilities.includes(capability));
-  if (capable.some((worker) => (worker.localAssetIds ?? []).includes(target.assetId))) {
+  if (
+    capable.some(
+      (worker) =>
+        worker.holdsAllLocalAssets === true ||
+        (worker.localAssetIds ?? []).includes(target.assetId),
+    )
+  ) {
     return {
       state: 'ready',
       label: target.kind === 'image' ? 'Photo ready' : 'Video ready',

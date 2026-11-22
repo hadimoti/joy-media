@@ -10,6 +10,11 @@ export interface BrowserWorker {
   readonly revoked: boolean;
   readonly capabilities: readonly string[];
   readonly localAssetIds?: readonly string[];
+  /**
+   * True for the local desktop route: its Worker reads every asset the app has registered, through the
+   * desktop's own job API, so it has no list of ids to advertise. Masking and enhancing treat the source as present.
+   */
+  readonly holdsAllLocalAssets?: boolean;
   readonly lastSeenAt?: number;
   readonly modelInventory?: {
     readonly managerVersion: string;

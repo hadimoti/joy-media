@@ -132,8 +132,9 @@ describe('publicJobError', () => {
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {
     expect(new Set(MEDIA_CHANNELS).size).toBe(MEDIA_CHANNELS.length);
-    expect(MEDIA_CHANNELS).toHaveLength(25);
+    expect(MEDIA_CHANNELS).toHaveLength(26);
     expect(MEDIA_CHANNELS).toContain('desktop.media.qc.run');
+    expect(MEDIA_CHANNELS).toContain('desktop.media.mask.run');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.remove-internal');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-chunk');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-finish');

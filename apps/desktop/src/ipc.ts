@@ -52,6 +52,7 @@ export const IPC_CHANNELS = [
   'desktop.media.project.document.put',
   'desktop.media.render.enqueue',
   'desktop.media.qc.run',
+  'desktop.media.mask.run',
   'desktop.media.job.status',
   'desktop.media.job.cancel',
   'desktop.media.derivative.bytes',

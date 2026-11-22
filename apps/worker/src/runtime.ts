@@ -444,13 +444,18 @@ export class WorkerRuntime {
         job.type === 'mask.image' ? this.tools.masking?.image : this.tools.masking?.video;
       if (runner === undefined) throw new Error(`${job.type} is not enabled on this Worker`);
       if (job.assetId === undefined) throw new Error(`${job.type} requires an input asset`);
-      const sourcePath = this.options.sources?.resolve(job.assetId);
-      if (sourcePath === undefined)
+      const registeredSource = this.options.sources?.resolve(job.assetId);
+      if (registeredSource === undefined && this.options.downloadJobAsset === undefined)
         throw new Error(`local source unavailable for asset ${job.assetId}`);
+      if (options.cancelled()) return { state: 'canceled' };
       const derivativeDirectory =
         this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
+      const tempDir = mkdtempSync(join(tmpdir(), `joy-media-mask-${job.id}-`));
       this.log.write(`job ${job.id} started (${job.type})`);
       try {
+        // A local-route job's source is not in this Worker's registry, so the desktop serves its bytes.
+        const sourcePath =
+          registeredSource ?? (await this.stageDownloadedSource(job.id, job.leaseToken, tempDir));
         const result = await runMaskingJob({
           jobId: job.id,
           type: job.type,
@@ -470,6 +475,8 @@ export class WorkerRuntime {
           return { state: 'canceled' };
         }
         throw error;
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
       }
     }
     if (job.type === 'image.comfy') {

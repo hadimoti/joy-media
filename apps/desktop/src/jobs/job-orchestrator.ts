@@ -50,12 +50,16 @@ const DISPATCHABLE_JOB_TYPES = [
   'render.export',
   'upscale.image',
   'media.qc',
+  'mask.image',
+  'mask.video',
 ] as const;
 /** Job types whose Worker needs a payload. The desktop stores it at submit and sends it with the lease. */
 const PAYLOAD_JOB_TYPES: ReadonlySet<string> = new Set([
   'render.export',
   'upscale.image',
   'media.qc',
+  'mask.image',
+  'mask.video',
 ]);
 /** A payload is stored as JSON in the local database and handed to the Worker whole, so it is capped. */
 const MAX_PAYLOAD_BYTES = 64 * 1024;

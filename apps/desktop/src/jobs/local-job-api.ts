@@ -35,6 +35,8 @@ const DERIVATIVE_EXTENSIONS: Readonly<Record<string, string>> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'video/mp4': 'mp4',
+  // A tracked video mask: VP9 with alpha.
+  'video/webm': 'webm',
 };
 
 export interface LocalJobApiOptions {
