@@ -521,6 +521,10 @@ function TimelineClip({
       aria-pressed={selected}
       aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}${missingName !== undefined ? ', media missing' : ''}`}
       aria-roledescription="timeline clip"
+      // Defect 209: Chromium could start a native HTML5 drag (arrow with a small '+') when a
+      // press-and-hold selected the clip text. That cancelled the pointer stream mid-gesture.
+      draggable={false}
+      onDragStart={(event) => event.preventDefault()}
       data-clip-id={clip.id}
       data-asset-id={'assetId' in clip ? clip.assetId : undefined}
       data-start-us={clip.startUs}
@@ -715,7 +719,10 @@ function TimelineClip({
           targetTrackId,
         );
       }}
-      onPointerCancel={() => {
+      onPointerCancel={(event) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
         onMovePreview(clip.id, undefined);
         dragRef.current?.cleanupEscape();
         stopAutoScroll();
