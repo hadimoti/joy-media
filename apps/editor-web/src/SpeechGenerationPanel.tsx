@@ -351,6 +351,12 @@ export function SpeechGenerationPanel({
             ))}
           </select>
         </div>
+        {selectedEngine !== 'kokoro-82m' && referenceAssets.length === 0 && (
+          <p className="speech-setup-hint" role="status">
+            {referenceRequired ? 'Persian needs a reference voice: ' : 'To clone a voice: '}
+            add a short, clean recording of that voice to the timeline, then choose it here.
+          </p>
+        )}
 
         <label className="speech-text-label" htmlFor={textId}>
           Text to speak

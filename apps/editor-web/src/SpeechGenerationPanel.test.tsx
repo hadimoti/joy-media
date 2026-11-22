@@ -180,6 +180,19 @@ describe('SpeechGenerationPanel', () => {
     expect(view.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
   });
 
+  it('tells the user how to get a reference voice when the project has no audio', async () => {
+    const view = await render(makeProps({ referenceAssets: [] }));
+    // Kokoro is the default engine and takes no reference: no hint.
+    expect(view.textContent).not.toContain('reference voice');
+    const language = view.querySelector<HTMLSelectElement>('select[name="language"]')!;
+    await act(async () => {
+      language.value = 'fa-IR';
+      language.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(view.textContent).toContain('Persian needs a reference voice');
+    expect(view.textContent).toContain('to the timeline');
+  });
+
   it('disables Kokoro references and clears reference consent when switching engines', async () => {
     const view = await render(makeProps());
     const engine = view.querySelector<HTMLSelectElement>('select[name="engine"]')!;
