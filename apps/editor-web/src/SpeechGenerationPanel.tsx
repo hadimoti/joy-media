@@ -138,10 +138,8 @@ export function SpeechGenerationPanel({
     engineChoices[0];
   const selectedEngineStatus = modelStatus.find((model) => model.modelId === selectedEngine);
   useEffect(() => {
-    if (selectedEngine === 'kokoro-82m') {
-      setReferenceAssetId('');
-      setConsent(false);
-    }
+    setReferenceAssetId('');
+    setConsent(false);
   }, [selectedEngine]);
   const transcriberStatus = modelStatus.find(
     (model) => model.modelId === 'faster-whisper-large-v3-turbo',
