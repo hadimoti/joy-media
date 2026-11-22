@@ -574,6 +574,19 @@ type PlannedMove =
   | { readonly ok: true; readonly edit: Extract<QcRepairEdit, { kind: 'move' }> }
   | { readonly ok: false; readonly reason: string };
 
+function resolveVisualObjectId(boxId: string): string {
+  // Composition box collection tags bound title occurrences as `title-occurrence:<len>:<objectId>:<clipId>`.
+  if (!boxId.startsWith('title-occurrence:')) return boxId;
+  const rest = boxId.slice('title-occurrence:'.length);
+  const sep = rest.indexOf(':');
+  if (sep <= 0) return boxId;
+  const length = Number(rest.slice(0, sep));
+  const tail = rest.slice(sep + 1);
+  if (!Number.isSafeInteger(length) || length < 1 || tail.length <= length || tail[length] !== ':')
+    return boxId;
+  return tail.slice(0, length);
+}
+
 function planMove(
   finding: QcRepairFinding,
   input: QcRepairInput,
@@ -582,13 +595,14 @@ function planMove(
 ): PlannedMove {
   const box = (input.textBoxes ?? []).find(
     (candidate) =>
-      !claimed.has(candidate.id) &&
+      !claimed.has(resolveVisualObjectId(candidate.id)) &&
       candidate.startUs === finding.startUs &&
       candidate.endUs === finding.endUs &&
       !insideSafeArea(candidate),
   );
   if (box === undefined) return { ok: false, reason: 'JOY could not tell which title this is.' };
-  const object = input.document.visualObjects[box.id];
+  const resolvedId = resolveVisualObjectId(box.id);
+  const object = input.document.visualObjects[box.id] ?? input.document.visualObjects[resolvedId];
   if (object === undefined) return { ok: false, reason: 'The title is not in the project.' };
   if (
     object.animations?.x !== undefined ||
