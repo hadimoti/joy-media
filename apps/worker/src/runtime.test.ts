@@ -501,6 +501,35 @@ describe('Worker runtime', () => {
     ).rejects.toThrow('asset asset-1 is not available on this Worker');
   });
 
+  it('asks the desktop for a mask job source that is not in its own registry, before the runner starts', async () => {
+    const staged: string[] = [];
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-mask', createdAt: '2026-11-22T00:00:00.000Z' },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiBroker: false },
+      {
+        downloadJobAsset: async (jobId, leaseToken, destinationPath) => {
+          staged.push(`${jobId}:${leaseToken}`);
+          writeFileSync(destinationPath, Buffer.from('source'));
+        },
+      },
+    );
+    // Reach the private tools bag so the runner is a command that fails at once.
+    (runtime as unknown as { tools: Record<string, unknown> }).tools['masking'] = {
+      image: { command: process.execPath, prefixArgs: ['-e', 'process.exit(3)'] },
+    };
+    const job = {
+      id: 'job-mask-1',
+      type: 'mask.image',
+      assetId: 'asset-1',
+      leaseToken: 'lease-1',
+      payload: { mode: 'subject' },
+    } as unknown as Parameters<WorkerRuntime['run']>[0];
+    await expect(
+      runtime.run(job, { cancelled: () => false, progress: async () => undefined }),
+    ).rejects.toThrow();
+    expect(staged).toEqual(['job-mask-1:lease-1']);
+  }, 30_000);
+
   it('cancels a media.qc job before it runs anything', async () => {
     const runtime = new WorkerRuntime(
       { workerId: 'worker-qc-cancel', createdAt: '2026-11-14T00:00:00.000Z' },

@@ -556,6 +556,36 @@ describe('desktop.media channels', () => {
     });
   });
 
+  it('runs picture and video masks through desktop.media.mask.run and rejects anything else', () => {
+    const { orchestrator, handlers } = setup();
+    const run = handlers['desktop.media.mask.run'];
+    expect(run({ refId: 'asset-1', jobType: 'mask.image', payload: {} })).toEqual({
+      ok: false,
+      error: expect.stringContaining('Worker has not reported its capabilities'),
+    });
+    orchestrator.hello('w-1', ['mask.image', 'mask.video']);
+    expect(run({ refId: 'asset-1', jobType: 'media.qc', payload: {} })).toEqual({
+      ok: false,
+      error: 'Invalid mask job type',
+    });
+    expect(run({ refId: 'asset-1', payload: {} })).toEqual({
+      ok: false,
+      error: 'Invalid mask job type',
+    });
+    expect(run({ jobType: 'mask.image', payload: {} })).toEqual({
+      ok: false,
+      error: 'Invalid media request',
+    });
+    expect(run({ refId: 'asset-1', jobType: 'mask.video', payload: { mode: 'subject' } })).toEqual({
+      ok: true,
+      data: { jobId: 'job-1' },
+    });
+    expect(handlers['desktop.media.job.status']({ jobId: 'job-1' })).toMatchObject({
+      ok: true,
+      data: { id: 'job-1', jobType: 'mask.video', status: 'queued' },
+    });
+  });
+
   it('returns the QC report in job status once the job is done, and nothing for a queued one', () => {
     const { db, orchestrator, handlers } = setup();
     orchestrator.hello('w-1', ['media.qc']);
