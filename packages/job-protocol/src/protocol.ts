@@ -16,6 +16,11 @@ export type WorkerCapability =
   | 'mask.image'
   | 'mask.video'
   | 'audio.ml-denoise'
+  | 'speech.transcribe'
+  | 'speech.synthesize'
+  | 'speech.model.kokoro-82m'
+  | 'speech.model.chatterbox-en'
+  | 'speech.model.chatterbox-fa'
   | 'text.lm-studio'
   | 'text.openrouter';
 
