@@ -83,6 +83,8 @@ const GROUP_NAMES: Readonly<Record<string, string>> = {
   exposure: 'Exposure',
   'colour-cast': 'Colour cast',
   'av-length-mismatch': 'Video and sound length',
+  'low-resolution': 'Low resolution',
+  'aspect-mismatch': 'Picture shape and black bars',
   'safe-area': 'Safe area',
   'text-legibility': 'Text legibility',
 };
@@ -95,6 +97,8 @@ const GROUP_ORDER: readonly string[] = [
   'exposure',
   'colour-cast',
   'av-length-mismatch',
+  'low-resolution',
+  'aspect-mismatch',
   'silence',
   'clipping',
   'loudness',

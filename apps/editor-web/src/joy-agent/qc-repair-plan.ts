@@ -345,6 +345,10 @@ function notRepairableReason(type: string): string {
     case 'exposure':
     case 'colour-cast':
       return 'The grade is a taste decision; JOY does not change it on its own.';
+    case 'low-resolution':
+      return 'The picture has too few pixels; use a larger source file.';
+    case 'aspect-mismatch':
+      return 'Black bars are part of the picture itself; use a source without them or crop it by hand.';
     case 'silence':
       return 'Cutting a silent stretch also cuts the picture; decide what to cut by hand.';
     case 'audio-dropout':
