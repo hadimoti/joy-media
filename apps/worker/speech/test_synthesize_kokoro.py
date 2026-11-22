@@ -107,6 +107,70 @@ class KokoroRunnerTests(unittest.TestCase):
         self.assertEqual(timings["words"], [])
         self.assertEqual(timings["durationUs"], round(3 * 1_000_000 / runner.SAMPLE_RATE))
 
+    def test_real_kokoro_result_objects_give_native_word_timings(self):
+        """Real KPipeline yields Result objects (.audio tensor, .tokens with start_ts/end_ts seconds per chunk)."""
+
+        class Token:
+            def __init__(self, text, start_ts, end_ts):
+                self.text, self.start_ts, self.end_ts = text, start_ts, end_ts
+
+        class Result:
+            def __init__(self, audio, tokens):
+                self.audio, self.tokens = audio, tokens
+
+        rate = runner.SAMPLE_RATE
+        first = Result(
+            array("f", [0.1] * rate),
+            [Token("Hello", 0.1, 0.4), Token("there", 0.4, 0.9), Token(".", None, None)],
+        )
+        second = Result(array("f", [0.2] * rate), [Token("Bye", 0.0, 0.5)])
+
+        class FakeEngine:
+            def __call__(self, text, voice):
+                yield first
+                yield second
+
+        request = dict(self.request, text="Hello there. Bye")
+        with patch.object(runner.importlib.util, "find_spec", side_effect=self.tokenizer_specs):
+            with patch.object(runner, "_load_engine", return_value=FakeEngine()):
+                with patch.object(runner, "_load_voice", return_value=object()):
+                    runner.synthesize(request, self.output)
+
+        timings = json.loads((self.output / "timings.json").read_text(encoding="utf-8"))
+        self.assertEqual(timings["timingSource"], "native")
+        self.assertEqual(
+            timings["words"],
+            [
+                {"text": "Hello", "startUs": 100_000, "endUs": 400_000},
+                {"text": "there.", "startUs": 400_000, "endUs": 900_000},
+                # The second chunk starts after the first chunk's one second of audio.
+                {"text": "Bye", "startUs": 1_000_000, "endUs": 1_500_000},
+            ],
+        )
+
+    def test_real_result_without_word_times_keeps_audio_but_reports_unavailable(self):
+        class Token:
+            text, start_ts, end_ts = "Hello", None, None
+
+        class Result:
+            audio = array("f", [0.1, 0.2, 0.3])
+            tokens = [Token()]
+
+        class FakeEngine:
+            def __call__(self, text, voice):
+                yield Result()
+
+        request = dict(self.request, text="Hello")
+        with patch.object(runner.importlib.util, "find_spec", side_effect=self.tokenizer_specs):
+            with patch.object(runner, "_load_engine", return_value=FakeEngine()):
+                with patch.object(runner, "_load_voice", return_value=object()):
+                    runner.synthesize(request, self.output)
+
+        timings = json.loads((self.output / "timings.json").read_text(encoding="utf-8"))
+        self.assertEqual(timings["timingSource"], "unavailable")
+        self.assertEqual(timings["words"], [])
+        self.assertGreater((self.output / "voice.wav").stat().st_size, 44)
+
 
 if __name__ == "__main__":
     unittest.main()

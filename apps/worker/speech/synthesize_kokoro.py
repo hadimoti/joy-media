@@ -8,6 +8,7 @@ import array
 import importlib.util
 import json
 import math
+import re
 import sys
 import wave
 from pathlib import Path
@@ -17,6 +18,8 @@ from typing import Any
 SAMPLE_RATE = 24_000
 VOICE_ID = "af_heart"
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
+# Leading and trailing punctuation (and underscores) around a spoken word.
+_WORD_EDGES = re.compile(r"^[\W_]+|[\W_]+$")
 
 
 def _validate_request(request: dict[str, Any]) -> tuple[str, Path]:
@@ -139,13 +142,17 @@ def _normalize_native_timings(
     """Accept only complete, text-matching word tokens on valid sample boundaries."""
     if not isinstance(tokens, (list, tuple)) or not tokens or sample_rate <= 0:
         return []
-    expected = text.split()
+    # Kokoro times the spoken word without its surrounding punctuation; punctuation-only words have no timing.
+    expected = [word for word in text.split() if _WORD_EDGES.sub("", word)]
     if len(tokens) != len(expected):
         return []
 
     normalized: list[dict[str, Any]] = []
     for token, expected_word in zip(tokens, expected):
-        if not isinstance(token, dict) or token.get("text") != expected_word:
+        if (
+            not isinstance(token, dict)
+            or _WORD_EDGES.sub("", str(token.get("text", ""))) != _WORD_EDGES.sub("", expected_word)
+        ):
             return []
         start = token.get("startSample")
         end = token.get("endSample")
@@ -182,19 +189,75 @@ def _normalize_native_timings(
     return normalized
 
 
+def _timed_result_tokens(tokens: Any, offset_samples: int) -> list[dict[str, Any]] | None:
+    """Turn a real KPipeline.Result.tokens list (seconds, relative to its chunk) into sample-clock tokens.
+
+    Punctuation-only tokens carry no timing and are skipped. A word token without a start and end time makes the
+    whole chunk untrustworthy, so the caller reports the timings as unavailable.
+    """
+    if not isinstance(tokens, (list, tuple)):
+        return None
+    timed: list[dict[str, Any]] = []
+    for token in tokens:
+        if isinstance(token, dict):
+            token_text, start_ts, end_ts = token.get("text"), token.get("start_ts"), token.get("end_ts")
+        else:
+            token_text = getattr(token, "text", None)
+            start_ts = getattr(token, "start_ts", None)
+            end_ts = getattr(token, "end_ts", None)
+        if not isinstance(token_text, str):
+            return None
+        if not _WORD_EDGES.sub("", token_text):
+            continue
+        if (
+            isinstance(start_ts, bool)
+            or isinstance(end_ts, bool)
+            or not isinstance(start_ts, (int, float))
+            or not isinstance(end_ts, (int, float))
+            or not math.isfinite(start_ts)
+            or not math.isfinite(end_ts)
+        ):
+            return None
+        timed.append(
+            {
+                "text": token_text,
+                "startSample": offset_samples + round(start_ts * SAMPLE_RATE),
+                "endSample": offset_samples + round(end_ts * SAMPLE_RATE),
+            }
+        )
+    return timed
+
+
 def _generate_audio(engine: Any, voice: Any, text: str) -> tuple[list[float], Any]:
     chunks: list[float] = []
     native_tokens: Any = None
+    collected: list[dict[str, Any]] = []
+    collecting = True
     for result in engine(text, voice=voice):
-        if not isinstance(result, (tuple, list)) or len(result) < 3:
+        if isinstance(result, (tuple, list)) and len(result) >= 3:
+            chunks.extend(_as_mono_samples(result[2]))
+            # A fourth item is accepted only when it contains native timed word tokens.
+            if len(result) >= 4:
+                native_tokens = result[3]
+            continue
+        if not hasattr(result, "audio"):
             raise ValueError("Kokoro returned an unsupported result")
-        chunks.extend(_as_mono_samples(result[2]))
-        # Kokoro's standard result contains graphemes, phonemes, and audio only.
-        # A fourth item is accepted only when it contains native timed word tokens.
-        if len(result) >= 4:
-            native_tokens = result[3]
+        # Real Kokoro (KPipeline.Result): .audio is a tensor and .tokens carry start_ts/end_ts seconds per chunk.
+        if result.audio is None:
+            collecting = False
+            continue
+        offset = len(chunks)
+        chunks.extend(_as_mono_samples(result.audio))
+        if collecting:
+            timed = _timed_result_tokens(getattr(result, "tokens", None), offset)
+            if timed is None:
+                collecting = False
+            else:
+                collected.extend(timed)
     if not chunks:
         raise ValueError("Kokoro produced empty audio")
+    if collecting and collected:
+        native_tokens = collected
     return chunks, native_tokens
 
 
