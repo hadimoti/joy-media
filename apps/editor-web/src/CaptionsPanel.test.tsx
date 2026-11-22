@@ -3,6 +3,8 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { applyCaptionProjectCommand } from '@joy-media/captions-core';
+import type { VisualObjectTransaction } from '@joy-media/property-system';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import { CaptionsPanel } from './CaptionsPanel.js';
@@ -63,7 +65,7 @@ describe('CaptionsPanel empty state', () => {
     // Cues are named by order (1, 2, …); the segment id never reaches the DOM.
     expect(markup).toContain('aria-label="Caption text 1"');
     expect(markup).not.toContain('seg-1');
-    expect(markup).toContain('value="Edited caption"');
+    expect(markup).toContain('>Edited caption</textarea>');
     expect(markup).toContain('title="Source: Welcome to JOY"');
     expect(markup).toContain('aria-label="Revert caption 1 to source text"');
     expect(markup).toContain('aria-label="Delete caption 1"');
@@ -125,6 +127,297 @@ describe('CaptionsPanel empty state', () => {
     );
     expect(description?.textContent).toContain('Transcription unavailable:');
 
+    await act(async () => root.unmount());
+    container.remove();
+  });
+});
+
+describe('CaptionsPanel cue keyboard editing', () => {
+  function renderPanel(
+    container: HTMLElement,
+    onDispatch: (transaction: VisualObjectTransaction) => void,
+    project = INITIAL_EDITOR_PROJECT,
+  ) {
+    const root = createRoot(container);
+    const render = (nextProject = project) =>
+      root.render(
+        <CaptionsPanel
+          project={nextProject}
+          playheadUs={0}
+          onSeek={() => undefined}
+          onDispatch={onDispatch}
+          onTranscribe={async () => undefined}
+          transcriptionError={undefined}
+          onProjectChange={() => undefined}
+        />,
+      );
+    act(() => render());
+    return { root, render };
+  }
+
+  function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+      textarea,
+      value,
+    );
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function key(textarea: HTMLTextAreaElement, init: KeyboardEventInit) {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    textarea.dispatchEvent(event);
+    return event;
+  }
+
+  it('renders an accessible multiline editor and splits at the logical selection start once', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const transactions: VisualObjectTransaction[] = [];
+    const { root } = renderPanel(container, (transaction) => transactions.push(transaction));
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Caption text 1"]',
+    );
+
+    expect(editor).not.toBeNull();
+    expect(editor?.getAttribute('dir')).toBe('ltr');
+    expect(editor?.tagName).toBe('TEXTAREA');
+    await act(async () => {
+      editor!.focus();
+      editor!.setSelectionRange(8, 10);
+      key(editor!, { key: 'Enter' });
+    });
+
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]!.commands).toHaveLength(1);
+    expect(transactions[0]!.commands[0]!.type).toBe('caption.replaceDocument');
+    const replacement = transactions[0]!.commands[0]!.payload.document;
+    expect(
+      replacement.segments.map((segment: { textOverride?: string }) => segment.textOverride),
+    ).toEqual(['Welcome ', 'to JOY', undefined]);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('keeps native multiline editing for modified, composing, and ranged Backspace keys', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const transactions: VisualObjectTransaction[] = [];
+    const { root } = renderPanel(container, (transaction) => transactions.push(transaction));
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Caption text 1"]',
+    )!;
+    await act(async () => {
+      editor.focus();
+      expect(key(editor, { key: 'Enter', shiftKey: true }).defaultPrevented).toBe(false);
+      expect(key(editor, { key: 'Enter', isComposing: true }).defaultPrevented).toBe(false);
+      editor.setSelectionRange(1, 4);
+      expect(key(editor, { key: 'Backspace' }).defaultPrevented).toBe(false);
+    });
+    expect(transactions).toHaveLength(0);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('merges into the true previous cue and clears a filter that hid it', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    let project = INITIAL_EDITOR_PROJECT;
+    const { root, render } = renderPanel(container, (transaction) => {
+      const command = transaction.commands[0];
+      if (command?.type === 'caption.replaceDocument') {
+        project = {
+          ...project,
+          captionDocuments: {
+            ...project.captionDocuments,
+            [command.payload.documentId]: applyCaptionProjectCommand(project, command).project
+              .captionDocuments[command.payload.documentId]!,
+          },
+        };
+        render(project);
+      }
+    });
+    const searchToggle = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Search Captions"]',
+    )!;
+    await act(async () => searchToggle.click());
+    const search = container.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const second = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Caption text 2"]',
+    )!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        search,
+        'Studio',
+      );
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+      second.focus();
+      second.setSelectionRange(0, 0);
+      key(second, { key: 'Backspace' });
+    });
+
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Caption text 1"]',
+    );
+    expect(editor).not.toBeNull();
+    expect(document.activeElement).toBe(editor);
+    expect(editor?.value).toBe('Welcome to JOY Media Studio');
+    expect(editor?.selectionStart).toBe('Welcome to JOY '.length);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('splits RTL code points at the logical caret, focuses the new cue, and preserves undo', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const source = '\u200fسلام‌۱۲۳';
+    const original = INITIAL_EDITOR_PROJECT;
+    const captionDocument = original.captionDocuments['captions-fa']!;
+    const first = captionDocument.segments[0]!;
+    let project = {
+      ...original,
+      captionDocuments: {
+        ...original.captionDocuments,
+        'captions-fa': {
+          ...captionDocument,
+          direction: 'rtl' as const,
+          segments: [{ ...first, textOverride: source }, ...captionDocument.segments.slice(1)],
+        },
+      },
+    };
+    const expectedBefore = project.captionDocuments['captions-fa']!.segments;
+    let renderProject: (next: typeof project) => void = () => undefined;
+    const { root, render } = renderPanel(
+      container,
+      (transaction) => {
+        const command = transaction.commands[0];
+        if (command?.type !== 'caption.replaceDocument') return;
+        const applied = applyCaptionProjectCommand(project, command);
+        project = applied.project;
+        renderProject(project);
+        const undone = applyCaptionProjectCommand(project, applied.inverse).project;
+        expect(undone.captionDocuments['captions-fa']?.segments).toEqual(expectedBefore);
+      },
+      project,
+    );
+    renderProject = render;
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Caption text 1"]',
+    )!;
+    const logicalCut = '\u200fسلام‌'.length;
+    await act(async () => {
+      editor.focus();
+      editor.setSelectionRange(logicalCut, logicalCut);
+      key(editor, { key: 'Enter' });
+    });
+
+    const nextEditor = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Caption text 2"]',
+    );
+    expect(editor.dir).toBe('rtl');
+    expect(nextEditor?.value).toBe('۱۲۳');
+    expect(document.activeElement).toBe(nextEditor);
+    expect(nextEditor?.selectionStart).toBe(0);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('keeps newlines and aligns a multiline word boundary to source timing', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const base = INITIAL_EDITOR_PROJECT;
+    const captionDocument = base.captionDocuments['captions-fa']!;
+    const cue = captionDocument.segments[0]!;
+    const project = {
+      ...base,
+      captionDocuments: {
+        ...base.captionDocuments,
+        'captions-fa': {
+          ...captionDocument,
+          words: {
+            first: { id: 'first', text: 'hello', startUs: 0, endUs: 400_000 },
+            second: { id: 'second', text: 'world', startUs: 600_000, endUs: 1_000_000 },
+          },
+          segments: [{ ...cue, startUs: 0, endUs: 1_000_000, wordIds: ['first', 'second'] }],
+        },
+      },
+    };
+    const transactions: VisualObjectTransaction[] = [];
+    const { root } = renderPanel(
+      container,
+      (transaction) => transactions.push(transaction),
+      project,
+    );
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Caption text 1"]',
+    )!;
+    await act(async () => {
+      setTextareaValue(editor, 'hello\nworld');
+      editor.setSelectionRange(6, 6);
+      key(editor, { key: 'Enter' });
+    });
+    const command = transactions[0]!.commands[0];
+    expect(command?.type).toBe('caption.replaceDocument');
+    if (command?.type === 'caption.replaceDocument') {
+      expect(
+        command.payload.document.segments.map(({ startUs, endUs, textOverride }) => ({
+          startUs,
+          endUs,
+          textOverride,
+        })),
+      ).toEqual([
+        { startUs: 0, endUs: 500_000, textOverride: 'hello\n' },
+        { startUs: 500_000, endUs: 1_000_000, textOverride: 'world' },
+      ]);
+    }
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('makes edge splits and a first-cue Backspace no-ops without inserting a newline', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const transactions: VisualObjectTransaction[] = [];
+    const { root } = renderPanel(container, (transaction) => transactions.push(transaction));
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Caption text 1"]',
+    )!;
+    await act(async () => {
+      editor.setSelectionRange(0, 0);
+      expect(key(editor, { key: 'Enter' }).defaultPrevented).toBe(true);
+      editor.setSelectionRange(editor.value.length, editor.value.length);
+      expect(key(editor, { key: 'Enter' }).defaultPrevented).toBe(true);
+      editor.setSelectionRange(0, 0);
+      expect(key(editor, { key: 'Backspace' }).defaultPrevented).toBe(false);
+    });
+    expect(editor.value).toBe('Welcome to JOY');
+    expect(transactions).toHaveLength(0);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('cancels drafts on Escape and keeps Ctrl+Enter as an ordinary edit commit', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const transactions: VisualObjectTransaction[] = [];
+    const { root } = renderPanel(container, (transaction) => transactions.push(transaction));
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Caption text 1"]',
+    )!;
+    await act(async () => {
+      editor.focus();
+      setTextareaValue(editor, 'Discard this edit');
+      key(editor, { key: 'Escape' });
+    });
+    expect(transactions).toHaveLength(0);
+    expect(editor.value).toBe('Welcome to JOY');
+
+    await act(async () => {
+      editor.focus();
+      setTextareaValue(editor, 'Committed edit');
+      key(editor, { key: 'Enter', ctrlKey: true });
+    });
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]!.commands[0]!.type).toBe('caption.setSegmentText');
     await act(async () => root.unmount());
     container.remove();
   });
