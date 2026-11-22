@@ -51,7 +51,41 @@ export function renderFrameOptions(
     ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
     clipTimes: transitionClipTimes(timeline),
     ...(imageSizesByObjectId !== undefined ? { imageSizesByObjectId } : {}),
+    zIndexByObjectId: trackLayerOrder(project, timeline, timeUs),
   };
+}
+
+/**
+ * Layer order from the timeline (ADR-0035): the top visual row is in front. The renderer's order is bottom to
+ * top and the Timeline lists visual rows in descending `Track.order`, so an object takes the `order` of the track
+ * its clip sits on at this moment. Moving a row changes `order`, and with it what covers what, in the Monitor and
+ * in the export. Only the root composition is read: the children of a merged timeline keep the frame's own order.
+ * Objects with no clip playing now are left out. The result is at least 1, which keeps them above the video layer.
+ */
+export function trackLayerOrder(
+  project: JoyProjectV1,
+  timeline: SpikeProject,
+  timeUs = 0,
+): Readonly<Record<string, number>> {
+  const raw = project.pluginData?.['joy.clipObjects'];
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const objectByClipId = raw as Readonly<Record<string, unknown>>;
+  const root =
+    timeline.compositions[project.rootCompositionId] ??
+    timeline.compositions['root'] ??
+    Object.values(timeline.compositions)[0];
+  if (root === undefined) return {};
+  const order: Record<string, number> = {};
+  for (const track of root.tracks) {
+    const layer = track.order + 1;
+    for (const clip of track.clips) {
+      if (timeUs < clip.startUs || timeUs >= clip.startUs + clip.durationUs) continue;
+      const objectId = objectByClipId[clip.id];
+      if (typeof objectId !== 'string') continue;
+      order[objectId] = Math.max(order[objectId] ?? 0, layer);
+    }
+  }
+  return order;
 }
 
 export function imageSizesFromCache(
