@@ -1,8 +1,4 @@
-import type {
-  CaptionDocumentV1,
-  CaptionSegmentV1,
-  CaptionWordV1,
-} from '@joy-media/project-schema';
+import type { CaptionDocumentV1, CaptionSegmentV1, CaptionWordV1 } from '@joy-media/project-schema';
 import { segmentDisplayText } from '@joy-media/captions-core';
 
 export interface CaptionCueEdit {
@@ -34,7 +30,10 @@ function graphemes(text: string): Grapheme[] {
     const previous = result.at(-1);
     if (
       previous !== undefined &&
-      (/\p{Mark}/u.test(character) || /[\ufe00-\ufe0f\u{1f3fb}-\u{1f3ff}]/u.test(character) || previous.text.endsWith('\u200d') || character === '\u200d')
+      (/\p{Mark}/u.test(character) ||
+        /[\p{Variation_Selector}\p{Emoji_Modifier}]/u.test(character) ||
+        previous.text.endsWith('\u200d') ||
+        character === '\u200d')
     ) {
       result[result.length - 1] = { ...previous, text: previous.text + character, end };
     } else result.push({ text: character, start: index, end });
@@ -44,7 +43,10 @@ function graphemes(text: string): Grapheme[] {
 }
 
 function snapOffset(text: string, requested: number): number {
-  const offset = Math.max(0, Math.min(text.length, Number.isFinite(requested) ? Math.trunc(requested) : 0));
+  const offset = Math.max(
+    0,
+    Math.min(text.length, Number.isFinite(requested) ? Math.trunc(requested) : 0),
+  );
   let before = 0;
   for (const grapheme of graphemes(text)) {
     if (offset === grapheme.start || offset === grapheme.end) return offset;
@@ -67,7 +69,11 @@ function normalizedGraphemes(text: string): string[] {
 }
 
 function wordEntries(document: CaptionDocumentV1, segment: CaptionSegmentV1) {
-  return [...new Set(segment.wordIds)].map((id, index) => ({ id, index, word: document.words[id] }));
+  return [...new Set(segment.wordIds)].map((id, index) => ({
+    id,
+    index,
+    word: document.words[id],
+  }));
 }
 
 function mappedWordCut(
@@ -85,7 +91,8 @@ function mappedWordCut(
   if (source.length !== shown.length || source.some((value, index) => value !== shown[index]))
     return undefined;
 
-  const prefixCount = graphemes(text).filter(({ end }) => end <= caret)
+  const prefixCount = graphemes(text)
+    .filter(({ end }) => end <= caret)
     .flatMap(({ text: value }) => normalizedGraphemes(value)).length;
   let consumed = 0;
   for (let index = 0; index < entries.length; index += 1) {
@@ -121,10 +128,17 @@ function splitWordIds(
   for (const entry of entries) {
     const { id, word } = entry;
     let goesBefore: boolean;
-    if (word === undefined) goesBefore = (entry.index + 0.5) / Math.max(1, entries.length) < fallbackRatio;
+    if (word === undefined)
+      goesBefore = (entry.index + 0.5) / Math.max(1, entries.length) < fallbackRatio;
     else {
-      const left = Math.max(0, Math.min(cutUs, word.endUs) - Math.max(segment.startUs, word.startUs));
-      const right = Math.max(0, Math.min(segment.endUs, word.endUs) - Math.max(cutUs, word.startUs));
+      const left = Math.max(
+        0,
+        Math.min(cutUs, word.endUs) - Math.max(segment.startUs, word.startUs),
+      );
+      const right = Math.max(
+        0,
+        Math.min(segment.endUs, word.endUs) - Math.max(cutUs, word.startUs),
+      );
       goesBefore = left === right ? (word.startUs + word.endUs) / 2 <= cutUs : left > right;
       if (word.endUs <= segment.startUs || word.startUs >= segment.endUs)
         goesBefore = (word.startUs + word.endUs) / 2 <= cutUs;
@@ -142,7 +156,12 @@ export function splitCaptionCue(
   nextId: string,
 ): CaptionCueEdit | undefined {
   const index = document.segments.findIndex((segment) => segment.id === cueId);
-  if (index < 0 || nextId.length === 0 || nextId === cueId || document.segments.some((s) => s.id === nextId))
+  if (
+    index < 0 ||
+    nextId.length === 0 ||
+    nextId === cueId ||
+    document.segments.some((s) => s.id === nextId)
+  )
     return undefined;
 
   const segment = document.segments[index]!;
@@ -156,12 +175,18 @@ export function splitCaptionCue(
   const ratio = graphemeList.length === 0 ? 0 : beforeCount / graphemeList.length;
   const duration = segment.endUs - segment.startUs;
   if (duration < 2) return undefined;
-  const desiredCut = mappedWordCut(document, segment, text, offset) ?? segment.startUs + duration * ratio;
+  const desiredCut =
+    mappedWordCut(document, segment, text, offset) ?? segment.startUs + duration * ratio;
   const cutUs = Math.max(segment.startUs + 1, Math.min(segment.endUs - 1, Math.round(desiredCut)));
   if (cutUs <= segment.startUs || cutUs >= segment.endUs) return undefined;
 
   const ids = splitWordIds(document, segment, cutUs, ratio);
-  const first: CaptionSegmentV1 = { ...segment, endUs: cutUs, wordIds: ids.before, textOverride: beforeText };
+  const first: CaptionSegmentV1 = {
+    ...segment,
+    endUs: cutUs,
+    wordIds: ids.before,
+    textOverride: beforeText,
+  };
   const second: CaptionSegmentV1 = {
     ...segment,
     id: nextId,
@@ -186,8 +211,11 @@ export function mergeCaptionCueWithPrevious(
   const predecessor = document.segments
     .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
     .filter(({ candidate }) => candidate.id !== cueId && candidate.startUs < segment.startUs)
-    .sort((left, right) => right.candidate.startUs - left.candidate.startUs || right.candidateIndex - left.candidateIndex)[0]
-    ?.candidate;
+    .sort(
+      (left, right) =>
+        right.candidate.startUs - left.candidate.startUs ||
+        right.candidateIndex - left.candidateIndex,
+    )[0]?.candidate;
   if (predecessor === undefined) return undefined;
 
   const left = (previousDraft ?? segmentDisplayText(document, predecessor)).trim();
@@ -201,7 +229,7 @@ export function mergeCaptionCueWithPrevious(
   };
   const segments = document.segments
     .filter((candidate) => candidate.id !== cueId)
-    .map((candidate) => candidate.id === predecessor.id ? merged : candidate);
+    .map((candidate) => (candidate.id === predecessor.id ? merged : candidate));
   return {
     document: { ...document, segments },
     focusCueId: predecessor.id,
