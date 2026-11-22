@@ -2124,6 +2124,7 @@ export function SpeedSection({
                   aria-describedby={rateOutputId}
                   onChange={(event) => {
                     rateCommittedRef.current = false;
+                    rateEscapeRef.current = false;
                     setDraftRate(event.currentTarget.value);
                     setRateError(undefined);
                   }}
