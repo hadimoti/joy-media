@@ -253,6 +253,51 @@ describe('SpeechGenerationPanel', () => {
     expect(onGenerate.mock.calls[0]?.[1].referenceAssetId).toBeUndefined();
   });
 
+  it('requires fresh consent and drops the reference when model status changes the effective engine', async () => {
+    const onGenerate = vi.fn<SpeechGenerationPanelProps['onGenerate']>(async () => ({
+      availability: 'ready',
+    }));
+    const view = await render(makeProps({ onGenerate }));
+    await setValue(view.querySelector<HTMLTextAreaElement>('textarea')!, 'Hello there');
+    const engine = view.querySelector<HTMLSelectElement>('select[name="engine"]')!;
+    await setValue(engine, 'chatterbox-en');
+    const reference = view.querySelector<HTMLSelectElement>('select[name="referenceAssetId"]')!;
+    await setValue(reference, 'asset-voice-one');
+    await setCheckbox('I have permission');
+
+    const renderStatus = async (chatterbox: 'ready' | 'setup-required') =>
+      act(async () =>
+        root?.render(
+          <SpeechGenerationPanel
+            {...makeProps({
+              onGenerate,
+              modelStatus: [
+                { modelId: 'faster-whisper-large-v3-turbo', state: 'ready' },
+                { modelId: 'kokoro-82m', state: 'ready' },
+                { modelId: 'chatterbox-en', state: chatterbox },
+                { modelId: 'chatterbox-fa', state: 'ready' },
+              ],
+            })}
+          />,
+        ),
+      );
+
+    await renderStatus('setup-required');
+    expect(engine.value).toBe('kokoro-82m');
+    await renderStatus('ready');
+    expect(engine.value).toBe('chatterbox-en');
+    expect(reference.value).toBe('');
+    const consent = view.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(consent.checked).toBe(false);
+
+    await act(async () =>
+      view
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
+    expect(onGenerate).not.toHaveBeenCalled();
+  });
+
   it('requires reference voice rights consent before Generate', async () => {
     const onGenerate = vi.fn<SpeechGenerationPanelProps['onGenerate']>(async () => ({
       availability: 'ready',
