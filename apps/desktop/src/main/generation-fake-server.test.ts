@@ -520,7 +520,13 @@ describe('generation against the fake MiniMax server: videos', () => {
       method: 'POST',
       path: '/v2/video_generation',
       authorizationOk: true,
-      body: { model: 'MiniMax-H3-Lite', prompt: 'a slow pan', resolution: '480P', duration: 4 },
+      body: {
+        model: 'MiniMax-H3-Lite',
+        content: [{ type: 'text', text: 'a slow pan' }],
+        resolution: '480P',
+        duration: 4,
+        ratio: '16:9',
+      },
     });
     const keyed = made.server.requests.filter((request) => request.label !== 'download');
     expect(keyed.every((request) => request.authorizationOk)).toBe(true);
