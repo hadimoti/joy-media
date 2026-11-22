@@ -69,6 +69,8 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.media.derivative.transfer.cancel',
   'desktop.media.audio.denoise',
   'desktop.media.speech.transcribe',
+  'desktop.media.speech.run',
+  'desktop.media.speech.status',
   'desktop.media.preview.frame',
   'desktop.media.workers.list',
 ]);

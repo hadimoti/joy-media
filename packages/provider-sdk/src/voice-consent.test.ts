@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { createVoiceConsentManager } from './voice-consent.js';
+import { createVoiceConsentManager, requireVoiceConsent } from './voice-consent.js';
 
 describe('VoiceConsentManager', () => {
+  it('requires active consent before a caller can use a voice', async () => {
+    const manager = createVoiceConsentManager();
+    const voice = await manager.enrollVoice({
+      displayName: 'Reference voice',
+      allowedPurposes: ['general'],
+      allowedUsersOrTeams: ['desktop-local'],
+      consentGrantedBy: 'desktop-local',
+    });
+
+    expect(requireVoiceConsent(manager, voice.id, { purpose: 'general', userId: 'desktop-local' })).toEqual(voice);
+    expect(() => requireVoiceConsent(manager, voice.id, { purpose: 'general', userId: 'other' }))
+      .toThrow('CONSENT_DENIED');
+    expect(() => requireVoiceConsent(manager, 'forged-voice', { purpose: 'general', userId: 'desktop-local' }))
+      .toThrow('VOICE_NOT_FOUND');
+  });
+
   describe('enrollVoice', () => {
     it('creates voice identity with consent record', async () => {
       const manager = createVoiceConsentManager();
