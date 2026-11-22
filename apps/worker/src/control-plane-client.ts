@@ -84,6 +84,28 @@ export class WorkerSessionExpiredError extends Error {
   }
 }
 
+/**
+ * A refused control-plane request. The local job API answers with a short fixed reason ({error:{message}}), for
+ * example "synthesis requires audio/wav"; keep it (single line, bounded) so a failure says why, not just the status.
+ */
+function requestFailure(response: { readonly status: number; readonly body: unknown }): Error {
+  let reason = '';
+  const body = response.body;
+  if (typeof body === 'object' && body !== null) {
+    const error = (body as { readonly error?: unknown }).error;
+    const message =
+      typeof error === 'string'
+        ? error
+        : typeof error === 'object' && error !== null
+          ? (error as { readonly message?: unknown }).message
+          : undefined;
+    if (typeof message === 'string' && message.trim().length > 0) {
+      reason = `: ${message.replace(/\s+/gu, ' ').trim().slice(0, 160)}`;
+    }
+  }
+  return new Error(`Worker control-plane request failed (${response.status})${reason}`);
+}
+
 /** A bounded request protects the daemon from hanging sockets and proxies. */
 export class WorkerRequestTimeoutError extends Error {
   constructor(
@@ -318,7 +340,7 @@ export class WorkerControlPlaneClient {
       this.options.sessionStore.clearWorkerSession();
       throw new WorkerSessionExpiredError();
     }
-    if (!response.ok) throw new Error(`Worker control-plane request failed (${response.status})`);
+    if (!response.ok) throw requestFailure(response);
     return response.body;
   }
 
@@ -330,7 +352,7 @@ export class WorkerControlPlaneClient {
     const response = await this.fetchJson(pathname, body);
     if (!response.ok) {
       if (!throwOnFailure && response.status === 403) return undefined;
-      throw new Error(`Worker control-plane request failed (${response.status})`);
+      throw requestFailure(response);
     }
     return response.body;
   }
