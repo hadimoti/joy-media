@@ -112,7 +112,6 @@ describe('local speech worker runner', () => {
     const previous = process.env.FIXTURE_WAV;
     process.env.FIXTURE_WAV = wavBytes().toString('base64');
     const config = availability({
-      transcribe: undefined,
       synthesis: {
         'kokoro-82m': modelRunner(runner, join(root, 'kokoro')),
       },
@@ -163,7 +162,6 @@ describe('local speech worker runner', () => {
     const previous = process.env.FIXTURE_WAV;
     process.env.FIXTURE_WAV = wavBytes().toString('base64');
     const config = availability({
-      transcribe: undefined,
       synthesis: {
         'chatterbox-fa': modelRunner(runner, join(root, 'chatterbox'), 'synthesize_chatterbox.py'),
       },
@@ -249,7 +247,6 @@ describe('local speech worker runner', () => {
           text: 'Hello',
         },
         availability: availability({
-          transcribe: undefined,
           synthesis: {
             'kokoro-82m': modelRunner(runner, root),
           },
