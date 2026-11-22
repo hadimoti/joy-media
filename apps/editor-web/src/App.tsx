@@ -500,7 +500,8 @@ import {
   buildSpeechVoicePlacement,
   withSpeechCaptionClipPlacement,
 } from './speech-voice-placement.js';
-import type { SpeechModelStatus, SpeechGenerationOptions } from './SpeechGenerationPanel.js';
+import type { SpeechGenerationOptions } from './SpeechGenerationPanel.js';
+import { useSpeechModelStatus } from './use-speech-model-status.js';
 import type { SpeechSynthesizeV1 } from '@joy-media/job-protocol';
 import { ProjectMediaResolver } from './project-media-resolver.js';
 import { createProjectColorLutResolver } from './project-color-luts.js';
@@ -1167,21 +1168,7 @@ function EditorWorkspace({
     if (!paletteOpen) setQuery('');
   }, [paletteOpen]);
   const [transcriptionError, setTranscriptionError] = useState<string>();
-  const [speechModelStatus, setSpeechModelStatus] = useState<readonly SpeechModelStatus[]>([]);
-  useEffect(() => {
-    let active = true;
-    void mediaControlPlaneClient.speechStatus().then(
-      ({ models }) => {
-        if (active) setSpeechModelStatus(models);
-      },
-      () => {
-        if (active) setSpeechModelStatus([]);
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [projectId]);
+  const speechModelStatus = useSpeechModelStatus(mediaControlPlaneClient, projectId);
   const transcriptionControllerRef = useRef<AbortController | undefined>(undefined);
   useEffect(() => {
     transcriptionControllerRef.current?.abort();
