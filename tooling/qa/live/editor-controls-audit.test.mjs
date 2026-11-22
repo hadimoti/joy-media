@@ -71,7 +71,9 @@ test('expands every inventory family into stable independent audit rows', () => 
     assert.ok(ids.includes(`editor:${suffix}`), `missing editor row ${suffix}`);
   }
 
-  const grouped = rows.filter((row) => row.sourceIds?.includes('toolbar.play') || row.sourceIds?.includes('toolbar.pause'));
+  const grouped = rows.filter(
+    (row) => row.sourceIds?.includes('toolbar.play') || row.sourceIds?.includes('toolbar.pause'),
+  );
   assert.ok(grouped.length >= 2);
   assert.equal(new Set(grouped.map((row) => row.id)).size, grouped.length);
 });
@@ -96,8 +98,9 @@ test('records pre/post state and deterministic evidence paths; unavailable diffe
   assert.match(failed.reason, /fake action failed/u);
 
   const firstPath = gesture.expectedEvidencePath;
-  const secondPath = buildEditorControlsAuditRows(fakeHelpers(), descriptors)
-    .find((row) => row.id === gesture.id).expectedEvidencePath;
+  const secondPath = buildEditorControlsAuditRows(fakeHelpers(), descriptors).find(
+    (row) => row.id === gesture.id,
+  ).expectedEvidencePath;
   assert.equal(firstPath, secondPath);
   assert.ok(firstPath.endsWith(`${gesture.evidenceKey}.png`));
   assert.equal(typeof gesture.run, 'function');
@@ -108,8 +111,25 @@ test('validates effect descriptors per parameter and models keyed and unkeyed nu
     {
       id: 'tone',
       params: [
-        { key: 'gain', label: 'Gain', type: 'number', defaultValue: 0, min: -1, max: 1, step: 0.01, animatable: true },
-        { key: 'broken', label: 'Broken', type: 'number', defaultValue: 0, min: 2, max: 1, step: 0 },
+        {
+          key: 'gain',
+          label: 'Gain',
+          type: 'number',
+          defaultValue: 0,
+          min: -1,
+          max: 1,
+          step: 0.01,
+          animatable: true,
+        },
+        {
+          key: 'broken',
+          label: 'Broken',
+          type: 'number',
+          defaultValue: 0,
+          min: 2,
+          max: 1,
+          step: 0,
+        },
       ],
     },
   ];
@@ -132,8 +152,24 @@ test('keeps duplicate descriptor parameters as unique per-parameter failures', (
     {
       id: 'tone',
       params: [
-        { key: 'gain', label: 'Gain', type: 'number', defaultValue: 0, min: -1, max: 1, step: 0.01 },
-        { key: 'gain', label: 'Gain again', type: 'number', defaultValue: 0, min: -1, max: 1, step: 0.01 },
+        {
+          key: 'gain',
+          label: 'Gain',
+          type: 'number',
+          defaultValue: 0,
+          min: -1,
+          max: 1,
+          step: 0.01,
+        },
+        {
+          key: 'gain',
+          label: 'Gain again',
+          type: 'number',
+          defaultValue: 0,
+          min: -1,
+          max: 1,
+          step: 0.01,
+        },
       ],
     },
   ];

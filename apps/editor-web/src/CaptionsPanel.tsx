@@ -160,7 +160,10 @@ export function CaptionsPanel({
   /** When supplied, creates the visual document and Classic timeline CC lane as one undo step. */
   readonly onCreateCaptionTrack?: () => void;
   readonly speechModelStatus?: readonly SpeechModelStatus[];
-  readonly onGenerateSpeech?: (request: SpeechSynthesizeV1, options: SpeechGenerationOptions) => Promise<{ availability: 'ready' | 'setup-required'; timing?: SpeechSynthesisTiming }>;
+  readonly onGenerateSpeech?: (
+    request: SpeechSynthesizeV1,
+    options: SpeechGenerationOptions,
+  ) => Promise<{ availability: 'ready' | 'setup-required'; timing?: SpeechSynthesisTiming }>;
   readonly onOpenLocalAssets?: () => void;
 }) {
   const [query, setQuery] = useState('');
@@ -233,58 +236,73 @@ export function CaptionsPanel({
         </div>
       ) : (
         <>
-        {slots.map((slot, slotIndex) => (
-          <CaptionSlotEditor
-            key={`${slot.trackId}:${slot.clip.id}`}
-            slot={slot}
-            slotNumber={slotIndex + 1}
-            query={query}
-            onClearQuery={() => setQuery('')}
-            activeTab={activeTab}
-            playheadUs={playheadUs}
-            onSeek={onSeek}
-            onDispatch={onDispatch}
-            onTranscribe={onTranscribe}
-            project={project}
-            transcriptionError={transcriptionError}
-          />
-        ))}
-        {activeTab === 'generate' && speechModelStatus !== undefined && onGenerateSpeech !== undefined && (
-          <SpeechGenerationPanel
-            modelStatus={speechModelStatus}
-            referenceAssets={Object.values(project.assets).filter((asset) => asset.kind === 'audio').map((asset) => ({ id: asset.id, label: asset.displayName }))}
-            onGenerate={onGenerateSpeech}
-            onAddCaptions={(timing) => {
-              const slot = slots[0];
-              if (slot === undefined || timing.timingSource === 'unavailable' || timing.words.length === 0) return;
-              const offsetUs = Math.max(0, playheadUs - slot.clip.startUs);
-              const words: Record<string, CaptionWordV1> = {};
-              timing.words.forEach((word, index) => {
-                const startUs = Math.max(0, Math.min(timing.durationUs - 1, word.startUs));
-                const endUs = Math.max(startUs + 1, Math.min(timing.durationUs, word.endUs));
-                if (word.endUs <= 0 || word.startUs >= timing.durationUs || endUs <= startUs) return;
-                const id = `speech-word-${index + 1}`;
-                words[id] = {
-                  id,
-                  text: word.text,
-                  startUs: offsetUs + startUs,
-                  endUs: offsetUs + endUs,
-                  ...(word.confidence === undefined ? {} : { confidence: word.confidence }),
-                };
-              });
-              const document = buildSpeechCaptionCues({
-                ...slot.document,
-                words,
-                segments: [],
-              });
-              onDispatch({
-                label: 'Add speech captions',
-                commands: [{ type: 'caption.replaceDocument', payload: { documentId: slot.document.id, document } }],
-              });
-            }}
-            onOpenLocalAssets={onOpenLocalAssets ?? (() => undefined)}
-          />
-        )}
+          {slots.map((slot, slotIndex) => (
+            <CaptionSlotEditor
+              key={`${slot.trackId}:${slot.clip.id}`}
+              slot={slot}
+              slotNumber={slotIndex + 1}
+              query={query}
+              onClearQuery={() => setQuery('')}
+              activeTab={activeTab}
+              playheadUs={playheadUs}
+              onSeek={onSeek}
+              onDispatch={onDispatch}
+              onTranscribe={onTranscribe}
+              project={project}
+              transcriptionError={transcriptionError}
+            />
+          ))}
+          {activeTab === 'generate' &&
+            speechModelStatus !== undefined &&
+            onGenerateSpeech !== undefined && (
+              <SpeechGenerationPanel
+                modelStatus={speechModelStatus}
+                referenceAssets={Object.values(project.assets)
+                  .filter((asset) => asset.kind === 'audio')
+                  .map((asset) => ({ id: asset.id, label: asset.displayName }))}
+                onGenerate={onGenerateSpeech}
+                onAddCaptions={(timing) => {
+                  const slot = slots[0];
+                  if (
+                    slot === undefined ||
+                    timing.timingSource === 'unavailable' ||
+                    timing.words.length === 0
+                  )
+                    return;
+                  const offsetUs = Math.max(0, playheadUs - slot.clip.startUs);
+                  const words: Record<string, CaptionWordV1> = {};
+                  timing.words.forEach((word, index) => {
+                    const startUs = Math.max(0, Math.min(timing.durationUs - 1, word.startUs));
+                    const endUs = Math.max(startUs + 1, Math.min(timing.durationUs, word.endUs));
+                    if (word.endUs <= 0 || word.startUs >= timing.durationUs || endUs <= startUs)
+                      return;
+                    const id = `speech-word-${index + 1}`;
+                    words[id] = {
+                      id,
+                      text: word.text,
+                      startUs: offsetUs + startUs,
+                      endUs: offsetUs + endUs,
+                      ...(word.confidence === undefined ? {} : { confidence: word.confidence }),
+                    };
+                  });
+                  const document = buildSpeechCaptionCues({
+                    ...slot.document,
+                    words,
+                    segments: [],
+                  });
+                  onDispatch({
+                    label: 'Add speech captions',
+                    commands: [
+                      {
+                        type: 'caption.replaceDocument',
+                        payload: { documentId: slot.document.id, document },
+                      },
+                    ],
+                  });
+                }}
+                onOpenLocalAssets={onOpenLocalAssets ?? (() => undefined)}
+              />
+            )}
         </>
       )}
     </PanelShell>

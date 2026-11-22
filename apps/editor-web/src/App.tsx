@@ -1168,10 +1168,16 @@ function EditorWorkspace({
   useEffect(() => {
     let active = true;
     void mediaControlPlaneClient.speechStatus().then(
-      ({ models }) => { if (active) setSpeechModelStatus(models); },
-      () => { if (active) setSpeechModelStatus([]); },
+      ({ models }) => {
+        if (active) setSpeechModelStatus(models);
+      },
+      () => {
+        if (active) setSpeechModelStatus([]);
+      },
     );
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [projectId]);
   const transcriptionControllerRef = useRef<AbortController | undefined>(undefined);
   useEffect(() => {
@@ -3708,9 +3714,7 @@ function EditorWorkspace({
                 modelId: 'faster-whisper-large-v3-turbo',
                 range: {
                   startUs: clip.sourceInUs,
-                  endUs: Math.round(
-                    clip.sourceInUs + clip.durationUs * (clip.playbackRate ?? 1),
-                  ),
+                  endUs: Math.round(clip.sourceInUs + clip.durationUs * (clip.playbackRate ?? 1)),
                 },
               },
             },
@@ -3718,7 +3722,8 @@ function EditorWorkspace({
             loadMedia: async () => {
               const source = await mediaResolver.resolve(clip.assetId);
               const response = await fetch(source.url, { signal: controller.signal });
-              if (!response.ok) throw new Error(`Unable to read ${clip.assetId} for transcription.`);
+              if (!response.ok)
+                throw new Error(`Unable to read ${clip.assetId} for transcription.`);
               return { media: await response.blob(), mediaType: source.mimeType };
             },
           },
@@ -3756,46 +3761,77 @@ function EditorWorkspace({
       if (transcriptionControllerRef.current === controller)
         transcriptionControllerRef.current = undefined;
     },
-    [controlPlaneProject.controlPlaneProjectId, mediaResolver, projectId, session, state.playheadUs, state.selectedIds],
-  );
-  const generateSpeech = useCallback(async (
-    request: SpeechSynthesizeV1,
-    options: SpeechGenerationOptions,
-  ) => {
-    const capturedProjectId = projectId;
-    const capturedPlayheadUs = state.playheadUs;
-    const capturedComposition = session.timelineProject.compositions[session.timelineProject.rootCompositionId];
-    if (capturedComposition === undefined) throw new Error('The main timeline is unavailable.');
-    const generated = await mediaControlPlaneClient.runLocalSynthesis(
+    [
       controlPlaneProject.controlPlaneProjectId,
-      request,
-      { referenceAssetId: options.referenceAssetId, consent: options.consent, signal: options.signal },
-    );
-    if (options.signal.aborted || projectId !== capturedProjectId) throw Object.assign(new Error('Generation canceled.'), { code: 'CANCELED' });
-    if (!generated.audio.type.toLowerCase().includes('wav')) throw new Error('The speech worker did not return WAV audio.');
-    const file = new File([generated.audio], 'Generated speech.wav', { type: 'audio/wav' });
-    const asset = await importMediaFile({
-      projectId: controlPlaneProject.controlPlaneProjectId,
-      projectTitle: controlPlaneProject.title,
-      file,
-      displayName: 'Generated speech',
-      client: mediaControlPlaneClient,
-      originalAssetCache: originalAssetCachePromise,
-    });
-    if (options.signal.aborted || projectId !== capturedProjectId) throw Object.assign(new Error('Generation canceled.'), { code: 'CANCELED' });
-    const currentComposition = session.timelineProject.compositions[session.timelineProject.rootCompositionId];
-    if (currentComposition === undefined) throw new Error('The main timeline is unavailable.');
-    const transaction = buildSpeechVoicePlacement({
-      composition: currentComposition,
-      asset: { id: asset.id, kind: 'audio', displayName: asset.displayName, descriptor: asset.descriptor },
-      playheadUs: capturedPlayheadUs,
-      lockedTrackIds: new Set(timelineTrackFlags.filter((track) => track.locked).map((track) => track.id)),
-      clipId: `speech-${asset.id}`,
-    });
-    dispatchTimeline(transaction);
-    setRevision((revision) => revision + 1);
-    return { availability: 'ready' as const, timing: generated.timing };
-  }, [controlPlaneProject.controlPlaneProjectId, controlPlaneProject.title, dispatchTimeline, projectId, session, state.playheadUs, timelineTrackFlags]);
+      mediaResolver,
+      projectId,
+      session,
+      state.playheadUs,
+      state.selectedIds,
+    ],
+  );
+  const generateSpeech = useCallback(
+    async (request: SpeechSynthesizeV1, options: SpeechGenerationOptions) => {
+      const capturedProjectId = projectId;
+      const capturedPlayheadUs = state.playheadUs;
+      const capturedComposition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+      if (capturedComposition === undefined) throw new Error('The main timeline is unavailable.');
+      const generated = await mediaControlPlaneClient.runLocalSynthesis(
+        controlPlaneProject.controlPlaneProjectId,
+        request,
+        {
+          referenceAssetId: options.referenceAssetId,
+          consent: options.consent,
+          signal: options.signal,
+        },
+      );
+      if (options.signal.aborted || projectId !== capturedProjectId)
+        throw Object.assign(new Error('Generation canceled.'), { code: 'CANCELED' });
+      if (!generated.audio.type.toLowerCase().includes('wav'))
+        throw new Error('The speech worker did not return WAV audio.');
+      const file = new File([generated.audio], 'Generated speech.wav', { type: 'audio/wav' });
+      const asset = await importMediaFile({
+        projectId: controlPlaneProject.controlPlaneProjectId,
+        projectTitle: controlPlaneProject.title,
+        file,
+        displayName: 'Generated speech',
+        client: mediaControlPlaneClient,
+        originalAssetCache: originalAssetCachePromise,
+      });
+      if (options.signal.aborted || projectId !== capturedProjectId)
+        throw Object.assign(new Error('Generation canceled.'), { code: 'CANCELED' });
+      const currentComposition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+      if (currentComposition === undefined) throw new Error('The main timeline is unavailable.');
+      const transaction = buildSpeechVoicePlacement({
+        composition: currentComposition,
+        asset: {
+          id: asset.id,
+          kind: 'audio',
+          displayName: asset.displayName,
+          descriptor: asset.descriptor,
+        },
+        playheadUs: capturedPlayheadUs,
+        lockedTrackIds: new Set(
+          timelineTrackFlags.filter((track) => track.locked).map((track) => track.id),
+        ),
+        clipId: `speech-${asset.id}`,
+      });
+      dispatchTimeline(transaction);
+      setRevision((revision) => revision + 1);
+      return { availability: 'ready' as const, timing: generated.timing };
+    },
+    [
+      controlPlaneProject.controlPlaneProjectId,
+      controlPlaneProject.title,
+      dispatchTimeline,
+      projectId,
+      session,
+      state.playheadUs,
+      timelineTrackFlags,
+    ],
+  );
   const reconcileWorkerResultOperations = useCallback(() => {
     for (const record of operationLedger.list()) {
       if (record.type !== 'worker-job' || record.resultRef === undefined) continue;

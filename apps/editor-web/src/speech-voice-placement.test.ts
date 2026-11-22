@@ -22,7 +22,11 @@ describe('buildSpeechVoicePlacement', () => {
         type: 'timeline.insertClip',
         payload: expect.objectContaining({
           trackId: 'audio-b',
-          clip: expect.objectContaining({ id: 'voice-clip', startUs: 3_000_000, durationUs: 2_000_000 }),
+          clip: expect.objectContaining({
+            id: 'voice-clip',
+            startUs: 3_000_000,
+            durationUs: 2_000_000,
+          }),
         }),
       }),
     ]);
@@ -39,7 +43,9 @@ describe('buildSpeechVoicePlacement', () => {
       'timeline.addTrack',
       'timeline.insertClip',
     ]);
-    expect(transaction.commands.filter(({ type }) => type === 'timeline.insertClip')).toHaveLength(1);
+    expect(transaction.commands.filter(({ type }) => type === 'timeline.insertClip')).toHaveLength(
+      1,
+    );
   });
 
   it('skips locked compatible tracks and creates a free audio track', () => {
@@ -82,8 +88,33 @@ function composition(): Composition {
     frameRate: { num: 30, den: 1 },
     durationUs: 10_000_000,
     tracks: [
-      { id: 'audio-a', kind: 'video', family: 'audio', name: 'Audio 1', order: 0, enabled: true, clips: [{ id: 'overlap', kind: 'video', assetId: 'old', startUs: 0, durationUs: 8_000_000, sourceInUs: 0 }] },
-      { id: 'audio-b', kind: 'video', family: 'audio', name: 'Audio 2', order: 1, enabled: true, clips: [] },
+      {
+        id: 'audio-a',
+        kind: 'video',
+        family: 'audio',
+        name: 'Audio 1',
+        order: 0,
+        enabled: true,
+        clips: [
+          {
+            id: 'overlap',
+            kind: 'video',
+            assetId: 'old',
+            startUs: 0,
+            durationUs: 8_000_000,
+            sourceInUs: 0,
+          },
+        ],
+      },
+      {
+        id: 'audio-b',
+        kind: 'video',
+        family: 'audio',
+        name: 'Audio 2',
+        order: 1,
+        enabled: true,
+        clips: [],
+      },
     ],
   };
 }

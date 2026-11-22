@@ -27,7 +27,8 @@ function validationError(descriptor, param, seen) {
   if (!param || typeof param.key !== 'string' || param.key.trim() === '')
     return 'parameter key must be a non-empty string';
   if (seen.has(`${descriptor.id}/${param.key}`)) return 'duplicate descriptor parameter key';
-  if (typeof param.label !== 'string' || param.label.trim() === '') return 'label must be a non-empty string';
+  if (typeof param.label !== 'string' || param.label.trim() === '')
+    return 'label must be a non-empty string';
   if (param.type !== 'number') return 'parameter type must be number';
   for (const field of ['defaultValue', 'min', 'max', 'step']) {
     if (!Number.isFinite(param[field])) return `${field} must be a finite number`;
@@ -78,7 +79,11 @@ function makeRow(helpers, spec) {
     ...(spec.validationError ? { status: 'failed', reason: spec.validationError } : {}),
     evidenceKey: key,
     expectedEvidencePath: `${key}.png`,
-    evidencePaths: Object.freeze({ pre: `${key}.pre.json`, post: `${key}.post.json`, screenshot: `${key}.png` }),
+    evidencePaths: Object.freeze({
+      pre: `${key}.pre.json`,
+      post: `${key}.post.json`,
+      screenshot: `${key}.png`,
+    }),
     async run(page, context = {}) {
       if (spec.validationError) return failed(row, spec.validationError, null, null);
 
@@ -92,11 +97,20 @@ function makeRow(helpers, spec) {
         return failed(row, `prerequisite check failed: ${errorMessage(error)}`, null, null);
       }
       if (prerequisite === false || prerequisite?.available === false) {
-        return unavailable(row, prerequisite?.reason ?? 'prerequisite is not available', null, null);
+        return unavailable(
+          row,
+          prerequisite?.reason ?? 'prerequisite is not available',
+          null,
+          null,
+        );
       }
 
       const driver = spec.driver === 'pointer' ? helpers.pointer : helpers.cdp;
-      if (!driver || typeof driver.snapshot !== 'function' || typeof driver.perform !== 'function') {
+      if (
+        !driver ||
+        typeof driver.snapshot !== 'function' ||
+        typeof driver.perform !== 'function'
+      ) {
         return unavailable(
           row,
           `orchestrator did not supply the ${spec.driver} snapshot and action hooks`,
@@ -136,7 +150,16 @@ function makeRow(helpers, spec) {
       if (typeof helpers.assert === 'function') {
         try {
           assertion = normalizedResult(
-            await helpers.assert({ page, row, pre, post, before: pre, after: post, actionResult, context }),
+            await helpers.assert({
+              page,
+              row,
+              pre,
+              post,
+              before: pre,
+              after: post,
+              actionResult,
+              context,
+            }),
           );
         } catch (error) {
           return failed(row, `evidence assertion failed: ${errorMessage(error)}`, pre, post);
@@ -148,7 +171,8 @@ function makeRow(helpers, spec) {
         };
       }
 
-      if (!assertion.ok) return failed(row, assertion.detail ?? 'evidence assertion failed', pre, post);
+      if (!assertion.ok)
+        return failed(row, assertion.detail ?? 'evidence assertion failed', pre, post);
       return {
         id: row.id,
         status: 'passed',
@@ -193,7 +217,8 @@ function descriptorRows(helpers, descriptors) {
     }
     const paramCounts = new Map();
     for (const param of params) {
-      if (typeof param?.key === 'string') paramCounts.set(param.key, (paramCounts.get(param.key) ?? 0) + 1);
+      if (typeof param?.key === 'string')
+        paramCounts.set(param.key, (paramCounts.get(param.key) ?? 0) + 1);
     }
     for (const [paramIndex, param] of params.entries()) {
       if (param?.type !== 'number') continue;
@@ -229,7 +254,11 @@ function descriptorRows(helpers, descriptors) {
           ...shared,
           id: uncuedId.replace(`${param.key}:`, `${param.key}${duplicateSuffix}:`),
           driver: 'cdp',
-          action: { type: 'numeric-uncued-value', descriptorId: descriptor.id, parameterKey: param.key },
+          action: {
+            type: 'numeric-uncued-value',
+            descriptorId: descriptor.id,
+            parameterKey: param.key,
+          },
           keyed: false,
         }),
       );
@@ -239,7 +268,11 @@ function descriptorRows(helpers, descriptors) {
             ...shared,
             id: `descriptor:${descriptor.id}/${param.key}${duplicateSuffix}:keyed-value`,
             driver: 'cdp',
-            action: { type: 'numeric-keyed-value', descriptorId: descriptor.id, parameterKey: param.key },
+            action: {
+              type: 'numeric-keyed-value',
+              descriptorId: descriptor.id,
+              parameterKey: param.key,
+            },
             keyed: true,
           }),
         );
@@ -251,23 +284,68 @@ function descriptorRows(helpers, descriptors) {
 
 function supplementalRows(helpers) {
   const specs = [
-    ['space.tap', 'keyboard', { type: 'space-tap', key: 'Space' }, 'Space tap toggles playback once and returns focus ownership to the initiating control.'],
-    ['space.hold', 'keyboard', { type: 'space-hold', key: 'Space', durationMs: 700 }, 'Holding Space follows the editor hold behavior without leaking the key after release.'],
-    ['space.repeat', 'keyboard', { type: 'space-repeat', key: 'Space', repeats: 3 }, 'Repeated Space taps produce the expected repeat count without a stuck key.'],
-    ['space.focus-ownership', 'keyboard', { type: 'focus-ownership', key: 'Space' }, 'Space is handled only by the editor that owns focus; text inputs retain normal typing behavior.'],
-    ['gesture.single-undo', 'pointer', { type: 'gesture-single-undo', undoCount: 1 }, 'One complete pointer gesture is undone by exactly one Undo.'],
-    ['caption.direction-ltr', 'cdp', { type: 'caption-direction', direction: 'ltr' }, 'Caption text renders and remains editable in left-to-right direction.'],
-    ['caption.direction-rtl', 'cdp', { type: 'caption-direction', direction: 'rtl' }, 'Caption text renders and remains editable in right-to-left direction.'],
-    ['caption.reopen', 'cdp', { type: 'caption-reopen' }, 'Closing and reopening the caption editor preserves the text and direction.'],
+    [
+      'space.tap',
+      'keyboard',
+      { type: 'space-tap', key: 'Space' },
+      'Space tap toggles playback once and returns focus ownership to the initiating control.',
+    ],
+    [
+      'space.hold',
+      'keyboard',
+      { type: 'space-hold', key: 'Space', durationMs: 700 },
+      'Holding Space follows the editor hold behavior without leaking the key after release.',
+    ],
+    [
+      'space.repeat',
+      'keyboard',
+      { type: 'space-repeat', key: 'Space', repeats: 3 },
+      'Repeated Space taps produce the expected repeat count without a stuck key.',
+    ],
+    [
+      'space.focus-ownership',
+      'keyboard',
+      { type: 'focus-ownership', key: 'Space' },
+      'Space is handled only by the editor that owns focus; text inputs retain normal typing behavior.',
+    ],
+    [
+      'gesture.single-undo',
+      'pointer',
+      { type: 'gesture-single-undo', undoCount: 1 },
+      'One complete pointer gesture is undone by exactly one Undo.',
+    ],
+    [
+      'caption.direction-ltr',
+      'cdp',
+      { type: 'caption-direction', direction: 'ltr' },
+      'Caption text renders and remains editable in left-to-right direction.',
+    ],
+    [
+      'caption.direction-rtl',
+      'cdp',
+      { type: 'caption-direction', direction: 'rtl' },
+      'Caption text renders and remains editable in right-to-left direction.',
+    ],
+    [
+      'caption.reopen',
+      'cdp',
+      { type: 'caption-reopen' },
+      'Closing and reopening the caption editor preserves the text and direction.',
+    ],
   ];
   return specs.map(([suffix, driver, action, assertion]) =>
     makeRow(helpers, {
       id: `editor:${suffix}`,
-      family: suffix.startsWith('caption') ? 'captions' : suffix.startsWith('gesture') ? 'gesture-undo' : 'keyboard',
+      family: suffix.startsWith('caption')
+        ? 'captions'
+        : suffix.startsWith('gesture')
+          ? 'gesture-undo'
+          : 'keyboard',
       driver,
       action,
       assertion,
-      prerequisite: 'orchestrator confirms the target editor, caption, focus owner, or gesture is available',
+      prerequisite:
+        'orchestrator confirms the target editor, caption, focus owner, or gesture is available',
       sourceIds: [],
     }),
   );
@@ -358,7 +436,8 @@ export function buildEditorControlsAuditRows(helpers = {}, descriptors = []) {
           parameter: numericCase,
           action: { type: `numeric-${actionId}`, control: numericCase.control },
           assertion: numericAction.label,
-          prerequisite: numericCase.input?.selector ?? numericCase.input?.ariaLabel ?? numericCase.control,
+          prerequisite:
+            numericCase.input?.selector ?? numericCase.input?.ariaLabel ?? numericCase.control,
           driver: auditFamilyForNumericAction(actionId),
           keyed: numericAction.id === 'keyframe',
         }),
@@ -373,7 +452,8 @@ export function buildEditorControlsAuditRows(helpers = {}, descriptors = []) {
         numericCase,
         parameter: numericCase,
         action: { type: 'numeric-uncued-value', control: numericCase.control },
-        assertion: 'edit the numeric value with no keyframe cue and confirm no keyframe was created',
+        assertion:
+          'edit the numeric value with no keyframe cue and confirm no keyframe was created',
         prerequisite: numericCase.input?.selector ?? numericCase.control,
         driver: 'cdp',
         keyed: false,
