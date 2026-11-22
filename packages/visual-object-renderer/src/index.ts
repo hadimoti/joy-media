@@ -73,6 +73,12 @@ export interface BuildRenderFrameOptions {
   >;
   /** Optional evaluator-provided layer order for universal timeline tracks. */
   readonly zIndexByObjectId?: Readonly<Record<string, number>>;
+  /**
+   * Colour drawn behind every node. Defaults to the dark frame colour, which export and quality-check
+   * captures rely on. The Monitor passes a fully transparent colour so the checkerboard shows where
+   * nothing is drawn.
+   */
+  readonly background?: Rgba;
 }
 
 /**
@@ -322,7 +328,7 @@ export function buildRenderFrameIR(
     compositionId,
     timeUs,
     viewport: { width, height, dpr: 1 },
-    background: DARK_BG,
+    background: options.background ?? DARK_BG,
     nodes,
     ...(colorGrade ? { colorGrade } : {}),
   };
@@ -597,6 +603,8 @@ export function normalizeColorGrade(
 // ---- palette ----
 const WHITE: Rgba = Object.freeze({ r: 255, g: 255, b: 255, a: 255 });
 const DARK_BG: Rgba = Object.freeze({ r: 12, g: 16, b: 28, a: 255 });
+/** The solid colour behind every frame in export and quality captures (and the Monitor, where it is transparent). */
+export const DEFAULT_FRAME_BACKGROUND: Rgba = DARK_BG;
 const EMPTY_CLIP_TIMES: ClipTimingLookup = new Map();
 
 /**

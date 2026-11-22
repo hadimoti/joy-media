@@ -100,7 +100,8 @@ describe('Monitor overlays', () => {
         />,
       ),
     );
-    expect(overlayNames()).toEqual([]);
+    // Only the faint frame edge stays: the frame is transparent, so its edge must always be visible.
+    expect(overlayNames()).toEqual(['frame-edge']);
     expect(container?.querySelector('[data-monitor-ruler]')).toBeNull();
   });
 
