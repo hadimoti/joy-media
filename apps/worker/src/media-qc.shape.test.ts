@@ -58,7 +58,13 @@ describe('probe size', () => {
 describe('parseCropdetect', () => {
   it('takes the last box, which is the union of every sampled frame', () => {
     const text = [cropLine(1200, 600, 40, 180), cropLine(1280, 720, 0, 120)].join('\n');
-    expect(parseCropdetect(text)).toEqual({ cropWidth: 1280, cropHeight: 720, sampledFrames: 2 });
+    expect(parseCropdetect(text)).toEqual({
+      cropWidth: 1280,
+      cropHeight: 720,
+      cropX: 0,
+      cropY: 120,
+      sampledFrames: 2,
+    });
   });
   it('returns nothing when there is no usable crop line', () => {
     expect(parseCropdetect('frame=1 fps=0')).toBeUndefined();
@@ -97,7 +103,10 @@ describe('aspect and bar finding', () => {
 
   it('flags 16:9 content padded into a 4:3 frame as a letterbox of 25%', () => {
     const [finding] = findings(
-      measured({ ...frame, crop: { cropWidth: 1280, cropHeight: 720, sampledFrames: 20 } }),
+      measured({
+        ...frame,
+        crop: { cropWidth: 1280, cropHeight: 720, cropX: 0, cropY: 120, sampledFrames: 20 },
+      }),
     );
     expect(finding?.type).toBe('aspect-mismatch');
     expect(finding?.severity).toBe('major');
@@ -108,7 +117,7 @@ describe('aspect and bar finding', () => {
     const [finding] = findings(
       measured({
         videoSize: { width: 1920, height: 1080 },
-        crop: { cropWidth: 1440, cropHeight: 1080, sampledFrames: 20 },
+        crop: { cropWidth: 1440, cropHeight: 1080, cropX: 240, cropY: 0, sampledFrames: 20 },
       }),
     );
     expect(finding?.measured).toMatchObject({ bars: 'pillarbox', barFraction: 0.25 });
@@ -117,7 +126,7 @@ describe('aspect and bar finding', () => {
     const [finding] = findings(
       measured({
         videoSize: { width: 1000, height: 1000 },
-        crop: { cropWidth: 800, cropHeight: 800, sampledFrames: 20 },
+        crop: { cropWidth: 800, cropHeight: 800, cropX: 100, cropY: 100, sampledFrames: 20 },
       }),
     );
     expect(finding?.measured).toMatchObject({ bars: 'both' });
@@ -125,22 +134,57 @@ describe('aspect and bar finding', () => {
   it('ignores a rounding-size border and a full frame', () => {
     expect(
       findings(
-        measured({ ...frame, crop: { cropWidth: 1276, cropHeight: 956, sampledFrames: 9 } }),
+        measured({
+          ...frame,
+          crop: { cropWidth: 1276, cropHeight: 956, cropX: 2, cropY: 2, sampledFrames: 9 },
+        }),
       ),
     ).toEqual([]);
     expect(
       findings(
-        measured({ ...frame, crop: { cropWidth: 1280, cropHeight: 960, sampledFrames: 9 } }),
+        measured({
+          ...frame,
+          crop: { cropWidth: 1280, cropHeight: 960, cropX: 0, cropY: 0, sampledFrames: 9 },
+        }),
       ),
     ).toEqual([]);
   });
   it('does not call a nearly black picture a letterbox', () => {
     expect(
-      findings(measured({ ...frame, crop: { cropWidth: 100, cropHeight: 60, sampledFrames: 9 } })),
+      findings(
+        measured({
+          ...frame,
+          crop: { cropWidth: 100, cropHeight: 60, cropX: 0, cropY: 0, sampledFrames: 9 },
+        }),
+      ),
     ).toEqual([]);
   });
+  it('does not call a dark edge on one side a bar', () => {
+    // 120 px of dark on the bottom only (a night sky or a vignette is the other way round, same idea).
+    const oneSided = measured({
+      ...frame,
+      crop: { cropWidth: 1280, cropHeight: 840, cropX: 0, cropY: 0, sampledFrames: 9 },
+    });
+    expect(findings(oneSided)).toEqual([]);
+    const oneSidedWide = measured({
+      videoSize: { width: 1920, height: 1080 },
+      crop: { cropWidth: 1500, cropHeight: 1080, cropX: 0, cropY: 0, sampledFrames: 9 },
+    });
+    expect(findings(oneSidedWide)).toEqual([]);
+  });
+  it('does not report when the check did not run', () => {
+    const m = measured({
+      ...frame,
+      checksRun: ['low-resolution'],
+      crop: { cropWidth: 1280, cropHeight: 720, cropX: 0, cropY: 120, sampledFrames: 9 },
+    });
+    expect(findings(m)).toEqual([]);
+  });
   it('uses the bar threshold setting', () => {
-    const m = measured({ ...frame, crop: { cropWidth: 1280, cropHeight: 900, sampledFrames: 9 } });
+    const m = measured({
+      ...frame,
+      crop: { cropWidth: 1280, cropHeight: 900, cropX: 0, cropY: 30, sampledFrames: 9 },
+    });
     expect(findings(m)).toEqual([]);
     expect(
       qcFindings(m, { ...DEFAULT_QC_THRESHOLDS, letterboxBarMinFraction: 0.05 })[0]?.severity,
@@ -196,6 +240,32 @@ describe.skipIf(!canRun('ffmpeg') || !canRun('ffprobe'))(
       if (result.status !== 0) throw new Error(`could not generate ${name}: ${result.stderr}`);
       return output;
     }
+    function generateRotated(directory: string): string {
+      // A full-frame 640x360 clip that players turn by 90 degrees: the coded size must still match the frames read.
+      // The rotation is a stream property, so it is set on a stream copy of an ordinary clip.
+      const plain = generate(directory, 'plain.mp4', 'null');
+      const output = join(directory, 'rotated.mp4');
+      const result = spawnSync(
+        'ffmpeg',
+        [
+          '-y',
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-display_rotation',
+          '90',
+          '-i',
+          plain,
+          '-c',
+          'copy',
+          output,
+        ],
+        { shell: false, encoding: 'utf8' },
+      );
+      if (result.status !== 0)
+        throw new Error(`could not generate the rotated clip: ${result.stderr}`);
+      return output;
+    }
     const check = async (source: string) =>
       (
         await runMediaQc({
@@ -214,6 +284,9 @@ describe.skipIf(!canRun('ffmpeg') || !canRun('ffprobe'))(
         const clean = await check(generate(directory, 'clean.mp4', 'null'));
         expect(clean.findings).toEqual([]);
         expect(clean.technical?.checksRun).toEqual(['frozen', 'low-resolution', 'aspect-mismatch']);
+
+        const rotated = await check(generateRotated(directory));
+        expect(rotated.findings.some((finding) => finding.type === 'aspect-mismatch')).toBe(false);
 
         const small = await check(generate(directory, 'small.mp4', 'scale=320:180'));
         expect(small.findings.map((finding) => finding.type)).toEqual(['low-resolution']);

@@ -444,6 +444,9 @@ export interface QcExposureRun {
 export interface QcCropDetection {
   readonly cropWidth: number;
   readonly cropHeight: number;
+  /** Left and top edge of the non-black box, in pixels. */
+  readonly cropX: number;
+  readonly cropY: number;
   readonly sampledFrames: number;
 }
 
@@ -461,8 +464,10 @@ export function parseCropdetect(text: string): QcCropDetection | undefined {
   if (last === undefined) return undefined;
   const cropWidth = Number(last[1]);
   const cropHeight = Number(last[2]);
+  const cropX = Number(last[3]);
+  const cropY = Number(last[4]);
   if (!(cropWidth > 0 && cropHeight > 0)) return undefined;
-  return { cropWidth, cropHeight, sampledFrames: frames };
+  return { cropWidth, cropHeight, cropX, cropY, sampledFrames: frames };
 }
 
 export interface QcPictureAnalysis {
@@ -769,21 +774,28 @@ export function qcFindings(measurements: QcMeasurements, thresholds: QcThreshold
       );
     }
   }
-  if (size !== undefined && measurements.crop !== undefined) {
-    const { cropWidth, cropHeight } = measurements.crop;
+  if (
+    size !== undefined &&
+    measurements.crop !== undefined &&
+    measurements.checksRun.includes('aspect-mismatch')
+  ) {
+    const { cropWidth, cropHeight, cropX, cropY } = measurements.crop;
     // A crop smaller than a tenth of the frame means a mostly black picture, not bars: nothing to judge.
     if (cropWidth * cropHeight >= size.width * size.height * 0.1) {
-      const topBottom = Math.max(0, size.height - cropHeight) / size.height;
-      const leftRight = Math.max(0, size.width - cropWidth) / size.width;
+      const min = thresholds.letterboxBarMinFraction;
+      // Baked-in bars sit on both sides of an axis. A dark edge on one side only (a night sky, a vignette) is
+      // picture, not a bar. Each side must carry at least half the threshold, and the pair the whole of it.
+      const axis = (before: number, after: number, total: number): number => {
+        const a = Math.max(0, before) / total;
+        const b = Math.max(0, after) / total;
+        return Math.min(a, b) >= min / 2 && a + b >= min ? a + b : 0;
+      };
+      const topBottom = axis(cropY, size.height - (cropY + cropHeight), size.height);
+      const leftRight = axis(cropX, size.width - (cropX + cropWidth), size.width);
       const fraction = Math.max(topBottom, leftRight);
-      if (fraction >= thresholds.letterboxBarMinFraction) {
+      if (fraction > 0) {
         const bars =
-          topBottom >= thresholds.letterboxBarMinFraction &&
-          leftRight >= thresholds.letterboxBarMinFraction
-            ? 'both'
-            : topBottom >= leftRight
-              ? 'letterbox'
-              : 'pillarbox';
+          topBottom > 0 && leftRight > 0 ? 'both' : topBottom > 0 ? 'letterbox' : 'pillarbox';
         const where =
           bars === 'both'
             ? 'on all four sides of'
@@ -1416,12 +1428,21 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
   if (videoSize !== undefined && checks.has('aspect-mismatch')) {
     await options.progress(85);
     const seconds = durationUs / 1_000_000;
+    // Frames spread over the whole file, but never fewer than about eight, so a short clip that fades in from
+    // black is still seen lit. Capped like the picture check.
     const fps = Math.max(
       0.01,
-      seconds > 0 ? Math.min(MAX_SAMPLE_FPS, MAX_SAMPLED_FRAMES / seconds) : 1,
+      seconds > 0
+        ? Math.min(
+            MAX_SAMPLED_FRAMES / seconds,
+            Math.max(MAX_SAMPLE_FPS, Math.min(25, 8 / seconds)),
+          )
+        : 1,
     );
     const outcome = await run('the picture shape check', 'FFmpeg', ffmpeg, [
       ...COMMON_FFMPEG_ARGS,
+      // The probe reports the coded size, so the frames are read unrotated to match it.
+      '-noautorotate',
       '-i',
       options.sourcePath,
       '-map',
@@ -1430,14 +1451,20 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
       '-sn',
       '-dn',
       '-vf',
-      `fps=${Number(fps.toFixed(4))},cropdetect=limit=24:round=2:reset=0`,
+      // 8-bit luma, so the black limit means the same on 10-bit and HDR sources. skip=0 reads the first frame too.
+      `fps=${Number(fps.toFixed(4))},format=yuv420p,cropdetect=limit=24:round=2:reset=0:skip=0`,
       '-f',
       'null',
       '-',
     ]);
-    if (outcome !== undefined) {
-      checksRun.push('aspect-mismatch');
+    if (outcome !== undefined && outcome.state === 'timed-out') {
+      // The box only grows, so a part-way answer could report bars that later frames fill. Say nothing instead.
+      truncated.push('the picture shape was not judged: its check hit the time limit');
+    } else if (outcome !== undefined) {
       crop = parseCropdetect(outcome.stderr);
+      if (crop === undefined)
+        truncated.push('the picture shape was not judged: no frame could be measured');
+      else checksRun.push('aspect-mismatch');
     }
   }
 
