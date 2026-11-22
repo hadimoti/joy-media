@@ -11,11 +11,15 @@ describe('VoiceConsentManager', () => {
       consentGrantedBy: 'desktop-local',
     });
 
-    expect(requireVoiceConsent(manager, voice.id, { purpose: 'general', userId: 'desktop-local' })).toEqual(voice);
-    expect(() => requireVoiceConsent(manager, voice.id, { purpose: 'general', userId: 'other' }))
-      .toThrow('CONSENT_DENIED');
-    expect(() => requireVoiceConsent(manager, 'forged-voice', { purpose: 'general', userId: 'desktop-local' }))
-      .toThrow('VOICE_NOT_FOUND');
+    expect(
+      requireVoiceConsent(manager, voice.id, { purpose: 'general', userId: 'desktop-local' }),
+    ).toEqual(voice);
+    expect(() =>
+      requireVoiceConsent(manager, voice.id, { purpose: 'general', userId: 'other' }),
+    ).toThrow('CONSENT_DENIED');
+    expect(() =>
+      requireVoiceConsent(manager, 'forged-voice', { purpose: 'general', userId: 'desktop-local' }),
+    ).toThrow('VOICE_NOT_FOUND');
   });
 
   describe('enrollVoice', () => {

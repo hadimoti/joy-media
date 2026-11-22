@@ -357,9 +357,10 @@ function speechTimingOf(job: DispatchJob): { readonly speech?: unknown } {
 
 /** The job as the editor may see it: never the lease token, the worker ID, or any path. */
 function publicJob(job: DispatchJob): Record<string, unknown> {
-  const error = job.jobType.startsWith('speech.') && job.status === 'cancelled'
-    ? 'CANCELED'
-    : publicJobError(job.error);
+  const error =
+    job.jobType.startsWith('speech.') && job.status === 'cancelled'
+      ? 'CANCELED'
+      : publicJobError(job.error);
   return {
     id: job.id,
     jobType: job.jobType,
@@ -701,48 +702,49 @@ export function createMediaChannelHandlers(
     } catch {
       return unavailable('The local Whisper server returned an invalid reply.');
     }
-    const parseWords = (candidates: readonly unknown[]) => candidates.flatMap((candidate) => {
-      if (!isPlainObject(candidate)) return [];
-      const text = candidate['word'] ?? candidate['text'];
-      const start = candidate['start'];
-      const end = candidate['end'];
-      if (
-        typeof text !== 'string' ||
-        text.trim().length === 0 ||
-        typeof start !== 'number' ||
-        !Number.isFinite(start) ||
-        start < 0 ||
-        typeof end !== 'number' ||
-        !Number.isFinite(end) ||
-        end < start ||
-        !Number.isSafeInteger(Math.round(start * 1_000_000)) ||
-        !Number.isSafeInteger(Math.round(end * 1_000_000))
-      ) {
-        return [];
-      }
-      const probability = candidate['probability'];
-      return [
-        {
-          text,
-          startUs: Math.round(start * 1_000_000),
-          endUs: Math.round(end * 1_000_000),
-          ...(typeof probability === 'number' &&
-          Number.isFinite(probability) &&
-          probability >= 0 &&
-          probability <= 1
-            ? { confidence: probability }
-            : {}),
-        },
-      ];
-    });
-    const topLevelWords = isPlainObject(reply) && Array.isArray(reply['words'])
-      ? parseWords(reply['words'])
-      : [];
+    const parseWords = (candidates: readonly unknown[]) =>
+      candidates.flatMap((candidate) => {
+        if (!isPlainObject(candidate)) return [];
+        const text = candidate['word'] ?? candidate['text'];
+        const start = candidate['start'];
+        const end = candidate['end'];
+        if (
+          typeof text !== 'string' ||
+          text.trim().length === 0 ||
+          typeof start !== 'number' ||
+          !Number.isFinite(start) ||
+          start < 0 ||
+          typeof end !== 'number' ||
+          !Number.isFinite(end) ||
+          end < start ||
+          !Number.isSafeInteger(Math.round(start * 1_000_000)) ||
+          !Number.isSafeInteger(Math.round(end * 1_000_000))
+        ) {
+          return [];
+        }
+        const probability = candidate['probability'];
+        return [
+          {
+            text,
+            startUs: Math.round(start * 1_000_000),
+            endUs: Math.round(end * 1_000_000),
+            ...(typeof probability === 'number' &&
+            Number.isFinite(probability) &&
+            probability >= 0 &&
+            probability <= 1
+              ? { confidence: probability }
+              : {}),
+          },
+        ];
+      });
+    const topLevelWords =
+      isPlainObject(reply) && Array.isArray(reply['words']) ? parseWords(reply['words']) : [];
     let words = topLevelWords;
     if (words.length === 0 && isPlainObject(reply) && Array.isArray(reply['segments'])) {
       const nested: unknown[] = [];
       for (const segment of reply['segments']) {
-        if (isPlainObject(segment) && Array.isArray(segment['words'])) nested.push(...segment['words']);
+        if (isPlainObject(segment) && Array.isArray(segment['words']))
+          nested.push(...segment['words']);
       }
       words = parseWords(nested);
     }
@@ -776,11 +778,12 @@ export function createMediaChannelHandlers(
         models: models.map(([modelId, jobCapability]) => {
           const modelReady = presence?.capabilities.includes(`speech.model.${modelId}`) === true;
           const jobReady = presence?.capabilities.includes(jobCapability) === true;
-          const state = modelReady && jobReady
-            ? 'ready'
-            : modelReady && !jobReady
-              ? 'incompatible'
-              : 'setup-required';
+          const state =
+            modelReady && jobReady
+              ? 'ready'
+              : modelReady && !jobReady
+                ? 'incompatible'
+                : 'setup-required';
           return {
             modelId,
             state,
@@ -806,18 +809,25 @@ export function createMediaChannelHandlers(
     if (jobType === 'speech.transcribe' || refId !== undefined) {
       const sourceId = asId(refId);
       sourceAsset = sourceId === undefined ? undefined : deps.assets.get(sourceId);
-      const validKind = jobType === 'speech.transcribe'
-        ? sourceAsset?.kind === 'audio' || sourceAsset?.kind === 'video'
-        : sourceAsset?.kind === 'audio';
-      if (sourceAsset === undefined || sourceAsset.internal === true || !validKind || sourceAsset.storedPath === undefined) {
+      const validKind =
+        jobType === 'speech.transcribe'
+          ? sourceAsset?.kind === 'audio' || sourceAsset?.kind === 'video'
+          : sourceAsset?.kind === 'audio';
+      if (
+        sourceAsset === undefined ||
+        sourceAsset.internal === true ||
+        !validKind ||
+        sourceAsset.storedPath === undefined
+      ) {
         return { ok: false, error: 'SOURCE_UNAVAILABLE' };
       }
     }
 
     const presence = deps.jobStore.presence();
-    const parsed = jobType === 'speech.transcribe'
-      ? parseSpeechTranscribeV1(input)
-      : parseSpeechSynthesizeV1(input);
+    const parsed =
+      jobType === 'speech.transcribe'
+        ? parseSpeechTranscribeV1(input)
+        : parseSpeechSynthesizeV1(input);
     if (parsed === undefined) return { ok: false, error: 'Invalid media request' };
     const engineReady = presence?.capabilities.includes(`speech.model.${parsed.modelId}`) === true;
     const capability = jobType;
@@ -829,12 +839,18 @@ export function createMediaChannelHandlers(
     let jobRefId = sourceAsset?.id ?? '';
     if (jobType === 'speech.synthesize') {
       const consent = payload['consent'];
-      if (!isPlainObject(consent) || consent['acknowledged'] !== true ||
-        (consent['purpose'] !== 'general' && consent['purpose'] !== 'personal-noncommercial')) {
+      if (
+        !isPlainObject(consent) ||
+        consent['acknowledged'] !== true ||
+        (consent['purpose'] !== 'general' && consent['purpose'] !== 'personal-noncommercial')
+      ) {
         return { ok: false, error: 'CONSENT_DENIED' };
       }
       const purpose = consent['purpose'];
-      if ((parsed as { language: string }).language === 'fa-IR' && purpose !== 'personal-noncommercial') {
+      if (
+        (parsed as { language: string }).language === 'fa-IR' &&
+        purpose !== 'personal-noncommercial'
+      ) {
         return { ok: false, error: 'CONSENT_DENIED' };
       }
       if ('purpose' in parsed && parsed.purpose !== undefined && parsed.purpose !== purpose) {
@@ -858,12 +874,19 @@ export function createMediaChannelHandlers(
         sessionVoiceBindings.set(voice.id, { assetId: sourceAsset.id, userId, purpose });
         const binding = sessionVoiceBindings.get(voice.id);
         try {
-          if (binding?.assetId !== sourceAsset.id || binding.userId !== userId || binding.purpose !== purpose) {
+          if (
+            binding?.assetId !== sourceAsset.id ||
+            binding.userId !== userId ||
+            binding.purpose !== purpose
+          ) {
             return { ok: false, error: 'CONSENT_DENIED' };
           }
           requireVoiceConsent(voiceConsent, voice.id, { purpose, userId });
         } catch (error) {
-          return { ok: false, error: error instanceof VoiceConsentError ? error.code : 'CONSENT_DENIED' };
+          return {
+            ok: false,
+            error: error instanceof VoiceConsentError ? error.code : 'CONSENT_DENIED',
+          };
         } finally {
           sessionVoiceBindings.delete(voice.id);
         }

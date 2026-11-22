@@ -144,7 +144,8 @@ export function SpeechGenerationPanel({
   const selectedAssetIsRegistered =
     referenceAssetId.length === 0 || referenceAssets.some((asset) => asset.id === referenceAssetId);
   const referenceRequired = language === 'fa-IR';
-  const validReference = selectedAssetIsRegistered && (!referenceRequired || referenceAssetId.length > 0);
+  const validReference =
+    selectedAssetIsRegistered && (!referenceRequired || referenceAssetId.length > 0);
   const purpose: SpeechConsentRequest['purpose'] = personalNoncommercial
     ? 'personal-noncommercial'
     : 'general';
@@ -299,7 +300,8 @@ export function SpeechGenerationPanel({
             onChange={(event) => setEngineChoice(event.currentTarget.value as SpeechModelId)}
           >
             {engineChoices.map((engine) => {
-              const state = modelStatus.find((model) => model.modelId === engine)?.state ?? 'setup-required';
+              const state =
+                modelStatus.find((model) => model.modelId === engine)?.state ?? 'setup-required';
               return (
                 <option key={engine} value={engine} disabled={state !== 'ready'}>
                   {ENGINE_LABEL[engine]} · {statusText(state)}
@@ -367,7 +369,9 @@ export function SpeechGenerationPanel({
             Use for a personal, non-commercial purpose
           </label>
           {language === 'fa-IR' && (
-            <small>Persian speech is opt in and available only for personal, non-commercial use.</small>
+            <small>
+              Persian speech is opt in and available only for personal, non-commercial use.
+            </small>
           )}
           <label>
             <input
@@ -379,7 +383,11 @@ export function SpeechGenerationPanel({
           </label>
         </fieldset>
 
-        {error !== undefined && <p className="speech-error" role="alert">{error}</p>}
+        {error !== undefined && (
+          <p className="speech-error" role="alert">
+            {error}
+          </p>
+        )}
         <p id={statusId} className="speech-live-status" role="status" aria-live="polite">
           {status}
         </p>

@@ -60,10 +60,7 @@ export function requireVoiceConsent(
 ): NonNullable<ReturnType<VoiceConsentManager['getVoice']>> {
   const voice = manager.getVoice(voiceId);
   if (voice === undefined) {
-    throw new VoiceConsentError(
-      'VOICE_NOT_FOUND',
-      `VOICE_NOT_FOUND: Voice "${voiceId}" not found`,
-    );
+    throw new VoiceConsentError('VOICE_NOT_FOUND', `VOICE_NOT_FOUND: Voice "${voiceId}" not found`);
   }
   const check = manager.canUseVoice(voiceId, request);
   if (!check.allowed) {

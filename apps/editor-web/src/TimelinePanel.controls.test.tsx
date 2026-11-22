@@ -7,8 +7,9 @@ import { emptySpikeProject, makeVideoClip } from '@joy-media/test-fixtures';
 import { TimelinePanel } from './TimelinePanel.js';
 import { clearTimelineClipClipboard, copyTimelineClips } from './timeline-clip-clipboard.js';
 
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-  true;
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 const SECOND_US = 1_000_000;
 
@@ -37,7 +38,11 @@ interface MountOptions {
   readonly playheadUs?: number;
   readonly selectedIds?: readonly string[];
   readonly playing?: boolean;
-  readonly markers?: readonly { readonly id: string; readonly timeUs: number; readonly label: string }[];
+  readonly markers?: readonly {
+    readonly id: string;
+    readonly timeUs: number;
+    readonly label: string;
+  }[];
   readonly autoFit?: boolean;
   readonly snapping?: boolean;
   readonly muted?: boolean;
@@ -66,9 +71,7 @@ function project(locked = false, muted = false) {
   };
 }
 
-async function mount(
-  options: MountOptions = {},
-): Promise<Mounted> {
+async function mount(options: MountOptions = {}): Promise<Mounted> {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -226,7 +229,9 @@ describe('TimelinePanel toolbar and track controls', () => {
     expect(mounted.callbacks.autoFitChange).toHaveBeenCalledWith(false);
     await click(button('Zoom in'));
     expect(mounted.callbacks.viewportChange).toHaveBeenCalledTimes(2);
-    const slider = mounted.container.querySelector<HTMLInputElement>('input[aria-label="Timeline zoom"]')!;
+    const slider = mounted.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Timeline zoom"]',
+    )!;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(slider, '35');
     await act(async () => slider.dispatchEvent(new Event('input', { bubbles: true })));
     await act(async () => slider.dispatchEvent(new Event('change', { bubbles: true })));
@@ -244,7 +249,9 @@ describe('TimelinePanel toolbar and track controls', () => {
     const source = project();
     copyTimelineClips(source.compositions.root!, ['clip-a']);
     mounted = await mount();
-    const paste = mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Paste clip"]')!;
+    const paste = mounted.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Paste clip"]',
+    )!;
     expect(paste.disabled).toBe(false);
     await click(paste);
     expect(mounted.callbacks.paste).toHaveBeenCalledOnce();
@@ -304,7 +311,9 @@ describe('TimelinePanel toolbar and track controls', () => {
 
     await unmount(mounted);
     mounted = await mount({ muted: true });
-    await click(mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Unmute V1"]')!);
+    await click(
+      mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Unmute V1"]')!,
+    );
     expect(mounted.dispatch.mock.calls[0]?.[0].commands[0]).toMatchObject({
       type: 'timeline.setTrackMuted',
       payload: { muted: false },
@@ -315,7 +324,9 @@ describe('TimelinePanel toolbar and track controls', () => {
     await click(button('Solo V1'));
     expect(button('Solo V1').getAttribute('aria-pressed')).toBe('false');
     await click(
-      mounted.container.querySelector<HTMLButtonElement>('button[aria-label^="Change label color for "]')!,
+      mounted.container.querySelector<HTMLButtonElement>(
+        'button[aria-label^="Change label color for "]',
+      )!,
     );
     expect(document.querySelector('[role="menu"][aria-label="Track color"]')).not.toBeNull();
     await click(button('Violet'));
@@ -344,8 +355,8 @@ describe('TimelinePanel toolbar and track controls', () => {
     await click(snapping);
     expect(mounted.callbacks.snappingChange).toHaveBeenCalledWith(true);
 
-    const lanes = [...mounted.container.querySelectorAll<HTMLButtonElement>('button')].find((item) =>
-      item.textContent?.includes('Data Lanes'),
+    const lanes = [...mounted.container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (item) => item.textContent?.includes('Data Lanes'),
     )!;
     expect(lanes.getAttribute('aria-expanded')).toBe('false');
     await click(lanes);
@@ -416,10 +427,14 @@ describe('TimelinePanel toolbar and track controls', () => {
         'button[aria-label^="Change label color for "]',
       )!,
     );
-    await click(document.querySelector<HTMLButtonElement>(`[role="menuitemradio"][aria-label="${label}"]`)!);
+    await click(
+      document.querySelector<HTMLButtonElement>(`[role="menuitemradio"][aria-label="${label}"]`)!,
+    );
     const command = mounted.dispatch.mock.calls[0]?.[0].commands[0];
     expect(command?.type).toBe('timeline.setTrackLabelColor');
-    expect(command?.payload).toMatchObject({ ...(color === undefined ? {} : { labelColor: color }) });
+    expect(command?.payload).toMatchObject({
+      ...(color === undefined ? {} : { labelColor: color }),
+    });
   });
 
   it('executes track context hide/show and empty-track removal', async () => {
@@ -430,9 +445,9 @@ describe('TimelinePanel toolbar and track controls', () => {
         .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })),
     );
     const menuItem = (label: string) =>
-      [...document.querySelectorAll<HTMLButtonElement>('.timeline-context-menu [role="menuitem"]')].find(
-        (item) => item.textContent?.includes(label),
-      );
+      [
+        ...document.querySelectorAll<HTMLButtonElement>('.timeline-context-menu [role="menuitem"]'),
+      ].find((item) => item.textContent?.includes(label));
     const hide = menuItem('Hide Track');
     expect(hide).toBeDefined();
     await click(hide!);
@@ -461,7 +476,9 @@ describe('TimelinePanel toolbar and track controls', () => {
       '.timeline-track-header[data-track-id]',
     )!;
     const rootTrackId = emptyHeader.dataset.trackId;
-    await act(async () => emptyHeader.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+    await act(async () =>
+      emptyHeader.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })),
+    );
     const remove = menuItem('Remove Track');
     expect(remove?.disabled).toBe(false);
     await click(remove!);
@@ -490,7 +507,9 @@ describe('TimelinePanel toolbar and track controls', () => {
 
     await unmount(mounted);
     mounted = await mount({ markers: [{ id: 'marker-a', timeUs: SECOND_US, label: 'M1' }] });
-    await click(mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Remove M1"]')!);
+    await click(
+      mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Remove M1"]')!,
+    );
     expect(mounted.callbacks.removeMarker).toHaveBeenCalledWith('marker-a');
   });
 
@@ -501,7 +520,9 @@ describe('TimelinePanel toolbar and track controls', () => {
     expect(mounted.callbacks.toggleSelection).toHaveBeenCalledWith('clip-a');
 
     const lane = mounted.container.querySelector<HTMLElement>('.timeline-lane[role="button"]')!;
-    await act(async () => lane.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    await act(async () =>
+      lane.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
+    );
     expect(mounted.callbacks.openAssetLibrary).toHaveBeenCalledOnce();
   });
 
@@ -512,21 +533,29 @@ describe('TimelinePanel toolbar and track controls', () => {
     const noTracks = emptySpikeProject({ trackCount: 0, durationUs: 10 * SECOND_US });
     mounted = await mount({ customProject: noTracks, selectedIds: [] });
     const runway = mounted.container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!;
-    await act(async () => runway.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+    await act(async () =>
+      runway.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })),
+    );
     expect(mounted.callbacks.openAssetLibrary).toHaveBeenCalledOnce();
   });
 
   it('trims both edges from their accessible keyboard controls', async () => {
     mounted = await mount();
-    const start = mounted.container.querySelector<HTMLButtonElement>('button[data-trim-edge="start"]')!;
-    await act(async () => start.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+    const start = mounted.container.querySelector<HTMLButtonElement>(
+      'button[data-trim-edge="start"]',
+    )!;
+    await act(async () =>
+      start.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })),
+    );
     expect(mounted.dispatch.mock.calls[0]?.[0].commands[0]).toMatchObject({
       type: 'timeline.trimClipStart',
       payload: { clipId: 'clip-a', newStartUs: 2 * SECOND_US + 100_000 },
     });
 
     const end = mounted.container.querySelector<HTMLButtonElement>('button[data-trim-edge="end"]')!;
-    await act(async () => end.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+    await act(async () =>
+      end.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })),
+    );
     expect(mounted.dispatch.mock.calls[1]?.[0].commands[0]).toMatchObject({
       type: 'timeline.trimClipEnd',
       payload: { clipId: 'clip-a', newEndUs: 6 * SECOND_US - 100_000 },
@@ -541,9 +570,9 @@ describe('TimelinePanel toolbar and track controls', () => {
 
     expect(split).not.toBeNull();
     expect(split?.disabled).toBe(false);
-    expect(mounted.container.querySelector('[aria-label="Split tool"]')?.getAttribute('aria-pressed')).toBe(
-      'false',
-    );
+    expect(
+      mounted.container.querySelector('[aria-label="Split tool"]')?.getAttribute('aria-pressed'),
+    ).toBe('false');
 
     await click(split!);
 
@@ -558,24 +587,21 @@ describe('TimelinePanel toolbar and track controls', () => {
         newClipId: `clip-a-split-${3 * SECOND_US}`,
       },
     });
-    expect(mounted.container.querySelector('[aria-label="Split tool"]')?.getAttribute('aria-pressed')).toBe(
-      'false',
-    );
+    expect(
+      mounted.container.querySelector('[aria-label="Split tool"]')?.getAttribute('aria-pressed'),
+    ).toBe('false');
   });
 
-  it.each([2 * SECOND_US, 6 * SECOND_US])(
-    'does not split at clip edge %s',
-    async (playheadUs) => {
-      mounted = await mount({ playheadUs });
-      const split = mounted.container.querySelector<HTMLButtonElement>(
-        'button[aria-label="Split at playhead"]',
-      );
+  it.each([2 * SECOND_US, 6 * SECOND_US])('does not split at clip edge %s', async (playheadUs) => {
+    mounted = await mount({ playheadUs });
+    const split = mounted.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Split at playhead"]',
+    );
 
-      expect(split?.disabled).toBe(true);
-      await click(split!);
-      expect(mounted.dispatch).not.toHaveBeenCalled();
-    },
-  );
+    expect(split?.disabled).toBe(true);
+    await click(split!);
+    expect(mounted.dispatch).not.toHaveBeenCalled();
+  });
 
   it('does not split a selected clip on a locked track', async () => {
     mounted = await mount({ locked: true });
@@ -590,11 +616,13 @@ describe('TimelinePanel toolbar and track controls', () => {
 
   it('keeps Split tool as a separate mode and prevents a split without a selection', async () => {
     mounted = await mount();
-    await click(mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Split tool"]')!);
-
-    expect(mounted.container.querySelector('[aria-label="Split tool"]')?.getAttribute('aria-pressed')).toBe(
-      'true',
+    await click(
+      mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Split tool"]')!,
     );
+
+    expect(
+      mounted.container.querySelector('[aria-label="Split tool"]')?.getAttribute('aria-pressed'),
+    ).toBe('true');
     expect(mounted.dispatch).not.toHaveBeenCalled();
     await unmount(mounted);
     mounted = undefined;

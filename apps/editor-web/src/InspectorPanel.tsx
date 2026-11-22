@@ -546,8 +546,7 @@ function CropPropertyControl({
   const adapter = useTransientPropertyControl(
     {
       read: () => previewValue,
-      preview: (next) =>
-        setPreviewValue(Math.round(Math.min(0.49, Math.max(0, next)) * 100) / 100),
+      preview: (next) => setPreviewValue(Math.round(Math.min(0.49, Math.max(0, next)) * 100) / 100),
       restore: setPreviewValue,
       commit: ({ next }) =>
         onDispatch({
@@ -2306,8 +2305,7 @@ function AudioNumericControl({
   const max = property === 'gain' ? 2 : 1;
   const [previewValue, setPreviewValue] = useState(value);
   useEffect(() => setPreviewValue(value), [value]);
-  const normalize = (next: number) =>
-    Math.round(Math.min(max, Math.max(min, next)) * 100) / 100;
+  const normalize = (next: number) => Math.round(Math.min(max, Math.max(min, next)) * 100) / 100;
   const adapter = useTransientPropertyControl(
     {
       read: () => previewValue,

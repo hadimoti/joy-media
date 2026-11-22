@@ -189,7 +189,11 @@ describe('transcribeReferenceCaption (live + fixture fallback)', () => {
         workerRequest: {
           projectId: 'project-1',
           assetId: 'asset-1',
-          request: { schemaVersion: 1, language: 'fa-IR', modelId: 'faster-whisper-large-v3-turbo' },
+          request: {
+            schemaVersion: 1,
+            language: 'fa-IR',
+            modelId: 'faster-whisper-large-v3-turbo',
+          },
         },
         loadMedia,
       }),

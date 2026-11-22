@@ -62,15 +62,9 @@ export interface BrowserSpeechTranscript {
 
 export type SpeechLanguage = 'fa-IR' | 'en-US';
 export type SpeechModel =
-  | 'faster-whisper-large-v3-turbo'
-  | 'kokoro-82m'
-  | 'chatterbox-en'
-  | 'chatterbox-fa';
+  'faster-whisper-large-v3-turbo' | 'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa';
 export type SpeechErrorCode =
-  | 'SETUP_REQUIRED'
-  | 'SOURCE_UNAVAILABLE'
-  | 'CONSENT_DENIED'
-  | 'CANCELED';
+  'SETUP_REQUIRED' | 'SOURCE_UNAVAILABLE' | 'CONSENT_DENIED' | 'CANCELED';
 
 export interface SpeechWord {
   readonly text: string;
@@ -124,7 +118,10 @@ export interface SpeechModelStatus {
 }
 
 export class DesktopSpeechError extends Error {
-  constructor(readonly code: SpeechErrorCode, message: string) {
+  constructor(
+    readonly code: SpeechErrorCode,
+    message: string,
+  ) {
     super(message);
     this.name = 'DesktopSpeechError';
   }
@@ -224,7 +221,9 @@ async function call<T>(bridge: DesktopMediaBridge, channel: string, payload?: un
   } catch (error) {
     if (error instanceof BrowserControlPlaneRequestError) throw error;
     const code =
-      typeof error === 'object' && error !== null && 'code' in error &&
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
       typeof (error as { readonly code?: unknown }).code === 'string'
         ? (error as { readonly code: string }).code
         : undefined;
@@ -246,7 +245,9 @@ function speechErrorFrom(error: unknown): DesktopSpeechError | undefined {
         : typeof candidate?.message === 'string'
           ? candidate.message
           : '';
-  const code = rawCode.match(/\b(SETUP_REQUIRED|SOURCE_UNAVAILABLE|CONSENT_DENIED|CANCELED)\b/)?.[1];
+  const code = rawCode.match(
+    /\b(SETUP_REQUIRED|SOURCE_UNAVAILABLE|CONSENT_DENIED|CANCELED)\b/,
+  )?.[1];
   if (
     code === 'SETUP_REQUIRED' ||
     code === 'SOURCE_UNAVAILABLE' ||
@@ -302,7 +303,9 @@ function asSpeechTranscript(value: unknown, request: SpeechTranscribeV1): Speech
   const transcript = value as Record<string, unknown>;
   const provenanceValue = transcript['provenance'];
   const provenance =
-    typeof provenanceValue === 'object' && provenanceValue !== null && !Array.isArray(provenanceValue)
+    typeof provenanceValue === 'object' &&
+    provenanceValue !== null &&
+    !Array.isArray(provenanceValue)
       ? (provenanceValue as Record<string, unknown>)
       : undefined;
   const words = asSpeechWords(transcript['words']);
@@ -557,9 +560,7 @@ export class BrowserControlPlaneClient {
   async derivatives(projectId: string, assetId: string): Promise<readonly BrowserDerivative[]> {
     const tracked = [...trackedJobs.values()].filter(
       (job) =>
-        job.projectId === projectId &&
-        job.assetId === assetId &&
-        !job.type.startsWith('speech.'),
+        job.projectId === projectId && job.assetId === assetId && !job.type.startsWith('speech.'),
     );
     const views = await Promise.all(
       tracked.map(async (job) => {
@@ -924,8 +925,11 @@ export class BrowserControlPlaneClient {
           const typed = speechErrorFrom({ code: job.errorCode, message: job.error });
           throw typed ?? new Error(job.error || 'The local speech job failed');
         }
-        if (job.status === 'cancelled') throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
-        await (signal === undefined ? new Promise<void>((resolve) => setTimeout(resolve, 250)) : abortableDelay(signal, 250));
+        if (job.status === 'cancelled')
+          throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
+        await (signal === undefined
+          ? new Promise<void>((resolve) => setTimeout(resolve, 250))
+          : abortableDelay(signal, 250));
       }
     } catch (error) {
       if (signal?.aborted) {

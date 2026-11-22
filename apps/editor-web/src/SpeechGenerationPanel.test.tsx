@@ -22,7 +22,9 @@ const assets = [
   { id: 'asset-music', label: 'Music bed' },
 ] as const;
 
-function makeProps(overrides: Partial<SpeechGenerationPanelProps> = {}): SpeechGenerationPanelProps {
+function makeProps(
+  overrides: Partial<SpeechGenerationPanelProps> = {},
+): SpeechGenerationPanelProps {
   return {
     modelStatus: readyModels,
     referenceAssets: assets,
@@ -46,7 +48,8 @@ async function render(props: SpeechGenerationPanelProps) {
 
 async function clickButton(name: string) {
   const button = [...(container?.querySelectorAll('button') ?? [])].find(
-    (candidate) => candidate.textContent?.trim() === name || candidate.getAttribute('aria-label') === name,
+    (candidate) =>
+      candidate.textContent?.trim() === name || candidate.getAttribute('aria-label') === name,
   );
   if (button === undefined) throw new Error(`button not found: ${name}`);
   await act(async () => button.click());
@@ -63,12 +66,16 @@ async function setCheckbox(labelText: string, checked = true) {
   });
 }
 
-async function setValue(element: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, value: string) {
-  const prototype = element instanceof HTMLTextAreaElement
-    ? HTMLTextAreaElement.prototype
-    : element instanceof HTMLSelectElement
-      ? HTMLSelectElement.prototype
-      : HTMLInputElement.prototype;
+async function setValue(
+  element: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+  value: string,
+) {
+  const prototype =
+    element instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : element instanceof HTMLSelectElement
+        ? HTMLSelectElement.prototype
+        : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
   if (setter === undefined) throw new Error('native value setter unavailable');
   await act(async () => {
@@ -149,7 +156,11 @@ describe('SpeechGenerationPanel', () => {
     const view = await render(makeProps());
     const reference = view.querySelector<HTMLSelectElement>('select[name="referenceAssetId"]');
     expect(reference).not.toBeNull();
-    expect([...reference!.options].map((option) => option.value)).toEqual(['', 'asset-voice-one', 'asset-music']);
+    expect([...reference!.options].map((option) => option.value)).toEqual([
+      '',
+      'asset-voice-one',
+      'asset-music',
+    ]);
     expect(view.textContent).toContain('Optional English reference');
 
     const language = view.querySelector<HTMLSelectElement>('select[name="language"]')!;
@@ -173,19 +184,27 @@ describe('SpeechGenerationPanel', () => {
     const text = view.querySelector<HTMLTextAreaElement>('textarea')!;
     await setValue(text, 'Hello there');
     const form = view.querySelector('form')!;
-    await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () =>
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
     expect(onGenerate).not.toHaveBeenCalled();
 
     await setCheckbox('personal, non-commercial');
-    await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () =>
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
     expect(onGenerate).not.toHaveBeenCalled();
 
     await setCheckbox('I have permission');
-    await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () =>
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
     expect(onGenerate).toHaveBeenCalledTimes(1);
     const [request, options] = onGenerate.mock.calls[0]!;
     expect(request).toMatchObject({ schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m' });
-    expect(options).toMatchObject({ consent: { acknowledged: true, purpose: 'personal-noncommercial' } });
+    expect(options).toMatchObject({
+      consent: { acknowledged: true, purpose: 'personal-noncommercial' },
+    });
     expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -203,7 +222,11 @@ describe('SpeechGenerationPanel', () => {
     await setValue(text, 'Hello there');
     await setValue(reference, 'asset-voice-one');
     await setCheckbox('I have permission');
-    await act(async () => view.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () =>
+      view
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
 
     expect(onGenerate).toHaveBeenCalledTimes(1);
     expect(onGenerate.mock.calls[0]?.[1].referenceAssetId).toBe('asset-voice-one');
@@ -219,11 +242,23 @@ describe('SpeechGenerationPanel', () => {
     const text = view.querySelector<HTMLTextAreaElement>('textarea')!;
     await act(async () => {
       text.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(text, 'こん');
-      text.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'こん', isComposing: true }));
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(text, 'こんにちは');
-      text.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'こんにちは' }));
-      text.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'は', isComposing: false }));
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+        text,
+        'こん',
+      );
+      text.dispatchEvent(
+        new InputEvent('input', { bubbles: true, data: 'こん', isComposing: true }),
+      );
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+        text,
+        'こんにちは',
+      );
+      text.dispatchEvent(
+        new CompositionEvent('compositionend', { bubbles: true, data: 'こんにちは' }),
+      );
+      text.dispatchEvent(
+        new InputEvent('input', { bubbles: true, data: 'は', isComposing: false }),
+      );
     });
     expect(text.value).toBe('こんにちは');
     expect(onGenerate).not.toHaveBeenCalled();
@@ -243,7 +278,11 @@ describe('SpeechGenerationPanel', () => {
     const text = view.querySelector<HTMLTextAreaElement>('textarea')!;
     await setValue(text, 'Hello');
     await setCheckbox('I have permission');
-    await act(async () => view.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () =>
+      view
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
     expect(view.textContent).toContain('Add captions');
     await clickButton('Add captions');
     expect(onAddCaptions).toHaveBeenCalledTimes(1);
@@ -266,7 +305,11 @@ describe('SpeechGenerationPanel', () => {
     const text = view.querySelector<HTMLTextAreaElement>('textarea')!;
     await setValue(text, 'Hello');
     await setCheckbox('I have permission');
-    await act(async () => view.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () =>
+      view
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
     expect(view.textContent).not.toContain('Add captions');
   });
 });

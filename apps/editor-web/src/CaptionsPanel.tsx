@@ -455,10 +455,7 @@ function CaptionSlotEditor({
       ],
     });
   };
-  const handleCueKeyDown = (
-    event: KeyboardEvent<HTMLTextAreaElement>,
-    segmentId: string,
-  ) => {
+  const handleCueKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>, segmentId: string) => {
     const composing = event.nativeEvent.isComposing || event.keyCode === 229;
     if (composing) return;
     if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -507,13 +504,16 @@ function CaptionSlotEditor({
       !event.metaKey &&
       !event.altKey &&
       !event.shiftKey &&
-      event.currentTarget.selectionStart === 0 && event.currentTarget.selectionEnd === 0
+      event.currentTarget.selectionStart === 0 &&
+      event.currentTarget.selectionEnd === 0
     ) {
       const segment = document.segments.find((candidate) => candidate.id === segmentId);
       if (segment === undefined) return;
       const previous = document.segments
         .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
-        .filter(({ candidate }) => candidate.id !== segmentId && candidate.startUs < segment.startUs)
+        .filter(
+          ({ candidate }) => candidate.id !== segmentId && candidate.startUs < segment.startUs,
+        )
         .sort(
           (left, right) =>
             right.candidate.startUs - left.candidate.startUs ||

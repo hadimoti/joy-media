@@ -5,10 +5,7 @@ import {
 } from '@joy-media/provider-sdk';
 import type { CaptionDocumentV1 } from '@joy-media/project-schema';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
-import {
-  DesktopSpeechError,
-  type SpeechTranscribeV1,
-} from './local-media-client.js';
+import { DesktopSpeechError, type SpeechTranscribeV1 } from './local-media-client.js';
 
 interface TranscriptionFixture {
   readonly language: string;

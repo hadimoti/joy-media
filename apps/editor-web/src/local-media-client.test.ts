@@ -110,7 +110,11 @@ describe('BrowserControlPlaneClient local speech jobs', () => {
           status: 'done',
           progress: 100,
           cancelRequested: false,
-          derivative: { sha256: 'a'.repeat(64), bytes: bytes.byteLength, mimeType: 'application/json' },
+          derivative: {
+            sha256: 'a'.repeat(64),
+            bytes: bytes.byteLength,
+            mimeType: 'application/json',
+          },
         };
       }
       if (channel === 'desktop.media.derivative.transfer.begin') {
@@ -156,7 +160,8 @@ describe('BrowserControlPlaneClient local speech jobs', () => {
   it('sends only one cancellation request and ignores the late poll result', async () => {
     let finishStatus!: (value: unknown) => void;
     const invoke = vi.fn((channel: string): Promise<unknown> => {
-      if (channel === 'desktop.media.speech.run') return Promise.resolve({ jobId: 'desktop-speech-2' });
+      if (channel === 'desktop.media.speech.run')
+        return Promise.resolve({ jobId: 'desktop-speech-2' });
       if (channel === 'desktop.media.job.status') {
         return new Promise((resolve) => {
           finishStatus = resolve;
@@ -173,17 +178,23 @@ describe('BrowserControlPlaneClient local speech jobs', () => {
       request,
       controller.signal,
     );
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(
-      'desktop.media.job.status',
-      { jobId: 'desktop-speech-2' },
-    ));
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('desktop.media.job.status', {
+        jobId: 'desktop-speech-2',
+      }),
+    );
     controller.abort();
     await expect(work).rejects.toMatchObject({ code: 'CANCELED' });
     finishStatus({ status: 'done', progress: 100 });
     await Promise.resolve();
 
-    expect(invoke.mock.calls.filter(([channel]) => channel === 'desktop.media.job.cancel')).toHaveLength(1);
-    expect(invoke).not.toHaveBeenCalledWith('desktop.media.derivative.transfer.begin', expect.anything());
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === 'desktop.media.job.cancel'),
+    ).toHaveLength(1);
+    expect(invoke).not.toHaveBeenCalledWith(
+      'desktop.media.derivative.transfer.begin',
+      expect.anything(),
+    );
   });
 
   it('preserves typed polling errors and stops after the failed poll', async () => {
@@ -198,7 +209,9 @@ describe('BrowserControlPlaneClient local speech jobs', () => {
     await expect(
       client.runLocalTranscription('project-fail', 'asset-fail', request),
     ).rejects.toMatchObject({ code: 'SETUP_REQUIRED' });
-    expect(invoke.mock.calls.filter(([channel]) => channel === 'desktop.media.job.status')).toHaveLength(1);
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === 'desktop.media.job.status'),
+    ).toHaveLength(1);
   });
 
   it('reports speech models and synthesizes against the built-in output ref', async () => {
