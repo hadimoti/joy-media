@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent, type ReactElement } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactElement } from 'react';
 import type {
   SpeechConsentRequest,
   SpeechLanguage,
@@ -115,7 +115,6 @@ export function SpeechGenerationPanel({
   const [engineChoice, setEngineChoice] = useState<SpeechModelId>('kokoro-82m');
   const [text, setText] = useState('');
   const [referenceAssetId, setReferenceAssetId] = useState('');
-  const [personalNoncommercial, setPersonalNoncommercial] = useState(false);
   const [consent, setConsent] = useState(false);
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState('Ready to generate speech locally.');
@@ -138,6 +137,12 @@ export function SpeechGenerationPanel({
     ) ??
     engineChoices[0];
   const selectedEngineStatus = modelStatus.find((model) => model.modelId === selectedEngine);
+  useEffect(() => {
+    if (selectedEngine === 'kokoro-82m') {
+      setReferenceAssetId('');
+      setConsent(false);
+    }
+  }, [selectedEngine]);
   const transcriberStatus = modelStatus.find(
     (model) => model.modelId === 'faster-whisper-large-v3-turbo',
   );
@@ -146,17 +151,13 @@ export function SpeechGenerationPanel({
   const referenceRequired = language === 'fa-IR';
   const validReference =
     selectedAssetIsRegistered && (!referenceRequired || referenceAssetId.length > 0);
-  const purpose: SpeechConsentRequest['purpose'] = personalNoncommercial
-    ? 'personal-noncommercial'
-    : 'general';
   const canGenerate =
     !pending &&
     !composing.current &&
     text.trim().length > 0 &&
     validReference &&
     selectedEngineStatus?.state === 'ready' &&
-    consent &&
-    (language !== 'fa-IR' || personalNoncommercial);
+    consent;
   const safeProgress =
     typeof progress === 'number' && Number.isFinite(progress)
       ? Math.max(0, Math.min(100, progress))
@@ -184,10 +185,10 @@ export function SpeechGenerationPanel({
       language,
       modelId: selectedEngine,
       text,
-      purpose,
+      ...(selectedEngine === 'chatterbox-fa' ? { purpose: 'personal-noncommercial' as const } : {}),
     };
     const options: SpeechGenerationOptions = {
-      consent: { acknowledged: true, purpose },
+      consent: { acknowledged: true, purpose: 'general' },
       signal: controller.signal,
       ...(referenceAssetId.length > 0 ? { referenceAssetId } : {}),
     };
@@ -281,12 +282,11 @@ export function SpeechGenerationPanel({
               setLanguage(next);
               setEngineChoice(next === 'fa-IR' ? 'chatterbox-fa' : 'kokoro-82m');
               setReferenceAssetId('');
-              setPersonalNoncommercial(false);
               setCaptionTiming(undefined);
             }}
           >
             <option value="en-US">English</option>
-            <option value="fa-IR">Persian (opt in)</option>
+            <option value="fa-IR">Persian</option>
           </select>
         </div>
 
@@ -317,6 +317,12 @@ export function SpeechGenerationPanel({
             })}
           </select>
         </div>
+        {selectedEngine === 'chatterbox-fa' && (
+          <p className="speech-license-notice">
+            Chatterbox Persian Expressive by Ramin Mahmoodi - CC-BY-NC-4.0 - for non-commercial use
+            only
+          </p>
+        )}
         {selectedEngineStatus?.state !== 'ready' && (
           <p className="speech-setup-hint" role="status">
             This engine needs local setup. Install it from Local assets and restart JOY Media.
@@ -367,19 +373,6 @@ export function SpeechGenerationPanel({
 
         <fieldset className="speech-consent-group" disabled={pending}>
           <legend>Purpose and consent</legend>
-          <label>
-            <input
-              type="checkbox"
-              checked={personalNoncommercial}
-              onChange={(event) => setPersonalNoncommercial(event.currentTarget.checked)}
-            />
-            Use for a personal, non-commercial purpose
-          </label>
-          {language === 'fa-IR' && (
-            <small>
-              Persian speech is opt in and available only for personal, non-commercial use.
-            </small>
-          )}
           <label>
             <input
               type="checkbox"

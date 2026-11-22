@@ -841,6 +841,13 @@ export function createMediaChannelHandlers(
     if (!engineReady || presence?.capabilities.includes(capability) !== true) {
       return { ok: false, error: 'SETUP_REQUIRED' };
     }
+    if (
+      jobType === 'speech.synthesize' &&
+      parsed.modelId === 'chatterbox-fa' &&
+      sourceAsset === undefined
+    ) {
+      return { ok: false, error: 'SOURCE_UNAVAILABLE' };
+    }
 
     let jobPayload: unknown = parsed;
     let jobRefId = sourceAsset?.id ?? '';
@@ -853,16 +860,17 @@ export function createMediaChannelHandlers(
       ) {
         return { ok: false, error: 'CONSENT_DENIED' };
       }
-      const purpose = consent['purpose'];
+      const consentPurpose = consent['purpose'];
       if (
-        (parsed as { language: string }).language === 'fa-IR' &&
-        purpose !== 'personal-noncommercial'
+        parsed.modelId !== 'chatterbox-fa' &&
+        'purpose' in parsed &&
+        parsed.purpose !== undefined &&
+        parsed.purpose !== consentPurpose
       ) {
         return { ok: false, error: 'CONSENT_DENIED' };
       }
-      if ('purpose' in parsed && parsed.purpose !== undefined && parsed.purpose !== purpose) {
-        return { ok: false, error: 'CONSENT_DENIED' };
-      }
+      const purpose =
+        parsed.modelId === 'chatterbox-fa' ? 'personal-noncommercial' : consentPurpose;
       if ('voiceId' in parsed && parsed.voiceId !== undefined) {
         return { ok: false, error: 'CONSENT_DENIED' };
       }

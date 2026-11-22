@@ -131,7 +131,9 @@ describe('SpeechGenerationPanel', () => {
     expect(options.join(' ')).toContain('Chatterbox Persian');
     expect(options.join(' ')).not.toContain('Kokoro 82M');
     expect(options.join(' ')).not.toContain('Chatterbox English');
-    expect(view.textContent).toContain('personal, non-commercial');
+    expect(view.textContent).toContain('Chatterbox Persian Expressive by Ramin Mahmoodi');
+    expect(view.textContent).toContain('CC-BY-NC-4.0 - for non-commercial use only');
+    expect(view.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
     expect(view.querySelector<HTMLTextAreaElement>('textarea')?.dir).toBe('rtl');
   });
 
@@ -208,7 +210,50 @@ describe('SpeechGenerationPanel', () => {
     expect(consent?.checked).toBe(false);
   });
 
-  it('requires explicit purpose opt-in and consent before Generate', async () => {
+  it('clears stale reference state when a ready engine becomes unavailable and Kokoro is selected automatically', async () => {
+    const onGenerate = vi.fn<SpeechGenerationPanelProps['onGenerate']>(async () => ({
+      availability: 'ready',
+    }));
+    const view = await render(makeProps({ onGenerate }));
+    await setValue(view.querySelector<HTMLTextAreaElement>('textarea')!, 'Hello there');
+    const engine = view.querySelector<HTMLSelectElement>('select[name="engine"]')!;
+    await act(async () => {
+      engine.value = 'chatterbox-en';
+      engine.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await setValue(
+      view.querySelector<HTMLSelectElement>('select[name="referenceAssetId"]')!,
+      'asset-voice-one',
+    );
+    await setCheckbox('I have permission');
+    await act(async () =>
+      root?.render(
+        <SpeechGenerationPanel
+          {...makeProps({
+            onGenerate,
+            modelStatus: [
+              { modelId: 'faster-whisper-large-v3-turbo', state: 'ready' },
+              { modelId: 'kokoro-82m', state: 'ready' },
+              { modelId: 'chatterbox-en', state: 'setup-required' },
+              { modelId: 'chatterbox-fa', state: 'ready' },
+            ],
+          })}
+        />,
+      ),
+    );
+    expect(engine.value).toBe('kokoro-82m');
+    expect(view.querySelector<HTMLSelectElement>('select[name="referenceAssetId"]')!.value).toBe(
+      '',
+    );
+    await act(async () =>
+      view
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
+    expect(onGenerate.mock.calls[0]?.[1].referenceAssetId).toBeUndefined();
+  });
+
+  it('requires reference voice rights consent before Generate', async () => {
     const onGenerate = vi.fn<SpeechGenerationPanelProps['onGenerate']>(async () => ({
       availability: 'ready',
     }));
@@ -216,12 +261,6 @@ describe('SpeechGenerationPanel', () => {
     const text = view.querySelector<HTMLTextAreaElement>('textarea')!;
     await setValue(text, 'Hello there');
     const form = view.querySelector('form')!;
-    await act(async () =>
-      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
-    );
-    expect(onGenerate).not.toHaveBeenCalled();
-
-    await setCheckbox('personal, non-commercial');
     await act(async () =>
       form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
     );
@@ -235,7 +274,7 @@ describe('SpeechGenerationPanel', () => {
     const [request, options] = onGenerate.mock.calls[0]!;
     expect(request).toMatchObject({ schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m' });
     expect(options).toMatchObject({
-      consent: { acknowledged: true, purpose: 'personal-noncommercial' },
+      consent: { acknowledged: true, purpose: 'general' },
     });
     expect(options.signal).toBeInstanceOf(AbortSignal);
   });

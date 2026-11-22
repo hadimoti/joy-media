@@ -300,8 +300,17 @@ describe('desktop.media channels', () => {
     expect(db.jobDispatch.get('job-2')).toBeUndefined();
   });
 
-  it('requires an explicit non-commercial acknowledgment for Persian synthesis', async () => {
+  it('denies Persian synthesis without reference voice rights consent', async () => {
     const { db, handlers } = setup();
+    const bytes = new Uint8Array([1, 2, 3]);
+    handlers['desktop.media.asset.register']({
+      id: 'fa-voice',
+      kind: 'audio',
+      displayName: 'Voice reference',
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      bytes: bytes.byteLength,
+    });
+    await handlers['desktop.media.asset.upload-original']({ assetId: 'fa-voice', bytes });
     db.jobDispatch.savePresence({
       workerId: 'worker-1',
       capabilities: ['speech.synthesize', 'speech.model.chatterbox-fa'],
@@ -310,6 +319,39 @@ describe('desktop.media channels', () => {
     await expect(
       handlers['desktop.media.speech.run']({
         jobType: 'speech.synthesize',
+        refId: 'fa-voice',
+        payload: {
+          schemaVersion: 1,
+          language: 'fa-IR',
+          modelId: 'chatterbox-fa',
+          text: 'سلام',
+          purpose: 'personal-noncommercial',
+        },
+      }),
+    ).resolves.toMatchObject({ ok: false, error: 'CONSENT_DENIED' });
+    expect(db.jobDispatch.get('job-1')).toBeUndefined();
+  });
+
+  it('sets Persian non-commercial worker purpose in the desktop', async () => {
+    const { db, handlers } = setup();
+    const bytes = new Uint8Array([1, 2, 3]);
+    handlers['desktop.media.asset.register']({
+      id: 'fa-voice',
+      kind: 'audio',
+      displayName: 'Voice reference',
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      bytes: bytes.byteLength,
+    });
+    await handlers['desktop.media.asset.upload-original']({ assetId: 'fa-voice', bytes });
+    db.jobDispatch.savePresence({
+      workerId: 'worker-1',
+      capabilities: ['speech.synthesize', 'speech.model.chatterbox-fa'],
+      lastHelloAt: 'T0',
+    });
+    await expect(
+      handlers['desktop.media.speech.run']({
+        jobType: 'speech.synthesize',
+        refId: 'fa-voice',
         payload: {
           schemaVersion: 1,
           language: 'fa-IR',
@@ -319,8 +361,11 @@ describe('desktop.media channels', () => {
         },
         consent: { acknowledged: true, purpose: 'general' },
       }),
-    ).resolves.toMatchObject({ ok: false, error: 'CONSENT_DENIED' });
-    expect(db.jobDispatch.get('job-1')).toBeUndefined();
+    ).resolves.toMatchObject({ ok: true });
+    expect(JSON.parse(db.jobDispatch.get('job-1')!.payloadJson!)).toMatchObject({
+      purpose: 'personal-noncommercial',
+      worker: { consent: { acknowledged: true, purpose: 'personal-noncommercial' } },
+    });
   });
 
   it('returns the CANCELED code when a queued speech job is canceled', async () => {
