@@ -1,4 +1,9 @@
 import { randomBytes } from 'node:crypto';
+import {
+  parseSpeechSynthesizeV1,
+  parseSpeechSynthesisTiming,
+  parseSpeechTranscribeV1,
+} from '@joy-media/job-protocol';
 import type { DerivativeReceipt, DispatchJob, JobDispatchStore } from './job-dispatch.js';
 
 /** Worker leases last this long unless the Worker asks for less; each heartbeat renews it. */
@@ -7,6 +12,7 @@ export const MAX_LEASE_MS = 120_000;
 export const EXPIRED_LEASE_ERROR = 'worker lease expired';
 export const CANCELLED_BY_USER = 'cancelled by user';
 const MAX_ERROR_LENGTH = 240;
+export const BUILTIN_SPEECH_OUTPUT_REF_ID = 'speech-output';
 
 /** Protocol refusal that the loopback API maps onto an HTTP status. */
 export class JobProtocolError extends Error {
@@ -42,6 +48,14 @@ const JOB_REQUIREMENTS: Readonly<Record<string, JobRequirement>> = {
   'mask.video': { capability: 'mask.video', missing: 'local masking models for mask.video' },
   'upscale.image': { capability: 'upscale.image', missing: 'the installed upscaling model' },
   'upscale.video': { capability: 'upscale.video', missing: 'the installed upscaling model' },
+  'speech.transcribe': {
+    capability: 'speech.transcribe',
+    missing: 'the local speech transcription engine',
+  },
+  'speech.synthesize': {
+    capability: 'speech.synthesize',
+    missing: 'the local speech synthesis engine',
+  },
 };
 
 /** Job types the desktop submits and the Worker can lease. */
@@ -52,6 +66,8 @@ const DISPATCHABLE_JOB_TYPES = [
   'media.qc',
   'mask.image',
   'mask.video',
+  'speech.transcribe',
+  'speech.synthesize',
 ] as const;
 /** Job types whose Worker needs a payload. The desktop stores it at submit and sends it with the lease. */
 const PAYLOAD_JOB_TYPES: ReadonlySet<string> = new Set([
@@ -60,6 +76,8 @@ const PAYLOAD_JOB_TYPES: ReadonlySet<string> = new Set([
   'media.qc',
   'mask.image',
   'mask.video',
+  'speech.transcribe',
+  'speech.synthesize',
 ]);
 /** A payload is stored as JSON in the local database and handed to the Worker whole, so it is capped. */
 const MAX_PAYLOAD_BYTES = 64 * 1024;
@@ -89,6 +107,12 @@ function encodePayload(
   }
   if (Buffer.byteLength(json, 'utf8') > MAX_PAYLOAD_BYTES) {
     return { ok: false, message: `${jobType} payload is larger than ${MAX_PAYLOAD_BYTES} bytes` };
+  }
+  if (jobType === 'speech.transcribe' && parseSpeechTranscribeV1(JSON.parse(json)) === undefined) {
+    return { ok: false, message: 'speech.transcribe payload is invalid' };
+  }
+  if (jobType === 'speech.synthesize' && parseSpeechSynthesizeV1(JSON.parse(json)) === undefined) {
+    return { ok: false, message: 'speech.synthesize payload is invalid' };
   }
   return { ok: true, json };
 }
@@ -161,6 +185,8 @@ export interface JobOrchestrator {
       readonly kind: string;
       readonly sha256?: string;
       readonly bytes?: number;
+      readonly mimeType?: string;
+      readonly speech?: unknown;
       readonly resultJson: string;
     },
   ): void;
@@ -204,8 +230,9 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
   function expireLeasesWithin(): number {
     const expired = store.expiredRunning(now());
     for (const job of expired) {
-      if (job.cancelRequested) finish(job, 'cancelled', CANCELLED_BY_USER);
-      else finish(job, 'failed', EXPIRED_LEASE_ERROR);
+      const patch = job.jobType.startsWith('speech.') ? { derivative: undefined } : {};
+      if (job.cancelRequested) finish(job, 'cancelled', CANCELLED_BY_USER, patch);
+      else finish(job, 'failed', EXPIRED_LEASE_ERROR, patch);
     }
     return expired.length;
   }
@@ -269,6 +296,37 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
       const payloadResult = encodePayload(jobType, payload);
       if (!payloadResult.ok) {
         return { ok: false, code: 'PAYLOAD_INVALID', jobType, message: payloadResult.message };
+      }
+      if (jobType === 'speech.transcribe' || jobType === 'speech.synthesize') {
+        const speechPayload = JSON.parse(payloadResult.json ?? '{}') as Record<string, unknown>;
+        const engineFlag = `speech.model.${String(speechPayload.modelId)}`;
+        if (!presence?.capabilities.includes(engineFlag)) {
+          return {
+            ok: false,
+            code: 'SETUP_REQUIRED',
+            jobType,
+            message: `Worker has not reported ${engineFlag} as ready`,
+          };
+        }
+        if (
+          jobType === 'speech.transcribe' &&
+          (!refId.trim() || refId === BUILTIN_SPEECH_OUTPUT_REF_ID)
+        ) {
+          return {
+            ok: false,
+            code: 'PAYLOAD_INVALID',
+            jobType,
+            message: 'speech.transcribe needs an audio source',
+          };
+        }
+        if (jobType === 'speech.synthesize' && refId !== BUILTIN_SPEECH_OUTPUT_REF_ID) {
+          return {
+            ok: false,
+            code: 'PAYLOAD_INVALID',
+            jobType,
+            message: 'speech.synthesize needs the built-in speech output reference',
+          };
+        }
       }
       const timestamp = now();
       const job: DispatchJob = {
@@ -363,6 +421,8 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
     recordDerivative(workerId, jobId, leaseToken, receipt) {
       store.transaction(() => {
         const job = assertHolder(workerId, jobId, leaseToken);
+        if (job.jobType.startsWith('speech.') && job.cancelRequested)
+          throw new JobProtocolError(409, 'the speech job was cancelled');
         store.save({ ...job, derivative: receipt, updatedAt: now() });
       });
     },
@@ -381,6 +441,30 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
             throw new JobProtocolError(422, 'derivative is missing or does not match the result');
           }
         }
+        if (job.jobType === 'speech.transcribe' || job.jobType === 'speech.synthesize') {
+          if (job.cancelRequested) throw new JobProtocolError(409, 'the speech job was cancelled');
+          const derivative = job.derivative;
+          const expectedMime =
+            job.jobType === 'speech.transcribe' ? 'application/json' : 'audio/wav';
+          if (
+            completion.kind !== job.jobType ||
+            derivative === undefined ||
+            completion.sha256 !== derivative.sha256 ||
+            completion.bytes !== derivative.bytes ||
+            completion.mimeType !== expectedMime || derivative.mimeType !== expectedMime
+          ) {
+            throw new JobProtocolError(
+              422,
+              'speech derivative is missing or does not match the result',
+            );
+          }
+          if (job.jobType === 'speech.synthesize') {
+            if (parseSpeechSynthesisTiming(completion.speech) === undefined)
+              throw new JobProtocolError(422, 'speech synthesis timing is invalid');
+          } else if (completion.speech !== undefined) {
+            throw new JobProtocolError(422, 'transcription results cannot include synthesis timing');
+          }
+        }
         finish(job, 'done', undefined, { progress: 100, resultJson: completion.resultJson });
       });
     },
@@ -389,10 +473,20 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
       store.transaction(() => {
         const job = assertHolder(workerId, jobId, leaseToken);
         if (error === 'canceled') {
-          finish(job, 'cancelled', CANCELLED_BY_USER);
+          finish(
+            job,
+            'cancelled',
+            CANCELLED_BY_USER,
+            job.jobType.startsWith('speech.') ? { derivative: undefined } : {},
+          );
           return;
         }
-        finish(job, 'failed', error.slice(0, MAX_ERROR_LENGTH));
+        finish(
+          job,
+          'failed',
+          error.slice(0, MAX_ERROR_LENGTH),
+          job.jobType.startsWith('speech.') ? { derivative: undefined } : {},
+        );
       });
     },
 
@@ -405,6 +499,7 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
             ...job,
             status: 'cancelled',
             error: CANCELLED_BY_USER,
+            ...(job.jobType.startsWith('speech.') ? { derivative: undefined } : {}),
             updatedAt: now(),
           };
           store.save(cancelled);
