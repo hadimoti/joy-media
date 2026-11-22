@@ -238,7 +238,9 @@ export function visualObjectToRenderNode(
     return {
       kind: 'video-frame',
       id: object.id,
-      zIndex: 10,
+      // Same layer as the other nodes, so a picture draws in the frame's order. It used to be 10, which put every
+      // picture above every title (a title over a photo was hidden in the Monitor and the export).
+      zIndex: 0,
       opacity,
       transform: renderTransform,
       width: imageSize.width,
