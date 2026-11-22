@@ -1971,6 +1971,9 @@ h2 {
 .monitor-overlay-svg.is-border rect {
   stroke: #ffffff66;
 }
+.monitor-overlay-svg.is-frame-edge rect {
+  stroke: #ffffff2e;
+}
 .monitor-overlay-svg.is-title-safe rect {
   stroke: var(--joy-accent);
   stroke-dasharray: 4 3;

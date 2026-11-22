@@ -95,12 +95,13 @@ describe('Monitor overlays', () => {
           view={{ zoom: 1, panX: 0, panY: 0 }}
           frame={FRAME}
           viewportSize={VIEWPORT}
-          options={{ ...DEFAULT_MONITOR_VIEW_OPTIONS, canvasBorder: false }}
+          options={DEFAULT_MONITOR_VIEW_OPTIONS}
           onGuidesChange={() => undefined}
         />,
       ),
     );
-    expect(overlayNames()).toEqual([]);
+    // Only the faint frame edge stays: the frame is transparent, so its edge must always be visible.
+    expect(overlayNames()).toEqual(['frame-edge']);
     expect(container?.querySelector('[data-monitor-ruler]')).toBeNull();
   });
 

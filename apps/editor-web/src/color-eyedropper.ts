@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { ScopePixels } from './color-scopes.js';
 import type { PickedColour } from './color-hsl-math.js';
+import { overFrameBackdrop } from './frame-backdrop.js';
 
 /**
  * The eyedropper of the HSL bands (T-K04).
@@ -123,7 +124,12 @@ export function pixelAt(
 ): PickedColour | undefined {
   const offset = cellOffset(pixels, frame, point);
   if (offset === undefined) return undefined;
-  return { r: pixels.data[offset]!, g: pixels.data[offset + 1]!, b: pixels.data[offset + 2]! };
+  const alpha = pixels.data[offset + 3] ?? 255;
+  return {
+    r: Math.round(overFrameBackdrop('r', pixels.data[offset]!, alpha)),
+    g: Math.round(overFrameBackdrop('g', pixels.data[offset + 1]!, alpha)),
+    b: Math.round(overFrameBackdrop('b', pixels.data[offset + 2]!, alpha)),
+  };
 }
 
 /**
@@ -175,9 +181,10 @@ export function pixelNeighbourhood(
       if (offset === undefined) cells[index] = undefined;
       else {
         const colour = pool[index]!;
-        colour.r = pixels.data[offset]!;
-        colour.g = pixels.data[offset + 1]!;
-        colour.b = pixels.data[offset + 2]!;
+        const alpha = pixels.data[offset + 3] ?? 255;
+        colour.r = Math.round(overFrameBackdrop('r', pixels.data[offset]!, alpha));
+        colour.g = Math.round(overFrameBackdrop('g', pixels.data[offset + 1]!, alpha));
+        colour.b = Math.round(overFrameBackdrop('b', pixels.data[offset + 2]!, alpha));
         cells[index] = colour;
       }
       index += 1;

@@ -227,8 +227,13 @@ export function MonitorOverlays({
       onPointerCancel={(event) => endDrag(event, false)}
       onLostPointerCapture={(event) => endDrag(event, false)}
     >
-      {options.canvasBorder && (
+      {options.canvasBorder ? (
         <FrameSvg name="canvas-border" frame={frame} frameRect={frameRect} className="is-border">
+          <rect {...rectProps({ x: 0, y: 0, width: frame.width, height: frame.height })} />
+        </FrameSvg>
+      ) : (
+        // The frame is transparent, so without any border its edge cannot be seen. This faint line is always on.
+        <FrameSvg name="frame-edge" frame={frame} frameRect={frameRect} className="is-frame-edge">
           <rect {...rectProps({ x: 0, y: 0, width: frame.width, height: frame.height })} />
         </FrameSvg>
       )}
