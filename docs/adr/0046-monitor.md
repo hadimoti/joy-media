@@ -369,3 +369,10 @@ Drop a file on the Monitor (T-H02), the offline frame for missing media (T-R03),
 ### D. Implementation note (T-M02c, 12 Nov 2026)
 
 `setView` takes the panel size as a second argument: `setView({ zoom, panX, panY }, { width, height })`, because the renderer must know the panel size to keep the canvas panel-sized. `setPixelScale` overrides `options.resolution`. The export-width test (`export canvas width = composition width after another instance calls setPixelScale(4)`) is a unit test with a mocked Pixi `Application`; the real-window check is part of the monitor live pass (T-M13, T-L03). A window-level zoom shortcut handler now exists in the Monitor; T-M03 must arbitrate keys with it.
+
+### E. Decision 181: v1.1.1 scope of the right-click menu and the title editor (22 Nov 2026)
+
+Settled at the T-M14 sitting with the owner, after a read-only review by `gemini-4-argon-high`.
+
+- **Bring forward and Send backward are not in the v1.1.1 Monitor menu.** The Monitor visual document has no z-order command: `scene.moveLayer` belongs to the separate Motion Studio scene document and does not map to it (section 7 above says every menu item must map to an existing command, and anything missing is filed as a defect, not invented; see X-175 and X-176). In v1.1.1 a layer is reordered by moving its **track in the Timeline**, which already sets draw order. A durable z-order command and the two menu items are queued for **v1.1.2**.
+- **Esc in the inline title editor keeps committing the text in v1.1.1.** `MonitorTextInlineEditor.tsx` ends the edit on Escape through the same `finish()` as a click away. Making Escape cancel and restore the previous title is queued for **v1.1.2**, with the z-order command. Until then the Undo step that the commit creates is the way back.

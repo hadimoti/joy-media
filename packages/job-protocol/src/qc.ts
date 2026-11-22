@@ -6,7 +6,7 @@
  * sentences, so the report can be shown to the owner, stored with a project, or handed to a model as is.
  */
 
-/** The nine file check types. The two document-only checks are not Worker jobs. */
+/** The eleven file check types. The two document-only checks are not Worker jobs. */
 export type QcFileFindingType =
   | 'black'
   | 'frozen'
@@ -16,7 +16,9 @@ export type QcFileFindingType =
   | 'clipping'
   | 'exposure'
   | 'colour-cast'
-  | 'av-length-mismatch';
+  | 'av-length-mismatch'
+  | 'low-resolution'
+  | 'aspect-mismatch';
 
 export const QC_FILE_FINDING_TYPES: readonly QcFileFindingType[] = [
   'black',
@@ -28,6 +30,8 @@ export const QC_FILE_FINDING_TYPES: readonly QcFileFindingType[] = [
   'exposure',
   'colour-cast',
   'av-length-mismatch',
+  'low-resolution',
+  'aspect-mismatch',
 ] as const;
 
 /** `blocker` is data loss or a wrong export; the file checks only ever produce `major` and `minor`. */
@@ -75,12 +79,16 @@ export interface QcThresholds {
   readonly colourCastMax: number;
   /** Length difference above which a file with video and sound is reported, seconds. */
   readonly avLengthMismatchToleranceSec: number;
+  /** A picture whose shorter side is below this many pixels is reported as low resolution. */
+  readonly lowResolutionMinShortSidePx: number;
+  /** Black bars baked into the picture (letterbox or pillarbox) above this share of the frame are reported (0 to 1). */
+  readonly letterboxBarMinFraction: number;
 }
 
-/** The payload of a `media.qc` job. Every field is optional: an empty payload runs all nine checks. */
+/** The payload of a `media.qc` job. Every field is optional: an empty payload runs all eleven checks. */
 export interface MediaQcJobPayload {
   readonly schemaVersion?: 1;
-  /** Checks to run; omitted means all nine. */
+  /** Checks to run; omitted means all eleven. */
   readonly checks?: readonly QcFileFindingType[];
   readonly thresholds?: Partial<QcThresholds>;
   /** Whole-run time cap, milliseconds. The Worker clamps it to its own maximum. */

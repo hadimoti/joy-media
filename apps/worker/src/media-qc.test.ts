@@ -685,7 +685,7 @@ describe('job payload', () => {
   it('runs every check with the defaults when there is no payload', () => {
     for (const payload of [undefined, null, {}]) {
       const parsed = parseMediaQcPayload(payload);
-      expect(parsed.checks.size).toBe(9);
+      expect(parsed.checks.size).toBe(11);
       expect(parsed.thresholds).toEqual(DEFAULT_QC_THRESHOLDS);
       expect(parsed.thresholds.avLengthMismatchToleranceSec).toBe(0.5);
       expect(parsed.maxRunMs).toBe(10 * 60 * 1000);

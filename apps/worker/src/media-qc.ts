@@ -2,10 +2,11 @@
  * `media.qc` Worker job (ADR-0045 layer 1, T-B02). Runs ffmpeg filters over one file and returns one JSON
  * report. No model, no network, no cost: the numbers are the same on every machine and for every provider.
  *
- * Three bounded ffmpeg passes, each with its own filter chain:
+ * Four bounded ffmpeg passes, each with its own filter chain:
  *  - video:  blackdetect, freezedetect, scdet        (full frame rate, so times are frame-accurate)
  *  - audio:  ebur128, silencedetect, astats          (loudness, silence, clipping)
  *  - stats:  signalstats on a sampled frame rate     (exposure and colour cast)
+ *  - shape:  probe size, cropdetect on sampled frames (low resolution, baked-in black bars)
  *
  * Every time in the report is in microseconds. A pass is capped in run time and in captured output; a
  * pass that hits a cap says so in the report instead of pretending it looked at everything. The report holds
@@ -22,7 +23,7 @@ import type {
   QcThresholds,
 } from '@joy-media/job-protocol';
 
-/** The nine file checks. Kept here as well as in job-protocol so this file needs no rebuilt package. */
+/** The eleven file checks. Kept here as well as in job-protocol so this file needs no rebuilt package. */
 const ALL_CHECKS: readonly QcFileFindingType[] = [
   'black',
   'frozen',
@@ -33,6 +34,8 @@ const ALL_CHECKS: readonly QcFileFindingType[] = [
   'exposure',
   'colour-cast',
   'av-length-mismatch',
+  'low-resolution',
+  'aspect-mismatch',
 ];
 
 export const DEFAULT_QC_THRESHOLDS: QcThresholds = {
@@ -53,6 +56,10 @@ export const DEFAULT_QC_THRESHOLDS: QcThresholds = {
   exposureMinRunSec: 1,
   colourCastMax: 12,
   avLengthMismatchToleranceSec: 0.5,
+  // Below 360 px on the short side is under 640x360: soft on any screen. 320x180 is the typical culprit.
+  lowResolutionMinShortSidePx: 360,
+  // Bars of 8% of the frame or more are baked in (4:3 padded into 16:9 is 25%, 2.39:1 inside 16:9 is 12%).
+  letterboxBarMinFraction: 0.08,
 };
 
 /** The lowest and highest value a payload may give each threshold. Anything outside is refused, not clamped. */
@@ -74,6 +81,8 @@ const THRESHOLD_RANGES: Readonly<Record<keyof QcThresholds, readonly [number, nu
   exposureMinRunSec: [0.2, 600],
   colourCastMax: [1, 128],
   avLengthMismatchToleranceSec: [0, 60],
+  lowResolutionMinShortSidePx: [64, 2160],
+  letterboxBarMinFraction: [0.02, 0.45],
 };
 
 /** Whole-run time cap. A payload may lower it; it may not raise it past the maximum. */
@@ -431,6 +440,31 @@ export interface QcExposureRun {
   readonly endUs: number;
   readonly meanLuma: number;
 }
+/** The picture area that holds anything brighter than black, as ffmpeg `cropdetect` reports it. */
+export interface QcCropDetection {
+  readonly cropWidth: number;
+  readonly cropHeight: number;
+  readonly sampledFrames: number;
+}
+
+/**
+ * Reads `cropdetect` log lines. With its default `reset=0` the box only grows, so the last line is the union of
+ * the non-black area over every sampled frame: black bars that stay black in all of them show as a smaller box.
+ */
+export function parseCropdetect(text: string): QcCropDetection | undefined {
+  let last: RegExpMatchArray | undefined;
+  let frames = 0;
+  for (const match of text.matchAll(/cropdetect[^\n]*?crop=(\d+):(\d+):(\d+):(\d+)/g)) {
+    frames += 1;
+    last = match;
+  }
+  if (last === undefined) return undefined;
+  const cropWidth = Number(last[1]);
+  const cropHeight = Number(last[2]);
+  if (!(cropWidth > 0 && cropHeight > 0)) return undefined;
+  return { cropWidth, cropHeight, sampledFrames: frames };
+}
+
 export interface QcPictureAnalysis {
   readonly sampledFrames: number;
   readonly meanLuma: number;
@@ -533,6 +567,10 @@ export interface QcMeasurements {
   readonly audioStats?: QcAudioStats;
   readonly picture?: QcPictureAnalysis;
   readonly sampleIntervalUs?: number;
+  /** Coded picture size from the probe, when there is a video stream. */
+  readonly videoSize?: { readonly width: number; readonly height: number };
+  /** Result of the bar check; absent when the check did not run or nothing could be read. */
+  readonly crop?: QcCropDetection;
   readonly avStreamDurations?: {
     readonly videoDurationUs: number;
     readonly audioDurationUs: number;
@@ -713,6 +751,63 @@ export function qcFindings(measurements: QcMeasurements, thresholds: QcThreshold
           false,
         ),
       );
+    }
+  }
+  const size = measurements.videoSize;
+  if (size !== undefined && measurements.checksRun.includes('low-resolution')) {
+    const shortSide = Math.min(size.width, size.height);
+    if (shortSide < thresholds.lowResolutionMinShortSidePx) {
+      drafts.push(
+        measuredFinding(
+          'low-resolution',
+          shortSide < 240 ? 'major' : 'minor',
+          wholeFile,
+          `The picture is only ${size.width}x${size.height} pixels and will look soft on a larger screen.`,
+          { width: size.width, height: size.height, shortSidePx: shortSide },
+          false,
+        ),
+      );
+    }
+  }
+  if (size !== undefined && measurements.crop !== undefined) {
+    const { cropWidth, cropHeight } = measurements.crop;
+    // A crop smaller than a tenth of the frame means a mostly black picture, not bars: nothing to judge.
+    if (cropWidth * cropHeight >= size.width * size.height * 0.1) {
+      const topBottom = Math.max(0, size.height - cropHeight) / size.height;
+      const leftRight = Math.max(0, size.width - cropWidth) / size.width;
+      const fraction = Math.max(topBottom, leftRight);
+      if (fraction >= thresholds.letterboxBarMinFraction) {
+        const bars =
+          topBottom >= thresholds.letterboxBarMinFraction &&
+          leftRight >= thresholds.letterboxBarMinFraction
+            ? 'both'
+            : topBottom >= leftRight
+              ? 'letterbox'
+              : 'pillarbox';
+        const where =
+          bars === 'both'
+            ? 'on all four sides of'
+            : bars === 'letterbox'
+              ? 'above and below'
+              : 'to the left and right of';
+        drafts.push(
+          measuredFinding(
+            'aspect-mismatch',
+            fraction >= 0.1 ? 'major' : 'minor',
+            wholeFile,
+            `Black bars are baked into the picture ${where} the image (${Math.round(fraction * 100)}% of the frame): the picture shape does not match the frame.`,
+            {
+              width: size.width,
+              height: size.height,
+              contentWidth: cropWidth,
+              contentHeight: cropHeight,
+              barFraction: Math.round(fraction * 1000) / 1000,
+              bars,
+            },
+            false,
+          ),
+        );
+      }
     }
   }
   const avStreamDurations = measurements.avStreamDurations;
@@ -969,6 +1064,9 @@ interface ProbeResult {
   readonly hasAudio: boolean;
   readonly videoDurationUs?: number;
   readonly audioDurationUs?: number;
+  /** Coded size of the first real video stream, when the probe states it. */
+  readonly videoWidth?: number;
+  readonly videoHeight?: number;
 }
 
 /** Reads `ffprobe -of json` output. A cover-art picture inside an audio file is not a video stream. */
@@ -1020,12 +1118,19 @@ export function parseProbe(json: string): ProbeResult {
   };
   const videoDurationUs = streamDurationUs(videoStream);
   const audioDurationUs = streamDurationUs(audioStream);
+  const dimension = (name: string): number | undefined => {
+    const value = Number(videoStream?.[name]);
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  };
+  const videoWidth = dimension('width');
+  const videoHeight = dimension('height');
   return {
     durationUs,
     hasVideo,
     hasAudio,
     ...(videoDurationUs === undefined ? {} : { videoDurationUs }),
     ...(audioDurationUs === undefined ? {} : { audioDurationUs }),
+    ...(videoWidth === undefined || videoHeight === undefined ? {} : { videoWidth, videoHeight }),
   };
 }
 
@@ -1138,7 +1243,7 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
       '-v',
       'error',
       '-show_entries',
-      'format=duration:stream=codec_type,duration:stream_disposition=attached_pic:stream_tags=DURATION',
+      'format=duration:stream=codec_type,duration,width,height:stream_disposition=attached_pic:stream_tags=DURATION',
       '-of',
       'json',
       options.sourcePath,
@@ -1296,6 +1401,46 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
     }
   }
 
+  // Size and bars: the probe states the size; `cropdetect` on a sampled frame rate finds baked-in black bars.
+  let videoSize: { width: number; height: number } | undefined;
+  if (
+    probe.hasVideo &&
+    probe.videoWidth !== undefined &&
+    probe.videoHeight !== undefined &&
+    (checks.has('low-resolution') || checks.has('aspect-mismatch'))
+  ) {
+    videoSize = { width: probe.videoWidth, height: probe.videoHeight };
+    if (checks.has('low-resolution')) checksRun.push('low-resolution');
+  }
+  let crop: QcCropDetection | undefined;
+  if (videoSize !== undefined && checks.has('aspect-mismatch')) {
+    await options.progress(85);
+    const seconds = durationUs / 1_000_000;
+    const fps = Math.max(
+      0.01,
+      seconds > 0 ? Math.min(MAX_SAMPLE_FPS, MAX_SAMPLED_FRAMES / seconds) : 1,
+    );
+    const outcome = await run('the picture shape check', 'FFmpeg', ffmpeg, [
+      ...COMMON_FFMPEG_ARGS,
+      '-i',
+      options.sourcePath,
+      '-map',
+      '0:v:0',
+      '-an',
+      '-sn',
+      '-dn',
+      '-vf',
+      `fps=${Number(fps.toFixed(4))},cropdetect=limit=24:round=2:reset=0`,
+      '-f',
+      'null',
+      '-',
+    ]);
+    if (outcome !== undefined) {
+      checksRun.push('aspect-mismatch');
+      crop = parseCropdetect(outcome.stderr);
+    }
+  }
+
   await options.progress(95);
   const measurements: QcMeasurements = {
     durationUs,
@@ -1310,6 +1455,8 @@ export async function runMediaQc(options: MediaQcRunOptions): Promise<MediaQcRec
     ...(audioStats === undefined ? {} : { audioStats }),
     ...(picture === undefined ? {} : { picture }),
     ...(sampleIntervalUs === undefined ? {} : { sampleIntervalUs }),
+    ...(videoSize === undefined ? {} : { videoSize }),
+    ...(crop === undefined ? {} : { crop }),
     ...(avStreamDurations === undefined ? {} : { avStreamDurations }),
     incomplete,
     truncated,
