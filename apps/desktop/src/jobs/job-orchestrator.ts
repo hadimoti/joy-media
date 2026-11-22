@@ -34,29 +34,38 @@ const pendingSpeechDerivativeCleanup = new Map<string, SpeechDerivativeCleanup>(
 const PENDING_CLEANUP_FILE = 'pending-cleanup.json';
 let derivativeDirectory: string | undefined;
 let warnCleanup: (message: string) => void = (message) => console.warn(message);
+let pendingCleanupNeedsWrite = false;
+
+type CleanupPathResult =
+  | { readonly kind: 'safe'; readonly path: string }
+  | { readonly kind: 'missing'; readonly path: string }
+  | { readonly kind: 'unsafe' }
+  | { readonly kind: 'transient' };
 
 function isSpeechDerivativeFileName(jobId: string, fileName: string): boolean {
   const escapedJobId = jobId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`^${escapedJobId}-[a-f0-9]{16}\\.(?:wav|json)$`).test(fileName);
 }
 
-function cleanupPath(fileName: string): string | undefined {
+let realpathForCleanup: typeof realpathSync = realpathSync;
+
+function cleanupPath(fileName: string): CleanupPathResult {
   const configured = derivativeDirectory;
   if (configured === undefined || basename(fileName) !== fileName || fileName.includes('..'))
-    return undefined;
+    return { kind: 'unsafe' };
   const target = join(configured, fileName);
   try {
-    const realDirectory = realpathSync(configured);
-    const realFile = realpathSync(target);
+    const realDirectory = realpathForCleanup(configured);
+    const realFile = realpathForCleanup(target);
     const inside = relative(realDirectory, realFile);
     if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside))
-      return undefined;
-    if (realpathSync(dirname(target)) !== realDirectory || !lstatSync(target).isFile())
-      return undefined;
-    return target;
+      return { kind: 'unsafe' };
+    if (realpathForCleanup(dirname(target)) !== realDirectory || !lstatSync(target).isFile())
+      return { kind: 'unsafe' };
+    return { kind: 'safe', path: target };
   } catch (error) {
-    if (isNodeError(error) && error.code === 'ENOENT') return target;
-    return undefined;
+    if (isNodeError(error) && error.code === 'ENOENT') return { kind: 'missing', path: target };
+    return { kind: 'transient' };
   }
 }
 
@@ -65,6 +74,7 @@ function writePendingCleanup(): void {
   const path = join(derivativeDirectory, PENDING_CLEANUP_FILE);
   if (pendingSpeechDerivativeCleanup.size === 0) {
     rmSync(path, { force: true });
+    pendingCleanupNeedsWrite = false;
     return;
   }
   const temporary = join(derivativeDirectory, `${PENDING_CLEANUP_FILE}.${process.pid}.tmp`);
@@ -73,6 +83,7 @@ function writePendingCleanup(): void {
     mode: 0o600,
   });
   renameSync(temporary, path);
+  pendingCleanupNeedsWrite = false;
 }
 
 function loadPendingCleanup(): void {
@@ -124,24 +135,34 @@ function retrySpeechDerivativeCleanup(): void {
       warnCleanup('Speech derivative cleanup record was refused');
       continue;
     }
-    const path = cleanupPath(cleanup.fileName);
-    if (path === undefined) {
+    const checked = cleanupPath(cleanup.fileName);
+    if (checked.kind === 'unsafe') {
       pendingSpeechDerivativeCleanup.delete(key);
       changed = true;
       warnCleanup('Speech derivative cleanup was refused');
       continue;
     }
+    if (checked.kind === 'transient') {
+      warnCleanup('Speech derivative cleanup check will be retried');
+      continue;
+    }
+    if (checked.kind === 'missing') {
+      pendingSpeechDerivativeCleanup.delete(key);
+      changed = true;
+      continue;
+    }
     try {
-      if (existsSync(path)) removeSpeechDerivative(path);
-      lstatSync(path);
+      if (existsSync(checked.path)) removeSpeechDerivative(checked.path);
+      lstatSync(checked.path);
     } catch (error) {
       if (isNodeError(error) && error.code === 'ENOENT') {
         pendingSpeechDerivativeCleanup.delete(key);
         changed = true;
-      }
+      } else warnCleanup('Speech derivative cleanup will be retried');
     }
   }
-  if (changed) {
+  if (changed) pendingCleanupNeedsWrite = true;
+  if (changed || pendingCleanupNeedsWrite) {
     try {
       writePendingCleanup();
     } catch {
@@ -298,6 +319,8 @@ export interface JobOrchestratorOptions {
   readonly maxLeaseMs?: number;
   /** Test seam for transient filesystem failures; production uses a non-recursive unlink. */
   readonly removeDerivativeFile?: (path: string) => void;
+  /** Test seam for transient realpath failures. */
+  readonly realpathSync?: typeof realpathSync;
 }
 
 export interface JobOrchestrator {
@@ -347,6 +370,7 @@ export interface JobOrchestrator {
 
 export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrchestrator {
   const { store } = options;
+  realpathForCleanup = options.realpathSync ?? realpathSync;
   const now = options.now ?? (() => new Date().toISOString());
   const newId = options.newId ?? (() => crypto.randomUUID());
   const newLeaseToken = options.newLeaseToken ?? (() => randomBytes(32).toString('base64url'));
@@ -402,13 +426,14 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
         !rawPath.split(/[\\/]/).includes('..') &&
         isSpeechDerivativeFileName(job.id, fileName) &&
         resolve(dirname(rawPath)) === derivativeDirectory &&
-        cleanupPath(fileName) !== undefined
+        cleanupPath(fileName).kind === 'safe'
       ) {
         const key = `${job.id}\0${fileName}`;
         pendingSpeechDerivativeCleanup.set(key, {
           jobId: job.id,
           fileName,
         });
+        pendingCleanupNeedsWrite = true;
         try {
           writePendingCleanup();
         } catch {
