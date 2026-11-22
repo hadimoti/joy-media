@@ -12,6 +12,10 @@ describe('localWorkerEnv', () => {
     const env = localWorkerEnv(
       {
         PATH: '/bin',
+        JOY_MEDIA_SPEECH_WHISPER_PYTHON: 'python-whisper',
+        JOY_MEDIA_SPEECH_WHISPER_SCRIPT: 'stt_fw.py',
+        JOY_MEDIA_SPEECH_TTS_PYTHON: 'python-tts',
+        JOY_MEDIA_SPEECH_TTS_SCRIPT: 'tts.py',
         JOY_MEDIA_LOCAL_ASSETS_JSON: '{"asset-product":"C:/missing.mp4"}',
         JOY_MEDIA_API_URL: 'https://api.joyst.ir',
         JOY_MEDIA_WORKER_LOCAL_TOKEN: 'stale',
@@ -23,6 +27,12 @@ describe('localWorkerEnv', () => {
     expect(env.JOY_MEDIA_WORKER_PAIRING_NOTIFICATION_PATH).toBeUndefined();
     expect(env.JOY_MEDIA_API_URL).toBe('http://127.0.0.1:4000');
     expect(env.JOY_MEDIA_WORKER_LOCAL_TOKEN).toBe('token');
+    expect(env).toMatchObject({
+      JOY_MEDIA_SPEECH_WHISPER_PYTHON: 'python-whisper',
+      JOY_MEDIA_SPEECH_WHISPER_SCRIPT: 'stt_fw.py',
+      JOY_MEDIA_SPEECH_TTS_PYTHON: 'python-tts',
+      JOY_MEDIA_SPEECH_TTS_SCRIPT: 'tts.py',
+    });
     expect(env.PATH).toBe('/bin');
   });
 

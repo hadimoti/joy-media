@@ -1,11 +1,15 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createWriteStream } from 'node:fs';
-import { mkdir, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm } from 'node:fs/promises';
 import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { JobProtocolError, type JobOrchestrator } from './job-orchestrator.js';
+import {
+  parseSpeechTranscript,
+  parseSpeechTranscribeV1,
+} from '@joy-media/job-protocol';
 import { MAX_LOCAL_ORIGINAL_BYTES } from '../main/local-originals.js';
 
 /**
@@ -22,6 +26,8 @@ export const MAX_AI_REQUEST_BYTES = 1024 * 1024;
 export const MAX_AI_RESPONSE_BYTES = 4 * 1024 * 1024;
 /** The finished export comes back through this route, so it gets the same ceiling as an original. */
 const MAX_DERIVATIVE_BYTES = MAX_LOCAL_ORIGINAL_BYTES;
+const MAX_SPEECH_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
+const MAX_SPEECH_WAV_BYTES = 32 * 1024 * 1024;
 /**
  * Largest source served over the loopback route. It is the registration limit, so every original
  * that registers can render. The source is read into memory on both sides, so a large file is a
@@ -37,6 +43,8 @@ const DERIVATIVE_EXTENSIONS: Readonly<Record<string, string>> = {
   'video/mp4': 'mp4',
   // A tracked video mask: VP9 with alpha.
   'video/webm': 'webm',
+  'application/json': 'json',
+  'audio/wav': 'wav',
 };
 
 export interface LocalJobApiOptions {
@@ -170,6 +178,8 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
         jobId,
         headerValue(request, 'x-joy-lease-token'),
       );
+      if (job.jobType === 'speech.synthesize')
+        throw new JobProtocolError(409, 'built-in speech output does not have a source file');
       const limit = options.maxSourceBytes ?? MAX_LOCAL_SOURCE_BYTES;
       const size = await options.sourceSize(job.refId);
       if (size > limit)
@@ -203,10 +213,37 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
       const result = isRecord(body.result) ? body.result : undefined;
       if (result === undefined || typeof result.kind !== 'string')
         throw new JobProtocolError(422, 'invalid result');
+      const completing = orchestrator.get(jobId);
+      if (completing?.jobType === 'speech.transcribe') {
+        orchestrator.assertLeaseHolder(workerId, jobId, leaseToken);
+        const derivative = completing.derivative;
+        if (derivative === undefined || derivative.mimeType !== 'application/json')
+          throw new JobProtocolError(422, 'transcription JSON derivative is missing');
+        const requestPayload = parseSpeechTranscribeV1(
+          JSON.parse(completing.payloadJson ?? 'null') as unknown,
+        );
+        if (requestPayload === undefined)
+          throw new JobProtocolError(422, 'transcription request payload is invalid');
+        let decoded: unknown;
+        try {
+          decoded = JSON.parse((await readFile(derivative.path)).toString('utf8')) as unknown;
+        } catch {
+          throw new JobProtocolError(422, 'transcription JSON derivative is invalid');
+        }
+        const transcript = parseSpeechTranscript(decoded);
+        if (
+          transcript === undefined || transcript.language !== requestPayload.language ||
+          transcript.provenance.modelId !== requestPayload.modelId
+        ) {
+          throw new JobProtocolError(422, 'transcription JSON does not match its request');
+        }
+      }
       orchestrator.complete(workerId, jobId, leaseToken, {
         kind: result.kind,
         ...(typeof result.sha256 === 'string' ? { sha256: result.sha256 } : {}),
         ...(typeof result.bytes === 'number' ? { bytes: result.bytes } : {}),
+        ...(typeof result.mimeType === 'string' ? { mimeType: result.mimeType } : {}),
+        ...(result.speech === undefined ? {} : { speech: result.speech }),
         resultJson: JSON.stringify(result),
       });
       sendData(response, null);
@@ -281,10 +318,22 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
     jobId: string,
   ): Promise<void> {
     const leaseToken = headerValue(request, 'x-joy-lease-token');
-    orchestrator.assertLeaseHolder(workerId, jobId, leaseToken);
+    const job = orchestrator.assertLeaseHolder(workerId, jobId, leaseToken);
+    if (job.jobType.startsWith('speech.') && job.cancelRequested)
+      throw new JobProtocolError(409, 'the speech job was cancelled');
     const mimeType = (request.headers['content-type'] ?? '').split(';')[0]?.trim() ?? '';
     const extension = DERIVATIVE_EXTENSIONS[mimeType];
     if (extension === undefined) throw new JobProtocolError(422, 'unsupported derivative type');
+    let maxBytes = MAX_DERIVATIVE_BYTES;
+    if (job.jobType === 'speech.transcribe') {
+      if (mimeType !== 'application/json') throw new JobProtocolError(422, 'transcription requires application/json');
+      maxBytes = MAX_SPEECH_TRANSCRIPT_BYTES;
+    } else if (job.jobType === 'speech.synthesize') {
+      if (mimeType !== 'audio/wav') throw new JobProtocolError(422, 'synthesis requires audio/wav');
+      maxBytes = MAX_SPEECH_WAV_BYTES;
+    } else if (mimeType === 'application/json' || mimeType === 'audio/wav') {
+      throw new JobProtocolError(422, 'speech derivative MIME type is not valid for this job');
+    }
     const expectedSha = headerValue(request, 'x-joy-sha256');
     const expectedBytes = Number(headerValue(request, 'x-joy-bytes'));
     await mkdir(options.derivativeDirectory, { recursive: true });
@@ -293,7 +342,13 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
       options.derivativeDirectory,
       `${jobId}-${randomBytes(6).toString('hex')}.tmp`,
     );
-    const received = await receiveDerivative(request, temporary);
+    const speechDerivative = job.jobType === 'speech.transcribe' || job.jobType === 'speech.synthesize';
+    const received = await receiveDerivative(
+      request,
+      temporary,
+      maxBytes,
+      speechDerivative ? 413 : 422,
+    );
     if (received.bytes < 1 || received.bytes !== expectedBytes || received.sha256 !== expectedSha) {
       await rm(temporary, { force: true });
       throw new JobProtocolError(422, 'derivative bytes do not match their digest');
@@ -302,6 +357,9 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
     const path = join(options.derivativeDirectory, `${jobId}-${sha256.slice(0, 16)}.${extension}`);
     try {
       await rename(temporary, path);
+      const current = orchestrator.assertLeaseHolder(workerId, jobId, leaseToken);
+      if (current.jobType.startsWith('speech.') && current.cancelRequested)
+        throw new JobProtocolError(409, 'the speech job was cancelled');
       orchestrator.recordDerivative(workerId, jobId, leaseToken, {
         sha256,
         bytes: received.bytes,
@@ -376,6 +434,8 @@ function headerValue(request: IncomingMessage, name: string): string {
 async function receiveDerivative(
   request: IncomingMessage,
   path: string,
+  maxBytes = MAX_DERIVATIVE_BYTES,
+  tooLargeStatus: 413 | 422 = 422,
 ): Promise<{ readonly sha256: string; readonly bytes: number }> {
   const hash = createHash('sha256');
   const file = createWriteStream(path, { mode: 0o600 });
@@ -384,7 +444,7 @@ async function receiveDerivative(
     for await (const chunk of request) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
       total += buffer.length;
-      if (total > MAX_DERIVATIVE_BYTES) throw new JobProtocolError(422, 'payload is too large');
+      if (total > maxBytes) throw new JobProtocolError(tooLargeStatus, 'payload is too large');
       hash.update(buffer);
       if (!file.write(buffer)) await once(file, 'drain');
     }

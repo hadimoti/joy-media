@@ -129,6 +129,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@joy-media/job-protocol':
+        specifier: workspace:*
+        version: link:../../packages/job-protocol
       '@joy-media/provider-oauth':
         specifier: workspace:*
         version: link:../../packages/provider-oauth

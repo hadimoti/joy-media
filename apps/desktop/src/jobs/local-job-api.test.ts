@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalDatabase } from '../store/local-database.js';
-import { createJobOrchestrator } from './job-orchestrator.js';
+import { createJobOrchestrator, type JobOrchestrator } from './job-orchestrator.js';
 import {
   MAX_AI_REQUEST_BYTES,
   MAX_AI_RESPONSE_BYTES,
@@ -26,6 +26,7 @@ describe('local job API', () => {
   let database: LocalDatabase;
   let api: LocalJobApi;
   let derivativeDirectory: string;
+  let orchestrator: JobOrchestrator;
 
   let reportedSourceSize: number;
   let aiRequests: LocalAiRequest[];
@@ -40,8 +41,9 @@ describe('local job API', () => {
     aiRequests = [];
     aiReply = { ok: true, text: '{"choices":[]}' };
     holdAi = undefined;
+    orchestrator = createJobOrchestrator({ store: database.jobDispatch });
     api = await startLocalJobApi({
-      orchestrator: createJobOrchestrator({ store: database.jobDispatch }),
+      orchestrator,
       derivativeDirectory,
       sourceSize: async () => reportedSourceSize,
       openSource: (refId) => {
@@ -110,6 +112,44 @@ describe('local job API', () => {
     const response = await postJson(`/v1/workers/${WORKER}/leases`, { durationMs: 30_000 });
     const body = (await response.json()) as { data: { id: string; leaseToken: string } };
     return body.data;
+  }
+
+  async function queueSpeechAndLease(
+    jobType: 'speech.transcribe' | 'speech.synthesize',
+  ): Promise<{ jobId: string; leaseToken: string; payload: Record<string, unknown> }> {
+    const payload: Record<string, unknown> = jobType === 'speech.transcribe'
+      ? { schemaVersion: 1, language: 'en-US', modelId: 'faster-whisper-large-v3-turbo' }
+      : { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' };
+    const modelId = String(payload.modelId);
+    await postJson(`/v1/workers/${WORKER}/hello`, {
+      capabilities: [jobType, `speech.model.${modelId}`],
+      assetIds: [],
+    });
+    const submitted = orchestrator.submit({ jobType, refId: jobType === 'speech.synthesize' ? 'speech-output' : 'ref-1', kind: jobType, payload });
+    if (!submitted.ok) throw new Error(`expected a speech job, got ${submitted.code}`);
+    const response = await postJson(`/v1/workers/${WORKER}/leases`, { durationMs: 30_000 });
+    const body = (await response.json()) as { data: { id: string; leaseToken: string } };
+    return { jobId: body.data.id, leaseToken: body.data.leaseToken, payload };
+  }
+
+  async function uploadSpeechDerivative(
+    jobId: string,
+    leaseToken: string,
+    mimeType: string,
+    bytes: Buffer,
+  ): Promise<{ response: Response; sha256: string }> {
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const response = await call(`/v1/workers/${WORKER}/jobs/${jobId}/derivative`, {
+      method: 'POST',
+      headers: {
+        'content-type': mimeType,
+        'x-joy-lease-token': leaseToken,
+        'x-joy-sha256': sha256,
+        'x-joy-bytes': String(bytes.length),
+      },
+      body: bytes,
+    });
+    return { response, sha256 };
   }
 
   it('binds only to the loopback address on a random port', () => {
@@ -275,6 +315,123 @@ describe('local job API', () => {
     expect(upload.status).toBe(200);
     const [stored] = readdirSync(derivativeDirectory);
     expect(stored).toMatch(/\.webm$/);
+  });
+
+  describe('speech transfers', () => {
+    const transcript = {
+      language: 'en-US',
+      words: [{ text: 'Hello', startUs: 0, endUs: 500_000, confidence: 0.9 }],
+      speakers: [],
+      provenance: {
+        providerId: 'local',
+        modelId: 'faster-whisper-large-v3-turbo',
+        createdAt: '2026-11-22T00:00:00.000Z',
+      },
+    };
+
+    it('serves transcription source bytes but refuses a built-in synthesis source read', async () => {
+      const transcription = await queueSpeechAndLease('speech.transcribe');
+      const source = await call(`/v1/workers/${WORKER}/jobs/${transcription.jobId}/source`, {
+        headers: { 'x-joy-lease-token': transcription.leaseToken },
+      });
+      expect(source.status).toBe(200);
+      expect(Buffer.from(await source.arrayBuffer())).toEqual(SOURCE);
+      orchestrator.fail(WORKER, transcription.jobId, transcription.leaseToken, 'stopped');
+
+      const synthesis = await queueSpeechAndLease('speech.synthesize');
+      const builtIn = await call(`/v1/workers/${WORKER}/jobs/${synthesis.jobId}/source`, {
+        headers: { 'x-joy-lease-token': synthesis.leaseToken },
+      });
+      expect(builtIn.status).toBe(409);
+    });
+
+    it('accepts JSON only for transcription and WAV only for synthesis', async () => {
+      const transcription = await queueSpeechAndLease('speech.transcribe');
+      expect((await uploadSpeechDerivative(transcription.jobId, transcription.leaseToken, 'audio/wav', Buffer.from('wav'))).response.status).toBe(422);
+      orchestrator.fail(WORKER, transcription.jobId, transcription.leaseToken, 'stopped');
+
+      const synthesis = await queueSpeechAndLease('speech.synthesize');
+      expect((await uploadSpeechDerivative(synthesis.jobId, synthesis.leaseToken, 'application/json', Buffer.from('{}'))).response.status).toBe(422);
+    });
+
+    it('completes transcription only with matching kind, MIME, bytes and digest', async () => {
+      const leased = await queueSpeechAndLease('speech.transcribe');
+      const jobId = leased.jobId;
+      const bytes = Buffer.from(JSON.stringify(transcript));
+      const uploaded = await uploadSpeechDerivative(jobId, leased.leaseToken, 'application/json', bytes);
+      expect(uploaded.response.status).toBe(200);
+
+      const wrongKind = await postJson(`/v1/workers/${WORKER}/jobs/${jobId}/complete`, {
+        leaseToken: leased.leaseToken,
+        result: { kind: 'speech.synthesize', sha256: uploaded.sha256, bytes: bytes.length, mimeType: 'application/json' },
+      });
+      expect(wrongKind.status).toBe(422);
+      const wrongDigest = await postJson(`/v1/workers/${WORKER}/jobs/${jobId}/complete`, {
+        leaseToken: leased.leaseToken,
+        result: { kind: 'speech.transcribe', sha256: '0'.repeat(64), bytes: bytes.length, mimeType: 'application/json' },
+      });
+      expect(wrongDigest.status).toBe(422);
+      const wrongMime = await postJson(`/v1/workers/${WORKER}/jobs/${jobId}/complete`, {
+        leaseToken: leased.leaseToken,
+        result: { kind: 'speech.transcribe', sha256: uploaded.sha256, bytes: bytes.length, mimeType: 'audio/wav' },
+      });
+      expect(wrongMime.status).toBe(422);
+      const complete = await postJson(`/v1/workers/${WORKER}/jobs/${jobId}/complete`, {
+        leaseToken: leased.leaseToken,
+        result: { kind: 'speech.transcribe', sha256: uploaded.sha256, bytes: bytes.length, mimeType: 'application/json' },
+      });
+      expect(complete.status).toBe(200);
+      expect(database.jobDispatch.get(jobId)).toMatchObject({ status: 'done' });
+    });
+
+    it('requires valid synthesis timing metadata before completion', async () => {
+      const leased = await queueSpeechAndLease('speech.synthesize');
+      const audio = Buffer.from('RIFF-wav-data');
+      const uploaded = await uploadSpeechDerivative(leased.jobId, leased.leaseToken, 'audio/wav', audio);
+      expect(uploaded.response.status).toBe(200);
+      const result = {
+        kind: 'speech.synthesize',
+        sha256: uploaded.sha256,
+        bytes: audio.length,
+        mimeType: 'audio/wav',
+      };
+      const invalidTiming = await postJson(`/v1/workers/${WORKER}/jobs/${leased.jobId}/complete`, {
+        leaseToken: leased.leaseToken,
+        result: { ...result, speech: { durationUs: 800_000, timingSource: 'unavailable', words: [{ text: 'Hello', startUs: 0, endUs: 1 }] } },
+      });
+      expect(invalidTiming.status).toBe(422);
+      expect(database.jobDispatch.get(leased.jobId)).toMatchObject({ status: 'running' });
+      const complete = await postJson(`/v1/workers/${WORKER}/jobs/${leased.jobId}/complete`, {
+        leaseToken: leased.leaseToken,
+        result: { ...result, speech: { durationUs: 800_000, timingSource: 'unavailable', words: [] } },
+      });
+      expect(complete.status).toBe(200);
+      expect(database.jobDispatch.get(leased.jobId)).toMatchObject({ status: 'done' });
+    });
+
+    it('requires valid synthesis timing and rejects speech writes after cancellation', async () => {
+      const leased = await queueSpeechAndLease('speech.synthesize');
+      const jobId = leased.jobId;
+      const audio = Buffer.from('RIFF-wav-data');
+      const uploaded = await uploadSpeechDerivative(jobId, leased.leaseToken, 'audio/wav', audio);
+      expect(uploaded.response.status).toBe(200);
+      orchestrator.requestCancel(jobId);
+      const lateWrite = await uploadSpeechDerivative(jobId, leased.leaseToken, 'audio/wav', audio);
+      expect(lateWrite.response.status).toBe(409);
+      const completion = await postJson(`/v1/workers/${WORKER}/jobs/${jobId}/complete`, {
+        leaseToken: leased.leaseToken,
+        result: {
+          kind: 'speech.synthesize',
+          sha256: uploaded.sha256,
+          bytes: audio.length,
+          mimeType: 'audio/wav',
+          speech: { durationUs: 800_000, timingSource: 'unavailable', words: [] },
+        },
+      });
+      expect(completion.status).toBe(409);
+      orchestrator.fail(WORKER, jobId, leased.leaseToken, 'canceled');
+      expect(database.jobDispatch.get(jobId)).toMatchObject({ status: 'cancelled', derivative: undefined });
+    });
   });
 
   describe('media.qc report on the complete route', () => {
