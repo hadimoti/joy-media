@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { rmSync } from 'node:fs';
 import {
   parseSpeechSynthesizeV1,
   parseSpeechSynthesisTiming,
@@ -243,6 +244,17 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
     error: string | undefined,
     patch: Partial<DispatchJob> = {},
   ): void {
+    if (
+      job.jobType.startsWith('speech.') &&
+      status !== 'done' &&
+      job.derivative !== undefined
+    ) {
+      try {
+        rmSync(job.derivative.path, { force: true });
+      } catch {
+        // A terminal job must still leave the dispatch store even if local cleanup fails.
+      }
+    }
     store.save({
       ...job,
       ...patch,
@@ -319,12 +331,12 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
             message: 'speech.transcribe needs an audio source',
           };
         }
-        if (jobType === 'speech.synthesize' && refId !== BUILTIN_SPEECH_OUTPUT_REF_ID) {
+        if (jobType === 'speech.synthesize' && !refId.trim()) {
           return {
             ok: false,
             code: 'PAYLOAD_INVALID',
             jobType,
-            message: 'speech.synthesize needs the built-in speech output reference',
+            message: 'speech.synthesize needs an output or reference asset',
           };
         }
       }

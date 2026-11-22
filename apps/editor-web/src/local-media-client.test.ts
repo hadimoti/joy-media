@@ -214,7 +214,7 @@ describe('BrowserControlPlaneClient local speech jobs', () => {
     ).toHaveLength(1);
   });
 
-  it('reports speech models and synthesizes against the built-in output ref', async () => {
+  it('reports speech models and omits the reference for built-in synthesis', async () => {
     const audioBytes = new Uint8Array([82, 73, 70, 70]);
     const timing = { durationUs: 1_000_000, timingSource: 'unavailable', words: [] } as const;
     const invoke = vi.fn(async (channel: string) => {
@@ -262,7 +262,6 @@ describe('BrowserControlPlaneClient local speech jobs', () => {
     });
     expect(invoke).toHaveBeenCalledWith('desktop.media.speech.run', {
       jobType: 'speech.synthesize',
-      refId: 'joy-speech-output',
       payload: request,
       consent: { acknowledged: true, purpose: 'general' },
     });

@@ -5,7 +5,11 @@ import { mkdir, readFile, rename, rm } from 'node:fs/promises';
 import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { join } from 'node:path';
-import { JobProtocolError, type JobOrchestrator } from './job-orchestrator.js';
+import {
+  BUILTIN_SPEECH_OUTPUT_REF_ID,
+  JobProtocolError,
+  type JobOrchestrator,
+} from './job-orchestrator.js';
 import { parseSpeechTranscript, parseSpeechTranscribeV1 } from '@joy-media/job-protocol';
 import { MAX_LOCAL_ORIGINAL_BYTES } from '../main/local-originals.js';
 
@@ -175,7 +179,7 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
         jobId,
         headerValue(request, 'x-joy-lease-token'),
       );
-      if (job.jobType === 'speech.synthesize')
+      if (job.jobType === 'speech.synthesize' && job.refId === BUILTIN_SPEECH_OUTPUT_REF_ID)
         throw new JobProtocolError(409, 'built-in speech output does not have a source file');
       const limit = options.maxSourceBytes ?? MAX_LOCAL_SOURCE_BYTES;
       const size = await options.sourceSize(job.refId);

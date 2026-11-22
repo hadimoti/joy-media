@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -110,13 +110,14 @@ describe('job orchestrator', () => {
       expect(orchestrator.submit(request)).toMatchObject({ ok: true });
     });
 
-    it('requires a source for transcription and the fixed built-in reference for synthesis', () => {
+    it('requires a source for transcription and preserves optional synthesis references', () => {
       const orchestrator = orchestratorFor(database);
       orchestrator.hello(WORKER, [
         'speech.transcribe',
         'speech.model.faster-whisper-large-v3-turbo',
         'speech.synthesize',
         'speech.model.kokoro-82m',
+        'speech.model.chatterbox-en',
       ]);
       expect(
         orchestrator.submit({
@@ -130,14 +131,15 @@ describe('job orchestrator', () => {
           },
         }),
       ).toMatchObject({ ok: false, code: 'PAYLOAD_INVALID' });
-      expect(
-        orchestrator.submit({
-          jobType: 'speech.synthesize',
-          refId: 'external-file',
-          kind: 'speech.synthesize',
-          payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
-        }),
-      ).toMatchObject({ ok: false, code: 'PAYLOAD_INVALID' });
+      const selectedSource = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'voice-reference-a',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'chatterbox-en', text: 'Hello' },
+      });
+      expect(selectedSource).toMatchObject({ ok: true });
+      if (!selectedSource.ok) throw new Error('expected synthesis to be queued');
+      expect(orchestrator.lease(WORKER)?.refId).toBe('voice-reference-a');
     });
 
     it('rejects malformed speech payloads and accepts a valid synthesis payload', () => {
@@ -507,6 +509,29 @@ describe('job orchestrator', () => {
         status: 'cancelled',
         error: CANCELLED_BY_USER,
       });
+    });
+
+    it('deletes an uploaded speech derivative when its lease expires', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const submitted = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      });
+      if (!submitted.ok) throw new Error('expected synthesis job');
+      const leased = orchestrator.lease(WORKER);
+      if (leased === undefined) throw new Error('expected a speech lease');
+      const path = join(dir, 'speech.wav');
+      writeFileSync(path, 'wav');
+      orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
+        sha256: 'a'.repeat(64), bytes: 3, mimeType: 'audio/wav', path,
+      });
+      clock = 4_000;
+      expect(orchestrator.expireLeases()).toBe(1);
+      expect(orchestrator.get(submitted.jobId)?.status).toBe('failed');
+      expect(existsSync(path)).toBe(false);
     });
 
     it('keeps a dispatched job, its lease and its progress across a desktop restart', () => {

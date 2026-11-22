@@ -857,7 +857,7 @@ export class BrowserControlPlaneClient {
   private async runSpeechJob(
     projectId: string,
     jobType: 'speech.transcribe' | 'speech.synthesize',
-    refId: string,
+    refId: string | undefined,
     payload: SpeechTranscribeV1 | SpeechSynthesizeV1,
     consent: SpeechConsentRequest | undefined,
     signal: AbortSignal | undefined,
@@ -868,7 +868,7 @@ export class BrowserControlPlaneClient {
     try {
       started = await call(this.bridge, 'desktop.media.speech.run', {
         jobType,
-        refId,
+        ...(refId === undefined ? {} : { refId }),
         payload,
         ...(consent === undefined ? {} : { consent }),
       });
@@ -882,7 +882,7 @@ export class BrowserControlPlaneClient {
     trackedJobs.set(editorJobId, {
       editorId: editorJobId,
       projectId,
-      assetId: refId,
+      assetId: refId ?? BUILT_IN_SPEECH_OUTPUT_REF_ID,
       type: jobType,
       desktopJobId: started.jobId,
     });
@@ -1018,7 +1018,7 @@ export class BrowserControlPlaneClient {
     ) {
       throw new Error('Speech text must contain 1,000 graphemes or fewer and fit within 16 KiB');
     }
-    const refId = options.referenceAssetId ?? BUILT_IN_SPEECH_OUTPUT_REF_ID;
+    const refId = options.referenceAssetId;
     const { editorJobId, job } = await this.runSpeechJob(
       projectId,
       'speech.synthesize',
