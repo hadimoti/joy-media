@@ -38,10 +38,20 @@ export interface SpeechModelRunner {
   readonly ffmpegPath?: string;
 }
 
+export type SpeechSetupReasonCode =
+  | 'CHATTERBOX_EN_FILES_MISSING'
+  | 'CHATTERBOX_FA_CHECKPOINT_MISSING'
+  | 'CHATTERBOX_FA_ENGINE_MISSING'
+  | 'CHATTERBOX_FA_TOKENIZER_MISSING'
+  | 'CHATTERBOX_FA_BASE_FILES_MISSING';
+
 export interface SpeechAvailability {
   readonly transcribe?: SpeechModelRunner;
   readonly synthesis: Readonly<
     Partial<Record<'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa', SpeechModelRunner>>
+  >;
+  readonly setupRequired?: Readonly<
+    Partial<Record<'chatterbox-en' | 'chatterbox-fa', SpeechSetupReasonCode>>
   >;
 }
 
@@ -110,6 +120,7 @@ export function speechAvailabilityFromEnvironment(env: NodeJS.ProcessEnv): Speec
   const synthesis: Partial<
     Record<'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa', SpeechModelRunner>
   > = {};
+  const setupRequired: Partial<Record<'chatterbox-en' | 'chatterbox-fa', SpeechSetupReasonCode>> = {};
   const models = [
     [
       'kokoro-82m',
@@ -137,14 +148,70 @@ export function speechAvailabilityFromEnvironment(env: NodeJS.ProcessEnv): Speec
       modelId.startsWith('chatterbox-') && env.JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT?.trim()
         ? env.JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT.trim()
         : resolve(scriptDir, scriptName);
-    if (
+    const isChatterbox = modelId.startsWith('chatterbox-');
+    const chatterboxReason = isChatterbox
+      ? chatterboxModelReason(modelId, modelPath)
+      : undefined;
+    const runtimeAvailable =
       isLocalDirectory(modelPath) &&
       isLocalFile(scriptPath) &&
-      dependenciesAvailable(ttsPython, modules)
-    )
+      dependenciesAvailable(ttsPython, modules);
+    if (runtimeAvailable && chatterboxReason === undefined)
       synthesis[modelId] = modelRunner(ttsPython, scriptPath, modelPath, ffmpegPath);
+    else if (runtimeAvailable && chatterboxReason !== undefined)
+      setupRequired[modelId as 'chatterbox-en' | 'chatterbox-fa'] = chatterboxReason;
   }
-  return { ...(transcribe === undefined ? {} : { transcribe }), synthesis };
+  return {
+    ...(transcribe === undefined ? {} : { transcribe }),
+    synthesis,
+    ...(Object.keys(setupRequired).length === 0 ? {} : { setupRequired }),
+  };
+}
+
+function chatterboxModelReason(modelId: string, modelPath: string): SpeechSetupReasonCode | undefined {
+  if (!isLocalDirectory(modelPath)) return undefined;
+  if (modelId === 'chatterbox-en') {
+    const required: ReadonlyArray<readonly [string, readonly string[]]> = [
+      ['conds.pt', []],
+      ['s3gen.safetensors', ['s3gen.pt']],
+      ['t3_cfg.safetensors', ['t3.safetensors', 't3.pt', 't3_mtl.safetensors']],
+      ['tokenizer.json', []],
+      ['ve.safetensors', ['ve.pt']],
+    ];
+    const hasLegacyT3 = ['t3.safetensors', 't3.pt', 't3_mtl.safetensors'].some((name) =>
+      isNonemptyFile(resolve(modelPath, name)),
+    );
+    return required.every(([name, alternates]) =>
+      (name === 'conds.pt' && hasLegacyT3) ||
+      [name, ...alternates].some((candidate) => isNonemptyFile(resolve(modelPath, candidate))),
+    )
+      ? undefined
+      : 'CHATTERBOX_EN_FILES_MISSING';
+  }
+  if (!isNonemptyFile(resolve(modelPath, 't3_fa_expressive.safetensors')))
+    return 'CHATTERBOX_FA_CHECKPOINT_MISSING';
+  if (!isNonemptyFile(resolve(modelPath, 'persian_tts_engine.py')))
+    return 'CHATTERBOX_FA_ENGINE_MISSING';
+  if (
+    !isNonemptyFile(resolve(modelPath, 'grapheme_mtl_merged_expanded_v1.json')) &&
+    !isNonemptyFile(resolve(modelPath, 'tokenizer.json'))
+  )
+    return 'CHATTERBOX_FA_TOKENIZER_MISSING';
+  const bases = [
+    modelPath,
+    resolve(modelPath, '..', 'chatterbox-en'),
+    resolve(modelPath, '..', 'chatterbox-english'),
+  ];
+  return bases.some((base) =>
+    isNonemptyFile(resolve(base, 've.safetensors')) &&
+    isNonemptyFile(resolve(base, 's3gen.safetensors')),
+  )
+    ? undefined
+    : 'CHATTERBOX_FA_BASE_FILES_MISSING';
+}
+
+function isNonemptyFile(path: string): boolean {
+  return isLocalFile(path) && statSync(path).size > 0;
 }
 
 function modelRunner(

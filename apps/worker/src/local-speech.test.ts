@@ -94,6 +94,13 @@ describe('local speech worker runner', () => {
       'chatterbox-fa',
     ])
       mkdirSync(join(modelDir, name), { recursive: true });
+    for (const name of ['conds.pt', 's3gen.safetensors', 't3_cfg.safetensors', 'tokenizer.json', 've.safetensors'])
+      writeFileSync(join(modelDir, 'chatterbox-en', name), 'fixture');
+    for (const name of ['t3_fa_expressive.safetensors', 'persian_tts_engine.py', 'grapheme_mtl_merged_expanded_v1.json'])
+      writeFileSync(join(modelDir, 'chatterbox-fa', name), 'fixture');
+    mkdirSync(join(modelDir, 'chatterbox-en-base'));
+    writeFileSync(join(modelDir, 'chatterbox-en-base', 've.safetensors'), 'fixture');
+    writeFileSync(join(modelDir, 'chatterbox-en-base', 's3gen.safetensors'), 'fixture');
     const sttPython = join(root, 'stt-python.exe');
     const ttsPython = join(root, 'tts-python.exe');
     writeFileSync(sttPython, 'fixture STT executable');
@@ -115,6 +122,36 @@ describe('local speech worker runner', () => {
             }
           : {},
       );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('checks the real Chatterbox files and gives Persian a setup reason when its base is absent', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-speech-chatterbox-layout-'));
+    const runnerDir = join(root, 'runners');
+    const models = join(root, 'models');
+    const python = join(root, 'python.exe');
+    mkdirSync(runnerDir);
+    mkdirSync(join(models, 'chatterbox-en'), { recursive: true });
+    const isolatedFa = join(root, 'isolated', 'persian-only');
+    mkdirSync(isolatedFa, { recursive: true });
+    writeFileSync(join(runnerDir, 'synthesize_chatterbox.py'), 'fixture');
+    writeFileSync(python, 'fixture');
+    for (const name of ['conds.pt', 's3gen.safetensors', 't3_cfg.safetensors', 'tokenizer.json', 've.safetensors'])
+      writeFileSync(join(models, 'chatterbox-en', name), 'fixture');
+    for (const name of ['t3_fa_expressive.safetensors', 'persian_tts_engine.py', 'grapheme_mtl_merged_expanded_v1.json'])
+      writeFileSync(join(isolatedFa, name), 'fixture');
+    try {
+      const result = speechAvailabilityFromEnvironment({
+        JOY_MEDIA_SPEECH_TTS_PYTHON: python,
+        JOY_MEDIA_SPEECH_RUNNER_DIR: runnerDir,
+        JOY_MEDIA_SPEECH_MODEL_DIR: models,
+        JOY_MEDIA_SPEECH_CHATTERBOX_FA_MODEL_PATH: isolatedFa,
+      });
+      expect(result.synthesis['chatterbox-en']?.modelPath).toBe(join(models, 'chatterbox-en'));
+      expect(result.synthesis['chatterbox-fa']).toBeUndefined();
+      expect(result.setupRequired?.['chatterbox-fa']).toBe('CHATTERBOX_FA_BASE_FILES_MISSING');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
