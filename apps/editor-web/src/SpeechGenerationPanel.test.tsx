@@ -183,7 +183,7 @@ describe('SpeechGenerationPanel', () => {
   it('tells the user how to get a reference voice when the project has no audio', async () => {
     const view = await render(makeProps({ referenceAssets: [] }));
     // Kokoro is the default engine and takes no reference: no hint.
-    expect(view.textContent).not.toContain('reference voice');
+    expect(view.textContent).not.toContain('to the timeline, then choose it here');
     const language = view.querySelector<HTMLSelectElement>('select[name="language"]')!;
     await act(async () => {
       language.value = 'fa-IR';
