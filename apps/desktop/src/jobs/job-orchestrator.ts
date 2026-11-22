@@ -39,6 +39,7 @@ let pendingCleanupNeedsWrite = false;
 type CleanupPathResult =
   | { readonly kind: 'safe'; readonly path: string }
   | { readonly kind: 'missing'; readonly path: string }
+  | { readonly kind: 'directory-missing' }
   | { readonly kind: 'unsafe' }
   | { readonly kind: 'transient' };
 
@@ -54,8 +55,14 @@ function cleanupPath(fileName: string): CleanupPathResult {
   if (configured === undefined || basename(fileName) !== fileName || fileName.includes('..'))
     return { kind: 'unsafe' };
   const target = join(configured, fileName);
+  let realDirectory: string;
   try {
-    const realDirectory = realpathForCleanup(configured);
+    realDirectory = realpathForCleanup(configured);
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') return { kind: 'directory-missing' };
+    return { kind: 'transient' };
+  }
+  try {
     const realFile = realpathForCleanup(target);
     const inside = relative(realDirectory, realFile);
     if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside))
@@ -143,6 +150,10 @@ function retrySpeechDerivativeCleanup(): void {
       continue;
     }
     if (checked.kind === 'transient') {
+      warnCleanup('Speech derivative cleanup check will be retried');
+      continue;
+    }
+    if (checked.kind === 'directory-missing') {
       warnCleanup('Speech derivative cleanup check will be retried');
       continue;
     }
@@ -420,14 +431,14 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
     if (job.jobType.startsWith('speech.') && status !== 'done' && job.derivative !== undefined) {
       const rawPath = job.derivative.path;
       const fileName = basename(resolve(rawPath));
-      if (
+      const candidateIsSafe =
         derivativeDirectory !== undefined &&
         isAbsolute(rawPath) &&
         !rawPath.split(/[\\/]/).includes('..') &&
         isSpeechDerivativeFileName(job.id, fileName) &&
-        resolve(dirname(rawPath)) === derivativeDirectory &&
-        cleanupPath(fileName).kind === 'safe'
-      ) {
+        resolve(dirname(rawPath)) === derivativeDirectory;
+      const checked = candidateIsSafe ? cleanupPath(fileName) : { kind: 'unsafe' as const };
+      if (candidateIsSafe && checked.kind !== 'unsafe' && checked.kind !== 'missing') {
         const key = `${job.id}\0${fileName}`;
         pendingSpeechDerivativeCleanup.set(key, {
           jobId: job.id,
