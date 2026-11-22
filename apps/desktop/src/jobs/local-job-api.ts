@@ -6,10 +6,7 @@ import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { JobProtocolError, type JobOrchestrator } from './job-orchestrator.js';
-import {
-  parseSpeechTranscript,
-  parseSpeechTranscribeV1,
-} from '@joy-media/job-protocol';
+import { parseSpeechTranscript, parseSpeechTranscribeV1 } from '@joy-media/job-protocol';
 import { MAX_LOCAL_ORIGINAL_BYTES } from '../main/local-originals.js';
 
 /**
@@ -232,7 +229,8 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
         }
         const transcript = parseSpeechTranscript(decoded);
         if (
-          transcript === undefined || transcript.language !== requestPayload.language ||
+          transcript === undefined ||
+          transcript.language !== requestPayload.language ||
           transcript.provenance.modelId !== requestPayload.modelId
         ) {
           throw new JobProtocolError(422, 'transcription JSON does not match its request');
@@ -326,7 +324,8 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
     if (extension === undefined) throw new JobProtocolError(422, 'unsupported derivative type');
     let maxBytes = MAX_DERIVATIVE_BYTES;
     if (job.jobType === 'speech.transcribe') {
-      if (mimeType !== 'application/json') throw new JobProtocolError(422, 'transcription requires application/json');
+      if (mimeType !== 'application/json')
+        throw new JobProtocolError(422, 'transcription requires application/json');
       maxBytes = MAX_SPEECH_TRANSCRIPT_BYTES;
     } else if (job.jobType === 'speech.synthesize') {
       if (mimeType !== 'audio/wav') throw new JobProtocolError(422, 'synthesis requires audio/wav');
@@ -342,7 +341,8 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
       options.derivativeDirectory,
       `${jobId}-${randomBytes(6).toString('hex')}.tmp`,
     );
-    const speechDerivative = job.jobType === 'speech.transcribe' || job.jobType === 'speech.synthesize';
+    const speechDerivative =
+      job.jobType === 'speech.transcribe' || job.jobType === 'speech.synthesize';
     const received = await receiveDerivative(
       request,
       temporary,

@@ -14,10 +14,7 @@ import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type {
-  SpeechConsentRequest,
-  SpeechSynthesisTiming,
-} from '@joy-media/job-protocol';
+import type { SpeechConsentRequest, SpeechSynthesisTiming } from '@joy-media/job-protocol';
 import {
   parseSpeechSynthesisTiming,
   parseSpeechSynthesizeV1,
@@ -43,7 +40,9 @@ export interface SpeechModelRunner {
 
 export interface SpeechAvailability {
   readonly transcribe?: SpeechModelRunner;
-  readonly synthesis: Readonly<Partial<Record<'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa', SpeechModelRunner>>>;
+  readonly synthesis: Readonly<
+    Partial<Record<'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa', SpeechModelRunner>>
+  >;
 }
 
 export interface SpeechWorkerDerivative {
@@ -52,7 +51,10 @@ export interface SpeechWorkerDerivative {
   readonly sha256: string;
   readonly bytes: number;
   readonly localRef: string;
-  readonly descriptor: { readonly mimeType: 'application/json' | 'audio/wav'; readonly durationUs?: number };
+  readonly descriptor: {
+    readonly mimeType: 'application/json' | 'audio/wav';
+    readonly durationUs?: number;
+  };
   readonly speech?: SpeechSynthesisTiming;
 }
 
@@ -76,7 +78,10 @@ export interface SpeechRunnerOptions {
 }
 
 export class SpeechWorkerError extends Error {
-  constructor(readonly code: 'SETUP_REQUIRED' | 'SOURCE_UNAVAILABLE' | 'CONSENT_DENIED' | 'CANCELED', message: string) {
+  constructor(
+    readonly code: 'SETUP_REQUIRED' | 'SOURCE_UNAVAILABLE' | 'CONSENT_DENIED' | 'CANCELED',
+    message: string,
+  ) {
     super(message);
     this.name = 'SpeechWorkerError';
   }
@@ -93,28 +98,57 @@ export function speechAvailabilityFromEnvironment(env: NodeJS.ProcessEnv): Speec
   if (!isLocalFile(python)) return { synthesis: {} };
   const transcribeModel = env.JOY_MEDIA_SPEECH_STT_MODEL_PATH?.trim() ?? '';
   const transcribeScript = resolve(scriptDir, 'transcribe.py');
-  const transcribe = isLocalDirectory(transcribeModel) && isLocalFile(transcribeScript) &&
-      dependenciesAvailable(python, ['faster_whisper', 'torch'])
-    ? modelRunner(python, transcribeScript, transcribeModel, ffmpegPath)
-    : undefined;
-  const synthesis: Partial<Record<'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa', SpeechModelRunner>> = {};
+  const transcribe =
+    isLocalDirectory(transcribeModel) &&
+    isLocalFile(transcribeScript) &&
+    dependenciesAvailable(python, ['faster_whisper', 'torch'])
+      ? modelRunner(python, transcribeScript, transcribeModel, ffmpegPath)
+      : undefined;
+  const synthesis: Partial<
+    Record<'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa', SpeechModelRunner>
+  > = {};
   const models = [
-    ['kokoro-82m', 'JOY_MEDIA_SPEECH_KOKORO_MODEL_PATH', 'synthesize_kokoro.py', ['kokoro', 'torch', 'misaki', 'spacy', 'en_core_web_sm']],
-    ['chatterbox-en', 'JOY_MEDIA_SPEECH_CHATTERBOX_EN_MODEL_PATH', 'synthesize_chatterbox.py', ['chatterbox', 'torch', 'torchaudio']],
-    ['chatterbox-fa', 'JOY_MEDIA_SPEECH_CHATTERBOX_FA_MODEL_PATH', 'synthesize_chatterbox.py', ['chatterbox', 'torch', 'torchaudio']],
+    [
+      'kokoro-82m',
+      'JOY_MEDIA_SPEECH_KOKORO_MODEL_PATH',
+      'synthesize_kokoro.py',
+      ['kokoro', 'torch', 'misaki', 'spacy', 'en_core_web_sm'],
+    ],
+    [
+      'chatterbox-en',
+      'JOY_MEDIA_SPEECH_CHATTERBOX_EN_MODEL_PATH',
+      'synthesize_chatterbox.py',
+      ['chatterbox', 'torch', 'torchaudio'],
+    ],
+    [
+      'chatterbox-fa',
+      'JOY_MEDIA_SPEECH_CHATTERBOX_FA_MODEL_PATH',
+      'synthesize_chatterbox.py',
+      ['chatterbox', 'torch', 'torchaudio'],
+    ],
   ] as const;
   for (const [modelId, key, scriptName, modules] of models) {
     const modelPath = env[key]?.trim() ?? '';
-    const scriptPath = modelId.startsWith('chatterbox-') && env.JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT?.trim()
-      ? env.JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT.trim()
-      : resolve(scriptDir, scriptName);
-    if (isLocalDirectory(modelPath) && isLocalFile(scriptPath) && dependenciesAvailable(python, modules))
+    const scriptPath =
+      modelId.startsWith('chatterbox-') && env.JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT?.trim()
+        ? env.JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT.trim()
+        : resolve(scriptDir, scriptName);
+    if (
+      isLocalDirectory(modelPath) &&
+      isLocalFile(scriptPath) &&
+      dependenciesAvailable(python, modules)
+    )
       synthesis[modelId] = modelRunner(python, scriptPath, modelPath, ffmpegPath);
   }
   return { ...(transcribe === undefined ? {} : { transcribe }), synthesis };
 }
 
-function modelRunner(python: string, scriptPath: string, modelPath: string, ffmpegPath?: string): SpeechModelRunner {
+function modelRunner(
+  python: string,
+  scriptPath: string,
+  modelPath: string,
+  ffmpegPath?: string,
+): SpeechModelRunner {
   return {
     runner: { command: python, prefixArgs: [scriptPath] },
     modelPath: resolve(modelPath),
@@ -124,7 +158,13 @@ function modelRunner(python: string, scriptPath: string, modelPath: string, ffmp
 }
 
 function isLocalFile(path: string): boolean {
-  return path.length > 0 && isAbsolute(path) && existsSync(path) && statSync(path).isFile() && extname(path).toLowerCase() !== '.url';
+  return (
+    path.length > 0 &&
+    isAbsolute(path) &&
+    existsSync(path) &&
+    statSync(path).isFile() &&
+    extname(path).toLowerCase() !== '.url'
+  );
 }
 
 function isLocalDirectory(path: string): boolean {
@@ -136,32 +176,48 @@ function dependenciesAvailable(python: string, modules: readonly string[]): bool
   const cached = dependencyProbeCache.get(key);
   if (cached !== undefined) return cached;
   const source = `import importlib.util,sys;sys.exit(0 if all(importlib.util.find_spec(x) is not None for x in ${JSON.stringify(modules)}) else 1)`;
-  const result = spawnSync(python, ['-c', source], { shell: false, stdio: 'ignore', timeout: 5_000 });
+  const result = spawnSync(python, ['-c', source], {
+    shell: false,
+    stdio: 'ignore',
+    timeout: 5_000,
+  });
   const ready = result.status === 0;
   dependencyProbeCache.set(key, ready);
   return ready;
 }
 
 export async function runSpeechJob(options: SpeechRunnerOptions): Promise<SpeechWorkerDerivative> {
-  const transcribe = options.jobType === 'speech.transcribe'
-    ? parseSpeechTranscribeV1(options.payload)
-    : undefined;
-  const synthesize = options.jobType === 'speech.synthesize'
-    ? parseSpeechSynthesizeV1(options.payload)
-    : undefined;
-  if ((options.jobType === 'speech.transcribe' && transcribe === undefined) ||
-      (options.jobType === 'speech.synthesize' && synthesize === undefined))
+  const transcribe =
+    options.jobType === 'speech.transcribe' ? parseSpeechTranscribeV1(options.payload) : undefined;
+  const synthesize =
+    options.jobType === 'speech.synthesize' ? parseSpeechSynthesizeV1(options.payload) : undefined;
+  if (
+    (options.jobType === 'speech.transcribe' && transcribe === undefined) ||
+    (options.jobType === 'speech.synthesize' && synthesize === undefined)
+  )
     throw new Error('speech job payload is invalid');
 
-  const model = transcribe !== undefined ? options.availability.transcribe : options.availability.synthesis[synthesize!.modelId];
-  if (model === undefined) throw new SpeechWorkerError('SETUP_REQUIRED', 'Local speech model setup is required');
+  const model =
+    transcribe !== undefined
+      ? options.availability.transcribe
+      : options.availability.synthesis[synthesize!.modelId];
+  if (model === undefined)
+    throw new SpeechWorkerError('SETUP_REQUIRED', 'Local speech model setup is required');
   if (options.cancelled()) throw new SpeechWorkerError('CANCELED', 'Speech job canceled');
   const purpose = synthesize?.purpose ?? 'general';
-  if (synthesize !== undefined && (!options.consent?.acknowledged || options.consent.purpose !== purpose))
+  if (
+    synthesize !== undefined &&
+    (!options.consent?.acknowledged || options.consent.purpose !== purpose)
+  )
     throw new SpeechWorkerError('CONSENT_DENIED', 'Speech synthesis consent is required');
-  if (synthesize?.modelId === 'chatterbox-fa' &&
-      (purpose !== 'personal-noncommercial' || options.consent?.purpose !== 'personal-noncommercial'))
-    throw new SpeechWorkerError('CONSENT_DENIED', 'Chatterbox Fa is restricted to personal noncommercial use');
+  if (
+    synthesize?.modelId === 'chatterbox-fa' &&
+    (purpose !== 'personal-noncommercial' || options.consent?.purpose !== 'personal-noncommercial')
+  )
+    throw new SpeechWorkerError(
+      'CONSENT_DENIED',
+      'Chatterbox Fa is restricted to personal noncommercial use',
+    );
 
   const privateDir = mkdtempSync(join(tmpdir(), `joy-speech-${safeId(options.jobId)}-`));
   const outputDir = join(privateDir, 'output');
@@ -170,11 +226,12 @@ export async function runSpeechJob(options: SpeechRunnerOptions): Promise<Speech
   let retainedPath: string | undefined;
   let committed = false;
   try {
-    const sourcePath = transcribe !== undefined
-      ? await stageSource(options, privateDir)
-      : synthesize!.modelId.startsWith('chatterbox-') && options.assetId !== undefined
+    const sourcePath =
+      transcribe !== undefined
         ? await stageSource(options, privateDir)
-        : undefined;
+        : synthesize!.modelId.startsWith('chatterbox-') && options.assetId !== undefined
+          ? await stageSource(options, privateDir)
+          : undefined;
     if (options.cancelled()) throw new SpeechWorkerError('CANCELED', 'Speech job canceled');
     const isStt = transcribe !== undefined;
     const speechModelId = isStt ? transcribe.modelId : synthesize!.modelId;
@@ -193,8 +250,14 @@ export async function runSpeechJob(options: SpeechRunnerOptions): Promise<Speech
     writeFileSync(requestPath, JSON.stringify(request), { encoding: 'utf8', mode: 0o600 });
     if (options.cancelled()) throw new SpeechWorkerError('CANCELED', 'Speech job canceled');
     await options.progress(5);
-    const completed = await runRunner(model.runner, ['--request', requestPath, '--output-dir', outputDir], options.cancelled, options.progress);
-    if (!completed || options.cancelled()) throw new SpeechWorkerError('CANCELED', 'Speech job canceled');
+    const completed = await runRunner(
+      model.runner,
+      ['--request', requestPath, '--output-dir', outputDir],
+      options.cancelled,
+      options.progress,
+    );
+    if (!completed || options.cancelled())
+      throw new SpeechWorkerError('CANCELED', 'Speech job canceled');
 
     let outputPath: string;
     let descriptor: SpeechWorkerDerivative['descriptor'];
@@ -203,7 +266,11 @@ export async function runSpeechJob(options: SpeechRunnerOptions): Promise<Speech
       outputPath = join(outputDir, 'transcript.json');
       const raw = readBounded(outputPath, SPEECH_TRANSCRIPT_MAX_BYTES);
       const parsed = parseSpeechTranscript(JSON.parse(raw.toString('utf8')));
-      if (parsed === undefined || parsed.language !== transcribe.language || parsed.provenance.modelId !== transcribe.modelId)
+      if (
+        parsed === undefined ||
+        parsed.language !== transcribe.language ||
+        parsed.provenance.modelId !== transcribe.modelId
+      )
         throw new Error('speech runner returned an invalid transcript');
       descriptor = { mimeType: 'application/json' };
     } else {
@@ -211,11 +278,26 @@ export async function runSpeechJob(options: SpeechRunnerOptions): Promise<Speech
       const wav = readBounded(outputPath, SPEECH_WAV_MAX_BYTES);
       const durationUs = validateWav(wav);
       const timingPath = join(outputDir, 'timings.json');
-      let parsedTiming = parseSpeechSynthesisTiming(JSON.parse(readBounded(timingPath, SPEECH_TRANSCRIPT_MAX_BYTES).toString('utf8')));
+      let parsedTiming = parseSpeechSynthesisTiming(
+        JSON.parse(readBounded(timingPath, SPEECH_TRANSCRIPT_MAX_BYTES).toString('utf8')),
+      );
       if (parsedTiming === undefined || parsedTiming.durationUs !== durationUs)
         throw new Error('speech runner returned invalid timing metadata');
-      if (parsedTiming.timingSource === 'unavailable' && options.availability.transcribe !== undefined && synthesize !== undefined) {
-        parsedTiming = await alignSpeech(options, options.availability.transcribe, model.modelPath, outputPath, privateDir, durationUs, synthesize.language) ?? parsedTiming;
+      if (
+        parsedTiming.timingSource === 'unavailable' &&
+        options.availability.transcribe !== undefined &&
+        synthesize !== undefined
+      ) {
+        parsedTiming =
+          (await alignSpeech(
+            options,
+            options.availability.transcribe,
+            model.modelPath,
+            outputPath,
+            privateDir,
+            durationUs,
+            synthesize.language,
+          )) ?? parsedTiming;
       }
       speech = parsedTiming;
       descriptor = { mimeType: 'audio/wav', durationUs };
@@ -223,15 +305,22 @@ export async function runSpeechJob(options: SpeechRunnerOptions): Promise<Speech
 
     if (options.cancelled()) throw new SpeechWorkerError('CANCELED', 'Speech job canceled');
     await options.progress(90);
-    const { sha256, bytes } = await hashFile(outputPath, isStt ? SPEECH_TRANSCRIPT_MAX_BYTES : SPEECH_WAV_MAX_BYTES);
+    const { sha256, bytes } = await hashFile(
+      outputPath,
+      isStt ? SPEECH_TRANSCRIPT_MAX_BYTES : SPEECH_WAV_MAX_BYTES,
+    );
     const ext = isStt ? 'json' : 'wav';
     const localRef = `speech-${safeId(options.jobId)}-${sha256.slice(0, 16)}`;
     mkdirSync(options.derivativeDirectory, { recursive: true });
     const finalPath = join(options.derivativeDirectory, `${localRef}.${ext}`);
     retainedPath = finalPath;
     copyFileSync(outputPath, finalPath);
-    const verified = await hashFile(finalPath, isStt ? SPEECH_TRANSCRIPT_MAX_BYTES : SPEECH_WAV_MAX_BYTES);
-    if (verified.sha256 !== sha256 || verified.bytes !== bytes) throw new Error('speech derivative integrity check failed');
+    const verified = await hashFile(
+      finalPath,
+      isStt ? SPEECH_TRANSCRIPT_MAX_BYTES : SPEECH_WAV_MAX_BYTES,
+    );
+    if (verified.sha256 !== sha256 || verified.bytes !== bytes)
+      throw new Error('speech derivative integrity check failed');
     if (options.cancelled()) {
       rmSync(finalPath, { force: true });
       throw new SpeechWorkerError('CANCELED', 'Speech job canceled');
@@ -241,8 +330,13 @@ export async function runSpeechJob(options: SpeechRunnerOptions): Promise<Speech
     committed = true;
     return {
       kind: options.jobType,
-      ...(options.assetId === undefined || sourcePath === undefined ? {} : { assetId: options.assetId }),
-      sha256, bytes, localRef, descriptor,
+      ...(options.assetId === undefined || sourcePath === undefined
+        ? {}
+        : { assetId: options.assetId }),
+      sha256,
+      bytes,
+      localRef,
+      descriptor,
       ...(speech === undefined ? {} : { speech }),
     };
   } finally {
@@ -253,14 +347,19 @@ export async function runSpeechJob(options: SpeechRunnerOptions): Promise<Speech
 
 async function stageSource(options: SpeechRunnerOptions, privateDir: string): Promise<string> {
   const target = join(privateDir, 'source.wav');
-  if (options.sourcePath !== undefined && isAbsolute(options.sourcePath) && existsSync(options.sourcePath)) {
+  if (
+    options.sourcePath !== undefined &&
+    isAbsolute(options.sourcePath) &&
+    existsSync(options.sourcePath)
+  ) {
     copyFileSync(options.sourcePath, target);
     return target;
   }
   if (options.assetId === undefined || options.downloadJobAsset === undefined)
     throw new SpeechWorkerError('SOURCE_UNAVAILABLE', 'Speech source is unavailable');
   await options.downloadJobAsset(options.jobId, options.leaseToken, target);
-  if (!existsSync(target) || statSync(target).size === 0) throw new SpeechWorkerError('SOURCE_UNAVAILABLE', 'Speech source is unavailable');
+  if (!existsSync(target) || statSync(target).size === 0)
+    throw new SpeechWorkerError('SOURCE_UNAVAILABLE', 'Speech source is unavailable');
   return target;
 }
 
@@ -276,17 +375,46 @@ async function alignSpeech(
   const outputDir = join(privateDir, 'alignment');
   mkdirSync(outputDir, { recursive: true, mode: 0o700 });
   const requestPath = join(privateDir, 'alignment.json');
-  writeFileSync(requestPath, JSON.stringify({
-    protocol: 'joy.speech.v1', type: 'speech.transcribe', language,
-    modelId: 'faster-whisper-large-v3-turbo', modelPath: stt.modelPath || fallbackModelPath,
-    sourcePath: wavPath, ...(stt.ffmpegPath === undefined ? {} : { ffmpegPath: stt.ffmpegPath }),
-  }), { encoding: 'utf8', mode: 0o600 });
+  writeFileSync(
+    requestPath,
+    JSON.stringify({
+      protocol: 'joy.speech.v1',
+      type: 'speech.transcribe',
+      language,
+      modelId: 'faster-whisper-large-v3-turbo',
+      modelPath: stt.modelPath || fallbackModelPath,
+      sourcePath: wavPath,
+      ...(stt.ffmpegPath === undefined ? {} : { ffmpegPath: stt.ffmpegPath }),
+    }),
+    { encoding: 'utf8', mode: 0o600 },
+  );
   try {
-    const completed = await runRunner(stt.runner, ['--request', requestPath, '--output-dir', outputDir], options.cancelled, options.progress);
-    if (!completed || options.cancelled()) throw new SpeechWorkerError('CANCELED', 'Speech job canceled');
-    const transcript = parseSpeechTranscript(JSON.parse(readBounded(join(outputDir, 'transcript.json'), SPEECH_TRANSCRIPT_MAX_BYTES).toString('utf8')));
-    if (transcript === undefined || transcript.language !== language || transcript.words.some((word) => word.endUs > durationUs)) return undefined;
-    return parseSpeechSynthesisTiming({ durationUs, timingSource: 'aligned', words: transcript.words });
+    const completed = await runRunner(
+      stt.runner,
+      ['--request', requestPath, '--output-dir', outputDir],
+      options.cancelled,
+      options.progress,
+    );
+    if (!completed || options.cancelled())
+      throw new SpeechWorkerError('CANCELED', 'Speech job canceled');
+    const transcript = parseSpeechTranscript(
+      JSON.parse(
+        readBounded(join(outputDir, 'transcript.json'), SPEECH_TRANSCRIPT_MAX_BYTES).toString(
+          'utf8',
+        ),
+      ),
+    );
+    if (
+      transcript === undefined ||
+      transcript.language !== language ||
+      transcript.words.some((word) => word.endUs > durationUs)
+    )
+      return undefined;
+    return parseSpeechSynthesisTiming({
+      durationUs,
+      timingSource: 'aligned',
+      words: transcript.words,
+    });
   } catch (error) {
     if (options.cancelled()) throw error;
     return undefined;
@@ -300,7 +428,9 @@ async function runRunner(
   progress: (progress: number) => Promise<void>,
 ): Promise<boolean> {
   const child = spawn(runner.command, [...runner.prefixArgs, ...args], {
-    shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
+    shell: false,
+    detached: process.platform !== 'win32',
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderrBytes = 0;
   let stdoutBuffer = '';
@@ -315,17 +445,26 @@ async function runRunner(
       if (line.length > 512) continue;
       try {
         const item: unknown = JSON.parse(line);
-        if (isRecord(item) && item.type === 'progress' && typeof item.percent === 'number' && Number.isFinite(item.percent)) {
+        if (
+          isRecord(item) &&
+          item.type === 'progress' &&
+          typeof item.percent === 'number' &&
+          Number.isFinite(item.percent)
+        ) {
           const value = Math.max(5, Math.min(85, Math.round(item.percent * 0.8 + 5)));
           if (value > lastProgress && progressTasks.length < 100) {
             lastProgress = value;
             progressTasks.push(progress(value));
           }
         }
-      } catch { /* Non-progress runner output is ignored and never logged. */ }
+      } catch {
+        /* Non-progress runner output is ignored and never logged. */
+      }
     }
   });
-  child.stderr?.on('data', (chunk: Buffer) => { stderrBytes = Math.min(2_000, stderrBytes + chunk.length); });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    stderrBytes = Math.min(2_000, stderrBytes + chunk.length);
+  });
   const completed = new Promise<number | null>((resolveExit, reject) => {
     child.once('error', reject);
     child.once('close', resolveExit);
@@ -341,7 +480,10 @@ async function runRunner(
     }
     const code = await completed;
     await Promise.all(progressTasks);
-    if (code !== 0) throw new Error(`speech runner failed (${String(code)})${stderrBytes ? ' with stderr output' : ''}`);
+    if (code !== 0)
+      throw new Error(
+        `speech runner failed (${String(code)})${stderrBytes ? ' with stderr output' : ''}`,
+      );
     return true;
   } catch (error) {
     if (cancelled()) {
@@ -353,11 +495,21 @@ async function runRunner(
   }
 }
 
-export function readSpeechDerivative(directory: string, receipt: SpeechWorkerDerivative): Uint8Array {
-  if (!/^speech-[A-Za-z0-9._-]{1,90}-[a-f0-9]{16}$/u.test(receipt.localRef)) throw new Error('speech derivative reference is invalid');
+export function readSpeechDerivative(
+  directory: string,
+  receipt: SpeechWorkerDerivative,
+): Uint8Array {
+  if (!/^speech-[A-Za-z0-9._-]{1,90}-[a-f0-9]{16}$/u.test(receipt.localRef))
+    throw new Error('speech derivative reference is invalid');
   const isStt = receipt.kind === 'speech.transcribe';
-  const bytes = readBounded(join(directory, `${receipt.localRef}.${isStt ? 'json' : 'wav'}`), isStt ? SPEECH_TRANSCRIPT_MAX_BYTES : SPEECH_WAV_MAX_BYTES);
-  if (bytes.length !== receipt.bytes || createHash('sha256').update(bytes).digest('hex') !== receipt.sha256)
+  const bytes = readBounded(
+    join(directory, `${receipt.localRef}.${isStt ? 'json' : 'wav'}`),
+    isStt ? SPEECH_TRANSCRIPT_MAX_BYTES : SPEECH_WAV_MAX_BYTES,
+  );
+  if (
+    bytes.length !== receipt.bytes ||
+    createHash('sha256').update(bytes).digest('hex') !== receipt.sha256
+  )
     throw new Error('retained speech derivative integrity check failed');
   return bytes;
 }
@@ -369,7 +521,10 @@ function readBounded(path: string, maxBytes: number): Buffer {
   return readFileSync(path);
 }
 
-async function hashFile(path: string, maxBytes: number): Promise<{ sha256: string; bytes: number }> {
+async function hashFile(
+  path: string,
+  maxBytes: number,
+): Promise<{ sha256: string; bytes: number }> {
   const size = statSync(path).size;
   if (size < 1 || size > maxBytes) throw new Error('speech derivative exceeds its byte limit');
   const bytes = readFileSync(path);
@@ -377,7 +532,12 @@ async function hashFile(path: string, maxBytes: number): Promise<{ sha256: strin
 }
 
 function validateWav(bytes: Buffer): number {
-  if (bytes.length < 44 || bytes.toString('ascii', 0, 4) !== 'RIFF' || bytes.toString('ascii', 8, 12) !== 'WAVE' || bytes.toString('ascii', 12, 16) !== 'fmt ')
+  if (
+    bytes.length < 44 ||
+    bytes.toString('ascii', 0, 4) !== 'RIFF' ||
+    bytes.toString('ascii', 8, 12) !== 'WAVE' ||
+    bytes.toString('ascii', 12, 16) !== 'fmt '
+  )
     throw new Error('speech runner returned an invalid WAV');
   const format = bytes.readUInt16LE(20);
   const channels = bytes.readUInt16LE(22);
@@ -386,13 +546,25 @@ function validateWav(bytes: Buffer): number {
   const blockAlign = bytes.readUInt16LE(32);
   const bitsPerSample = bytes.readUInt16LE(34);
   const dataOffset = bytes.indexOf('data', 36, 'ascii');
-  if (format !== 1 || channels < 1 || channels > 2 || sampleRate < 8_000 || sampleRate > 192_000 || bitsPerSample !== 16 || blockAlign !== channels * 2 || byteRate !== sampleRate * blockAlign || dataOffset < 36 || dataOffset + 8 > bytes.length)
+  if (
+    format !== 1 ||
+    channels < 1 ||
+    channels > 2 ||
+    sampleRate < 8_000 ||
+    sampleRate > 192_000 ||
+    bitsPerSample !== 16 ||
+    blockAlign !== channels * 2 ||
+    byteRate !== sampleRate * blockAlign ||
+    dataOffset < 36 ||
+    dataOffset + 8 > bytes.length
+  )
     throw new Error('speech runner returned an unsupported WAV format');
   const dataBytes = bytes.readUInt32LE(dataOffset + 4);
   if (dataBytes < 1 || dataOffset + 8 + dataBytes > bytes.length || dataBytes % blockAlign !== 0)
     throw new Error('speech runner returned a truncated WAV');
-  const durationUs = Math.round((dataBytes / blockAlign) * 1_000_000 / sampleRate);
-  if (!Number.isSafeInteger(durationUs) || durationUs < 1) throw new Error('speech runner returned invalid WAV duration');
+  const durationUs = Math.round(((dataBytes / blockAlign) * 1_000_000) / sampleRate);
+  if (!Number.isSafeInteger(durationUs) || durationUs < 1)
+    throw new Error('speech runner returned invalid WAV duration');
   return durationUs;
 }
 

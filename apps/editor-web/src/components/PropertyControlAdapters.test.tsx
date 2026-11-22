@@ -116,7 +116,9 @@ describe('property control adapters', () => {
     const target = { setPointerCapture: vi.fn() } as unknown as HTMLElement;
     const listeners = new Map<string, EventListener>();
     vi.stubGlobal('window', {
-      addEventListener: vi.fn((name: string, listener: EventListener) => listeners.set(name, listener)),
+      addEventListener: vi.fn((name: string, listener: EventListener) =>
+        listeners.set(name, listener),
+      ),
       removeEventListener: vi.fn((name: string) => listeners.delete(name)),
       setTimeout: vi.fn(),
     });
@@ -154,7 +156,11 @@ describe('property control adapters', () => {
     const harness = createHarness(2);
     const adapter = createTransientControlAdapter(harness.interaction, 'Scale');
     const target = { setPointerCapture: vi.fn() } as unknown as HTMLElement;
-    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn(), setTimeout: vi.fn() });
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      setTimeout: vi.fn(),
+    });
     let bindings!: ReturnType<typeof useNumberScrub>;
     function Probe() {
       bindings = useNumberScrub({ value: harness.value, adapter, disabled: true });
@@ -175,7 +181,11 @@ describe('property control adapters', () => {
     const harness = createHarness(0.2);
     const adapter = createTransientControlAdapter(harness.interaction, 'Opacity');
     const target = { setPointerCapture: vi.fn() } as unknown as HTMLElement;
-    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn(), setTimeout: vi.fn() });
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      setTimeout: vi.fn(),
+    });
     let bindings!: ReturnType<typeof useNumberScrub>;
     function Probe() {
       bindings = useNumberScrub({

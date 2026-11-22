@@ -1,8 +1,4 @@
-import type {
-  CaptionDocumentV1,
-  CaptionSegmentV1,
-  CaptionWordV1,
-} from '@joy-media/project-schema';
+import type { CaptionDocumentV1, CaptionSegmentV1, CaptionWordV1 } from '@joy-media/project-schema';
 import { segmentSourceText } from '@joy-media/captions-core';
 import { repairPersianSpeechTokens } from './persian-speech-text.js';
 
@@ -139,7 +135,8 @@ export function buildSpeechCaptionCues(document: CaptionDocumentV1): CaptionDocu
       startUs: first.word.startUs,
       endUs: last.word.endUs,
       wordIds: cueWords.map(({ id }) => id),
-      ...(layout === segmentSourceText(document, {
+      ...(layout ===
+      segmentSourceText(document, {
         id: '',
         startUs: first.word.startUs,
         endUs: last.word.endUs,
@@ -168,7 +165,8 @@ export function buildSpeechCaptionCues(document: CaptionDocumentV1): CaptionDocu
         duration > SOFT_DURATION_US ||
         previous.words.at(-1)?.word.speakerId !== nextWord.speakerId ||
         exceedsLines
-      ) flush();
+      )
+        flush();
     }
     current.push(unit);
   }

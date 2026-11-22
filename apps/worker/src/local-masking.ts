@@ -164,10 +164,14 @@ export function killProcessTree(child: ReturnType<typeof spawn>): void {
       'while ($frontier.Count -gt 0) { $children = @($processes | Where-Object { $frontier -contains [int]$_.ParentProcessId }); $ids = @($children | ForEach-Object { [int]$_.ProcessId }); if ($ids.Count -eq 0) { break }; $descendants += $ids; $frontier = $ids }',
       '@($descendants + $root | Select-Object -Unique) | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }',
     ].join('; ');
-    const treeKill = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-      stdio: 'ignore',
-      timeout: 5_000,
-    });
+    const treeKill = spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        stdio: 'ignore',
+        timeout: 5_000,
+      },
+    );
     if (treeKill.error === undefined && treeKill.status === 0) return;
     spawnSync('taskkill.exe', ['/pid', String(child.pid), '/T', '/F'], {
       stdio: 'ignore',

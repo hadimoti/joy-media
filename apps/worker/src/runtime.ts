@@ -317,7 +317,10 @@ export class WorkerRuntime {
     if (job.type === 'fixture.thumbnail') return this.runFixtureThumbnail(job.id, options);
     if (job.type === 'speech.transcribe' || job.type === 'speech.synthesize') {
       if (this.tools.speech === undefined)
-        throw new SpeechWorkerError('SETUP_REQUIRED', 'Local speech setup is required on this Worker');
+        throw new SpeechWorkerError(
+          'SETUP_REQUIRED',
+          'Local speech setup is required on this Worker',
+        );
       const derivativeDirectory =
         this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       this.log.write(`job ${job.id} started (${job.type})`);

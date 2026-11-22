@@ -451,7 +451,8 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
             derivative === undefined ||
             completion.sha256 !== derivative.sha256 ||
             completion.bytes !== derivative.bytes ||
-            completion.mimeType !== expectedMime || derivative.mimeType !== expectedMime
+            completion.mimeType !== expectedMime ||
+            derivative.mimeType !== expectedMime
           ) {
             throw new JobProtocolError(
               422,
@@ -462,7 +463,10 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
             if (parseSpeechSynthesisTiming(completion.speech) === undefined)
               throw new JobProtocolError(422, 'speech synthesis timing is invalid');
           } else if (completion.speech !== undefined) {
-            throw new JobProtocolError(422, 'transcription results cannot include synthesis timing');
+            throw new JobProtocolError(
+              422,
+              'transcription results cannot include synthesis timing',
+            );
           }
         }
         finish(job, 'done', undefined, { progress: 100, resultJson: completion.resultJson });

@@ -528,15 +528,27 @@ describe('Worker runtime', () => {
       const sha256 = createHash('sha256').update(bytes).digest('hex');
       const localRef = `speech-job-${sha256.slice(0, 16)}`;
       writeFileSync(join(root, `${localRef}.json`), bytes);
-      expect(runtime.readDerivative({
-        kind: 'speech.transcribe', sha256, bytes: bytes.length, localRef,
-        descriptor: { mimeType: 'application/json' },
-      })).toEqual(bytes);
-      expect(() => runtime.readDerivative({
-        kind: 'speech.transcribe', sha256: '0'.repeat(64), bytes: bytes.length, localRef,
-        descriptor: { mimeType: 'application/json' },
-      })).toThrow('integrity check failed');
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      expect(
+        runtime.readDerivative({
+          kind: 'speech.transcribe',
+          sha256,
+          bytes: bytes.length,
+          localRef,
+          descriptor: { mimeType: 'application/json' },
+        }),
+      ).toEqual(bytes);
+      expect(() =>
+        runtime.readDerivative({
+          kind: 'speech.transcribe',
+          sha256: '0'.repeat(64),
+          bytes: bytes.length,
+          localRef,
+          descriptor: { mimeType: 'application/json' },
+        }),
+      ).toThrow('integrity check failed');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('asks the desktop for a mask job source that is not in its own registry, before the runner starts', async () => {

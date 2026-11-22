@@ -24,9 +24,10 @@ describe('WorkerDaemon', () => {
         sha256: 'a'.repeat(64),
         bytes: 3,
         localRef: 'speech-job-aaaaaaaaaaaaaaaa',
-        descriptor: kind === 'speech.transcribe'
-          ? { mimeType: 'application/json' }
-          : { mimeType: 'audio/wav', durationUs: 100_000 },
+        descriptor:
+          kind === 'speech.transcribe'
+            ? { mimeType: 'application/json' }
+            : { mimeType: 'audio/wav', durationUs: 100_000 },
         ...(kind === 'speech.synthesize'
           ? { speech: { durationUs: 100_000, timingSource: 'unavailable', words: [] } }
           : {}),
@@ -35,10 +36,13 @@ describe('WorkerDaemon', () => {
         hello: async () => undefined,
         lease: async () => ({ id: 'speech-job', projectId: 'project-1', type: kind }),
         heartbeat: async () => ({ cancelRequested: false }),
-        uploadDerivative: async (_jobId: string, result: { kind: string }) => { uploaded.push(result.kind); },
+        uploadDerivative: async (_jobId: string, result: { kind: string }) => {
+          uploaded.push(result.kind);
+        },
         complete: async (_jobId: string, result: { kind: string; speech?: unknown }) => {
           expect(result.kind).toBe(kind);
-          if (kind === 'speech.synthesize') expect(result.speech).toMatchObject({ timingSource: 'unavailable' });
+          if (kind === 'speech.synthesize')
+            expect(result.speech).toMatchObject({ timingSource: 'unavailable' });
           stopped = true;
         },
         fail: async () => undefined,

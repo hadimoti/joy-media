@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useRef,
-  type KeyboardEvent,
-  type MouseEvent,
-  type PointerEvent,
-} from 'react';
+import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import type { TransientControlAdapter } from './PropertyControlAdapters.js';
 
 export interface UseNumberScrubOptions {
@@ -61,7 +55,9 @@ export function useNumberScrub({
     }
     if (commit && gesture.accepted) {
       suppressClickRef.current = true;
-      window.setTimeout(() => { suppressClickRef.current = false; }, 0);
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
     }
   };
 
@@ -92,7 +88,12 @@ export function useNumberScrub({
       window.addEventListener('blur', windowBlurHandlerRef.current);
     }
     event.preventDefault();
-    const { min: lower, max: upper, step: increment, normalize: normalizeValue } = optionsRef.current;
+    const {
+      min: lower,
+      max: upper,
+      step: increment,
+      normalize: normalizeValue,
+    } = optionsRef.current;
     const safeStep = Number.isFinite(increment) && increment > 0 ? increment : 1;
     const precision = precisionFor(safeStep);
     const raw = gesture.startValue + Math.trunc(delta / 4) * safeStep;

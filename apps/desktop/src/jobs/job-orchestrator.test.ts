@@ -101,10 +101,7 @@ describe('job orchestrator', () => {
       expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
       orchestrator.hello(WORKER, ['speech.transcribe']);
       expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
-      orchestrator.hello(WORKER, [
-        'speech.transcribe',
-        'speech.model.kokoro-82m',
-      ]);
+      orchestrator.hello(WORKER, ['speech.transcribe', 'speech.model.kokoro-82m']);
       expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
       orchestrator.hello(WORKER, [
         'speech.transcribe',
@@ -121,31 +118,46 @@ describe('job orchestrator', () => {
         'speech.synthesize',
         'speech.model.kokoro-82m',
       ]);
-      expect(orchestrator.submit({
-        jobType: 'speech.transcribe', refId: ' ', kind: 'speech.transcribe',
-        payload: { schemaVersion: 1, language: 'en-US', modelId: 'faster-whisper-large-v3-turbo' },
-      })).toMatchObject({ ok: false, code: 'PAYLOAD_INVALID' });
-      expect(orchestrator.submit({
-        jobType: 'speech.synthesize', refId: 'external-file', kind: 'speech.synthesize',
-        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
-      })).toMatchObject({ ok: false, code: 'PAYLOAD_INVALID' });
+      expect(
+        orchestrator.submit({
+          jobType: 'speech.transcribe',
+          refId: ' ',
+          kind: 'speech.transcribe',
+          payload: {
+            schemaVersion: 1,
+            language: 'en-US',
+            modelId: 'faster-whisper-large-v3-turbo',
+          },
+        }),
+      ).toMatchObject({ ok: false, code: 'PAYLOAD_INVALID' });
+      expect(
+        orchestrator.submit({
+          jobType: 'speech.synthesize',
+          refId: 'external-file',
+          kind: 'speech.synthesize',
+          payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+        }),
+      ).toMatchObject({ ok: false, code: 'PAYLOAD_INVALID' });
     });
 
     it('rejects malformed speech payloads and accepts a valid synthesis payload', () => {
       const orchestrator = orchestratorFor(database);
-      orchestrator.hello(WORKER, [
-        'speech.synthesize',
-        'speech.model.kokoro-82m',
-      ]);
-      const base = { jobType: 'speech.synthesize', refId: 'speech-output', kind: 'speech.synthesize' };
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const base = {
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+      };
       expect(orchestrator.submit({ ...base, payload: { schemaVersion: 1 } })).toMatchObject({
         ok: false,
         code: 'PAYLOAD_INVALID',
       });
-      expect(orchestrator.submit({
-        ...base,
-        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
-      })).toMatchObject({ ok: true });
+      expect(
+        orchestrator.submit({
+          ...base,
+          payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+        }),
+      ).toMatchObject({ ok: true });
     });
 
     it('queues picture and video mask jobs with their payload once the Worker advertises the capability', () => {

@@ -100,16 +100,21 @@ export function canUseEditorSpaceTarget(target: EventTarget | null): boolean {
   let nestedInteractive = false;
   const interactiveTags = new Set(['A', 'BUTTON', 'DETAILS', 'SUMMARY']);
   const interactiveRoles = new Set([
-    'button', 'checkbox', 'link', 'menuitem', 'option', 'radio', 'slider', 'switch', 'tab',
+    'button',
+    'checkbox',
+    'link',
+    'menuitem',
+    'option',
+    'radio',
+    'slider',
+    'switch',
+    'tab',
   ]);
   while (element !== null) {
     const role = element.getAttribute?.('role')?.toLowerCase();
     if (role === 'dialog' || role === 'alertdialog') return false;
     if (element.getAttribute?.('aria-roledescription') === 'timeline clip') {
-      if (
-        element.getAttribute('aria-pressed') !== 'true' ||
-        !element.getAttribute('data-clip-id')
-      )
+      if (element.getAttribute('aria-pressed') !== 'true' || !element.getAttribute('data-clip-id'))
         return false;
       clip = element;
       break;
