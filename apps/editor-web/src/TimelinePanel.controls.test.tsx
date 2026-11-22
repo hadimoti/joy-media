@@ -51,10 +51,7 @@ interface MountOptions {
   readonly dataLanes?: ComponentProps<typeof TimelinePanel>['dataLanes'];
 }
 
-function project(
-  locked = false,
-  muted = false,
-): ComponentProps<typeof TimelinePanel>['project'] {
+function project(locked = false, muted = false): ComponentProps<typeof TimelinePanel>['project'] {
   const base = emptySpikeProject({ trackCount: 1, durationUs: 10 * SECOND_US });
   const composition = base.compositions.root!;
   return {
