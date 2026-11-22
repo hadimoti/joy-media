@@ -336,7 +336,9 @@ describe('CaptionsPanel cue keyboard editing', () => {
       checkbox.click();
     });
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('.speech-action-row button[type="submit"]')!.click();
+      container
+        .querySelector<HTMLButtonElement>('.speech-action-row button[type="submit"]')!
+        .click();
     });
     expect(container.textContent).toContain('Speech generation complete.');
 
@@ -355,14 +357,16 @@ describe('CaptionsPanel cue keyboard editing', () => {
     expect(command.type).toBe('caption.replaceDocument');
     if (command.type === 'caption.replaceDocument') {
       const before = project.captionDocuments[command.payload.documentId]!;
-      const generatedWords = Object.values(command.payload.document.words).filter((word) =>
-        word.text.startsWith('Generated') || word.text === 'words',
+      const generatedWords = Object.values(command.payload.document.words).filter(
+        (word) => word.text.startsWith('Generated') || word.text === 'words',
       );
       expect(generatedWords.map(({ startUs, endUs }) => [startUs, endUs])).toEqual([
         [capturedStartUs - 1_000_000 + 100_000, capturedStartUs - 1_000_000 + 500_000],
         [capturedStartUs - 1_000_000 + 600_000, capturedStartUs - 1_000_000 + 900_000],
       ]);
-      expect(command.payload.document.segments).toEqual(expect.arrayContaining([...before.segments]));
+      expect(command.payload.document.segments).toEqual(
+        expect.arrayContaining([...before.segments]),
+      );
       expect(Object.keys(command.payload.document.words)).toEqual(
         expect.arrayContaining(Object.keys(before.words)),
       );

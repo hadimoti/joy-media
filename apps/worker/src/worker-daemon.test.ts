@@ -649,8 +649,12 @@ describe('WorkerDaemon', () => {
         return { id: 'speech-upload-fail', projectId: 'project-1', type: 'speech.synthesize' };
       },
       heartbeat: async () => ({ cancelRequested: false }),
-      uploadDerivative: async () => { throw new Error('upload interrupted'); },
-      fail: async () => { stop = true; },
+      uploadDerivative: async () => {
+        throw new Error('upload interrupted');
+      },
+      fail: async () => {
+        stop = true;
+      },
     } as unknown as WorkerControlPlaneClient;
     const runtime = {
       hello: () => ({ capabilities: [] }),
@@ -691,7 +695,9 @@ describe('WorkerDaemon', () => {
         cancelRequested = true;
         await new Promise((resolve) => setTimeout(resolve, 15));
       },
-      complete: async () => { throw new Error('canceled job must not complete'); },
+      complete: async () => {
+        throw new Error('canceled job must not complete');
+      },
       fail: async (_jobId: string, error: string) => {
         expect(error).toBe('canceled');
         stop = true;

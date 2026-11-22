@@ -587,7 +587,9 @@ describe('Worker runtime', () => {
       },
     } as const;
     const options = { cancelled: () => false, progress: async () => undefined };
-    await expect(runtime.run(base, options)).rejects.toThrow('Speech synthesis consent is required');
+    await expect(runtime.run(base, options)).rejects.toThrow(
+      'Speech synthesis consent is required',
+    );
     let acceptedError: unknown;
     try {
       await runtime.run(

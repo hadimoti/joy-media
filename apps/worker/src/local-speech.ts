@@ -98,11 +98,13 @@ export function speechAvailabilityFromEnvironment(env: NodeJS.ProcessEnv): Speec
   const scriptDir = runnerDir || env.JOY_MEDIA_SPEECH_SCRIPT_DIR?.trim() || speechRoot;
   const modelDir = env.JOY_MEDIA_SPEECH_MODEL_DIR?.trim();
   const ffmpegPath = env.JOY_MEDIA_SPEECH_FFMPEG?.trim();
-  const transcribeModel = env.JOY_MEDIA_SPEECH_STT_MODEL_PATH?.trim() ||
+  const transcribeModel =
+    env.JOY_MEDIA_SPEECH_STT_MODEL_PATH?.trim() ||
     (modelDir ? resolve(modelDir, 'faster-whisper-large-v3-turbo') : '');
   const transcribeScript = resolve(scriptDir, 'transcribe.py');
   const transcribe =
-    isLocalFile(sttPython) && isLocalDirectory(transcribeModel) &&
+    isLocalFile(sttPython) &&
+    isLocalDirectory(transcribeModel) &&
     isLocalFile(transcribeScript) &&
     dependenciesAvailable(sttPython, ['faster_whisper', 'torch'])
       ? modelRunner(sttPython, transcribeScript, transcribeModel, ffmpegPath)

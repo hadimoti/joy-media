@@ -285,14 +285,13 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
     error: string | undefined,
     patch: Partial<DispatchJob> = {},
   ): void {
-    if (
-      job.jobType.startsWith('speech.') &&
-      status !== 'done' &&
-      job.derivative !== undefined
-    ) {
+    if (job.jobType.startsWith('speech.') && status !== 'done' && job.derivative !== undefined) {
       if (isSpeechDerivativePath(job.id, job.derivative.path)) {
         const key = `${job.id}\0${resolve(job.derivative.path)}`;
-        pendingSpeechDerivativeCleanup.set(key, { jobId: job.id, path: resolve(job.derivative.path) });
+        pendingSpeechDerivativeCleanup.set(key, {
+          jobId: job.id,
+          path: resolve(job.derivative.path),
+        });
         retrySpeechDerivativeCleanup();
       }
     }

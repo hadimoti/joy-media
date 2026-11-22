@@ -486,7 +486,10 @@ describe('job orchestrator', () => {
       const path = join(derivativeDirectory, `${submitted.jobId}-${'a'.repeat(16)}.wav`);
       writeFileSync(path, 'wav');
       orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
-        sha256: 'a'.repeat(64), bytes: 3, mimeType: 'audio/wav', path,
+        sha256: 'a'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
       });
 
       orchestrator.requestCancel(submitted.jobId);
@@ -559,7 +562,10 @@ describe('job orchestrator', () => {
       const path = join(derivativeDirectory, `${submitted.jobId}-${'a'.repeat(16)}.wav`);
       writeFileSync(path, 'wav');
       orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
-        sha256: 'a'.repeat(64), bytes: 3, mimeType: 'audio/wav', path,
+        sha256: 'a'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
       });
       clock = 4_000;
       expect(orchestrator.expireLeases()).toBe(1);
@@ -585,7 +591,10 @@ describe('job orchestrator', () => {
       mkdirSync(path);
       writeFileSync(join(path, 'locked-placeholder'), 'wav');
       orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
-        sha256: 'b'.repeat(64), bytes: 3, mimeType: 'audio/wav', path,
+        sha256: 'b'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
       });
 
       orchestrator.requestCancel(submitted.jobId);
@@ -617,7 +626,10 @@ describe('job orchestrator', () => {
       const path = join(dir, `${submitted.jobId}-${'c'.repeat(16)}.wav`);
       writeFileSync(path, 'wav');
       orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
-        sha256: 'c'.repeat(64), bytes: 3, mimeType: 'audio/wav', path,
+        sha256: 'c'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
       });
 
       orchestrator.requestCancel(submitted.jobId);

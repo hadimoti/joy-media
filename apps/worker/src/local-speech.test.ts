@@ -109,9 +109,24 @@ describe('local speech worker runner', () => {
       expect(result.synthesis).toEqual(
         tts
           ? {
-              'kokoro-82m': expect.objectContaining({ runner: { command: ttsPython, prefixArgs: [join(runnerDir, 'synthesize_kokoro.py')] } }),
-              'chatterbox-en': expect.objectContaining({ runner: { command: ttsPython, prefixArgs: [join(runnerDir, 'synthesize_chatterbox.py')] } }),
-              'chatterbox-fa': expect.objectContaining({ runner: { command: ttsPython, prefixArgs: [join(runnerDir, 'synthesize_chatterbox.py')] } }),
+              'kokoro-82m': expect.objectContaining({
+                runner: {
+                  command: ttsPython,
+                  prefixArgs: [join(runnerDir, 'synthesize_kokoro.py')],
+                },
+              }),
+              'chatterbox-en': expect.objectContaining({
+                runner: {
+                  command: ttsPython,
+                  prefixArgs: [join(runnerDir, 'synthesize_chatterbox.py')],
+                },
+              }),
+              'chatterbox-fa': expect.objectContaining({
+                runner: {
+                  command: ttsPython,
+                  prefixArgs: [join(runnerDir, 'synthesize_chatterbox.py')],
+                },
+              }),
             }
           : {},
       );

@@ -342,11 +342,15 @@ describe('Inspector numeric scrubbing', () => {
     });
     expect(rate.value).toBe('2.5');
 
-    act(() => rate.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape',
-      bubbles: true,
-      cancelable: true,
-    })));
+    act(() =>
+      rate.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
     expect(rate.value).toBe('1');
     act(() => rate.blur());
 
@@ -365,9 +369,13 @@ describe('Inspector numeric scrubbing', () => {
     act(() => {
       rate.focus();
       setRate('2.5');
-      rate.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      rate.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
       setRate('1.5');
-      rate.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      rate.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
     });
 
     expect(onChange).toHaveBeenCalledTimes(1);

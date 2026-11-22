@@ -183,7 +183,10 @@ describe('property control adapters', () => {
     bindings.onPointerDown(pointer(0, target, 1));
     bindings.onPointerMove(pointer(8, target, 1));
     expect(capturedPointer).toBe(1);
-    bindings.onKeyDown({ key: 'Escape', preventDefault: vi.fn() } as unknown as KeyboardEvent<HTMLElement>);
+    bindings.onKeyDown({
+      key: 'Escape',
+      preventDefault: vi.fn(),
+    } as unknown as KeyboardEvent<HTMLElement>);
     bindings.onPointerUp(pointer(8, target, 1));
     expect(capturedPointer).toBeUndefined();
     expect(target.releasePointerCapture).toHaveBeenCalledWith(1);
