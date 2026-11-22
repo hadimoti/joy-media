@@ -44,6 +44,7 @@ const SOURCE_CLAIMS = {
     { fragment: 'aria-label="Add audio track"', labels: ['Add audio track'] },
     { fragment: 'aria-label="Select tool"', labels: ['Select tool'] },
     { fragment: 'aria-label="Split tool"', labels: ['Split tool'] },
+    { fragment: 'aria-label="Split at playhead"', labels: ['Split at playhead'] },
     {
       fragment: "aria-label={snapping ? 'Snapping enabled' : 'Snapping disabled'}",
       labels: ['Snapping enabled', 'Snapping disabled'],
@@ -239,14 +240,13 @@ test('the color menu lists every COLOR_LABELS choice plus Default', () => {
   assert.deepEqual(colorRows, ['Default', ...names].sort());
 });
 
-test('new Split at playhead action is absent in baseline and marked pending', () => {
+test('Split at playhead is present in TimelinePanel and its row is no longer pending', () => {
   const row = timelineControlCases.find((c) => c.label === 'Split at playhead');
   assert.ok(row, 'missing Split at playhead row');
-  assert.match(row.expected, /^ABSENT in baseline; pending implementation/);
-  assert.equal(
-    read(PANEL).includes('Split at playhead'),
-    false,
-    'TimelinePanel now names "Split at playhead": flip this row from absent to present and update its evidence',
+  assert.doesNotMatch(row.expected, /ABSENT|pending implementation/);
+  assert.ok(
+    read(PANEL).includes('aria-label="Split at playhead"'),
+    'TimelinePanel lost the Split at playhead control',
   );
 });
 
@@ -301,10 +301,7 @@ test('every inventoried case label is claimed by source or by a menu', () => {
     );
     claimed.add(label);
   }
-  // Pending rows are absent from source by design; the absence test above covers them.
-  const pending = new Set(['Split at playhead']);
   for (const label of caseLabels) {
-    if (pending.has(label)) continue;
     assert.ok(claimed.has(label), `case "${label}" is not claimed by any source attribute or menu`);
   }
 });
