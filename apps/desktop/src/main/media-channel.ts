@@ -804,6 +804,13 @@ export function createMediaChannelHandlers(
       return { ok: false, error: 'Invalid media request' };
     }
     if (!isPlainObject(input)) return { ok: false, error: 'Invalid media request' };
+    if (
+      jobType === 'speech.synthesize' &&
+      input['modelId'] === 'kokoro-82m' &&
+      (refId !== undefined || input['voiceId'] !== undefined)
+    ) {
+      return { ok: false, error: 'KOKORO_REFERENCE_UNSUPPORTED' };
+    }
 
     let sourceAsset: LocalAsset | undefined;
     if (jobType === 'speech.transcribe' || refId !== undefined) {
