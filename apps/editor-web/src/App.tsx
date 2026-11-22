@@ -7094,8 +7094,8 @@ function EditorWorkspace({
           transcriptionError={context.transcriptionError}
           onProjectChange={(next) => context.replaceVisualProject(next)}
           onCreateCaptionTrack={context.addCaptionLayer}
-          speechModelStatus={speechModelStatus}
-          onGenerateSpeech={generateSpeech}
+          speechModelStatus={context.speechModelStatus}
+          onGenerateSpeech={context.generateSpeech}
           onAddSpeechCaptions={(documentId, document, clipId, clipStartUs, clipEndUs) => {
             const placedProject = withSpeechCaptionClipPlacement(
               session.visualProject,
@@ -8363,6 +8363,8 @@ function EditorWorkspace({
               setAudioState,
               transcribe,
               transcriptionError,
+              speechModelStatus,
+              generateSpeech,
               undo,
               redo,
               jumpToHistory,
