@@ -530,6 +530,7 @@ import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
 import {
   SHORTCUT_REFERENCE,
+  canUseEditorSpaceTarget,
   isEditableTarget,
   actionYieldsToSelectedText,
   interactiveTargetOwnsAction,
@@ -4220,11 +4221,14 @@ function EditorWorkspace({
       }
       const action = resolveShortcut(event);
       if (action === undefined) return;
+      if (action === 'playback.toggle' && event.isComposing) return;
       // Escape must close the palette even while its search input has focus.
       if (
         action !== 'palette.close' &&
         (isEditableTarget(event.target) ||
-          (isInteractiveTarget(event.target) && interactiveTargetOwnsAction(action)))
+          (action === 'playback.toggle'
+            ? !canUseEditorSpaceTarget(event.target)
+            : isInteractiveTarget(event.target) && interactiveTargetOwnsAction(action)))
       )
         return;
       // Text selected on the page (a chat reply) is copied by the browser, not the selected clip.

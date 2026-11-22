@@ -149,7 +149,7 @@ import {
   planClipLandings,
   type ClipLanding,
 } from './timeline-clip-interaction.js';
-import { scopedKeyTable } from './keyboard-shortcuts.js';
+import { scopedKeyTable, timelineClipSpaceBehavior } from './keyboard-shortcuts.js';
 import {
   TIMELINE_KEY_SCOPE,
   timelineToolKey,
@@ -569,7 +569,13 @@ function TimelineClip({
       }}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
-        if (event.key === 'Enter' || event.key === ' ') {
+        const spaceBehavior = timelineClipSpaceBehavior(
+          event.key,
+          selected,
+          event.altKey || event.ctrlKey || event.metaKey || event.shiftKey,
+        );
+        if (spaceBehavior === 'bubble' || spaceBehavior === 'native') return;
+        if (spaceBehavior === 'select') {
           event.preventDefault();
           onSelect(clip.id, event.metaKey || event.ctrlKey || event.shiftKey);
           return;

@@ -1,4 +1,4 @@
-import { isEditableTarget, isInteractiveTarget } from '../keyboard-shortcuts.js';
+import { canUseEditorSpaceTarget } from '../keyboard-shortcuts.js';
 
 /**
  * The Monitor's tools and the Space rule (ADR-0046 section 3). The tool is
@@ -151,6 +151,7 @@ type SpaceKeyEvent = Pick<
   | 'ctrlKey'
   | 'altKey'
   | 'metaKey'
+  | 'isComposing'
 >;
 
 /** True when Shift, Ctrl, Alt or Meta is held with the key. */
@@ -178,9 +179,8 @@ export function createSpaceKeyHandlers(
   return {
     keyDown(event) {
       if (event.key !== ' ' || event.defaultPrevented) return undefined;
-      if (hasKeyModifier(event)) return undefined;
-      if (isEditableTarget(event.target)) return 'type';
-      if (isInteractiveTarget(event.target)) return undefined;
+      if (event.isComposing || hasKeyModifier(event)) return undefined;
+      if (!canUseEditorSpaceTarget(event.target)) return undefined;
       event.preventDefault();
       if (event.repeat) return undefined;
       gesture.press();
@@ -188,6 +188,15 @@ export function createSpaceKeyHandlers(
     },
     keyUp(event) {
       if (event.key !== ' ' || !gesture.isDown()) return undefined;
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        hasKeyModifier(event) ||
+        !canUseEditorSpaceTarget(event.target)
+      ) {
+        gesture.cancel();
+        return undefined;
+      }
       event.preventDefault();
       const intent = gesture.release();
       if (intent === 'tap') onTap();
