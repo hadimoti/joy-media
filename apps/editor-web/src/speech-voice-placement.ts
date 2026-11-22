@@ -70,6 +70,7 @@ export function withSpeechCaptionClipPlacement(
   clipId: string,
   newStartUs: number,
   newEndUs: number,
+  captionDocumentId?: string,
 ): JoyProjectV1 {
   if (
     !Number.isSafeInteger(newStartUs) ||
@@ -90,7 +91,13 @@ export function withSpeechCaptionClipPlacement(
   const currentEndUs = clip.startUs + clip.durationUs;
   if (newStartUs > clip.startUs || newEndUs < currentEndUs)
     throw new Error('Speech captions can only extend the caption clip.');
-  if (newStartUs === clip.startUs && newEndUs === currentEndUs) return project;
+  const nextDocumentId = captionDocumentId ?? clip.captionDocumentId;
+  if (
+    newStartUs === clip.startUs &&
+    newEndUs === currentEndUs &&
+    nextDocumentId === clip.captionDocumentId
+  )
+    return project;
   return {
     ...project,
     updatedAt: new Date().toISOString(),
@@ -106,7 +113,14 @@ export function withSpeechCaptionClipPlacement(
                 clips: candidate.clips.map((item) =>
                   item.id !== clipId
                     ? item
-                    : { ...item, startUs: newStartUs, durationUs: newEndUs - newStartUs },
+                    : item.kind === 'caption'
+                      ? {
+                          ...item,
+                          startUs: newStartUs,
+                          durationUs: newEndUs - newStartUs,
+                          captionDocumentId: nextDocumentId,
+                        }
+                      : item,
                 ),
               },
         ),

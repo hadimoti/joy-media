@@ -333,6 +333,7 @@ describe('CaptionsPanel cue keyboard editing', () => {
               clipId,
               clipStartUs,
               clipEndUs,
+              documentId,
             );
             session.dispatchCompound('Add speech captions', {
               document: {
@@ -427,6 +428,163 @@ describe('CaptionsPanel cue keyboard editing', () => {
     expect(session.visualProject).toEqual(project);
     expect(session.timelineProject).toEqual(timelineProject);
     await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('copies a shared caption document when extending one clip earlier and undoes atomically', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = INITIAL_EDITOR_PROJECT.compositions.root!;
+    const originalTrack = root.tracks[0]!;
+    const project = {
+      ...INITIAL_EDITOR_PROJECT,
+      compositions: {
+        ...INITIAL_EDITOR_PROJECT.compositions,
+        root: {
+          ...root,
+          tracks: root.tracks.map((track) =>
+            track.id === originalTrack.id
+              ? {
+                  ...track,
+                  clips: [
+                    ...track.clips,
+                    {
+                      id: 'caption-clip-2',
+                      kind: 'caption' as const,
+                      startUs: 10_000_000,
+                      durationUs: 4_000_000,
+                      captionDocumentId: 'captions-fa',
+                    },
+                  ],
+                }
+              : track,
+          ),
+        },
+      },
+    };
+    const timelineProject = buildReferenceSpikeProject();
+    const session = new EditorSession(memoryStorage(), timelineProject, project);
+    let addedDocumentId = '';
+    const reactRoot = createRoot(container);
+    const render = () =>
+      reactRoot.render(
+        <CaptionsPanel
+          project={project}
+          playheadUs={0}
+          onSeek={() => undefined}
+          onDispatch={() => undefined}
+          onTranscribe={async () => undefined}
+          transcriptionError={undefined}
+          onProjectChange={() => undefined}
+          speechModelStatus={[
+            { modelId: 'kokoro-82m', state: 'ready' },
+            { modelId: 'faster-whisper-large-v3-turbo', state: 'ready' },
+          ]}
+          onGenerateSpeech={async () => ({
+            availability: 'ready',
+            insertionStartUs: 0,
+            timing: {
+              durationUs: 2_000_000,
+              timingSource: 'native',
+              words: [{ text: 'Generated', startUs: 100_000, endUs: 500_000 }],
+            },
+          })}
+          onAddSpeechCaptions={(documentId, document, clipId, clipStartUs, clipEndUs) => {
+            addedDocumentId = documentId;
+            const placedProject = withSpeechCaptionClipPlacement(
+              project,
+              clipId,
+              clipStartUs,
+              clipEndUs,
+              documentId,
+            );
+            session.dispatchCompound('Add speech captions', {
+              document: {
+                ...placedProject,
+                captionDocuments: { ...placedProject.captionDocuments, [documentId]: document },
+              },
+            });
+          }}
+        />,
+      );
+    const documentBefore = project.captionDocuments['captions-fa']!;
+    const secondClipCuePositionsBefore = documentBefore.segments.map((segment) => [
+      10_000_000 + segment.startUs,
+      10_000_000 + segment.endUs,
+    ]);
+    await act(async () => render());
+
+    const generateTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      (button) => button.textContent === 'Generate',
+    )!;
+    await act(async () => generateTab.click());
+    const text = container.querySelector<HTMLTextAreaElement>('.speech-generation-panel textarea')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        text,
+        'Generated',
+      );
+      text.dispatchEvent(new Event('input', { bubbles: true }));
+      for (const checkbox of container.querySelectorAll<HTMLInputElement>(
+        '.speech-consent-group input[type="checkbox"]',
+      )) {
+        if (!checkbox.checked) checkbox.click();
+      }
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.speech-action-row button[type="submit"]')!
+        .click();
+    });
+    await act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>('.speech-action-row button')]
+        .find((button) => button.textContent === 'Add captions')!
+        .click();
+    });
+
+    const updatedComposition = session.visualProject.compositions.root!;
+    const firstClip = updatedComposition.tracks[0]!.clips.find(
+      (clip) => clip.id === 'caption-clip-1',
+    )!;
+    const secondClip = updatedComposition.tracks[0]!.clips.find(
+      (clip) => clip.id === 'caption-clip-2',
+    )!;
+    if (firstClip.kind !== 'caption') throw new Error('Expected a caption clip');
+    if (secondClip.kind !== 'caption') throw new Error('Expected a caption clip');
+    expect(addedDocumentId).not.toBe('captions-fa');
+    expect(firstClip).toMatchObject({
+      startUs: 0,
+      captionDocumentId: expect.not.stringMatching(/^captions-fa$/),
+    });
+    expect(secondClip).toMatchObject({ startUs: 10_000_000, captionDocumentId: 'captions-fa' });
+    const firstClipDocument = session.visualProject.captionDocuments[firstClip.captionDocumentId]!;
+    expect(firstClipDocument.segments).toEqual(
+      expect.arrayContaining(
+        documentBefore.segments.map((segment) => ({
+          ...segment,
+          startUs: segment.startUs + 1_000_000,
+          endUs: segment.endUs + 1_000_000,
+        })),
+      ),
+    );
+    expect(Object.values(firstClipDocument.words).some((word) => word.text === 'Generated')).toBe(
+      true,
+    );
+    expect(session.visualProject.captionDocuments['captions-fa']).toEqual(documentBefore);
+    const secondClipDocument =
+      session.visualProject.captionDocuments[secondClip.captionDocumentId]!;
+    expect(
+      secondClipDocument.segments.map((segment) => [
+        secondClip.startUs + segment.startUs,
+        secondClip.startUs + segment.endUs,
+      ]),
+    ).toEqual(secondClipCuePositionsBefore);
+
+    expect(session.canUndo).toBe(true);
+    session.undo();
+    expect(session.visualProject).toEqual(project);
+    expect(session.timelineProject).toEqual(timelineProject);
+    await act(async () => reactRoot.unmount());
     container.remove();
   });
 
