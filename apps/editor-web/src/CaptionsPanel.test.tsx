@@ -536,11 +536,17 @@ describe('CaptionsPanel cue keyboard editing', () => {
         .querySelector<HTMLButtonElement>('.speech-action-row button[type="submit"]')!
         .click();
     });
-    await act(async () => {
-      [...container.querySelectorAll<HTMLButtonElement>('.speech-action-row button')]
-        .find((button) => button.textContent === 'Add captions')!
-        .click();
-    });
+    vi.stubGlobal('crypto', { ...globalThis.crypto, randomUUID: undefined });
+    try {
+      expect(globalThis.crypto.randomUUID).toBeUndefined();
+      await act(async () => {
+        [...container.querySelectorAll<HTMLButtonElement>('.speech-action-row button')]
+          .find((button) => button.textContent === 'Add captions')!
+          .click();
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
 
     const updatedComposition = session.visualProject.compositions.root!;
     const firstClip = updatedComposition.tracks[0]!.clips.find(
@@ -552,6 +558,7 @@ describe('CaptionsPanel cue keyboard editing', () => {
     if (firstClip.kind !== 'caption') throw new Error('Expected a caption clip');
     if (secondClip.kind !== 'caption') throw new Error('Expected a caption clip');
     expect(addedDocumentId).not.toBe('captions-fa');
+    expect(addedDocumentId).toMatch(/^captions-/);
     expect(firstClip).toMatchObject({
       startUs: 0,
       captionDocumentId: expect.not.stringMatching(/^captions-fa$/),

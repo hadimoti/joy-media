@@ -310,7 +310,11 @@ export function CaptionsPanel({
                   );
                   const documentId =
                     documentIsShared && existingShiftUs !== 0
-                      ? `captions-${crypto.randomUUID()}`
+                      ? `captions-${
+                          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+                            ? crypto.randomUUID()
+                            : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+                        }`
                       : slot.document.id;
                   const existingDocument: CaptionDocumentV1 = {
                     ...slot.document,
