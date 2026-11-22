@@ -282,6 +282,7 @@ export function SpeechGenerationPanel({
               setLanguage(next);
               setEngineChoice(next === 'fa-IR' ? 'chatterbox-fa' : 'kokoro-82m');
               setReferenceAssetId('');
+              setConsent(false);
               setCaptionTiming(undefined);
             }}
           >
@@ -300,9 +301,9 @@ export function SpeechGenerationPanel({
             onChange={(event) => {
               const next = event.currentTarget.value as SpeechModelId;
               setEngineChoice(next);
+              setConsent(false);
               if (next === 'kokoro-82m') {
                 setReferenceAssetId('');
-                setConsent(false);
               }
             }}
           >
@@ -339,7 +340,10 @@ export function SpeechGenerationPanel({
             value={referenceAssetId}
             disabled={pending || selectedEngine === 'kokoro-82m'}
             required={referenceRequired}
-            onChange={(event) => setReferenceAssetId(event.currentTarget.value)}
+            onChange={(event) => {
+              setReferenceAssetId(event.currentTarget.value);
+              setConsent(false);
+            }}
           >
             <option value="">{referenceRequired ? 'Choose project audio' : 'No reference'}</option>
             {referenceAssets.map((asset) => (

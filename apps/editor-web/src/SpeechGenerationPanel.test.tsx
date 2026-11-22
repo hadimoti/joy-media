@@ -279,6 +279,75 @@ describe('SpeechGenerationPanel', () => {
     expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it('requires fresh consent when the selected reference asset changes', async () => {
+    const view = await render(makeProps());
+    await setValue(view.querySelector<HTMLTextAreaElement>('textarea')!, 'Hello there');
+    await setValue(
+      view.querySelector<HTMLSelectElement>('select[name="engine"]')!,
+      'chatterbox-en',
+    );
+    const reference = view.querySelector<HTMLSelectElement>('select[name="referenceAssetId"]')!;
+    await setValue(reference, 'asset-voice-one');
+    await setCheckbox('I have permission');
+    const consent = view.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    const generate = view.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    expect(consent.checked).toBe(true);
+    expect(generate.disabled).toBe(false);
+
+    await setValue(reference, 'asset-music');
+
+    expect(reference.value).toBe('asset-music');
+    expect(consent.checked).toBe(false);
+    expect(generate.disabled).toBe(true);
+  });
+
+  it('requires fresh consent when the language or engine changes', async () => {
+    const view = await render(makeProps());
+    await setValue(view.querySelector<HTMLTextAreaElement>('textarea')!, 'Hello there');
+    await setValue(
+      view.querySelector<HTMLSelectElement>('select[name="engine"]')!,
+      'chatterbox-en',
+    );
+    const reference = view.querySelector<HTMLSelectElement>('select[name="referenceAssetId"]')!;
+    await setValue(reference, 'asset-voice-one');
+    const consent = view.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    const generate = view.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    await setCheckbox('I have permission');
+
+    await setValue(view.querySelector<HTMLSelectElement>('select[name="language"]')!, 'fa-IR');
+    expect(consent.checked).toBe(false);
+    expect(generate.disabled).toBe(true);
+    await setValue(reference, 'asset-voice-one');
+    await setCheckbox('I have permission');
+    expect(generate.disabled).toBe(false);
+
+    await setValue(
+      view.querySelector<HTMLSelectElement>('select[name="engine"]')!,
+      'chatterbox-en',
+    );
+    expect(consent.checked).toBe(false);
+  });
+
+  it('keeps consent for the same reference when only the text changes', async () => {
+    const view = await render(makeProps());
+    const text = view.querySelector<HTMLTextAreaElement>('textarea')!;
+    await setValue(text, 'Hello there');
+    await setValue(
+      view.querySelector<HTMLSelectElement>('select[name="engine"]')!,
+      'chatterbox-en',
+    );
+    await setValue(
+      view.querySelector<HTMLSelectElement>('select[name="referenceAssetId"]')!,
+      'asset-voice-one',
+    );
+    await setCheckbox('I have permission');
+
+    await setValue(text, 'A different script for the same voice');
+
+    expect(view.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(true);
+    expect(view.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false);
+  });
+
   it('passes the selected reference once and aborts the in-flight request on Cancel', async () => {
     let finish: ((value: SpeechGenerationResult) => void) | undefined;
     const onGenerate = vi.fn<SpeechGenerationPanelProps['onGenerate']>(
