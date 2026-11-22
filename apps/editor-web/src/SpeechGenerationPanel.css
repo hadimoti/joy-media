@@ -43,7 +43,7 @@
   border-radius: 999px;
   padding: 2px 8px;
   color: var(--inspector-muted, #b1b5c2);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .speech-state-ready {
