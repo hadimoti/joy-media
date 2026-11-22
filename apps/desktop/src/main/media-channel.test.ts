@@ -364,6 +364,25 @@ describe('desktop.media channels', () => {
     });
   });
 
+  it('rejects a Kokoro synthesis request with a reference before queueing it', async () => {
+    const { db, handlers } = setup();
+    db.jobDispatch.savePresence({
+      workerId: 'worker-1',
+      capabilities: ['speech.synthesize', 'speech.model.kokoro-82m'],
+      lastHelloAt: 'T0',
+    });
+
+    await expect(
+      handlers['desktop.media.speech.run']({
+        jobType: 'speech.synthesize',
+        refId: 'reference-audio',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+        consent: { acknowledged: true, purpose: 'general' },
+      }),
+    ).resolves.toMatchObject({ ok: false, error: 'KOKORO_REFERENCE_UNSUPPORTED' });
+    expect(db.jobDispatch.get('job-1')).toBeUndefined();
+  });
+
   it('connects localhost through 127.0.0.1 while preserving the Host header and saved model provenance', async () => {
     const server = await listenWhisperServer((_request, response) => {
       response.setHeader('content-type', 'application/json');

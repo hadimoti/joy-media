@@ -297,7 +297,14 @@ export function SpeechGenerationPanel({
             name="engine"
             value={selectedEngine ?? ''}
             disabled={pending}
-            onChange={(event) => setEngineChoice(event.currentTarget.value as SpeechModelId)}
+            onChange={(event) => {
+              const next = event.currentTarget.value as SpeechModelId;
+              setEngineChoice(next);
+              if (next === 'kokoro-82m') {
+                setReferenceAssetId('');
+                setConsent(false);
+              }
+            }}
           >
             {engineChoices.map((engine) => {
               const state =
@@ -324,7 +331,7 @@ export function SpeechGenerationPanel({
             id={referenceId}
             name="referenceAssetId"
             value={referenceAssetId}
-            disabled={pending}
+            disabled={pending || selectedEngine === 'kokoro-82m'}
             required={referenceRequired}
             onChange={(event) => setReferenceAssetId(event.currentTarget.value)}
           >

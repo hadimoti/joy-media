@@ -178,6 +178,36 @@ describe('SpeechGenerationPanel', () => {
     expect(view.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
   });
 
+  it('disables Kokoro references and clears reference consent when switching engines', async () => {
+    const view = await render(makeProps());
+    const engine = view.querySelector<HTMLSelectElement>('select[name="engine"]')!;
+    await act(async () => {
+      engine.value = 'chatterbox-en';
+      engine.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const reference = view.querySelector<HTMLSelectElement>('select[name="referenceAssetId"]')!;
+    await act(async () => {
+      reference.value = 'asset-voice-one';
+      reference.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await setCheckbox('I have permission');
+    expect(reference.value).toBe('asset-voice-one');
+    expect(reference.disabled).toBe(false);
+
+    await act(async () => {
+      engine.value = 'kokoro-82m';
+      engine.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(reference.disabled).toBe(true);
+    expect(reference.value).toBe('');
+    const consent = [...view.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(
+      (input) => input.parentElement?.textContent?.includes('I have permission'),
+    );
+    expect(consent?.checked).toBe(false);
+  });
+
   it('requires explicit purpose opt-in and consent before Generate', async () => {
     const onGenerate = vi.fn<SpeechGenerationPanelProps['onGenerate']>(async () => ({
       availability: 'ready',
@@ -220,6 +250,11 @@ describe('SpeechGenerationPanel', () => {
     );
     const view = await render(makeProps({ onGenerate }));
     const text = view.querySelector<HTMLTextAreaElement>('textarea')!;
+    const engine = view.querySelector<HTMLSelectElement>('select[name="engine"]')!;
+    await act(async () => {
+      engine.value = 'chatterbox-en';
+      engine.dispatchEvent(new Event('change', { bubbles: true }));
+    });
     const reference = view.querySelector<HTMLSelectElement>('select[name="referenceAssetId"]')!;
     await setValue(text, 'Hello there');
     await setValue(reference, 'asset-voice-one');
