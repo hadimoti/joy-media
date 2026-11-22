@@ -189,11 +189,15 @@ def _normalize_native_timings(
     return normalized
 
 
-def _timed_result_tokens(tokens: Any, offset_samples: int) -> list[dict[str, Any]] | None:
+def _timed_result_tokens(
+    tokens: Any, offset_samples: int, chunk_samples: int
+) -> list[dict[str, Any]] | None:
     """Turn a real KPipeline.Result.tokens list (seconds, relative to its chunk) into sample-clock tokens.
 
-    Punctuation-only tokens carry no timing and are skipped. A word token without a start and end time makes the
-    whole chunk untrustworthy, so the caller reports the timings as unavailable.
+    Punctuation-only tokens carry no timing and are skipped. A word token without a start and end time, or one
+    that falls outside its own chunk's audio, makes the whole result untrustworthy, so the caller reports the
+    timings as unavailable (a word may never leak into a neighbouring chunk). A tiny rounding overrun at the end
+    of the chunk (50 ms) is clamped.
     """
     if not isinstance(tokens, (list, tuple)):
         return None
@@ -218,11 +222,17 @@ def _timed_result_tokens(tokens: Any, offset_samples: int) -> list[dict[str, Any
             or not math.isfinite(end_ts)
         ):
             return None
+        start = round(start_ts * SAMPLE_RATE)
+        end = min(round(end_ts * SAMPLE_RATE), chunk_samples)
+        if round(end_ts * SAMPLE_RATE) > chunk_samples + SAMPLE_RATE // 20:
+            return None
+        if start < 0 or end <= start or start >= chunk_samples:
+            return None
         timed.append(
             {
                 "text": token_text,
-                "startSample": offset_samples + round(start_ts * SAMPLE_RATE),
-                "endSample": offset_samples + round(end_ts * SAMPLE_RATE),
+                "startSample": offset_samples + start,
+                "endSample": offset_samples + end,
             }
         )
     return timed
@@ -247,9 +257,10 @@ def _generate_audio(engine: Any, voice: Any, text: str) -> tuple[list[float], An
             collecting = False
             continue
         offset = len(chunks)
-        chunks.extend(_as_mono_samples(result.audio))
+        chunk = _as_mono_samples(result.audio)
+        chunks.extend(chunk)
         if collecting:
-            timed = _timed_result_tokens(getattr(result, "tokens", None), offset)
+            timed = _timed_result_tokens(getattr(result, "tokens", None), offset, len(chunk))
             if timed is None:
                 collecting = False
             else:

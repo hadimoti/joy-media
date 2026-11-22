@@ -171,6 +171,50 @@ class KokoroRunnerTests(unittest.TestCase):
         self.assertEqual(timings["words"], [])
         self.assertGreater((self.output / "voice.wav").stat().st_size, 44)
 
+    def test_word_times_outside_their_own_chunk_make_timings_unavailable(self):
+        rate = runner.SAMPLE_RATE
+        one_second = array("f", [0.1] * rate)
+
+        class Token:
+            def __init__(self, text, start_ts, end_ts):
+                self.text, self.start_ts, self.end_ts = text, start_ts, end_ts
+
+        class Result:
+            def __init__(self, tokens):
+                self.audio, self.tokens = one_second, tokens
+
+        for bad in (
+            Token("Bye", -0.4, 0.2),  # negative start would leak into the previous chunk
+            Token("Bye", 0.2, 1.5),  # ends well past its own chunk
+            Token("Bye", 1.0, 1.2),  # starts after its own chunk
+        ):
+            with self.subTest(start=bad.start_ts, end=bad.end_ts):
+                chunks, native = runner._generate_audio(
+                    type(
+                        "E",
+                        (),
+                        {"__call__": lambda self, text, voice: iter([Result([Token("Hi", 0.1, 0.5)]), Result([bad])])},
+                    )(),
+                    object(),
+                    "Hi Bye",
+                )
+                self.assertEqual(len(chunks), 2 * rate)
+                self.assertIsNone(native)
+
+    def test_tiny_rounding_overrun_at_the_chunk_end_is_clamped(self):
+        rate = runner.SAMPLE_RATE
+
+        class Token:
+            text, start_ts, end_ts = "Hi", 0.5, 1.02  # 20 ms past a one second chunk
+
+        class Result:
+            audio = array("f", [0.1] * rate)
+            tokens = [Token()]
+
+        engine = type("E", (), {"__call__": lambda self, text, voice: iter([Result()])})()
+        _chunks, native = runner._generate_audio(engine, object(), "Hi")
+        self.assertEqual(native, [{"text": "Hi", "startSample": rate // 2, "endSample": rate}])
+
 
 if __name__ == "__main__":
     unittest.main()
