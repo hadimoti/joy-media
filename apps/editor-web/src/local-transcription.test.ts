@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ProviderUnavailableError } from '@joy-media/provider-sdk';
 import type { BrowserControlPlaneClient } from './control-plane-client.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
+import { DesktopSpeechError } from './local-media-client.js';
 
 describe('transcribeReferenceCaption (live + fixture fallback)', () => {
   it('uses the live API result when transcription succeeds', async () => {
@@ -109,5 +110,90 @@ describe('transcribeReferenceCaption (live + fixture fallback)', () => {
 
   it('keeps ProviderUnavailableError typed for callers', () => {
     expect(ProviderUnavailableError.name).toBe('ProviderUnavailableError');
+  });
+
+  it('uses first-party speech without loading media', async () => {
+    const loadMedia = vi.fn(async () => ({ media: new Blob(['audio']), mediaType: 'audio/wav' }));
+    const client = {
+      async runLocalTranscription() {
+        return {
+          language: 'fa-IR',
+          words: [{ text: 'Worker', startUs: 0, endUs: 400_000 }],
+          speakers: [],
+          provenance: {
+            providerId: 'local',
+            modelId: 'faster-whisper-large-v3-turbo',
+            createdAt: '2026-11-22T00:00:00.000Z',
+          },
+        };
+      },
+    } as unknown as BrowserControlPlaneClient;
+
+    const document = await transcribeReferenceCaption('caption-fa', 'fa-IR', client, {
+      workerRequest: {
+        projectId: 'project-1',
+        assetId: 'asset-1',
+        request: { schemaVersion: 1, language: 'fa-IR', modelId: 'faster-whisper-large-v3-turbo' },
+      },
+      loadMedia,
+    });
+
+    expect(Object.values(document.words).map((word) => word.text)).toEqual(['Worker']);
+    expect(loadMedia).not.toHaveBeenCalled();
+  });
+
+  it('loads media once only when first-party setup is missing', async () => {
+    const loadMedia = vi.fn(async () => ({ media: new Blob(['audio']), mediaType: 'audio/wav' }));
+    const client = {
+      async runLocalTranscription() {
+        throw new DesktopSpeechError('SETUP_REQUIRED', 'Worker speech is not set up');
+      },
+      async transcribeSpeech() {
+        return {
+          language: 'fa-IR',
+          words: [{ text: 'Loopback', startUs: 0, endUs: 400_000 }],
+          speakers: [],
+          provenance: {
+            providerId: 'local',
+            modelId: 'faster-whisper-large-v3-turbo',
+            createdAt: '2026-11-22T00:00:00.000Z',
+          },
+        };
+      },
+    } as unknown as BrowserControlPlaneClient;
+
+    const document = await transcribeReferenceCaption('caption-fa', 'fa-IR', client, {
+      workerRequest: {
+        projectId: 'project-1',
+        assetId: 'asset-1',
+        request: { schemaVersion: 1, language: 'fa-IR', modelId: 'faster-whisper-large-v3-turbo' },
+      },
+      loadMedia,
+    });
+
+    expect(Object.values(document.words).map((word) => word.text)).toEqual(['Loopback']);
+    expect(loadMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not use loopback fallback for a first-party runtime failure', async () => {
+    const loadMedia = vi.fn(async () => ({ media: new Blob(['audio']) }));
+    const failure = new Error('runtime failure');
+    const client = {
+      async runLocalTranscription() {
+        throw failure;
+      },
+    } as unknown as BrowserControlPlaneClient;
+
+    await expect(
+      transcribeReferenceCaption('caption-fa', 'fa-IR', client, {
+        workerRequest: {
+          projectId: 'project-1',
+          assetId: 'asset-1',
+          request: { schemaVersion: 1, language: 'fa-IR', modelId: 'faster-whisper-large-v3-turbo' },
+        },
+        loadMedia,
+      }),
+    ).rejects.toBe(failure);
+    expect(loadMedia).not.toHaveBeenCalled();
   });
 });
