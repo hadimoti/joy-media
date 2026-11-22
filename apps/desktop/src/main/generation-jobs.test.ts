@@ -627,6 +627,29 @@ describe('generation job manager', () => {
     );
   });
 
+  it('downloads directly when videoStatus returns a V2 downloadUrl without calling videoFileLink', async () => {
+    const { manager, broker, download } = harness();
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    broker.videoStatus.mockResolvedValueOnce({
+      ok: true,
+      data: { status: 'succeeded', downloadUrl: 'https://cdn.hailuoai.com/prod/out.mp4' },
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, started.id, 'completed');
+
+    expect(manager.status(started.id)?.state).toBe('completed');
+    expect(broker.videoFileLink).not.toHaveBeenCalled();
+    expect(download).toHaveBeenCalledWith(
+      'https://cdn.hailuoai.com/prod/out.mp4',
+      expect.any(AbortSignal),
+    );
+  });
+
   it('reads a completed picture back as bytes with its MIME type and file name', async () => {
     const probe = vi.fn(async (): Promise<ProbedGeneratedMedia> => ({
       kind: 'image',
