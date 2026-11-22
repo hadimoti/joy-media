@@ -304,6 +304,7 @@ class TestTranscribeRunner(unittest.TestCase):
 
         data = json.loads(raw_text)
         self.assertEqual(data["language"], "fa")
+        self.assertEqual(mock_model.transcribe.call_args.kwargs["language"], "fa")
         words = data["words"]
         self.assertEqual(len(words), 4)
         self.assertEqual(words[0]["text"], "سلام")
@@ -314,6 +315,20 @@ class TestTranscribeRunner(unittest.TestCase):
         self.assertEqual(words[2]["startUs"], 2_000_000)
         self.assertEqual(words[3]["text"], "JOY")
         self.assertEqual(words[3]["startUs"], 2_700_000)
+
+    @patch("apps.worker.speech.transcribe.probe_duration_s", return_value=5.0)
+    @patch("apps.worker.speech.transcribe.decode_window_wav", return_value=True)
+    def test_contract_locale_is_mapped_for_whisper_and_preserved_in_transcript(self, _decode, _probe):
+        for locale, model_language in (("en-US", "en"), ("fa-IR", "fa")):
+            with self.subTest(locale=locale):
+                request = dict(self.base_request, language=locale)
+                model = MagicMock()
+                model.transcribe.return_value = ([], MagicMock())
+                with patch.object(runner, "WhisperModel", MagicMock(return_value=model)):
+                    runner.transcribe(request, self.output_dir)
+                self.assertEqual(model.transcribe.call_args.kwargs["language"], model_language)
+                transcript = json.loads((self.output_dir / "transcript.json").read_text(encoding="utf-8"))
+                self.assertEqual(transcript["language"], locale)
 
     def test_missing_model(self):
         """Test missing model directory raises FileNotFoundError before any model load."""

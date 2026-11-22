@@ -92,17 +92,20 @@ const speechRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'speec
 
 /** Build capability state only from local paths; the cached probe checks imports without loading weights. */
 export function speechAvailabilityFromEnvironment(env: NodeJS.ProcessEnv): SpeechAvailability {
-  const python = env.JOY_MEDIA_SPEECH_PYTHON?.trim() ?? '';
-  const scriptDir = env.JOY_MEDIA_SPEECH_SCRIPT_DIR?.trim() || speechRoot;
+  const sttPython = env.JOY_MEDIA_SPEECH_STT_PYTHON?.trim() ?? '';
+  const ttsPython = env.JOY_MEDIA_SPEECH_TTS_PYTHON?.trim() ?? '';
+  const runnerDir = env.JOY_MEDIA_SPEECH_RUNNER_DIR?.trim();
+  const scriptDir = runnerDir || env.JOY_MEDIA_SPEECH_SCRIPT_DIR?.trim() || speechRoot;
+  const modelDir = env.JOY_MEDIA_SPEECH_MODEL_DIR?.trim();
   const ffmpegPath = env.JOY_MEDIA_SPEECH_FFMPEG?.trim();
-  if (!isLocalFile(python)) return { synthesis: {} };
-  const transcribeModel = env.JOY_MEDIA_SPEECH_STT_MODEL_PATH?.trim() ?? '';
+  const transcribeModel = env.JOY_MEDIA_SPEECH_STT_MODEL_PATH?.trim() ||
+    (modelDir ? resolve(modelDir, 'faster-whisper-large-v3-turbo') : '');
   const transcribeScript = resolve(scriptDir, 'transcribe.py');
   const transcribe =
-    isLocalDirectory(transcribeModel) &&
+    isLocalFile(sttPython) && isLocalDirectory(transcribeModel) &&
     isLocalFile(transcribeScript) &&
-    dependenciesAvailable(python, ['faster_whisper', 'torch'])
-      ? modelRunner(python, transcribeScript, transcribeModel, ffmpegPath)
+    dependenciesAvailable(sttPython, ['faster_whisper', 'torch'])
+      ? modelRunner(sttPython, transcribeScript, transcribeModel, ffmpegPath)
       : undefined;
   const synthesis: Partial<
     Record<'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa', SpeechModelRunner>
@@ -128,7 +131,8 @@ export function speechAvailabilityFromEnvironment(env: NodeJS.ProcessEnv): Speec
     ],
   ] as const;
   for (const [modelId, key, scriptName, modules] of models) {
-    const modelPath = env[key]?.trim() ?? '';
+    const modelPath = env[key]?.trim() || (modelDir ? resolve(modelDir, modelId) : '');
+    if (!isLocalFile(ttsPython)) continue;
     const scriptPath =
       modelId.startsWith('chatterbox-') && env.JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT?.trim()
         ? env.JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT.trim()
@@ -136,9 +140,9 @@ export function speechAvailabilityFromEnvironment(env: NodeJS.ProcessEnv): Speec
     if (
       isLocalDirectory(modelPath) &&
       isLocalFile(scriptPath) &&
-      dependenciesAvailable(python, modules)
+      dependenciesAvailable(ttsPython, modules)
     )
-      synthesis[modelId] = modelRunner(python, scriptPath, modelPath, ffmpegPath);
+      synthesis[modelId] = modelRunner(ttsPython, scriptPath, modelPath, ffmpegPath);
   }
   return { ...(transcribe === undefined ? {} : { transcribe }), synthesis };
 }
