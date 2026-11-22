@@ -298,8 +298,23 @@ export function CaptionsPanel({
                     timing.durationUs,
                   );
                   const existingShiftUs = slot.clip.startUs - placement.clipStartUs;
+                  const documentIsShared = Object.values(project.compositions).some((candidate) =>
+                    candidate.tracks.some((track) =>
+                      track.clips.some(
+                        (clip) =>
+                          clip.kind === 'caption' &&
+                          clip.id !== slot.clip.id &&
+                          clip.captionDocumentId === slot.document.id,
+                      ),
+                    ),
+                  );
+                  const documentId =
+                    documentIsShared && existingShiftUs !== 0
+                      ? `captions-${crypto.randomUUID()}`
+                      : slot.document.id;
                   const existingDocument: CaptionDocumentV1 = {
                     ...slot.document,
+                    id: documentId,
                     words: Object.fromEntries(
                       Object.entries(slot.document.words).map(([id, word]) => [
                         id,
@@ -348,7 +363,7 @@ export function CaptionsPanel({
                     ),
                   };
                   onAddSpeechCaptions(
-                    slot.document.id,
+                    documentId,
                     document,
                     slot.clip.id,
                     placement.clipStartUs,

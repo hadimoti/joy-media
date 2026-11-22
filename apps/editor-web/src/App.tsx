@@ -7115,6 +7115,7 @@ function EditorWorkspace({
               clipId,
               clipStartUs,
               clipEndUs,
+              documentId,
             );
             const nextProject = {
               ...placedProject,
