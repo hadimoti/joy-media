@@ -95,6 +95,7 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
   const tokenBuffer = Buffer.from(token);
   const warn = options.onWarning ?? (() => undefined);
   const { orchestrator } = options;
+  orchestrator.configureDerivativeCleanup(options.derivativeDirectory, options.onWarning);
 
   const server: Server = createServer((request, response) => {
     handle(request, response).catch((error: unknown) => {
