@@ -411,7 +411,9 @@ export const inspectorNumericCases = Object.freeze([
 
 /** The checklist items one case runs: keyframe items only where the case is animatable. */
 export function actionsFor(numericCase) {
-  return numericCase.actions.filter((action) => !action.requiresAnimatable || numericCase.animatable);
+  return numericCase.actions.filter(
+    (action) => !action.requiresAnimatable || numericCase.animatable,
+  );
 }
 
 export { EFFECTS_SOURCE, INSPECTOR_SOURCE, MASK_SOURCE };

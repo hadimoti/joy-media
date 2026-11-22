@@ -57,15 +57,15 @@ test('the inventory holds the requested fields per section', () => {
   assert.deepEqual(counts, { Transform: 6, Adjust: 5, Crop: 4, Audio: 2, Speed: 3, Mask: 6 });
   assert.equal(inspectorNumericCases.length, 26);
   assert.deepEqual(
-    inspectorNumericCases.filter((entry) => entry.section === 'Transform').map((entry) => entry.label),
+    inspectorNumericCases
+      .filter((entry) => entry.section === 'Transform')
+      .map((entry) => entry.label),
     ['Position X', 'Position Y', 'Scale X', 'Scale Y', 'Rotation', 'Opacity'],
   );
 });
 
 test('explicit input ids are unique and the case list is frozen', () => {
-  const ids = inspectorNumericCases
-    .map((entry) => entry.input.id)
-    .filter((id) => id !== null);
+  const ids = inspectorNumericCases.map((entry) => entry.input.id).filter((id) => id !== null);
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(Object.isFrozen(inspectorNumericCases));
   for (const entry of inspectorNumericCases) assert.ok(Object.isFrozen(entry));
@@ -218,7 +218,10 @@ test('every case input identity exists in the source it names', () => {
     const source = readRepoFile(entry.input.source);
     assert.ok(source.includes(entry.input.marker), `${entry.key} marker in ${entry.input.source}`);
     if (entry.input.container !== undefined) {
-      assert.ok(source.includes(entry.input.container), `${entry.key} container ${entry.input.container}`);
+      assert.ok(
+        source.includes(entry.input.container),
+        `${entry.key} container ${entry.input.container}`,
+      );
     }
   }
 });
