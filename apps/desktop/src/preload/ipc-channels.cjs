@@ -19,6 +19,7 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.generation.status',
   'desktop.generation.cancel',
   'desktop.generation.list',
+  'desktop.generation.bytes',
   'desktop.provider-profile.save',
   'desktop.provider-profile.list',
   'desktop.provider-profile.delete',

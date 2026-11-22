@@ -671,6 +671,7 @@ import {
   type MissingExportClip,
 } from './export-missing-media.js';
 import { MissingExportDialog } from './MissingExportDialog.js';
+import { createDesktopGenerationHost } from './joy-agent/desktop-generation-host.js';
 
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
 // One missing-media host per editor session, so the panel's list and operations share state.
@@ -6040,6 +6041,19 @@ function EditorWorkspace({
       return content;
     };
     const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
+    const desktopGenerationHost =
+      api.id === 'agent' && isDesktopHost()
+        ? createDesktopGenerationHost({
+            projectId: controlPlaneProject.controlPlaneProjectId,
+            projectTitle: controlPlaneProject.title,
+            session: context.session,
+            audioState: context.audioState,
+            client: mediaControlPlaneClient,
+            getPlayheadUs: () => context.state.playheadUs,
+            onAudioState: context.setAudioState,
+            originalAssetCache: originalAssetCachePromise,
+          })
+        : undefined;
     const previewVisualProject =
       agentPreviewState.document?.baseRevision === context.session.projectRevisionId
         ? agentPreviewState.document.preview
@@ -7487,6 +7501,12 @@ function EditorWorkspace({
           joyAgentEngineClient={joyAgentEngineClientRef.current!}
           joyAgentRunController={joyAgentRunController}
           observationAdapterFactory={observationAdapterFactory}
+          {...(desktopGenerationHost === undefined
+            ? {}
+            : {
+                generationAdapter: desktopGenerationHost.adapter,
+                generatedMedia: desktopGenerationHost.generatedMedia,
+              })}
           resolveAudioAssetUrl={resolveAudioAssetUrl}
           agentPresenceStore={appAgentPresenceStore}
           agentPreviewStore={appAgentPreviewStore}

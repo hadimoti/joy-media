@@ -396,6 +396,25 @@ export interface JoyAgentGenerationJobOutcome {
   readonly status: 'completed' | 'failed' | 'cancelled';
 }
 
+export interface JoyAgentGenerationJobSnapshot {
+  readonly id: string;
+  readonly kind: JoyAgentGenerationKind;
+  readonly provider: string;
+  readonly model: string;
+  readonly prompt: string;
+  readonly createdAt: string;
+  readonly state:
+    | 'queued'
+    | 'running'
+    | 'downloading'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'abandoned-locally'
+    | 'timed-out';
+  readonly error?: string;
+}
+
 export interface JoyAgentGeneratedAttachResult {
   readonly assetId: string;
   readonly placed: boolean;
@@ -403,11 +422,19 @@ export interface JoyAgentGeneratedAttachResult {
 
 /**
  * Trusted host seam for generated media. The order is part of the contract:
- * `start` is never called unless `requestApproval` resolved true, so no
- * provider request can precede the user's Allow. There is no auto-approve
- * path in any execution mode; every request raises a cost card.
+ * the legacy `start` path is never called unless `requestApproval` resolved
+ * true. Hosts with `enqueue` take ownership of the durable approval/job flow
+ * and return immediately with an opaque request identity.
  */
 export interface JoyAgentGenerationToolAdapter {
+  /** Enqueues generation outside Host RPC's bounded request lifetime. */
+  enqueue?(input: JoyAgentGenerateMediaRequest, context: HostRpcHandlerContext): string;
+  /** Optional desktop lifecycle surface used by the durable conversation cards. */
+  status?(jobId: string): Promise<JoyAgentGenerationJobSnapshot | undefined>;
+  list?(): Promise<readonly JoyAgentGenerationJobSnapshot[]>;
+  cancel?(jobId: string): Promise<JoyAgentGenerationJobSnapshot | undefined>;
+  /** Confirms that a completed job may be attached across runs. */
+  canAttachCompletedJob?(jobId: string, context: HostRpcHandlerContext): boolean | Promise<boolean>;
   requestApproval(
     input: JoyAgentGenerateMediaRequest,
     context: HostRpcHandlerContext,
@@ -1627,8 +1654,8 @@ function parseGenerationResult(value: HostRpcJson): HostRpcJson {
 
 /**
  * The two generation methods share one closure per run. `attach_generated_media`
- * accepts only jobs this run's `generate_media` call saw complete, so a model
- * cannot place an older or foreign file by guessing an id.
+ * accepts jobs this run saw complete or jobs the host separately authorizes,
+ * so a model cannot place an older or foreign file by guessing an id.
  */
 function createGenerationHostRpcMethods(
   adapter: JoyAgentGenerationToolAdapter,
@@ -1638,6 +1665,15 @@ function createGenerationHostRpcMethods(
     parseArgs: parseGenerateMediaArgs,
     execute: async (input, context) => {
       context.signal.throwIfAborted();
+      if (adapter.enqueue !== undefined) {
+        const requestId = adapter.enqueue(input, context);
+        if (!isSafeOpaqueIdentifier(requestId))
+          return generationRefusalResult(
+            'JOY_AGENT_GENERATION_FAILED',
+            'JOY could not hand the generation request to the host.',
+          );
+        return { ok: true, terminal: 'generation', requestId, kind: input.kind };
+      }
       let approved: boolean;
       try {
         approved = (await adapter.requestApproval(input, context)) === true;
@@ -1690,7 +1726,11 @@ function createGenerationHostRpcMethods(
     parseArgs: parseAttachGeneratedMediaArgs,
     execute: async (input, context) => {
       context.signal.throwIfAborted();
-      if (!completedJobIds.has(input.jobId))
+      const completedInRun = completedJobIds.has(input.jobId);
+      const completedAcrossRuns =
+        !completedInRun && (await adapter.canAttachCompletedJob?.(input.jobId, context)) === true;
+      context.signal.throwIfAborted();
+      if (!completedInRun && !completedAcrossRuns)
         return generationRefusalResult(
           'JOY_AGENT_GENERATION_JOB_UNAVAILABLE',
           'That job is not a completed generation from this run, so nothing was attached.',
