@@ -1,9 +1,6 @@
 export type SpeechLanguage = 'fa-IR' | 'en-US';
 export type SpeechModel =
-  | 'faster-whisper-large-v3-turbo'
-  | 'kokoro-82m'
-  | 'chatterbox-en'
-  | 'chatterbox-fa';
+  'faster-whisper-large-v3-turbo' | 'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa';
 
 export interface SpeechWord {
   readonly text: string;
@@ -68,8 +65,7 @@ export function parseSpeechTranscribeV1(value: unknown): SpeechTranscribeV1 | un
   if (value.range === undefined) {
     return { schemaVersion: 1, language: value.language, modelId: value.modelId };
   }
-  if (!isPlainObject(value.range) || !isValidRange(value.range))
-    return undefined;
+  if (!isPlainObject(value.range) || !isValidRange(value.range)) return undefined;
   return {
     schemaVersion: 1,
     language: value.language,
@@ -155,7 +151,10 @@ export function parseSpeechSynthesisTiming(value: unknown): SpeechSynthesisTimin
   return { durationUs: value.durationUs, timingSource: value.timingSource, words };
 }
 
-function parseWords(value: readonly unknown[], maxEndUs?: number): readonly SpeechWord[] | undefined {
+function parseWords(
+  value: readonly unknown[],
+  maxEndUs?: number,
+): readonly SpeechWord[] | undefined {
   const words: SpeechWord[] = [];
   let previousEndUs = 0;
   for (const item of value) {
