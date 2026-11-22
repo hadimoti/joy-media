@@ -34,7 +34,14 @@ const cue = (
   endUs: number,
   wordIds: readonly string[],
   textOverride?: string,
-): CaptionSegmentV1 => ({ id, startUs, endUs, wordIds, speakerId: 'speaker', ...(textOverride === undefined ? {} : { textOverride }) });
+): CaptionSegmentV1 => ({
+  id,
+  startUs,
+  endUs,
+  wordIds,
+  speakerId: 'speaker',
+  ...(textOverride === undefined ? {} : { textOverride }),
+});
 
 describe('splitCaptionCue', () => {
   it('splits on an exact word boundary and keeps the cue metadata and source table', () => {
@@ -59,7 +66,9 @@ describe('splitCaptionCue', () => {
     const document = documentOf({ a: word('a', 'hello', 0, 1000) }, [cue('first', 0, 1000, ['a'])]);
     const edit = splitCaptionCue(document, 'first', 'hello', 2, 'second');
 
-    expect(edit?.document.segments.map(({ startUs, endUs, wordIds }) => ({ startUs, endUs, wordIds }))).toEqual([
+    expect(
+      edit?.document.segments.map(({ startUs, endUs, wordIds }) => ({ startUs, endUs, wordIds })),
+    ).toEqual([
       { startUs: 0, endUs: 400, wordIds: [] },
       { startUs: 400, endUs: 1000, wordIds: ['a'] },
     ]);
@@ -80,12 +89,18 @@ describe('splitCaptionCue', () => {
 
   it('preserves visible multiline text and rejects edge, whitespace-only, empty, and one-microsecond splits', () => {
     const document = documentOf({}, [cue('first', 0, 1000, [])]);
-    expect(splitCaptionCue(document, 'first', 'one\ntwo', 4, 'second')?.document.segments.map((s) => s.textOverride)).toEqual(['one\n', 'two']);
+    expect(
+      splitCaptionCue(document, 'first', 'one\ntwo', 4, 'second')?.document.segments.map(
+        (s) => s.textOverride,
+      ),
+    ).toEqual(['one\n', 'two']);
     expect(splitCaptionCue(document, 'first', 'one\ntwo', 0, 'second')).toBeUndefined();
     expect(splitCaptionCue(document, 'first', 'one\ntwo', 8, 'second')).toBeUndefined();
     expect(splitCaptionCue(document, 'first', '   ', 1, 'second')).toBeUndefined();
     expect(splitCaptionCue(document, 'first', '', 0, 'second')).toBeUndefined();
-    expect(splitCaptionCue(documentOf({}, [cue('first', 0, 1, [])]), 'first', 'a b', 1, 'second')).toBeUndefined();
+    expect(
+      splitCaptionCue(documentOf({}, [cue('first', 0, 1, [])]), 'first', 'a b', 1, 'second'),
+    ).toBeUndefined();
   });
 
   it('keeps Persian digits, ZWNJ, bidi marks, and UTF-16 offsets intact', () => {
@@ -110,7 +125,9 @@ describe('splitCaptionCue', () => {
   });
 
   it('preserves missing word ids and returns no-op for a missing cue', () => {
-    const document = documentOf({ a: word('a', 'one', 0, 400), b: word('b', 'two', 600, 1000) }, [cue('first', 0, 1000, ['a', 'missing', 'b', 'a'])]);
+    const document = documentOf({ a: word('a', 'one', 0, 400), b: word('b', 'two', 600, 1000) }, [
+      cue('first', 0, 1000, ['a', 'missing', 'b', 'a']),
+    ]);
     const edit = splitCaptionCue(document, 'first', 'changed words', 7, 'second');
 
     expect(edit?.document.segments.flatMap((s) => s.wordIds).sort()).toEqual(['a', 'b', 'missing']);
@@ -141,10 +158,15 @@ describe('mergeCaptionCueWithPrevious', () => {
   it('uses the source display text by default and retains document and predecessor metadata', () => {
     const previous = cue('previous', 0, 400, ['a']);
     const current = cue('current', 500, 800, ['b']);
-    const document = documentOf({ a: word('a', 'hello', 0, 400), b: word('b', 'there', 500, 800) }, [previous, current]);
+    const document = documentOf(
+      { a: word('a', 'hello', 0, 400), b: word('b', 'there', 500, 800) },
+      [previous, current],
+    );
     const edit = mergeCaptionCueWithPrevious(document, 'current', 'there');
 
-    expect(edit?.document.segments).toEqual([{ ...previous, endUs: 800, wordIds: ['a', 'b'], textOverride: 'hello there' }]);
+    expect(edit?.document.segments).toEqual([
+      { ...previous, endUs: 800, wordIds: ['a', 'b'], textOverride: 'hello there' },
+    ]);
     expect(edit?.document.styleRef).toBe('bold');
     expect(edit?.document.provenance).toBe(document.provenance);
   });
