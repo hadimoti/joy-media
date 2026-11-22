@@ -15,6 +15,20 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 - A small readout shows the box's position, size and angle while you work.
 - Hold Ctrl to turn snapping off.
 
+### Timeline
+
+- Holding the left mouse button on a clip no longer sometimes turns the pointer into an arrow with a small plus and stops the drag. Clips, tracks and lanes no longer select text, and a clip cannot start a browser drag of its own.
+
+### Quality check
+
+- The quality check now also reports a **low resolution** picture (under 360 pixels on the short side, for example a 320 by 180 clip) and **black bars baked into the picture** (a letterbox or pillarbox of 8 percent of the frame or more, for example 16:9 content padded into a 4:3 frame). Both are advice: JOY Media does not change the picture for you.
+- The check for a frozen picture is unchanged and stays strict.
+
+### Generated pictures and video
+
+- Joy Code can start a picture or a video from MiniMax, show a cost card first, and attach the finished file to the timeline.
+- The MiniMax video request now uses the format the current MiniMax service expects.
+
 ### Joy Code and chat
 
 - The Joy Code Settings button is a gear icon, not a sun.
@@ -39,6 +53,8 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 - **xAI sign-in.** The "Signed in." label does not show yet for xAI.
 - **Missing library files.** A library file that is missing is asked for again at every refresh.
 - **Kimi limit.** When Kimi says the usage limit is reached, the limit is on your own Kimi plan. JOY Media cannot change it.
+- **MiniMax video.** The video steps are tested against test servers only. A real video request reached MiniMax and was answered with "no balance or rate limited", because the Go plan credits do not cover pay-as-you-go video. A picture from MiniMax was made and placed on the timeline for real.
+- **Monitor menu.** The right-click menu on the Monitor has no Bring forward or Send backward yet. To change which layer is on top, move its track in the Timeline. Both items, and pressing Esc to cancel a title edit on the Monitor, are planned for a later version; for now Esc keeps the edit.
 - **MiniMax.** MiniMax models think before they answer. A very long thought can still use up the room, and then the chat gives no answer. The app now says so.
 
 ## Not yet checked on screen
