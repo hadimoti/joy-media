@@ -3,9 +3,22 @@ import { createReadStream } from 'node:fs';
 import { createHash, randomBytes, type Hash } from 'node:crypto';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { ProviderUnavailableError, evaluateEndpoint } from '@joy-media/provider-sdk';
+import {
+  ProviderUnavailableError,
+  VoiceConsentError,
+  createVoiceConsentManager,
+  evaluateEndpoint,
+  requireVoiceConsent,
+} from '@joy-media/provider-sdk';
+import type { VoiceConsentManager } from '@joy-media/provider-sdk';
+import {
+  parseSpeechSynthesisTiming,
+  parseSpeechSynthesizeV1,
+  parseSpeechTranscribeV1,
+} from '@joy-media/job-protocol';
 import type { DispatchJob, JobDispatchStore } from '../jobs/job-dispatch.js';
 import type { CancelResult, JobOrchestrator, SubmitResult } from '../jobs/job-orchestrator.js';
+import { BUILTIN_SPEECH_OUTPUT_REF_ID } from '../jobs/job-orchestrator.js';
 import type {
   LocalAsset,
   LocalAssetRegistration,
@@ -43,6 +56,8 @@ export const MEDIA_CHANNELS = [
   'desktop.asset-library.remove-entry',
   'desktop.media.asset.remove-internal',
   'desktop.media.speech.transcribe',
+  'desktop.media.speech.run',
+  'desktop.media.speech.status',
   'desktop.media.asset.register',
   'desktop.media.asset.upload-original',
   'desktop.media.asset.upload-original-chunk',
@@ -95,6 +110,7 @@ export interface MediaChannelDeps {
   readonly whisper?: {
     readonly getEndpoint: () => { readonly endpoint: string; readonly modelId: string } | undefined;
   };
+  readonly voiceConsent?: VoiceConsentManager;
   /** Test seam for reading a derivative file. Defaults to the real filesystem. */
   readonly readDerivative?: (path: string) => Promise<Uint8Array>;
   /** Test seams for bounded derivative transfer reads. */
@@ -326,19 +342,36 @@ function qcReportOf(job: DispatchJob): { readonly report?: unknown } {
   }
 }
 
+function speechTimingOf(job: DispatchJob): { readonly speech?: unknown } {
+  if (job.jobType !== 'speech.synthesize' || job.status !== 'done' || job.resultJson === undefined)
+    return {};
+  try {
+    const parsed: unknown = JSON.parse(job.resultJson);
+    if (!isPlainObject(parsed)) return {};
+    const speech = parseSpeechSynthesisTiming(parsed['speech']);
+    return speech === undefined ? {} : { speech };
+  } catch {
+    return {};
+  }
+}
+
 /** The job as the editor may see it: never the lease token, the worker ID, or any path. */
 function publicJob(job: DispatchJob): Record<string, unknown> {
+  const error = job.jobType.startsWith('speech.') && job.status === 'cancelled'
+    ? 'CANCELED'
+    : publicJobError(job.error);
   return {
     id: job.id,
     jobType: job.jobType,
     status: job.status,
     progress: job.progress,
     attempts: job.attempts,
-    error: publicJobError(job.error),
+    error,
     cancelRequested: job.cancelRequested,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     ...qcReportOf(job),
+    ...speechTimingOf(job),
     ...(job.derivative === undefined
       ? {}
       : {
@@ -500,6 +533,11 @@ export function createMediaChannelHandlers(
     deps.statDerivative ?? (async (path: string) => ({ size: (await statFile(path)).size }));
   const readDerivativeRange = deps.readDerivativeRange ?? readDerivativeFileRange;
   const derivativeTransfers = new Map<string, DerivativeTransfer>();
+  const voiceConsent = deps.voiceConsent ?? createVoiceConsentManager();
+  const sessionVoiceBindings = new Map<
+    string,
+    { readonly assetId: string; readonly userId: string; readonly purpose: string }
+  >();
   const pruneDerivativeTransfers = (): void => {
     const expiredBefore = Date.now() - DERIVATIVE_TRANSFER_TTL_MS;
     for (const [id, transfer] of derivativeTransfers) {
@@ -663,18 +701,7 @@ export function createMediaChannelHandlers(
     } catch {
       return unavailable('The local Whisper server returned an invalid reply.');
     }
-    const candidates: unknown[] = [];
-    if (isPlainObject(reply)) {
-      if (Array.isArray(reply['words'])) candidates.push(...reply['words']);
-      if (Array.isArray(reply['segments'])) {
-        for (const segment of reply['segments']) {
-          if (isPlainObject(segment) && Array.isArray(segment['words'])) {
-            candidates.push(...segment['words']);
-          }
-        }
-      }
-    }
-    const words = candidates.flatMap((candidate) => {
+    const parseWords = (candidates: readonly unknown[]) => candidates.flatMap((candidate) => {
       if (!isPlainObject(candidate)) return [];
       const text = candidate['word'] ?? candidate['text'];
       const start = candidate['start'];
@@ -708,6 +735,17 @@ export function createMediaChannelHandlers(
         },
       ];
     });
+    const topLevelWords = isPlainObject(reply) && Array.isArray(reply['words'])
+      ? parseWords(reply['words'])
+      : [];
+    let words = topLevelWords;
+    if (words.length === 0 && isPlainObject(reply) && Array.isArray(reply['segments'])) {
+      const nested: unknown[] = [];
+      for (const segment of reply['segments']) {
+        if (isPlainObject(segment) && Array.isArray(segment['words'])) nested.push(...segment['words']);
+      }
+      words = parseWords(nested);
+    }
     if (words.length === 0) return unavailable('The local Whisper reply has no timed words.');
     return {
       ok: true,
@@ -722,6 +760,129 @@ export function createMediaChannelHandlers(
         },
       },
     };
+  };
+
+  const speechModels = (): MediaResult => {
+    const presence = deps.jobStore.presence();
+    const models = [
+      ['faster-whisper-large-v3-turbo', 'speech.transcribe'],
+      ['kokoro-82m', 'speech.synthesize'],
+      ['chatterbox-en', 'speech.synthesize'],
+      ['chatterbox-fa', 'speech.synthesize'],
+    ] as const;
+    return {
+      ok: true,
+      data: {
+        models: models.map(([modelId, jobCapability]) => {
+          const modelReady = presence?.capabilities.includes(`speech.model.${modelId}`) === true;
+          const jobReady = presence?.capabilities.includes(jobCapability) === true;
+          const state = modelReady && jobReady
+            ? 'ready'
+            : modelReady && !jobReady
+              ? 'incompatible'
+              : 'setup-required';
+          return {
+            modelId,
+            state,
+            ...(state === 'setup-required' ? { reasonCode: 'SETUP_REQUIRED' } : {}),
+            ...(state === 'incompatible' ? { reasonCode: 'INCOMPATIBLE_ENGINE' } : {}),
+          };
+        }),
+      },
+    };
+  };
+
+  const runSpeech = async (payload: unknown): Promise<MediaResult> => {
+    if (!isPlainObject(payload)) return { ok: false, error: 'Invalid media request' };
+    const jobType = payload['jobType'];
+    const input = payload['payload'];
+    const refId = payload['refId'];
+    if (jobType !== 'speech.transcribe' && jobType !== 'speech.synthesize') {
+      return { ok: false, error: 'Invalid media request' };
+    }
+    if (!isPlainObject(input)) return { ok: false, error: 'Invalid media request' };
+
+    let sourceAsset: LocalAsset | undefined;
+    if (jobType === 'speech.transcribe' || refId !== undefined) {
+      const sourceId = asId(refId);
+      sourceAsset = sourceId === undefined ? undefined : deps.assets.get(sourceId);
+      const validKind = jobType === 'speech.transcribe'
+        ? sourceAsset?.kind === 'audio' || sourceAsset?.kind === 'video'
+        : sourceAsset?.kind === 'audio';
+      if (sourceAsset === undefined || sourceAsset.internal === true || !validKind || sourceAsset.storedPath === undefined) {
+        return { ok: false, error: 'SOURCE_UNAVAILABLE' };
+      }
+    }
+
+    const presence = deps.jobStore.presence();
+    const parsed = jobType === 'speech.transcribe'
+      ? parseSpeechTranscribeV1(input)
+      : parseSpeechSynthesizeV1(input);
+    if (parsed === undefined) return { ok: false, error: 'Invalid media request' };
+    const engineReady = presence?.capabilities.includes(`speech.model.${parsed.modelId}`) === true;
+    const capability = jobType;
+    if (!engineReady || presence?.capabilities.includes(capability) !== true) {
+      return { ok: false, error: 'SETUP_REQUIRED' };
+    }
+
+    let jobPayload: unknown = parsed;
+    let jobRefId = sourceAsset?.id ?? '';
+    if (jobType === 'speech.synthesize') {
+      const consent = payload['consent'];
+      if (!isPlainObject(consent) || consent['acknowledged'] !== true ||
+        (consent['purpose'] !== 'general' && consent['purpose'] !== 'personal-noncommercial')) {
+        return { ok: false, error: 'CONSENT_DENIED' };
+      }
+      const purpose = consent['purpose'];
+      if ((parsed as { language: string }).language === 'fa-IR' && purpose !== 'personal-noncommercial') {
+        return { ok: false, error: 'CONSENT_DENIED' };
+      }
+      if ('purpose' in parsed && parsed.purpose !== undefined && parsed.purpose !== purpose) {
+        return { ok: false, error: 'CONSENT_DENIED' };
+      }
+      if ('voiceId' in parsed && parsed.voiceId !== undefined) {
+        return { ok: false, error: 'CONSENT_DENIED' };
+      }
+
+      let voiceId: string | undefined;
+      if (sourceAsset !== undefined) {
+        const userId = 'desktop-local';
+        const voice = await voiceConsent.enrollVoice({
+          displayName: 'Local speech reference',
+          ownerUserId: userId,
+          allowedPurposes: [purpose],
+          allowedUsersOrTeams: [userId],
+          consentGrantedBy: userId,
+        });
+        voiceId = voice.id;
+        sessionVoiceBindings.set(voice.id, { assetId: sourceAsset.id, userId, purpose });
+        const binding = sessionVoiceBindings.get(voice.id);
+        try {
+          if (binding?.assetId !== sourceAsset.id || binding.userId !== userId || binding.purpose !== purpose) {
+            return { ok: false, error: 'CONSENT_DENIED' };
+          }
+          requireVoiceConsent(voiceConsent, voice.id, { purpose, userId });
+        } catch (error) {
+          return { ok: false, error: error instanceof VoiceConsentError ? error.code : 'CONSENT_DENIED' };
+        } finally {
+          sessionVoiceBindings.delete(voice.id);
+        }
+      }
+      jobPayload = {
+        ...parsed,
+        purpose,
+        ...(voiceId === undefined ? {} : { voiceId }),
+      };
+      jobRefId = BUILTIN_SPEECH_OUTPUT_REF_ID;
+    }
+
+    const result = deps.orchestrator.submit({
+      jobType,
+      refId: jobRefId,
+      kind: jobType,
+      payload: jobPayload,
+    });
+    return fromSubmit(result);
   };
 
   const registerAsset = (payload: unknown): MediaResult => {
@@ -854,6 +1015,8 @@ export function createMediaChannelHandlers(
     'desktop.asset-library.remove-entry': removeLibraryEntry,
     'desktop.media.asset.remove-internal': removeInternalAsset,
     'desktop.media.speech.transcribe': transcribeSpeech,
+    'desktop.media.speech.run': runSpeech,
+    'desktop.media.speech.status': speechModels,
     'desktop.media.asset.register': registerAsset,
     'desktop.media.asset.upload-original': storeOriginal,
     'desktop.media.asset.upload-original-chunk': appendOriginalChunk,

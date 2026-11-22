@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { ProviderUnavailableError } from '@joy-media/provider-sdk';
+import { ProviderUnavailableError, createVoiceConsentManager } from '@joy-media/provider-sdk';
 import { join } from 'node:path';
+import { IPC_CHANNELS as MAIN_IPC_CHANNELS } from '../ipc.js';
 import { createAssetLibrary } from '../store/asset-library.js';
 import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
@@ -23,6 +25,7 @@ import {
 import type { AssetLibraryPort } from '../store/asset-library.js';
 
 const tempDirs: string[] = [];
+const require = createRequire(import.meta.url);
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -34,7 +37,7 @@ function setup(
     endpoint?: string;
     modelId?: string;
   },
-  mediaDeps: Pick<MediaChannelDeps, 'readDerivativeRange' | 'statDerivative'> = {},
+  mediaDeps: Partial<Pick<MediaChannelDeps, 'readDerivativeRange' | 'statDerivative' | 'voiceConsent'>> = {},
 ) {
   const db = new LocalDatabase({ filePath: ':memory:', now: () => 'T0' });
   const assetLibrary = typeof library === 'function' ? library(db) : library;
@@ -132,7 +135,9 @@ describe('publicJobError', () => {
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {
     expect(new Set(MEDIA_CHANNELS).size).toBe(MEDIA_CHANNELS.length);
-    expect(MEDIA_CHANNELS).toHaveLength(26);
+    expect(MEDIA_CHANNELS).toHaveLength(28);
+    expect(MEDIA_CHANNELS).toContain('desktop.media.speech.run');
+    expect(MEDIA_CHANNELS).toContain('desktop.media.speech.status');
     expect(MEDIA_CHANNELS).toContain('desktop.media.qc.run');
     expect(MEDIA_CHANNELS).toContain('desktop.media.mask.run');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.remove-internal');
@@ -144,6 +149,150 @@ describe('desktop.media channels', () => {
     expect(MEDIA_CHANNELS).toContain('desktop.media.derivative.transfer.chunk');
     expect(MEDIA_CHANNELS).toContain('desktop.media.derivative.transfer.finish');
     expect(MEDIA_CHANNELS).toContain('desktop.media.derivative.transfer.cancel');
+  });
+
+  it('keeps the main and preload speech channels in the IPC allowlists', () => {
+    const preload = require('../preload/ipc-channels.cjs') as { IPC_CHANNELS: readonly string[] };
+    expect(preload.IPC_CHANNELS).toEqual(MAIN_IPC_CHANNELS);
+    expect(MAIN_IPC_CHANNELS).toEqual(expect.arrayContaining([
+      'desktop.media.speech.run', 'desktop.media.speech.status',
+    ]));
+  });
+
+  it('reports speech model readiness from the local worker presence', () => {
+    const { db, handlers } = setup();
+    db.jobDispatch.savePresence({
+      workerId: 'worker-1',
+      capabilities: ['speech.transcribe', 'speech.synthesize', 'speech.model.kokoro-82m'],
+      lastHelloAt: 'T0',
+    });
+
+    expect(handlers['desktop.media.speech.status']({})).toMatchObject({
+      ok: true,
+      data: {
+        models: [
+          { modelId: 'faster-whisper-large-v3-turbo', state: 'setup-required' },
+          { modelId: 'kokoro-82m', state: 'ready' },
+          { modelId: 'chatterbox-en', state: 'setup-required' },
+          { modelId: 'chatterbox-fa', state: 'setup-required' },
+        ],
+      },
+    });
+  });
+
+  it('reports an unstaged registered speech source before submitting a transcription job', async () => {
+    const { db, handlers } = setup();
+    db.localAssets.register({
+      id: 'audio-ref', kind: 'audio', displayName: 'Reference', sha256: 'a'.repeat(64), bytes: 1,
+    });
+    db.jobDispatch.savePresence({
+      workerId: 'worker-1',
+      capabilities: ['speech.transcribe', 'speech.model.faster-whisper-large-v3-turbo'],
+      lastHelloAt: 'T0',
+    });
+
+    await expect(handlers['desktop.media.speech.run']({
+      jobType: 'speech.transcribe', refId: 'audio-ref',
+      payload: { schemaVersion: 1, language: 'en-US', modelId: 'faster-whisper-large-v3-turbo' },
+    })).resolves.toMatchObject({ ok: false, error: 'SOURCE_UNAVAILABLE' });
+    expect(db.jobDispatch.get('job-1')).toBeUndefined();
+  });
+
+  it('queues transcription only for a staged registered local source', async () => {
+    const { db, handlers } = setup();
+    const bytes = new Uint8Array([1, 2, 3]);
+    handlers['desktop.media.asset.register']({
+      id: 'staged-audio', kind: 'audio', displayName: 'Audio',
+      sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.byteLength,
+    });
+    await handlers['desktop.media.asset.upload-original']({ assetId: 'staged-audio', bytes });
+    db.jobDispatch.savePresence({
+      workerId: 'worker-1',
+      capabilities: ['speech.transcribe', 'speech.model.faster-whisper-large-v3-turbo'],
+      lastHelloAt: 'T0',
+    });
+
+    await expect(handlers['desktop.media.speech.run']({
+      jobType: 'speech.transcribe', refId: 'staged-audio',
+      payload: { schemaVersion: 1, language: 'en-US', modelId: 'faster-whisper-large-v3-turbo' },
+    })).resolves.toMatchObject({ ok: true, data: { jobId: 'job-1' } });
+    expect(db.jobDispatch.get('job-1')).toMatchObject({ jobType: 'speech.transcribe', refId: 'staged-audio' });
+  });
+
+  it('binds a generated voice consent to its registered source and rejects cross-asset reuse', async () => {
+    const consentManager = createVoiceConsentManager();
+    const { db, handlers } = setup(undefined, undefined, { voiceConsent: consentManager });
+    const firstBytes = new Uint8Array([1, 2, 3]);
+    const secondBytes = new Uint8Array([4, 5, 6]);
+    const addAudio = async (id: string, bytes: Uint8Array) => {
+      handlers['desktop.media.asset.register']({
+        id, kind: 'audio', displayName: 'Voice reference',
+        sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.byteLength,
+      });
+      await handlers['desktop.media.asset.upload-original']({ assetId: id, bytes });
+    };
+    await addAudio('voice-a', firstBytes);
+    await addAudio('voice-b', secondBytes);
+    db.jobDispatch.savePresence({
+      workerId: 'worker-1',
+      capabilities: ['speech.synthesize', 'speech.model.chatterbox-en'],
+      lastHelloAt: 'T0',
+    });
+    const input = {
+      schemaVersion: 1, language: 'en-US', modelId: 'chatterbox-en', text: 'Hello',
+    };
+    const result = await handlers['desktop.media.speech.run']({
+      jobType: 'speech.synthesize', refId: 'voice-a', payload: input,
+      consent: { acknowledged: true, purpose: 'general' },
+    });
+    expect(result).toMatchObject({ ok: true, data: { jobId: 'job-1' } });
+    const queuedPayload = JSON.parse(db.jobDispatch.get('job-1')!.payloadJson!);
+    expect(queuedPayload.voiceId).toBeTruthy();
+    expect(consentManager.getVoice(queuedPayload.voiceId)).toMatchObject({
+      ownerUserId: 'desktop-local', allowedUsersOrTeams: ['desktop-local'],
+    });
+
+    await expect(handlers['desktop.media.speech.run']({
+      jobType: 'speech.synthesize', refId: 'voice-b', payload: { ...input, voiceId: queuedPayload.voiceId },
+      consent: { acknowledged: true, purpose: 'general' },
+    })).resolves.toMatchObject({ ok: false, error: 'CONSENT_DENIED' });
+    expect(db.jobDispatch.get('job-2')).toBeUndefined();
+  });
+
+  it('requires an explicit non-commercial acknowledgment for Persian synthesis', async () => {
+    const { db, handlers } = setup();
+    db.jobDispatch.savePresence({
+      workerId: 'worker-1',
+      capabilities: ['speech.synthesize', 'speech.model.chatterbox-fa'],
+      lastHelloAt: 'T0',
+    });
+    await expect(handlers['desktop.media.speech.run']({
+      jobType: 'speech.synthesize',
+      payload: {
+        schemaVersion: 1, language: 'fa-IR', modelId: 'chatterbox-fa',
+        text: 'سلام', purpose: 'personal-noncommercial',
+      },
+      consent: { acknowledged: true, purpose: 'general' },
+    })).resolves.toMatchObject({ ok: false, error: 'CONSENT_DENIED' });
+    expect(db.jobDispatch.get('job-1')).toBeUndefined();
+  });
+
+  it('returns the CANCELED code when a queued speech job is canceled', async () => {
+    const { db, handlers } = setup();
+    db.jobDispatch.savePresence({
+      workerId: 'worker-1',
+      capabilities: ['speech.synthesize', 'speech.model.kokoro-82m'],
+      lastHelloAt: 'T0',
+    });
+    const run = await handlers['desktop.media.speech.run']({
+      jobType: 'speech.synthesize',
+      payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      consent: { acknowledged: true, purpose: 'general' },
+    });
+    const jobId = (run.data as { jobId: string }).jobId;
+    expect(handlers['desktop.media.job.cancel']({ jobId })).toMatchObject({
+      data: { status: 'cancelled', error: 'CANCELED' },
+    });
   });
 
   it('connects localhost through 127.0.0.1 while preserving the Host header and saved model provenance', async () => {
@@ -179,6 +328,41 @@ describe('desktop.media channels', () => {
         },
       });
       expect(host).toBe(`localhost:${address.port}`);
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('uses valid top-level Whisper words once when segment words repeat them', async () => {
+    const server = await listenWhisperServer((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({
+        words: [{ word: 'hello', start: 0, end: 0.2 }],
+        segments: [{ words: [{ word: 'hello', start: 0, end: 0.2 }] }],
+      }));
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string') throw new Error('Missing server address');
+      const { handlers } = setup(undefined, { endpoint: `http://127.0.0.1:${address.port}/v1` });
+      await expect(handlers['desktop.media.speech.transcribe'](validWhisperPayload()))
+        .resolves.toMatchObject({ data: { words: [{ text: 'hello', startUs: 0, endUs: 200_000 }] } });
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('uses nested Whisper segment words when the top-level word list is empty', async () => {
+    const server = await listenWhisperServer((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ words: [], segments: [{ words: [{ word: 'nested', start: 0, end: 0.3 }] }] }));
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string') throw new Error('Missing server address');
+      const { handlers } = setup(undefined, { endpoint: `http://127.0.0.1:${address.port}/v1` });
+      await expect(handlers['desktop.media.speech.transcribe'](validWhisperPayload()))
+        .resolves.toMatchObject({ data: { words: [{ text: 'nested', startUs: 0, endUs: 300_000 }] } });
     } finally {
       await closeWhisperServer(server);
     }
@@ -479,6 +663,26 @@ describe('desktop.media channels', () => {
     expect(serialized).not.toContain('lease-token');
     expect(serialized).not.toContain('w-1');
     expect(serialized).not.toContain('path');
+  });
+
+  it('returns only validated synthesis timing metadata on a completed speech job', () => {
+    const { db, handlers } = setup();
+    db.jobDispatch.insert({
+      id: 'speech-done', kind: 'speech.synthesize', jobType: 'speech.synthesize',
+      refId: 'speech-output', status: 'done', createdAt: 'T0', updatedAt: 'T1', error: undefined,
+      progress: 100, attempts: 1, workerId: 'private-worker', leaseToken: undefined,
+      leaseExpiresAt: undefined, cancelRequested: false, derivative: undefined,
+      resultJson: JSON.stringify({ speech: { durationUs: 800_000, timingSource: 'unavailable', words: [] } }),
+    });
+    db.jobDispatch.save({ ...db.jobDispatch.get('speech-done')!, status: 'done' });
+    expect(handlers['desktop.media.job.status']({ jobId: 'speech-done' })).toMatchObject({
+      data: { speech: { durationUs: 800_000, timingSource: 'unavailable', words: [] } },
+    });
+    db.jobDispatch.save({
+      ...db.jobDispatch.get('speech-done')!,
+      resultJson: JSON.stringify({ speech: { durationUs: -1, timingSource: 'unavailable', words: [] } }),
+    });
+    expect(handlers['desktop.media.job.status']({ jobId: 'speech-done' })).not.toHaveProperty('data.speech');
   });
 
   it('cancels a queued job, and reports the result', () => {

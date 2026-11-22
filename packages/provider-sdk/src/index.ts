@@ -87,7 +87,11 @@ export {
 
 // Re-export voice consent (WP-05.5)
 export type { VoiceConsentManager, EnrollVoiceParams } from './voice-consent.js';
-export { createVoiceConsentManager } from './voice-consent.js';
+export {
+  createVoiceConsentManager,
+  requireVoiceConsent,
+  VoiceConsentError,
+} from './voice-consent.js';
 
 // Re-export voice labels (WP-05.5)
 export type { VoiceUsageLabel } from './voice-labels.js';
