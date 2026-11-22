@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,4 +72,79 @@ describe('local masking runner', () => {
       rmSync(derivativeDirectory, { recursive: true, force: true });
     }
   });
+
+  const videoPayload = (provider: string) => ({
+    schemaVersion: 1,
+    provider,
+    selection: { mode: 'subject' },
+    edge: { featherPx: 2, expansionPx: 0, detail: 0.8, decontaminate: true },
+    invert: false,
+    output: 'cutout',
+    video: { range: 'clip', direction: 'both', temporalConsistency: 0.85 },
+  });
+
+  it('refuses a video mask that selects BiRefNet before any runner starts', async () => {
+    const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-mask-video-'));
+    try {
+      await expect(
+        runMaskingJob({
+          jobId: 'job-video-birefnet',
+          type: 'mask.video',
+          assetId: 'source-video',
+          sourcePath: join(derivativeDirectory, 'missing.mp4'),
+          payload: videoPayload('birefnet'),
+          runner: { command: process.execPath, prefixArgs: ['-e', 'process.exit(9)', '--'] },
+          derivativeDirectory,
+          cancelled: () => false,
+          progress: async () => undefined,
+        }),
+      ).rejects.toThrow('BiRefNet masks still images only');
+    } finally {
+      rmSync(derivativeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('ends the whole runner tree when the job is cancelled, not only the router', async () => {
+    const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-mask-cancel-'));
+    const pidFile = join(derivativeDirectory, 'grandchild.pid');
+    // The router role: start the model script as a child, then wait for it. On Windows the child is detached
+    // from Node's own job object, as the Python router's child is; elsewhere it stays in the router's group.
+    const router = [
+      "const {spawn}=require('node:child_process');",
+      "const fs=require('node:fs');",
+      `const g=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',detached:process.platform==='win32'});`,
+      `fs.writeFileSync(${JSON.stringify(pidFile)},String(g.pid));`,
+      "g.on('exit',()=>process.exit(0));",
+    ].join('');
+    let grandchild: number | undefined;
+    try {
+      await runMaskingJob({
+        jobId: 'job-cancel-tree',
+        type: 'mask.video',
+        assetId: 'source-video',
+        sourcePath: join(derivativeDirectory, 'missing.mp4'),
+        payload: videoPayload('auto'),
+        runner: { command: process.execPath, prefixArgs: ['-e', router, '--'] },
+        derivativeDirectory,
+        cancelled: () => {
+          if (!existsSync(pidFile)) return false;
+          grandchild = Number(readFileSync(pidFile, 'utf8'));
+          return Number.isInteger(grandchild) && grandchild > 0;
+        },
+        progress: async () => undefined,
+      }).catch(() => undefined);
+      expect(grandchild).toBeGreaterThan(0);
+      await new Promise((done) => setTimeout(done, 500));
+      expect(() => process.kill(grandchild ?? 0, 0)).toThrow();
+    } finally {
+      if (grandchild !== undefined) {
+        try {
+          process.kill(grandchild);
+        } catch {
+          /* already gone */
+        }
+      }
+      rmSync(derivativeDirectory, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

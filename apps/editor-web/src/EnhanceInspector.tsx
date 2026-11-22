@@ -39,7 +39,13 @@ function runtimeStatus(
       nowMs - worker.lastSeenAt < WORKER_FRESHNESS_MS,
   );
   const capable = online.filter((worker) => worker.capabilities.includes(capability));
-  if (capable.some((worker) => (worker.localAssetIds ?? []).includes(target.assetId))) {
+  if (
+    capable.some(
+      (worker) =>
+        worker.holdsAllLocalAssets === true ||
+        (worker.localAssetIds ?? []).includes(target.assetId),
+    )
+  ) {
     return {
       state: 'ready',
       label: target.kind === 'image' ? 'Photo ready' : 'Video ready',
@@ -153,12 +159,9 @@ export function EnhanceInspector({
           appliedJobRef.current !== job.id
         ) {
           appliedJobRef.current = job.id;
-          const resultAssetId = await callbacksRef.current.onApplyResult(job, next);
-          if (!cancelled)
-            callbacksRef.current.onChange({
-              ...next,
-              lastJob: { ...next.lastJob!, resultAssetId },
-            });
+          // The apply callback writes the imported result and the link in one project update. A second change
+          // from here would rebuild the project from a render that predates it and drop the link.
+          await callbacksRef.current.onApplyResult(job, next);
         }
         if (job.state !== 'queued' && job.state !== 'leased') pollingRef.current?.stop();
       } catch (error) {

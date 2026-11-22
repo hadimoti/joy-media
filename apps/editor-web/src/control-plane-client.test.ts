@@ -452,6 +452,7 @@ describe('BrowserControlPlaneClient on the local desktop channels', () => {
         paired: true,
         revoked: false,
         capabilities: ['render.export'],
+        holdsAllLocalAssets: true,
         lastSeenAt: Date.parse('2026-10-28T10:00:00.000Z'),
       },
     ]);

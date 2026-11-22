@@ -132,8 +132,9 @@ describe('publicJobError', () => {
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {
     expect(new Set(MEDIA_CHANNELS).size).toBe(MEDIA_CHANNELS.length);
-    expect(MEDIA_CHANNELS).toHaveLength(25);
+    expect(MEDIA_CHANNELS).toHaveLength(26);
     expect(MEDIA_CHANNELS).toContain('desktop.media.qc.run');
+    expect(MEDIA_CHANNELS).toContain('desktop.media.mask.run');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.remove-internal');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-chunk');
     expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-finish');
@@ -552,6 +553,36 @@ describe('desktop.media channels', () => {
     expect(handlers['desktop.media.qc.run']({ payload: {} })).toEqual({
       ok: false,
       error: 'Invalid media request',
+    });
+  });
+
+  it('runs picture and video masks through desktop.media.mask.run and rejects anything else', () => {
+    const { orchestrator, handlers } = setup();
+    const run = handlers['desktop.media.mask.run'];
+    expect(run({ refId: 'asset-1', jobType: 'mask.image', payload: {} })).toEqual({
+      ok: false,
+      error: expect.stringContaining('Worker has not reported its capabilities'),
+    });
+    orchestrator.hello('w-1', ['mask.image', 'mask.video']);
+    expect(run({ refId: 'asset-1', jobType: 'media.qc', payload: {} })).toEqual({
+      ok: false,
+      error: 'Invalid mask job type',
+    });
+    expect(run({ refId: 'asset-1', payload: {} })).toEqual({
+      ok: false,
+      error: 'Invalid mask job type',
+    });
+    expect(run({ jobType: 'mask.image', payload: {} })).toEqual({
+      ok: false,
+      error: 'Invalid media request',
+    });
+    expect(run({ refId: 'asset-1', jobType: 'mask.video', payload: { mode: 'subject' } })).toEqual({
+      ok: true,
+      data: { jobId: 'job-1' },
+    });
+    expect(handlers['desktop.media.job.status']({ jobId: 'job-1' })).toMatchObject({
+      ok: true,
+      data: { id: 'job-1', jobType: 'mask.video', status: 'queued' },
     });
   });
 

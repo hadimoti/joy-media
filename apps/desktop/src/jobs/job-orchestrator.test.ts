@@ -90,6 +90,36 @@ describe('job orchestrator', () => {
       expect(result).toMatchObject({ ok: false, code: 'SETUP_REQUIRED', jobType: 'mask.image' });
     });
 
+    it('queues picture and video mask jobs with their payload once the Worker advertises the capability', () => {
+      const orchestrator = orchestratorFor(database);
+      const request = (jobType: string, payload?: Record<string, unknown>) => ({
+        jobType,
+        refId: 'ref-1',
+        kind: 'derivative:mask',
+        payload,
+      });
+      orchestrator.hello(WORKER, ['mask.image']);
+      expect(orchestrator.submit(request('mask.video', { mode: 'subject' }))).toMatchObject({
+        ok: false,
+        code: 'SETUP_REQUIRED',
+        jobType: 'mask.video',
+      });
+      expect(orchestrator.submit(request('mask.image'))).toMatchObject({
+        ok: false,
+        code: 'PAYLOAD_INVALID',
+      });
+      const image = orchestrator.submit(request('mask.image', { mode: 'subject' }));
+      if (!image.ok) throw new Error(`expected a queued job, got ${image.code}`);
+      orchestrator.hello(WORKER, ['mask.image', 'mask.video']);
+      const video = orchestrator.submit(request('mask.video', { mode: 'subject' }));
+      expect(video.ok).toBe(true);
+      expect(orchestrator.lease(WORKER)).toMatchObject({
+        id: image.jobId,
+        jobType: 'mask.image',
+        payload: { mode: 'subject' },
+      });
+    });
+
     it('refuses a thumbnail with SETUP_REQUIRED when the Worker lacks FFmpeg', () => {
       const orchestrator = orchestratorFor(database);
       orchestrator.hello(WORKER, []);

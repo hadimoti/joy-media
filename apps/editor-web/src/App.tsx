@@ -6162,7 +6162,9 @@ function EditorWorkspace({
         target.assetId,
       );
       const derivative =
-        derivatives.find((candidate) => candidate.id === `derivative-${job.id}`) ??
+        derivatives.find(
+          (candidate) => candidate.id === job.id || candidate.id === `derivative-${job.id}`,
+        ) ??
         [...derivatives]
           .filter((candidate) => candidate.kind === 'mask')
           .sort((left, right) => right.verifiedAt - left.verifiedAt)[0];

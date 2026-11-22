@@ -55,6 +55,7 @@ export const MEDIA_CHANNELS = [
   'desktop.media.project.document.put',
   'desktop.media.render.enqueue',
   'desktop.media.qc.run',
+  'desktop.media.mask.run',
   'desktop.media.job.status',
   'desktop.media.job.cancel',
   'desktop.media.derivative.bytes',
@@ -867,6 +868,14 @@ export function createMediaChannelHandlers(
     'desktop.media.render.enqueue': (payload) => submitJob('render.export', payload),
     // The technical quality check of one file (ADR-0045 layer 1). The report comes back in job status.
     'desktop.media.qc.run': (payload) => submitJob('media.qc', payload),
+    // A picture or video mask (subject, person, prompt, points or box; tracked for video). The mask comes back as a
+    // derivative (a PNG matte or a VP9 WebM with alpha) that the editor imports and links to the clip.
+    'desktop.media.mask.run': (payload) => {
+      const jobType = isPlainObject(payload) ? payload['jobType'] : undefined;
+      if (jobType !== 'mask.image' && jobType !== 'mask.video')
+        return { ok: false, error: 'Invalid mask job type' };
+      return submitJob(jobType, payload);
+    },
     // The orchestrator does not dispatch audio.ml-denoise yet (only asset.thumbnail, render.export
     // and upscale.image), so denoise is refused rather than queued.
     'desktop.media.audio.denoise': notAvailable,

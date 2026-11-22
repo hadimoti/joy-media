@@ -89,8 +89,9 @@ export function maskRuntimeStatus(
   const pairedWorkers = workers.filter((worker) => worker.paired && !worker.revoked);
   const onlineWorkers = freshPairedWorkers(workers, nowMs);
   const capableWorkers = onlineWorkers.filter((worker) => worker.capabilities.includes(capability));
-  const readyWorker = capableWorkers.find((worker) =>
-    (worker.localAssetIds ?? []).includes(target.assetId),
+  const readyWorker = capableWorkers.find(
+    (worker) =>
+      worker.holdsAllLocalAssets === true || (worker.localAssetIds ?? []).includes(target.assetId),
   );
 
   if (readyWorker !== undefined) {
@@ -221,12 +222,9 @@ export function MaskInspector({
           appliedJobRef.current !== job.id
         ) {
           appliedJobRef.current = job.id;
-          const resultAssetId = await callbacksRef.current.onApplyResult(job, next);
-          if (!cancelled)
-            callbacksRef.current.onChange({
-              ...next,
-              lastJob: { ...next.lastJob!, resultAssetId },
-            });
+          // The apply callback writes the imported result and the link in one project update. A second change
+          // from here would rebuild the project from a render that predates it and drop the link.
+          await callbacksRef.current.onApplyResult(job, next);
         }
         if (job.state !== 'queued' && job.state !== 'leased') pollingRef.current?.stop();
       } catch (error) {

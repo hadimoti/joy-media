@@ -180,6 +180,11 @@ function trackedJob(projectId: string, jobId: string): TrackedJob {
   return tracked;
 }
 
+/** A mask job's result is a matte; every other job here still reports a proxy, as before. */
+function derivativeKind(type: string): 'proxy' | 'mask' {
+  return type.startsWith('mask.') ? 'mask' : 'proxy';
+}
+
 function jobState(status: DesktopJobView['status']): BrowserJob['state'] {
   switch (status) {
     case 'running':
@@ -210,7 +215,7 @@ function toBrowserJob(tracked: TrackedJob, job: DesktopJobView): BrowserJob {
           derivative: {
             id: tracked.editorId,
             jobId: tracked.editorId,
-            kind: 'proxy',
+            kind: derivativeKind(tracked.type),
             sha256: job.derivative.sha256,
             bytes: job.derivative.bytes,
             workerRef: '',
@@ -228,8 +233,8 @@ function toBrowserDerivative(tracked: TrackedJob, job: DesktopJobView): BrowserD
     id: tracked.editorId,
     projectId: tracked.projectId,
     assetId: tracked.assetId,
-    kind: 'proxy',
-    profile: 'render-export',
+    kind: derivativeKind(tracked.type),
+    profile: tracked.type.startsWith('mask.') ? 'mask-matte' : 'render-export',
     sha256: job.derivative.sha256,
     bytes: job.derivative.bytes,
     descriptor: { mimeType: job.derivative.mimeType },
@@ -269,6 +274,8 @@ export class BrowserControlPlaneClient {
       paired: true,
       revoked: false,
       capabilities: [...worker.capabilities],
+      // The local route resolves any registered asset itself; there is no per-asset list to report.
+      holdsAllLocalAssets: true,
       lastSeenAt: Date.parse(worker.lastHelloAt),
     }));
   }
@@ -669,13 +676,24 @@ export class BrowserControlPlaneClient {
   }
 
   async enqueueMask(
-    _projectId: string,
-    _id: string,
-    _type: 'mask.image' | 'mask.video',
-    _assetId: string,
-    _payload: Readonly<Record<string, unknown>>,
+    projectId: string,
+    id: string,
+    type: 'mask.image' | 'mask.video',
+    assetId: string,
+    payload: Readonly<Record<string, unknown>>,
   ): Promise<BrowserJob> {
-    throw notAvailable('Masking');
+    // The desktop checks that the local Worker reports the capability and refuses with SETUP_REQUIRED if not.
+    const { jobId } = await call<{ readonly jobId: string }>(
+      this.bridge,
+      'desktop.media.mask.run',
+      {
+        refId: assetId,
+        jobType: type,
+        payload,
+      },
+    );
+    trackedJobs.set(id, { editorId: id, projectId, assetId, type, desktopJobId: jobId });
+    return { id, projectId, type, assetId, state: 'queued', progress: 0, cancelRequested: false };
   }
 
   async enqueueUpscale(

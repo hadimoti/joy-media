@@ -259,6 +259,24 @@ describe('local job API', () => {
     expect(database.jobDispatch.get('job-http')).toMatchObject({ status: 'done', progress: 100 });
   });
 
+  it('stores a VP9 WebM matte as a derivative so a video mask can be completed', async () => {
+    const leased = await queueThumbnailAndLease();
+    const sha256 = createHash('sha256').update(DERIVATIVE).digest('hex');
+    const upload = await call(`/v1/workers/${WORKER}/jobs/job-http/derivative`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'video/webm',
+        'x-joy-lease-token': leased.leaseToken,
+        'x-joy-sha256': sha256,
+        'x-joy-bytes': String(DERIVATIVE.length),
+      },
+      body: DERIVATIVE,
+    });
+    expect(upload.status).toBe(200);
+    const [stored] = readdirSync(derivativeDirectory);
+    expect(stored).toMatch(/\.webm$/);
+  });
+
   describe('media.qc report on the complete route', () => {
     async function queueQcAndLease(id: string): Promise<{ leaseToken: string }> {
       await postJson(`/v1/workers/${WORKER}/hello`, { capabilities: ['media.qc'], assetIds: [] });
