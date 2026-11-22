@@ -150,35 +150,37 @@ Why B and not A: under A the model can never react to what it sees, so it cannot
 
 ### 6. Finding types
 
-Fifteen types, in three groups. Each finding carries: `id`, `type`, `severity`, `startUs`, `endUs`, `label` (one plain sentence for the owner), `measured` (the numbers, when the type has them), `state` (`measured` / `model-observed` / `unconfirmed`), `fixable` (section 7), and `evidenceIds` (the frames or samples behind it).
+Seventeen types, in three groups. Each finding carries: `id`, `type`, `severity`, `startUs`, `endUs`, `label` (one plain sentence for the owner), `measured` (the numbers, when the type has them), `state` (`measured` / `model-observed` / `unconfirmed`), `fixable` (section 7), and `evidenceIds` (the frames or samples behind it).
 
 **Severity** is three words and nothing else: `blocker` (data loss, crash, wrong export, install failure), `major`, `minor`. The word list is the same one the defect log already uses (`03-TASK-CARDS.md:203`), so a QC finding and a test defect speak the same language.
 
-#### 6a. The eleven Layer 1 types
+#### 6a. The thirteen Layer 1 types
 
-| Type                 | What it is                                                        | Where the number comes from                                                   | Target            | Fixable               |
-| -------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------- | --------------------- |
-| `black`              | A run of black frames                                             | ffmpeg `blackdetect`                                                          | file + timeline   | no (advice)           |
-| `frozen`             | A run of still frames                                             | ffmpeg `freezedetect`                                                         | file + timeline   | no (advice)           |
-| `scene-cut`          | A hard cut                                                        | ffmpeg `scdet`                                                                | file + timeline   | no (advice)           |
-| `loudness`           | The loudness of the whole cut                                     | ffmpeg `ebur128`                                                              | file + timeline   | yes (gain)            |
-| `silence`            | A silent stretch                                                  | ffmpeg `silencedetect`, or `detectSilence` (`audio-core/src/analysis.ts:121`) | file + timeline   | yes (trim or music)   |
-| `clipping`           | The loud samples that distort                                     | ffmpeg `astats`, or `detectClipping` (`:28`)                                  | file + timeline   | yes (gain)            |
-| `exposure`           | Too dark or too bright                                            | ffmpeg `signalstats`                                                          | file + timeline   | no (advice)           |
-| `colour-cast`        | The picture leans one way                                         | ffmpeg `signalstats` on the U and V planes                                    | file + timeline   | no (advice)           |
-| `av-length-mismatch` | The video and sound lengths differ by more than the default 0.5 s | ffprobe stream durations                                                      | **file only**     | no (adjust by hand)   |
-| `safe-area`          | A title or caption outside the safe area                          | the title and caption boxes in the project                                    | **timeline only** | yes (move)            |
-| `text-legibility`    | Text too close in value to its background                         | a contrast measure against the sampled frame                                  | **timeline only** | yes (move or restyle) |
+| Type                 | What it is                                                                          | Where the number comes from                                                   | Target            | Fixable                        |
+| -------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------- | ------------------------------ |
+| `black`              | A run of black frames                                                               | ffmpeg `blackdetect`                                                          | file + timeline   | no (advice)                    |
+| `frozen`             | A run of still frames                                                               | ffmpeg `freezedetect`                                                         | file + timeline   | no (advice)                    |
+| `scene-cut`          | A hard cut                                                                          | ffmpeg `scdet`                                                                | file + timeline   | no (advice)                    |
+| `loudness`           | The loudness of the whole cut                                                       | ffmpeg `ebur128`                                                              | file + timeline   | yes (gain)                     |
+| `silence`            | A silent stretch                                                                    | ffmpeg `silencedetect`, or `detectSilence` (`audio-core/src/analysis.ts:121`) | file + timeline   | yes (trim or music)            |
+| `clipping`           | The loud samples that distort                                                       | ffmpeg `astats`, or `detectClipping` (`:28`)                                  | file + timeline   | yes (gain)                     |
+| `exposure`           | Too dark or too bright                                                              | ffmpeg `signalstats`                                                          | file + timeline   | no (advice)                    |
+| `colour-cast`        | The picture leans one way                                                           | ffmpeg `signalstats` on the U and V planes                                    | file + timeline   | no (advice)                    |
+| `av-length-mismatch` | The video and sound lengths differ by more than the default 0.5 s                   | ffprobe stream durations                                                      | **file only**     | no (adjust by hand)            |
+| `low-resolution`     | The picture is smaller than 360 px on its short side (320x180 is the usual case)    | ffprobe stream width and height (`lowResolutionMinShortSidePx`)               | file + timeline   | no (use a larger file)         |
+| `aspect-mismatch`    | Black bars baked into the picture (letterbox or pillarbox), 8% of the frame or more | ffmpeg `cropdetect` on sampled frames (`letterboxBarMinFraction`)             | file + timeline   | no (use a source without bars) |
+| `safe-area`          | A title or caption outside the safe area                                            | the title and caption boxes in the project                                    | **timeline only** | yes (move)                     |
+| `text-legibility`    | Text too close in value to its background                                           | a contrast measure against the sampled frame                                  | **timeline only** | yes (move or restyle)          |
 
-**The check × target matrix.** Two of the eleven Layer 1 checks are timeline-only, because they read the project document. Eight read samples and work on both targets; the length check reads ffprobe stream durations and applies to files only.
+**The check × target matrix.** Two of the thirteen Layer 1 checks are timeline-only, because they read the project document. Ten read samples or probe numbers and work on both targets; the length check reads ffprobe stream durations and applies to files only.
 
-|                                                                                              | file (an export) | timeline (the current project) |
-| -------------------------------------------------------------------------------------------- | ---------------- | ------------------------------ |
-| `black`, `frozen`, `scene-cut`, `loudness`, `silence`, `clipping`, `exposure`, `colour-cast` | yes              | yes                            |
-| `av-length-mismatch`                                                                         | yes              | **no**                         |
-| `safe-area`, `text-legibility`                                                               | **no**           | yes                            |
+|                                                                                                                                   | file (an export) | timeline (the current project) |
+| --------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------ |
+| `black`, `frozen`, `scene-cut`, `loudness`, `silence`, `clipping`, `exposure`, `colour-cast`, `low-resolution`, `aspect-mismatch` | yes              | yes                            |
+| `av-length-mismatch`                                                                                                              | yes              | **no**                         |
+| `safe-area`, `text-legibility`                                                                                                    | **no**           | yes                            |
 
-For a timeline, the eight shared checks run over **sampled composed frames**, and the two document checks run over the document. The audio and video length check applies only to files.
+For a timeline, the ten shared checks run over **sampled composed frames**, and the two document checks run over the document. The audio and video length check applies only to files.
 
 #### 6b. The four types added on review
 
@@ -206,19 +208,20 @@ A note never becomes a finding, never counts towards a severity, and never block
 
 **The fix loop.** The agent proposes; **the owner approves**. One plan is one transaction, so one Undo takes it back.
 
-| Finding type                     | Fixable? | What the fix is                              | Who applies it                         |
-| -------------------------------- | -------- | -------------------------------------------- | -------------------------------------- |
-| `loudness`, `clipping`           | yes      | a gain change on the offending clip          | the model proposes, the owner approves |
-| `silence`                        | yes      | trim the gap, or place music over it         | the model proposes, the owner approves |
-| `safe-area`, `caption-collision` | yes      | move the title or caption box                | the model proposes, the owner approves |
-| `text-legibility`                | yes      | move the text, or change its fill or opacity | the model proposes, the owner approves |
-| `unfitted`                       | yes      | fit, fill or reframe the clip                | the model proposes, the owner approves |
-| `black`, `frozen`, `scene-cut`   | **no**   | advice only. The owner decides what to cut.  | nobody                                 |
-| `exposure`, `colour-cast`        | **no**   | advice only. The grade is a taste decision.  | nobody                                 |
-| `av-length-mismatch`             | **no**   | adjust the video and sound lengths by hand   | nobody                                 |
-| `audio-dropout`                  | **no**   | advice only. It points at the source.        | nobody                                 |
-| `missing-media`                  | **no**   | the owner must find or relink the file       | nobody                                 |
-| any note                         | **no**   | advice only                                  | nobody                                 |
+| Finding type                        | Fixable? | What the fix is                                                 | Who applies it                         |
+| ----------------------------------- | -------- | --------------------------------------------------------------- | -------------------------------------- |
+| `loudness`, `clipping`              | yes      | a gain change on the offending clip                             | the model proposes, the owner approves |
+| `silence`                           | yes      | trim the gap, or place music over it                            | the model proposes, the owner approves |
+| `safe-area`, `caption-collision`    | yes      | move the title or caption box                                   | the model proposes, the owner approves |
+| `text-legibility`                   | yes      | move the text, or change its fill or opacity                    | the model proposes, the owner approves |
+| `unfitted`                          | yes      | fit, fill or reframe the clip                                   | the model proposes, the owner approves |
+| `black`, `frozen`, `scene-cut`      | **no**   | advice only. The owner decides what to cut.                     | nobody                                 |
+| `low-resolution`, `aspect-mismatch` | **no**   | advice only. Use a larger source, or one without baked-in bars. | nobody                                 |
+| `exposure`, `colour-cast`           | **no**   | advice only. The grade is a taste decision.                     | nobody                                 |
+| `av-length-mismatch`                | **no**   | adjust the video and sound lengths by hand                      | nobody                                 |
+| `audio-dropout`                     | **no**   | advice only. It points at the source.                           | nobody                                 |
+| `missing-media`                     | **no**   | the owner must find or relink the file                          | nobody                                 |
+| any note                            | **no**   | advice only                                                     | nobody                                 |
 
 **QC fixes always use preview and approve.** Even when the agent's execution mode is `auto-apply-low-risk` or `full-auto-limited`, **a QC fix is staged and shown to the owner before it lands.** A QC fix is not a cheap edit like a colour tweak: it changes the cut the owner made, and it is judged against a threshold that is a guess. So the QC path pins the approval to preview-and-approve regardless of the mode the rest of the agent runs in.
 
