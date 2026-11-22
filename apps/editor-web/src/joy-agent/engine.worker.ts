@@ -1645,13 +1645,23 @@ async function run(request: JoyAgentRunRequest): Promise<void> {
         return;
       }
       const result =
-        outcome.kind === 'clarification'
-          ? { kind: 'clarification', question: outcome.question }
-          : { kind: 'answer', text: outcome.text };
+        outcome.kind === 'generation'
+          ? {
+              kind: 'generation',
+              requestId: outcome.requestId,
+              mediaKind: outcome.mediaKind,
+            }
+          : outcome.kind === 'clarification'
+            ? { kind: 'clarification', question: outcome.question }
+            : { kind: 'answer', text: outcome.text };
       assertSafeResult(result);
       emit(active, 'completed', {
         message:
-          outcome.kind === 'clarification' ? 'JOY needs one clarification' : 'JOY answer ready',
+          outcome.kind === 'generation'
+            ? 'JOY handed the generation request to the host'
+            : outcome.kind === 'clarification'
+              ? 'JOY needs one clarification'
+              : 'JOY answer ready',
         result,
       });
       return;
