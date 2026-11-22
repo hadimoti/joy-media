@@ -628,6 +628,329 @@ describe('timelineFactsFrom', () => {
       timelineFactsFrom({ ...stores(TIMELINE), [TIMELINE_LOG_KEY]: '{not json' }),
     ).toThrow('is not JSON');
   });
+
+  it('replays pending timeline transactions recorded after the newest snapshot revision', () => {
+    const baseTimeline = {
+      rootCompositionId: 'root',
+      compositions: {
+        root: {
+          width: 1920,
+          height: 1080,
+          frameRate: { num: 30, den: 1 },
+          tracks: [
+            { id: 'track-0', kind: 'video', family: 'visual', clips: [] },
+            { id: 'track-1', kind: 'video', family: 'audio', clips: [] },
+          ],
+        },
+      },
+    };
+    const timelineLog = JSON.stringify({
+      projects: {
+        p1: {
+          snapshots: [{ payload: baseTimeline, revision: 0 }],
+          transactions: [
+            {
+              revision: 1,
+              payload: {
+                commands: [
+                  {
+                    type: 'timeline.insertClip',
+                    payload: {
+                      compositionId: 'root',
+                      trackId: 'track-0',
+                      clip: {
+                        id: 'clip-video',
+                        kind: 'video',
+                        assetId: 'video-asset',
+                        startUs: 0,
+                        durationUs: 3_000_000,
+                        sourceInUs: 0,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              revision: 2,
+              payload: {
+                commands: [
+                  {
+                    type: 'timeline.insertClip',
+                    payload: {
+                      compositionId: 'root',
+                      trackId: 'track-0',
+                      clip: {
+                        id: 'clip-still',
+                        kind: 'video',
+                        assetId: 'still-asset',
+                        startUs: 3_000_000,
+                        durationUs: 3_000_000,
+                        sourceInUs: 0,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              revision: 3,
+              payload: {
+                commands: [
+                  {
+                    type: 'timeline.insertClip',
+                    payload: {
+                      compositionId: 'root',
+                      trackId: 'track-0',
+                      clip: {
+                        id: 'clip-removed',
+                        kind: 'video',
+                        assetId: 'removed-asset',
+                        startUs: 0,
+                        durationUs: 1_000_000,
+                        sourceInUs: 0,
+                      },
+                    },
+                  },
+                  {
+                    type: 'timeline.removeClip',
+                    payload: {
+                      compositionId: 'root',
+                      trackId: 'track-0',
+                      clipId: 'clip-removed',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+    const visual = {
+      exportPreset: 'youtube-1080',
+      assets: {
+        'video-asset': { id: 'video-asset', displayName: names.videoName },
+        'still-asset': { id: 'still-asset', displayName: names.stillName },
+      },
+    };
+    const facts = timelineFactsFrom({
+      [ACTIVE_PROJECT_KEY]: JSON.stringify({ projectId: 'p1' }),
+      [TIMELINE_LOG_KEY]: timelineLog,
+      [VISUAL_LOG_KEY]: JSON.stringify({
+        projects: { p1: { snapshots: [{ payload: visual, revision: 1 }] } },
+      }),
+    });
+    expect(clipNamed(facts, names.videoName)).toMatchObject({
+      id: 'clip-video',
+      trackId: 'track-0',
+      durationUs: 3_000_000,
+    });
+    expect(clipNamed(facts, names.stillName)).toMatchObject({
+      id: 'clip-still',
+      trackId: 'track-0',
+      startUs: 3_000_000,
+    });
+    expect(facts.clips).toHaveLength(2);
+  });
+
+  it('ignores timeline transactions at or below the latest snapshot revision', () => {
+    const timelineLog = JSON.stringify({
+      projects: {
+        p1: {
+          snapshots: [
+            {
+              revision: 2,
+              payload: {
+                rootCompositionId: 'root',
+                compositions: {
+                  root: {
+                    width: 1920,
+                    height: 1080,
+                    frameRate: { num: 30, den: 1 },
+                    tracks: [{ id: 'track-0', family: 'video', clips: [] }],
+                  },
+                },
+              },
+            },
+          ],
+          transactions: [
+            {
+              revision: 1,
+              payload: {
+                commands: [
+                  {
+                    type: 'timeline.insertClip',
+                    payload: {
+                      compositionId: 'root',
+                      trackId: 'track-0',
+                      clip: {
+                        id: 'stale-clip',
+                        assetId: 'video-asset',
+                        startUs: 0,
+                        durationUs: 3_000_000,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+    const visual = {
+      assets: { 'video-asset': { id: 'video-asset', displayName: names.videoName } },
+    };
+    const facts = timelineFactsFrom({
+      [ACTIVE_PROJECT_KEY]: JSON.stringify({ projectId: 'p1' }),
+      [TIMELINE_LOG_KEY]: timelineLog,
+      [VISUAL_LOG_KEY]: JSON.stringify({
+        projects: { p1: { snapshots: [{ payload: visual, revision: 1 }] } },
+      }),
+    });
+    expect(facts.clips).toHaveLength(0);
+  });
+
+  it('replays moveClip, moveElement, trimClipEnd and universalTimeline cleanup without mixing revisionless snapshots', () => {
+    const timelineLog = JSON.stringify({
+      projects: {
+        p1: {
+          snapshots: [
+            {
+              revision: 2,
+              payload: {
+                rootCompositionId: 'root',
+                compositions: {
+                  root: {
+                    width: 1920,
+                    height: 1080,
+                    frameRate: { num: 30, den: 1 },
+                    tracks: [
+                      {
+                        id: 'track-0',
+                        family: 'visual',
+                        clips: [
+                          {
+                            id: 'c-move',
+                            kind: 'video',
+                            assetId: 'video-asset',
+                            startUs: 0,
+                            durationUs: 3_000_000,
+                          },
+                        ],
+                      },
+                      { id: 'track-2', family: 'visual', clips: [] },
+                    ],
+                  },
+                },
+                universalTimeline: {
+                  schemaVersion: 1,
+                  items: [
+                    {
+                      id: 'c-univ-del',
+                      compositionId: 'root',
+                      trackId: 'track-0',
+                      elementKind: 'video',
+                      startUs: 0,
+                      durationUs: 1_000_000,
+                      source: { kind: 'asset', id: 'other-asset' },
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              payload: {
+                rootCompositionId: 'root',
+                compositions: { root: { width: 1280, height: 720, tracks: [] } },
+              },
+            },
+          ],
+          transactions: [
+            {
+              revision: 1,
+              payload: {
+                commands: [
+                  {
+                    type: 'timeline.insertClip',
+                    payload: {
+                      compositionId: 'root',
+                      trackId: 'track-0',
+                      clip: {
+                        id: 'stale-before-rev2',
+                        kind: 'video',
+                        assetId: 'other-asset',
+                        startUs: 0,
+                        durationUs: 500_000,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              revision: 3,
+              payload: {
+                commands: [
+                  {
+                    type: 'timeline.moveClip',
+                    payload: {
+                      compositionId: 'root',
+                      trackId: 'track-0',
+                      clipId: 'c-move',
+                      newStartUs: 500_000,
+                    },
+                  },
+                  {
+                    type: 'timeline.moveElement',
+                    payload: {
+                      compositionId: 'root',
+                      sourceTrackId: 'track-0',
+                      targetTrackId: 'track-2',
+                      clipId: 'c-move',
+                      newStartUs: 1_000_000,
+                    },
+                  },
+                  {
+                    type: 'timeline.trimClipEnd',
+                    payload: {
+                      compositionId: 'root',
+                      trackId: 'track-2',
+                      clipId: 'c-move',
+                      newEndUs: 5_000_000,
+                    },
+                  },
+                  {
+                    type: 'timeline.removeClip',
+                    payload: { compositionId: 'root', trackId: 'track-0', clipId: 'c-univ-del' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+    const visual = {
+      assets: { 'video-asset': { id: 'video-asset', displayName: names.videoName } },
+    };
+    const facts = timelineFactsFrom({
+      [ACTIVE_PROJECT_KEY]: JSON.stringify({ projectId: 'p1' }),
+      [TIMELINE_LOG_KEY]: timelineLog,
+      [VISUAL_LOG_KEY]: JSON.stringify({
+        projects: { p1: { snapshots: [{ payload: visual, revision: 1 }] } },
+      }),
+    });
+    expect(facts.width).toBe(1920);
+    expect(facts.clips).toHaveLength(1);
+    expect(clipNamed(facts, names.videoName)).toMatchObject({
+      id: 'c-move',
+      trackId: 'track-2',
+      startUs: 1_000_000,
+      durationUs: 4_000_000,
+    });
+  });
 });
 
 describe('placement, dissolve and samples', () => {

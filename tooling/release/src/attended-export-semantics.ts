@@ -292,7 +292,383 @@ function parseJson(text: string | null | undefined, label: string): unknown {
   }
 }
 
-/** The newest snapshot of one project in a stored log, or undefined when the log has none. */
+/** Pick the highest integer-revision snapshot, or the last snapshot when none carry an integer revision. */
+function latestSnapshotEntry(
+  snapshots: readonly unknown[],
+): { readonly payload: Record<string, unknown>; readonly revision: number } | undefined {
+  let revisioned:
+    | {
+        readonly payload: Record<string, unknown>;
+        readonly revision: number;
+        readonly index: number;
+      }
+    | undefined;
+  let fallback: Record<string, unknown> | undefined;
+  for (let i = 0; i < snapshots.length; i += 1) {
+    const entry = snapshots[i];
+    if (!isRecord(entry) || !isRecord(entry.payload)) continue;
+    fallback = entry.payload;
+    if (typeof entry.revision === 'number' && Number.isSafeInteger(entry.revision)) {
+      if (revisioned === undefined || entry.revision >= revisioned.revision) {
+        revisioned = { payload: entry.payload, revision: entry.revision, index: i };
+      }
+    }
+  }
+  if (revisioned !== undefined)
+    return { payload: revisioned.payload, revision: revisioned.revision };
+  return fallback === undefined ? undefined : { payload: fallback, revision: -1 };
+}
+
+function cloneTrack(track: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(track)) return undefined;
+  const clips = Array.isArray(track.clips)
+    ? track.clips.map((c) => (isRecord(c) ? { ...c } : c))
+    : [];
+  return { ...track, clips };
+}
+
+function cloneCompositions(raw: unknown): Record<string, Record<string, unknown>> {
+  if (!isRecord(raw)) return {};
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [compId, comp] of Object.entries(raw)) {
+    if (!isRecord(comp)) continue;
+    const tracks = Array.isArray(comp.tracks)
+      ? comp.tracks.map(cloneTrack).filter((t): t is Record<string, unknown> => t !== undefined)
+      : [];
+    out[compId] = { ...comp, tracks };
+  }
+  return out;
+}
+
+interface TimelineReplayState {
+  readonly compositions: Record<string, Record<string, unknown>>;
+  universalItems: Record<string, unknown>[] | undefined;
+}
+
+function moveClipInTracks(
+  tracks: Record<string, unknown>[],
+  universalItems: Record<string, unknown>[] | undefined,
+  compositionId: string,
+  clipId: string,
+  sourceTrackId: string | undefined,
+  targetTrackId: string | undefined,
+  newStartUs: unknown,
+): void {
+  const fromTrack = tracks.find(
+    (t) =>
+      (sourceTrackId === undefined || t.id === sourceTrackId) &&
+      Array.isArray(t.clips) &&
+      t.clips.some((c) => isRecord(c) && c.id === clipId),
+  );
+  const toTrack =
+    targetTrackId !== undefined ? tracks.find((t) => t.id === targetTrackId) : fromTrack;
+  if (fromTrack && toTrack && Array.isArray(fromTrack.clips) && Array.isArray(toTrack.clips)) {
+    const clipIdx = fromTrack.clips.findIndex((c) => isRecord(c) && c.id === clipId);
+    const clip = clipIdx >= 0 ? fromTrack.clips[clipIdx] : undefined;
+    if (isRecord(clip)) {
+      const moved = isTime(newStartUs) ? { ...clip, startUs: newStartUs } : { ...clip };
+      if (fromTrack === toTrack) {
+        fromTrack.clips[clipIdx] = moved;
+      } else {
+        fromTrack.clips.splice(clipIdx, 1);
+        (toTrack.clips as unknown[]).push(moved);
+      }
+    }
+  }
+  if (universalItems !== undefined) {
+    for (const item of universalItems) {
+      if (item.id === clipId && item.compositionId === compositionId) {
+        if (targetTrackId !== undefined) item.trackId = targetTrackId;
+        if (isTime(newStartUs)) item.startUs = newStartUs;
+      }
+    }
+  }
+}
+
+function applyTimelineTransactionCommand(state: TimelineReplayState, command: unknown): void {
+  if (!isRecord(command) || typeof command.type !== 'string' || !isRecord(command.payload)) return;
+  const p = command.payload;
+  const compId = typeof p.compositionId === 'string' ? p.compositionId : undefined;
+  const comp = compId === undefined ? undefined : state.compositions[compId];
+  if (comp === undefined || !Array.isArray(comp.tracks)) return;
+  const tracks = comp.tracks as Record<string, unknown>[];
+
+  switch (command.type) {
+    case 'timeline.insertClip': {
+      if (typeof p.trackId !== 'string' || !isRecord(p.clip) || typeof p.clip.id !== 'string')
+        return;
+      const track = tracks.find((t) => t.id === p.trackId);
+      if (track && Array.isArray(track.clips)) {
+        if (!track.clips.some((c) => isRecord(c) && c.id === p.clip.id)) {
+          (track.clips as unknown[]).push({ ...p.clip });
+        }
+      }
+      return;
+    }
+    case 'timeline.removeClip': {
+      if (typeof p.clipId !== 'string') return;
+      for (const track of tracks) {
+        if (typeof p.trackId === 'string' && track.id !== p.trackId) continue;
+        if (Array.isArray(track.clips)) {
+          track.clips = track.clips.filter((c) => !(isRecord(c) && c.id === p.clipId));
+        }
+      }
+      if (state.universalItems !== undefined) {
+        state.universalItems = state.universalItems.filter(
+          (item) => !(item.id === p.clipId && item.compositionId === compId),
+        );
+      }
+      return;
+    }
+    case 'timeline.moveClip': {
+      if (typeof p.clipId !== 'string' || typeof p.trackId !== 'string') return;
+      moveClipInTracks(
+        tracks,
+        state.universalItems,
+        compId!,
+        p.clipId,
+        p.trackId,
+        p.trackId,
+        p.newStartUs,
+      );
+      return;
+    }
+    case 'timeline.moveElement': {
+      if (
+        typeof p.clipId !== 'string' ||
+        typeof p.sourceTrackId !== 'string' ||
+        typeof p.targetTrackId !== 'string'
+      )
+        return;
+      moveClipInTracks(
+        tracks,
+        state.universalItems,
+        compId!,
+        p.clipId,
+        p.sourceTrackId,
+        p.targetTrackId,
+        p.newStartUs,
+      );
+      return;
+    }
+    case 'timeline.moveElements': {
+      if (!Array.isArray(p.moves)) return;
+      for (const move of p.moves) {
+        if (
+          isRecord(move) &&
+          typeof move.clipId === 'string' &&
+          typeof move.sourceTrackId === 'string' &&
+          typeof move.targetTrackId === 'string'
+        ) {
+          moveClipInTracks(
+            tracks,
+            state.universalItems,
+            compId!,
+            move.clipId,
+            move.sourceTrackId,
+            move.targetTrackId,
+            move.newStartUs,
+          );
+        }
+      }
+      return;
+    }
+    case 'timeline.trimClipStart': {
+      if (typeof p.clipId !== 'string' || !isTime(p.newStartUs)) return;
+      for (const track of tracks) {
+        if (typeof p.trackId === 'string' && track.id !== p.trackId) continue;
+        if (!Array.isArray(track.clips)) continue;
+        for (const clip of track.clips) {
+          if (
+            isRecord(clip) &&
+            clip.id === p.clipId &&
+            isTime(clip.startUs) &&
+            isTime(clip.durationUs)
+          ) {
+            const delta = p.newStartUs - clip.startUs;
+            clip.startUs = p.newStartUs;
+            clip.durationUs = Math.max(0, clip.durationUs - delta);
+            if (isTime(clip.sourceInUs)) clip.sourceInUs = Math.max(0, clip.sourceInUs + delta);
+          }
+        }
+      }
+      if (state.universalItems !== undefined) {
+        for (const item of state.universalItems) {
+          if (
+            item.id === p.clipId &&
+            item.compositionId === compId &&
+            isTime(item.startUs) &&
+            isTime(item.durationUs)
+          ) {
+            const delta = p.newStartUs - item.startUs;
+            item.startUs = p.newStartUs;
+            item.durationUs = Math.max(0, item.durationUs - delta);
+            if (isTime(item.sourceInUs)) item.sourceInUs = Math.max(0, item.sourceInUs + delta);
+          }
+        }
+      }
+      return;
+    }
+    case 'timeline.trimClipEnd': {
+      if (typeof p.clipId !== 'string' || !isTime(p.newEndUs)) return;
+      for (const track of tracks) {
+        if (typeof p.trackId === 'string' && track.id !== p.trackId) continue;
+        if (!Array.isArray(track.clips)) continue;
+        for (const clip of track.clips) {
+          if (isRecord(clip) && clip.id === p.clipId && isTime(clip.startUs)) {
+            clip.durationUs = Math.max(0, p.newEndUs - clip.startUs);
+          }
+        }
+      }
+      if (state.universalItems !== undefined) {
+        for (const item of state.universalItems) {
+          if (item.id === p.clipId && item.compositionId === compId && isTime(item.startUs)) {
+            item.durationUs = Math.max(0, p.newEndUs - item.startUs);
+          }
+        }
+      }
+      return;
+    }
+    case 'timeline.splitClip': {
+      if (
+        typeof p.trackId !== 'string' ||
+        typeof p.clipId !== 'string' ||
+        typeof p.newClipId !== 'string' ||
+        !isTime(p.atUs)
+      )
+        return;
+      const track = tracks.find((t) => t.id === p.trackId);
+      if (track && Array.isArray(track.clips)) {
+        const clip = track.clips.find(
+          (c): c is Record<string, unknown> => isRecord(c) && c.id === p.clipId,
+        );
+        if (
+          clip &&
+          isTime(clip.startUs) &&
+          isTime(clip.durationUs) &&
+          p.atUs > clip.startUs &&
+          p.atUs < clip.startUs + clip.durationUs
+        ) {
+          const rightDuration = clip.startUs + clip.durationUs - p.atUs;
+          const offset = p.atUs - clip.startUs;
+          const sourceInUs = isTime(clip.sourceInUs) ? clip.sourceInUs + offset : offset;
+          clip.durationUs = offset;
+          (track.clips as unknown[]).push({
+            ...clip,
+            id: p.newClipId,
+            startUs: p.atUs,
+            durationUs: rightDuration,
+            sourceInUs,
+          });
+        }
+      }
+      return;
+    }
+    case 'timeline.duplicateClip': {
+      if (
+        typeof p.trackId !== 'string' ||
+        typeof p.clipId !== 'string' ||
+        typeof p.newClipId !== 'string'
+      )
+        return;
+      const track = tracks.find((t) => t.id === p.trackId);
+      if (track && Array.isArray(track.clips)) {
+        const clip = track.clips.find(
+          (c): c is Record<string, unknown> => isRecord(c) && c.id === p.clipId,
+        );
+        if (clip && isTime(clip.startUs) && isTime(clip.durationUs)) {
+          (track.clips as unknown[]).push({
+            ...clip,
+            id: p.newClipId,
+            startUs: isTime(p.newStartUs) ? p.newStartUs : clip.startUs + clip.durationUs,
+          });
+        }
+      }
+      return;
+    }
+    case 'timeline.joinClips': {
+      if (
+        typeof p.trackId !== 'string' ||
+        typeof p.firstClipId !== 'string' ||
+        typeof p.secondClipId !== 'string'
+      )
+        return;
+      const track = tracks.find((t) => t.id === p.trackId);
+      if (track && Array.isArray(track.clips)) {
+        const first = track.clips.find(
+          (c): c is Record<string, unknown> => isRecord(c) && c.id === p.firstClipId,
+        );
+        const second = track.clips.find(
+          (c): c is Record<string, unknown> => isRecord(c) && c.id === p.secondClipId,
+        );
+        if (
+          first &&
+          second &&
+          isTime(first.startUs) &&
+          isTime(second.startUs) &&
+          isTime(second.durationUs)
+        ) {
+          first.durationUs = second.startUs + second.durationUs - first.startUs;
+          track.clips = track.clips.filter((c) => !(isRecord(c) && c.id === p.secondClipId));
+        }
+      }
+      return;
+    }
+    case 'timeline.setClipAsset': {
+      if (typeof p.clipId !== 'string' || typeof p.assetId !== 'string') return;
+      for (const track of tracks) {
+        if (typeof p.trackId === 'string' && track.id !== p.trackId) continue;
+        if (!Array.isArray(track.clips)) continue;
+        for (const clip of track.clips) {
+          if (isRecord(clip) && clip.id === p.clipId) clip.assetId = p.assetId;
+        }
+      }
+      if (state.universalItems !== undefined) {
+        for (const item of state.universalItems) {
+          if (item.id === p.clipId && item.compositionId === compId && isRecord(item.source)) {
+            item.source = { ...item.source, id: p.assetId };
+          }
+        }
+      }
+      return;
+    }
+    case 'timeline.setCompositionDimensions': {
+      if (typeof p.width === 'number' && Number.isSafeInteger(p.width) && p.width >= 1)
+        comp.width = p.width;
+      if (typeof p.height === 'number' && Number.isSafeInteger(p.height) && p.height >= 1)
+        comp.height = p.height;
+      return;
+    }
+    case 'timeline.restoreTrackClips': {
+      if (typeof p.trackId === 'string' && Array.isArray(p.clips)) {
+        const track = tracks.find((t) => t.id === p.trackId);
+        if (track) track.clips = p.clips.map((c) => (isRecord(c) ? { ...c } : c));
+      }
+      return;
+    }
+    case 'timeline.addTrack': {
+      if (isRecord(p.track) && typeof p.track.id === 'string') {
+        if (!tracks.some((t) => t.id === p.track.id)) {
+          tracks.push(cloneTrack(p.track) ?? { ...p.track, clips: [] });
+        }
+      }
+      return;
+    }
+    case 'timeline.removeTrack': {
+      if (typeof p.trackId === 'string') comp.tracks = tracks.filter((t) => t.id !== p.trackId);
+      return;
+    }
+    case 'timeline.setTrackFamily': {
+      if (typeof p.trackId === 'string' && typeof p.family === 'string') {
+        const track = tracks.find((t) => t.id === p.trackId);
+        if (track) track.family = p.family;
+      }
+      return;
+    }
+  }
+}
+
+/** The newest snapshot of one project in a stored log, replaying any newer logged transactions. */
 function latestDocument(
   text: string | null | undefined,
   label: string,
@@ -303,8 +679,44 @@ function latestDocument(
   if (!isRecord(database) || !isRecord(database.projects)) return undefined;
   const project = database.projects[projectId];
   if (!isRecord(project) || !Array.isArray(project.snapshots)) return undefined;
-  const latest: unknown = project.snapshots[project.snapshots.length - 1];
-  return isRecord(latest) && isRecord(latest.payload) ? latest.payload : undefined;
+  const latest = latestSnapshotEntry(project.snapshots);
+  if (latest === undefined) return undefined;
+  const txs = Array.isArray(project.transactions)
+    ? project.transactions
+        .filter(
+          (tx): tx is Record<string, unknown> =>
+            isRecord(tx) &&
+            typeof tx.revision === 'number' &&
+            Number.isSafeInteger(tx.revision) &&
+            tx.revision > latest.revision &&
+            isRecord(tx.payload) &&
+            Array.isArray(tx.payload.commands),
+        )
+        .sort((a, b) => (a.revision as number) - (b.revision as number))
+    : [];
+  if (txs.length === 0) return latest.payload;
+  const rawUniversal = latest.payload.universalTimeline;
+  const universalItems =
+    isRecord(rawUniversal) && Array.isArray(rawUniversal.items)
+      ? rawUniversal.items
+          .map((item) => (isRecord(item) ? { ...item } : null))
+          .filter((i): i is Record<string, unknown> => i !== null)
+      : undefined;
+  const replayState: TimelineReplayState = {
+    compositions: cloneCompositions(latest.payload.compositions),
+    universalItems,
+  };
+  for (const tx of txs) {
+    const commands = (tx.payload as Record<string, unknown>).commands as unknown[];
+    for (const command of commands) applyTimelineTransactionCommand(replayState, command);
+  }
+  return {
+    ...latest.payload,
+    compositions: replayState.compositions,
+    ...(replayState.universalItems !== undefined && isRecord(rawUniversal)
+      ? { universalTimeline: { ...rawUniversal, items: replayState.universalItems } }
+      : {}),
+  };
 }
 
 function rateOf(value: unknown): number | undefined {
