@@ -21,7 +21,21 @@ describe('speech job contracts', () => {
       modelId: 'faster-whisper-large-v3-turbo',
       range: { startUs: 0, endUs: 1_000_000 },
     });
-    for (const value of [null, [], 'request', {}, { schemaVersion: 2 }, { schemaVersion: 1, language: 'fr-FR', modelId: 'faster-whisper-large-v3-turbo' }, { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m' }, { schemaVersion: 1, language: 'en-US', modelId: 'faster-whisper-large-v3-turbo', range: { startUs: 1.5, endUs: 5 } }]) {
+    for (const value of [
+      null,
+      [],
+      'request',
+      {},
+      { schemaVersion: 2 },
+      { schemaVersion: 1, language: 'fr-FR', modelId: 'faster-whisper-large-v3-turbo' },
+      { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m' },
+      {
+        schemaVersion: 1,
+        language: 'en-US',
+        modelId: 'faster-whisper-large-v3-turbo',
+        range: { startUs: 1.5, endUs: 5 },
+      },
+    ]) {
       expect(parseSpeechTranscribeV1(value)).toBeUndefined();
     }
   });
@@ -109,7 +123,12 @@ describe('speech job contracts', () => {
       },
     });
     expect(transcript?.words[0]?.text).toBe(word);
-    expect(parseSpeechTranscript({ ...transcript, provenance: { ...transcript?.provenance, providerId: 'remote' } })).toBeUndefined();
+    expect(
+      parseSpeechTranscript({
+        ...transcript,
+        provenance: { ...transcript?.provenance, providerId: 'remote' },
+      }),
+    ).toBeUndefined();
   });
 
   it('rejects unordered, overlapping, zero-length and out-of-range timings', () => {
@@ -143,7 +162,9 @@ describe('speech job contracts', () => {
   });
 
   it('allows timing words only when timing is available', () => {
-    expect(parseSpeechSynthesisTiming({ durationUs: 0, timingSource: 'unavailable', words: [] })).toEqual({
+    expect(
+      parseSpeechSynthesisTiming({ durationUs: 0, timingSource: 'unavailable', words: [] }),
+    ).toEqual({
       durationUs: 0,
       timingSource: 'unavailable',
       words: [],
@@ -162,6 +183,8 @@ describe('speech job contracts', () => {
         words: [{ text: 'x', startUs: 0, endUs: 1 }],
       }),
     ).toBeDefined();
-    expect(parseSpeechSynthesisTiming({ durationUs: 10, timingSource: 'aligned', words: [] })).toBeDefined();
+    expect(
+      parseSpeechSynthesisTiming({ durationUs: 10, timingSource: 'aligned', words: [] }),
+    ).toBeDefined();
   });
 });
