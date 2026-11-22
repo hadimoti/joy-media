@@ -22,13 +22,24 @@ export function useSpeechModelStatus(
   const [models, setModels] = useState<readonly SpeechModelStatus[]>([]);
   useEffect(() => {
     let active = true;
+    let warned = false;
     const read = (): void => {
-      void source.speechStatus().then(
+      let pending: ReturnType<SpeechStatusSource['speechStatus']>;
+      try {
+        pending = source.speechStatus();
+      } catch (error) {
+        pending = Promise.reject(error);
+      }
+      void pending.then(
         (result) => {
           if (active) setModels(result.models);
         },
-        () => {
-          // Keep what is shown; the next tick tries again.
+        (error: unknown) => {
+          // Keep what is shown; the next tick tries again. Say so once, so a status that never arrives is findable.
+          if (!warned) {
+            warned = true;
+            console.warn('Speech engine status could not be read; retrying.', error);
+          }
         },
       );
     };
