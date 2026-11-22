@@ -722,4 +722,59 @@ describe('WorkerDaemon', () => {
     });
     expect(removed).toEqual(['speech-output-canceled']);
   });
+
+  it('reports a completion rejection when cancel arrives after the final heartbeat', async () => {
+    let stop = false;
+    let leased = false;
+    let cancelRequested = false;
+    const calls: string[] = [];
+    const removed: string[] = [];
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return {
+          id: 'speech-late-cancel',
+          projectId: 'project-1',
+          type: 'speech.synthesize',
+          leaseToken: 'lease-1',
+        };
+      },
+      heartbeat: async () => ({ cancelRequested: false }),
+      uploadDerivative: async () => {
+        cancelRequested = true;
+      },
+      complete: async () => {
+        if (cancelRequested) throw new Error('the speech job was cancelled');
+      },
+      fail: async (_jobId: string, error: string) => {
+        calls.push(`fail:${error}`);
+        stop = true;
+      },
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async () => ({
+        state: 'completed' as const,
+        result: {
+          kind: 'speech.synthesize' as const,
+          sha256: 'f'.repeat(64),
+          bytes: 1,
+          localRef: 'speech-output-late-cancel',
+          descriptor: { mimeType: 'audio/wav' as const },
+          speech: { durationUs: 1, timingSource: 'unavailable' as const, words: [] },
+        },
+      }),
+      readDerivative: () => new Uint8Array([1]),
+      removeDerivative: async (result: { localRef: string }) => removed.push(result.localRef),
+    } as unknown as WorkerRuntime;
+
+    await new WorkerDaemon(client, runtime).run({ pollIntervalMs: 1, stopped: () => stop });
+
+    expect(calls).toEqual(['fail:the speech job was cancelled']);
+    expect(removed).toEqual(['speech-output-late-cancel']);
+  });
 });

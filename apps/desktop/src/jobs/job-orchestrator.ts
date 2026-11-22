@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { rmSync } from 'node:fs';
+import { lstatSync, rmSync } from 'node:fs';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import {
   parseSpeechSynthesizeV1,
   parseSpeechSynthesisTiming,
@@ -14,6 +15,46 @@ export const EXPIRED_LEASE_ERROR = 'worker lease expired';
 export const CANCELLED_BY_USER = 'cancelled by user';
 const MAX_ERROR_LENGTH = 240;
 export const BUILTIN_SPEECH_OUTPUT_REF_ID = 'speech-output';
+
+interface SpeechDerivativeCleanup {
+  readonly jobId: string;
+  readonly path: string;
+}
+
+const pendingSpeechDerivativeCleanup = new Map<string, SpeechDerivativeCleanup>();
+
+function isSpeechDerivativePath(jobId: string, path: string): boolean {
+  if (!isAbsolute(path)) return false;
+  const absolutePath = resolve(path);
+  const fileName = basename(absolutePath);
+  const escapedJobId = jobId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return (
+    basename(dirname(absolutePath)) === 'derivatives' &&
+    new RegExp(`^${escapedJobId}-[a-f0-9]{16}\\.(?:wav|json)$`).test(fileName)
+  );
+}
+
+function retrySpeechDerivativeCleanup(): void {
+  for (const [key, cleanup] of pendingSpeechDerivativeCleanup) {
+    try {
+      rmSync(cleanup.path, { force: true });
+    } catch {
+      // Keep the job/path pair so a later sweep or process shutdown can retry it.
+    }
+    try {
+      lstatSync(cleanup.path);
+    } catch (error) {
+      if (isNodeError(error) && error.code === 'ENOENT') pendingSpeechDerivativeCleanup.delete(key);
+    }
+  }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error;
+}
+
+process.on('beforeExit', retrySpeechDerivativeCleanup);
+process.on('exit', retrySpeechDerivativeCleanup);
 
 /** Protocol refusal that the loopback API maps onto an HTTP status. */
 export class JobProtocolError extends Error {
@@ -249,10 +290,10 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
       status !== 'done' &&
       job.derivative !== undefined
     ) {
-      try {
-        rmSync(job.derivative.path, { force: true });
-      } catch {
-        // A terminal job must still leave the dispatch store even if local cleanup fails.
+      if (isSpeechDerivativePath(job.id, job.derivative.path)) {
+        const key = `${job.id}\0${resolve(job.derivative.path)}`;
+        pendingSpeechDerivativeCleanup.set(key, { jobId: job.id, path: resolve(job.derivative.path) });
+        retrySpeechDerivativeCleanup();
       }
     }
     store.save({
@@ -488,7 +529,7 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
     fail(workerId, jobId, leaseToken, error) {
       store.transaction(() => {
         const job = assertHolder(workerId, jobId, leaseToken);
-        if (error === 'canceled') {
+        if (job.cancelRequested || error === 'canceled') {
           finish(
             job,
             'cancelled',
@@ -531,7 +572,9 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
     },
 
     expireLeases() {
-      return store.transaction(expireLeasesWithin);
+      const expiredCount = store.transaction(expireLeasesWithin);
+      retrySpeechDerivativeCleanup();
+      return expiredCount;
     },
 
     get(jobId) {
