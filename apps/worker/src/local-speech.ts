@@ -122,7 +122,8 @@ export function speechAvailabilityFromEnvironment(env: NodeJS.ProcessEnv): Speec
   const synthesis: Partial<
     Record<'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa', SpeechModelRunner>
   > = {};
-  const setupRequired: Partial<Record<'chatterbox-en' | 'chatterbox-fa', SpeechSetupReasonCode>> = {};
+  const setupRequired: Partial<Record<'chatterbox-en' | 'chatterbox-fa', SpeechSetupReasonCode>> =
+    {};
   const models = [
     [
       'kokoro-82m',
@@ -151,9 +152,7 @@ export function speechAvailabilityFromEnvironment(env: NodeJS.ProcessEnv): Speec
         ? env.JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT.trim()
         : resolve(scriptDir, scriptName);
     const isChatterbox = modelId.startsWith('chatterbox-');
-    const chatterboxReason = isChatterbox
-      ? chatterboxModelReason(modelId, modelPath)
-      : undefined;
+    const chatterboxReason = isChatterbox ? chatterboxModelReason(modelId, modelPath) : undefined;
     const runtimeAvailable =
       isLocalDirectory(modelPath) &&
       isLocalFile(scriptPath) &&
@@ -170,7 +169,10 @@ export function speechAvailabilityFromEnvironment(env: NodeJS.ProcessEnv): Speec
   };
 }
 
-function chatterboxModelReason(modelId: string, modelPath: string): SpeechSetupReasonCode | undefined {
+function chatterboxModelReason(
+  modelId: string,
+  modelPath: string,
+): SpeechSetupReasonCode | undefined {
   if (!isLocalDirectory(modelPath)) return undefined;
   if (modelId === 'chatterbox-en') {
     const required: ReadonlyArray<readonly [string, readonly string[]]> = [
@@ -183,9 +185,10 @@ function chatterboxModelReason(modelId: string, modelPath: string): SpeechSetupR
     const hasLegacyT3 = ['t3.safetensors', 't3.pt', 't3_mtl.safetensors'].some((name) =>
       isNonemptyFile(resolve(modelPath, name)),
     );
-    return required.every(([name, alternates]) =>
-      (name === 'conds.pt' && hasLegacyT3) ||
-      [name, ...alternates].some((candidate) => isNonemptyFile(resolve(modelPath, candidate))),
+    return required.every(
+      ([name, alternates]) =>
+        (name === 'conds.pt' && hasLegacyT3) ||
+        [name, ...alternates].some((candidate) => isNonemptyFile(resolve(modelPath, candidate))),
     )
       ? undefined
       : 'CHATTERBOX_EN_FILES_MISSING';
@@ -204,9 +207,10 @@ function chatterboxModelReason(modelId: string, modelPath: string): SpeechSetupR
     resolve(modelPath, '..', 'chatterbox-en'),
     resolve(modelPath, '..', 'chatterbox-english'),
   ];
-  return bases.some((base) =>
-    isNonemptyFile(resolve(base, 've.safetensors')) &&
-    isNonemptyFile(resolve(base, 's3gen.safetensors')),
+  return bases.some(
+    (base) =>
+      isNonemptyFile(resolve(base, 've.safetensors')) &&
+      isNonemptyFile(resolve(base, 's3gen.safetensors')),
   )
     ? undefined
     : 'CHATTERBOX_FA_BASE_FILES_MISSING';

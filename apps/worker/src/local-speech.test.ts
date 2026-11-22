@@ -94,9 +94,19 @@ describe('local speech worker runner', () => {
       'chatterbox-fa',
     ])
       mkdirSync(join(modelDir, name), { recursive: true });
-    for (const name of ['conds.pt', 's3gen.safetensors', 't3_cfg.safetensors', 'tokenizer.json', 've.safetensors'])
+    for (const name of [
+      'conds.pt',
+      's3gen.safetensors',
+      't3_cfg.safetensors',
+      'tokenizer.json',
+      've.safetensors',
+    ])
       writeFileSync(join(modelDir, 'chatterbox-en', name), 'fixture');
-    for (const name of ['t3_fa_expressive.safetensors', 'persian_tts_engine.py', 'grapheme_mtl_merged_expanded_v1.json'])
+    for (const name of [
+      't3_fa_expressive.safetensors',
+      'persian_tts_engine.py',
+      'grapheme_mtl_merged_expanded_v1.json',
+    ])
       writeFileSync(join(modelDir, 'chatterbox-fa', name), 'fixture');
     mkdirSync(join(modelDir, 'chatterbox-en-base'));
     writeFileSync(join(modelDir, 'chatterbox-en-base', 've.safetensors'), 'fixture');
@@ -153,9 +163,19 @@ describe('local speech worker runner', () => {
     mkdirSync(isolatedFa, { recursive: true });
     writeFileSync(join(runnerDir, 'synthesize_chatterbox.py'), 'fixture');
     writeFileSync(python, 'fixture');
-    for (const name of ['conds.pt', 's3gen.safetensors', 't3_cfg.safetensors', 'tokenizer.json', 've.safetensors'])
+    for (const name of [
+      'conds.pt',
+      's3gen.safetensors',
+      't3_cfg.safetensors',
+      'tokenizer.json',
+      've.safetensors',
+    ])
       writeFileSync(join(models, 'chatterbox-en', name), 'fixture');
-    for (const name of ['t3_fa_expressive.safetensors', 'persian_tts_engine.py', 'grapheme_mtl_merged_expanded_v1.json'])
+    for (const name of [
+      't3_fa_expressive.safetensors',
+      'persian_tts_engine.py',
+      'grapheme_mtl_merged_expanded_v1.json',
+    ])
       writeFileSync(join(isolatedFa, name), 'fixture');
     try {
       const result = speechAvailabilityFromEnvironment({
