@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import array
 import importlib.metadata
+import importlib.util
 import json
 import math
 import re
@@ -21,14 +22,17 @@ MODEL_LANGUAGE = {
     "chatterbox-en": "en-US",
     "chatterbox-fa": "fa-IR",
 }
-CHECKPOINT_GROUPS = (
-    ("ve.pt",),
-    ("t3.safetensors", "t3.pt", "t3_mtl.safetensors"),
-    ("s3gen.safetensors", "s3gen.pt"),
-)
+ENGLISH_FILES = ("conds.pt", "s3gen.safetensors", "t3_cfg.safetensors", "tokenizer.json", "ve.safetensors")
+ENGLISH_ALTERNATES = {
+    "ve.safetensors": ("ve.pt",),
+    "s3gen.safetensors": ("s3gen.pt",),
+    "t3_cfg.safetensors": ("t3.safetensors", "t3.pt", "t3_mtl.safetensors"),
+    "conds.pt": (),
+    "tokenizer.json": (),
+}
 
 
-def _validate_request(request: dict[str, Any]) -> tuple[str, str, Path, Path | None]:
+def _validate_request(request: dict[str, Any]) -> tuple[str, str, Path, Path | None, Path | None]:
     if request.get("protocol") != "joy.speech.v1":
         raise ValueError("protocol must be joy.speech.v1")
     if request.get("type") != "speech.synthesize":
@@ -55,7 +59,13 @@ def _validate_request(request: dict[str, Any]) -> tuple[str, str, Path, Path | N
 
     if language == "fa-IR" and request.get("nonCommercial") is not True:
         raise ValueError("Persian Chatterbox requires the trusted non-commercial flag")
-    return text, language, Path(model_path).expanduser(), reference_path
+    base_path = None
+    raw_base = request.get("basePath")
+    if raw_base is not None:
+        if language != "fa-IR" or not isinstance(raw_base, str) or not raw_base.strip():
+            raise ValueError("basePath is only valid as a local Persian English-base directory")
+        base_path = Path(raw_base).expanduser()
+    return text, language, Path(model_path).expanduser(), reference_path, base_path
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
@@ -75,45 +85,104 @@ def _installed_version() -> str:
             raise RuntimeError("Local Chatterbox package is missing; install nothing during a job") from error
 
 
-def _verify_local_setup(model_dir: Path, language: str) -> dict[str, Any]:
+def _nonempty_file(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0
+
+
+def _require_file(directory: Path, names: tuple[str, ...], label: str) -> Path:
+    for name in names:
+        path = directory / name
+        if _nonempty_file(path):
+            return path
+    raise FileNotFoundError(f"Required Chatterbox {label} file is missing or empty")
+
+
+def _find_persian_base(model_dir: Path, base_path: Path | None) -> Path:
+    candidates = ([base_path] if base_path is not None else []) + [
+        model_dir / "chatterbox-en",
+        model_dir / "chatterbox-english",
+        model_dir.parent / "chatterbox-en",
+        model_dir.parent / "chatterbox-english",
+    ]
+    for candidate in candidates:
+        if candidate is not None and all(_nonempty_file(candidate / name) for name in ("ve.safetensors", "s3gen.safetensors")):
+            return candidate
+    raise FileNotFoundError("Persian Chatterbox English base files are missing")
+
+
+def _verify_local_setup(model_dir: Path, language: str, base_path: Path | None = None) -> Path | None:
     version = _installed_version()
     if _version_tuple(version) < (0, 1, 7):
         raise RuntimeError(f"Chatterbox >=0.1.7 is required; local version is {version}")
     if not model_dir.is_dir():
         raise FileNotFoundError(f"Chatterbox model directory is missing: {model_dir}")
 
-    config_path = model_dir / "config.json"
-    if not config_path.is_file():
-        raise FileNotFoundError(f"Chatterbox config is missing: {config_path}")
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError(f"Chatterbox config is invalid: {config_path}") from error
-    if not isinstance(config, dict):
-        raise ValueError("Chatterbox config must contain a JSON object")
-
-    for alternatives in CHECKPOINT_GROUPS:
-        if not any(
-            (model_dir / name).is_file() and (model_dir / name).stat().st_size > 0
-            for name in alternatives
-        ):
-            names = " or ".join(alternatives)
-            raise FileNotFoundError(f"Chatterbox checkpoint file is missing or empty: {names}")
-    if language == "fa-IR":
-        tokenizer_path = model_dir / "tokenizer.json"
-        if not tokenizer_path.is_file() or tokenizer_path.stat().st_size == 0:
-            raise FileNotFoundError(f"Expanded Persian tokenizer is missing: {tokenizer_path}")
-    return config
+    if language == "en-US":
+        for name in ENGLISH_FILES:
+            if name == "conds.pt" and not _nonempty_file(model_dir / name):
+                # Older local layouts predate the cached-conditioning file.
+                if any(_nonempty_file(model_dir / legacy) for legacy in ENGLISH_ALTERNATES["t3_cfg.safetensors"]):
+                    continue
+            _require_file(model_dir, (name, *ENGLISH_ALTERNATES[name]), name)
+        return None
+    _require_file(model_dir, ("t3_fa_expressive.safetensors",), "Persian checkpoint")
+    _require_file(model_dir, ("persian_tts_engine.py",), "Persian engine")
+    _require_file(model_dir, ("grapheme_mtl_merged_expanded_v1.json", "tokenizer.json"), "expanded Persian tokenizer")
+    return _find_persian_base(model_dir, base_path)
 
 
 def _load_engine(model_dir: Path) -> Any:
-    """Load staged model files through Chatterbox's local-only loader."""
+    """Load the English engine from the supplied local folder only."""
+    import torch
     from chatterbox.tts import ChatterboxTTS
+    return ChatterboxTTS.from_local(str(model_dir), "cuda" if torch.cuda.is_available() else "cpu")
 
-    loader = getattr(ChatterboxTTS, "from_local", None)
-    if loader is None:
-        raise RuntimeError("Local Chatterbox from_local loader is unavailable")
-    return loader(str(model_dir))
+
+def _load_persian_engine(model_dir: Path, base_dir: Path) -> Any:
+    """Build the Persian multilingual engine from local checkpoint and English base files."""
+    import torch
+    from safetensors.torch import load_file
+
+    sys.path.insert(0, str(model_dir))
+    engine_path = model_dir / "persian_tts_engine.py"
+    spec = importlib.util.spec_from_file_location("joy_persian_tts_engine", engine_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Persian Chatterbox engine could not be loaded")
+    pe = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = pe
+    spec.loader.exec_module(pe)
+    pe.patch_chatterbox_runtime()
+
+    from chatterbox import mtl_tts
+    from chatterbox.models.t3 import T3
+    from chatterbox.models.t3.t3 import T3Config
+    from chatterbox.models.s3gen import S3Gen
+    from chatterbox.models.voice_encoder import VoiceEncoder
+    from chatterbox.models.tokenizers import MTLTokenizer
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    ve = VoiceEncoder()
+    ve.load_state_dict(load_file(str(base_dir / "ve.safetensors")))
+    ve.to(device).eval()
+    s3 = S3Gen()
+    s3.load_state_dict(load_file(str(base_dir / "s3gen.safetensors")), strict=False)
+    s3.to(device).eval()
+    t3 = T3(T3Config.multilingual())
+    state = load_file(str(model_dir / "t3_fa_expressive.safetensors"))
+    t3.load_state_dict({key: value for key, value in state.items() if not key.startswith("patched_model.")}, strict=True)
+    t3.to(device).eval()
+    tokenizer_path = model_dir / "grapheme_mtl_merged_expanded_v1.json"
+    if not tokenizer_path.is_file():
+        tokenizer_path = model_dir / "tokenizer.json"
+    tokenizer = MTLTokenizer(str(tokenizer_path))
+    model = mtl_tts.ChatterboxMultilingualTTS(t3, s3, ve, tokenizer, device, conds=None)
+    engine = pe.PersianCommercialTTS.__new__(pe.PersianCommercialTTS)
+    engine.device = device
+    engine.model = model
+    engine.sr = 24_000
+    engine._cached_ref = None
+    engine.ezafe = None
+    return engine
 
 
 def _as_mono_samples(audio: Any) -> list[float]:
@@ -152,12 +221,15 @@ def _pcm16(samples: list[float]) -> array.array:
 
 
 def _generate_audio(
-    engine: Any, text: str, reference_path: Path | None
+    engine: Any, text: str, language: str, reference_path: Path | None
 ) -> tuple[list[float], int]:
-    kwargs: dict[str, Any] = {}
-    if reference_path is not None:
-        kwargs["audio_prompt_path"] = str(reference_path)
-    audio = engine.generate(text, **kwargs)
+    if language == "fa-IR":
+        audio = engine.synthesize(text, str(reference_path), exaggeration=0.45, seed=7, auto_ezafe=False)
+    else:
+        kwargs: dict[str, Any] = {}
+        if reference_path is not None:
+            kwargs["audio_prompt_path"] = str(reference_path)
+        audio = engine.generate(text, **kwargs)
     sample_rate = getattr(engine, "sr", getattr(engine, "sample_rate", DEFAULT_SAMPLE_RATE))
     if isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or sample_rate <= 0:
         raise ValueError("Chatterbox returned an invalid sample rate")
@@ -165,8 +237,8 @@ def _generate_audio(
 
 
 def synthesize(request: dict[str, Any], output_dir: Path) -> None:
-    text, language, model_dir, reference_path = _validate_request(request)
-    _verify_local_setup(model_dir, language)
+    text, language, model_dir, reference_path, base_path = _validate_request(request)
+    resolved_base = _verify_local_setup(model_dir, language, base_path)
     if language == "fa-IR" and reference_path is None:
         raise ValueError("Persian Chatterbox requires a staged reference audio file")
     if reference_path is not None and (
@@ -174,8 +246,8 @@ def synthesize(request: dict[str, Any], output_dir: Path) -> None:
     ):
         raise FileNotFoundError(f"Staged reference audio is missing or empty: {reference_path}")
 
-    engine = _load_engine(model_dir)
-    samples, sample_rate = _generate_audio(engine, text, reference_path)
+    engine = _load_engine(model_dir) if language == "en-US" else _load_persian_engine(model_dir, resolved_base)
+    samples, sample_rate = _generate_audio(engine, text, language, reference_path)
     pcm = _pcm16(samples)
     duration_us = round(len(pcm) * 1_000_000 / sample_rate)
     if duration_us > MAX_SAFE_INTEGER:
@@ -211,7 +283,7 @@ def main() -> int:
         print(json.dumps({"type": "progress", "percent": 100}), flush=True)
         return 0
     except Exception as error:
-        print(f"chatterbox synthesis failed: {error}", file=sys.stderr)
+        print("chatterbox synthesis failed", file=sys.stderr)
         return 1
 
 
