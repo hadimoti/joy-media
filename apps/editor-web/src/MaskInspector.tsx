@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BrowserJob, BrowserWorker } from './control-plane-client.js';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
 import { BoundedPollingLoop } from './bounded-polling.js';
+import type { TransientControlAdapter } from './components/PropertyControlAdapters.js';
+import { useNumberScrub } from './components/useNumberScrub.js';
 import {
   CloseIcon,
   MaskIcon,
@@ -630,11 +632,46 @@ function Coordinate({
   label,
   value,
   onChange,
+  disabled = false,
 }: {
   readonly label: string;
   readonly value: number;
   readonly onChange: (value: number) => void;
+  readonly disabled?: boolean;
 }) {
+  const [draftValue, setDraftValue] = useState(value);
+  const draftRef = useRef(value);
+  useEffect(() => {
+    draftRef.current = value;
+    setDraftValue(value);
+  }, [value]);
+  const adapter = useMemo<TransientControlAdapter<number>>(
+    () => ({
+      begin: () => {
+        draftRef.current = value;
+        setDraftValue(value);
+      },
+      preview: (next) => {
+        draftRef.current = next;
+        setDraftValue(next);
+      },
+      commit: () => onChange(draftRef.current),
+      cancel: () => {
+        draftRef.current = value;
+        setDraftValue(value);
+      },
+    }),
+    [onChange, value],
+  );
+  const { cursorStyle, ...scrub } = useNumberScrub({
+    value,
+    adapter,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    disabled,
+    normalize: (next) => Math.round(next * 100) / 100,
+  });
   return (
     <label className="mask-coordinate">
       <span>{label}</span>
@@ -643,10 +680,18 @@ function Coordinate({
         min={0}
         max={1}
         step={0.01}
-        value={Math.round(value * 100) / 100}
+        disabled={disabled}
+        style={{ cursor: cursorStyle }}
+        value={Math.round(draftValue * 100) / 100}
+        {...scrub}
         onChange={(event) => {
           const next = event.currentTarget.valueAsNumber;
-          if (Number.isFinite(next)) onChange(Math.min(1, Math.max(0, next)));
+          if (Number.isFinite(next)) {
+            const normalized = Math.min(1, Math.max(0, next));
+            draftRef.current = normalized;
+            setDraftValue(normalized);
+            onChange(normalized);
+          }
         }}
       />
     </label>
