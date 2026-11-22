@@ -33,6 +33,31 @@ describe('MaskInspector', () => {
     expect(markup).toContain('Remove BG');
   });
 
+  it('treats the local desktop Worker as holding every registered asset', () => {
+    const local = {
+      id: 'worker-local',
+      paired: true,
+      revoked: false,
+      capabilities: ['mask.image', 'mask.video'],
+      holdsAllLocalAssets: true,
+      lastSeenAt: 1_000,
+    } as const;
+    expect(
+      maskRuntimeStatus({ kind: 'image', assetId: 'any-photo' }, [local], 2_000),
+    ).toMatchObject({ state: 'ready', label: 'Photo ready' });
+    expect(
+      maskRuntimeStatus({ kind: 'video', assetId: 'any-video' }, [local], 2_000),
+    ).toMatchObject({ state: 'ready', label: 'Video ready' });
+    // A Worker with neither the flag nor the id still reports the source as missing.
+    expect(
+      maskRuntimeStatus(
+        { kind: 'image', assetId: 'any-photo' },
+        [{ ...local, holdsAllLocalAssets: false }],
+        2_000,
+      ),
+    ).toMatchObject({ state: 'source-missing' });
+  });
+
   it('distinguishes a live photo Worker from video tracking and stale pairings', () => {
     const photoWorker = {
       id: 'worker-photo',

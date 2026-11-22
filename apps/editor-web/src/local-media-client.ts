@@ -269,6 +269,8 @@ export class BrowserControlPlaneClient {
       paired: true,
       revoked: false,
       capabilities: [...worker.capabilities],
+      // The local route resolves any registered asset itself; there is no per-asset list to report.
+      holdsAllLocalAssets: true,
       lastSeenAt: Date.parse(worker.lastHelloAt),
     }));
   }

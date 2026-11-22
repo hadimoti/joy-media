@@ -452,6 +452,8 @@ describe('BrowserControlPlaneClient on the local desktop channels', () => {
         paired: true,
         revoked: false,
         capabilities: ['render.export'],
+        // The local route resolves any registered asset itself (masking and enhancing rely on this flag).
+        holdsAllLocalAssets: true,
         lastSeenAt: Date.parse('2026-10-28T10:00:00.000Z'),
       },
     ]);

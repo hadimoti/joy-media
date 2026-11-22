@@ -89,8 +89,9 @@ export function maskRuntimeStatus(
   const pairedWorkers = workers.filter((worker) => worker.paired && !worker.revoked);
   const onlineWorkers = freshPairedWorkers(workers, nowMs);
   const capableWorkers = onlineWorkers.filter((worker) => worker.capabilities.includes(capability));
-  const readyWorker = capableWorkers.find((worker) =>
-    (worker.localAssetIds ?? []).includes(target.assetId),
+  const readyWorker = capableWorkers.find(
+    (worker) =>
+      worker.holdsAllLocalAssets === true || (worker.localAssetIds ?? []).includes(target.assetId),
   );
 
   if (readyWorker !== undefined) {
