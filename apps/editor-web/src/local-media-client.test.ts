@@ -66,6 +66,8 @@ describe('BrowserControlPlaneClient local masks', () => {
     });
     const [derivative] = await client.derivatives('p-mask', 'asset-1');
     expect(derivative).toMatchObject({
+      // The editor picks its result by this id; a different id would fall back to the newest mask of the asset.
+      id: 'editor-job-1',
       kind: 'mask',
       profile: 'mask-matte',
       descriptor: { mimeType: 'video/webm' },

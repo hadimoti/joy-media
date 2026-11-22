@@ -154,6 +154,23 @@ function runnerOf(value: string | undefined, env: NodeJS.ProcessEnv): MaskingRun
   return { command: value, prefixArgs: [] };
 }
 
+/** The router starts the model script as its own child, so a cancel has to end the whole tree, not only the router. */
+function killProcessTree(child: ReturnType<typeof spawn>): void {
+  if (child.pid !== undefined && process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    return;
+  }
+  if (child.pid !== undefined) {
+    try {
+      process.kill(-child.pid);
+      return;
+    } catch {
+      /* not a group leader: fall back to the child itself */
+    }
+  }
+  child.kill();
+}
+
 async function runRunner(
   runner: MaskingRunner,
   args: readonly string[],
@@ -161,6 +178,7 @@ async function runRunner(
 ): Promise<boolean> {
   const child = spawn(runner.command, [...runner.prefixArgs, ...args], {
     shell: false,
+    detached: process.platform !== 'win32',
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   let stderr = '';
@@ -174,7 +192,7 @@ async function runRunner(
   });
   while (child.exitCode === null) {
     if (cancelled()) {
-      child.kill();
+      killProcessTree(child);
       await completed.catch(() => undefined);
       return false;
     }
@@ -196,6 +214,8 @@ function validateMaskPayload(value: unknown, type: 'mask.image' | 'mask.video'):
   const points = Array.isArray(selection?.points) ? selection.points : undefined;
   const box = record(selection?.box);
   const mode = selection?.mode;
+  if (type === 'mask.video' && payload.provider === 'birefnet')
+    throw new Error('BiRefNet masks still images only; choose Auto or SAM 2 for video');
   if (
     payload.schemaVersion !== 1 ||
     !['auto', 'sam3', 'sam2-grounded', 'birefnet'].includes(String(payload.provider)) ||
