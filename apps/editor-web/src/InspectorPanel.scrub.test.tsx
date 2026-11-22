@@ -353,4 +353,26 @@ describe('Inspector numeric scrubbing', () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(rate.value).toBe('1');
   });
+
+  it('commits a new speed rate after Escape clears the canceled draft', () => {
+    const onChange = vi.fn();
+    mountSpeed(onChange);
+    const rate = element<HTMLInputElement>('#insp-speed-rate-clip-1');
+    const setRate = (value: string) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(rate, value);
+      rate.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    act(() => {
+      rate.focus();
+      setRate('2.5');
+      rate.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      setRate('1.5');
+      rate.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0]?.[0]).toEqual({ rate: 1.5 });
+    act(() => rate.blur());
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
 });
