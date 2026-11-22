@@ -1,4 +1,11 @@
-import { useId, useRef, useState, type ReactElement } from 'react';
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactElement,
+} from 'react';
 import type {
   CaptionClipStyleV2,
   CaptionClipV1,
@@ -35,6 +42,12 @@ import { ColorSwatchPicker } from './ColorPickerPopover.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { downloadBrowserTextFile } from './browser-text-download.js';
 import { PropertyRow } from './components/PropertyRow.js';
+import {
+  mergeCaptionCueWithPrevious,
+  splitCaptionCue,
+  type CaptionCueEdit,
+} from './caption-cue-edit.js';
+import './CaptionsTranscript.css';
 
 type CaptionsTab = 'transcript' | 'style' | 'generate';
 
@@ -213,6 +226,7 @@ export function CaptionsPanel({
             slot={slot}
             slotNumber={slotIndex + 1}
             query={query}
+            onClearQuery={() => setQuery('')}
             activeTab={activeTab}
             playheadUs={playheadUs}
             onSeek={onSeek}
@@ -231,6 +245,7 @@ function CaptionSlotEditor({
   slot,
   slotNumber,
   query,
+  onClearQuery,
   activeTab,
   playheadUs,
   onSeek,
@@ -243,6 +258,7 @@ function CaptionSlotEditor({
   /** 1-based position of this caption track in the panel, shown instead of its id. */
   readonly slotNumber: number;
   readonly query: string;
+  readonly onClearQuery: () => void;
   readonly activeTab: CaptionsTab;
   readonly playheadUs: number;
   readonly onSeek: (timeUs: number) => void;
@@ -257,6 +273,9 @@ function CaptionSlotEditor({
   const [transcribingLanguage, setTranscribingLanguage] = useState<'fa-IR' | 'en-US'>();
   const transcriptionStatusId = useId();
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
+  const editorRefs = useRef(new Map<string, HTMLTextAreaElement>());
+  const suppressedBlurIds = useRef(new Set<string>());
+  const pendingFocus = useRef<{ readonly cueId: string; readonly caret: number } | null>(null);
   const direction = resolveCaptionDirection(document);
   const matches =
     query.trim().length === 0
@@ -265,6 +284,23 @@ function CaptionSlotEditor({
   const segments = document.segments.filter(
     (segment) => matches === undefined || matches.has(segment.id),
   );
+  useLayoutEffect(() => {
+    const target = pendingFocus.current;
+    if (target === null) return;
+    if (!segments.some((segment) => segment.id === target.cueId)) {
+      onClearQuery();
+      return;
+    }
+    const editor = editorRefs.current.get(target.cueId);
+    if (editor === undefined) return;
+    pendingFocus.current = null;
+    editor.focus();
+    editor.setSelectionRange(target.caret, target.caret);
+    for (const id of [...suppressedBlurIds.current]) {
+      if (!document.segments.some((segment) => segment.id === id))
+        suppressedBlurIds.current.delete(id);
+    }
+  }, [document, onClearQuery, segments]);
   const addSegment = () => {
     const startUs = Math.max(0, playheadUs - clip.startUs);
     onDispatch({
@@ -394,6 +430,106 @@ function CaptionSlotEditor({
       return next;
     });
   };
+  const clearDrafts = (...segmentIds: readonly string[]) => {
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const segmentId of segmentIds) delete next[segmentId];
+      return next;
+    });
+  };
+  const replaceDocumentForEdit = (
+    edit: CaptionCueEdit | undefined,
+    affectedIds: readonly string[],
+  ) => {
+    if (edit === undefined) return;
+    pendingFocus.current = { cueId: edit.focusCueId, caret: edit.caret };
+    for (const id of affectedIds) suppressedBlurIds.current.add(id);
+    clearDrafts(...affectedIds);
+    onDispatch({
+      label: 'Edit caption cues',
+      commands: [
+        {
+          type: 'caption.replaceDocument',
+          payload: { documentId: document.id, document: edit.document },
+        },
+      ],
+    });
+  };
+  const handleCueKeyDown = (
+    event: KeyboardEvent<HTMLTextAreaElement>,
+    segmentId: string,
+  ) => {
+    const composing = event.nativeEvent.isComposing || event.keyCode === 229;
+    if (composing) return;
+    if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      suppressedBlurIds.current.add(segmentId);
+      clearDrafts(segmentId);
+      event.currentTarget.blur();
+      return;
+    }
+    if (
+      event.key === 'Enter' &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+      suppressedBlurIds.current.add(segmentId);
+      commitSegmentText(segmentId, event.currentTarget.value);
+      event.currentTarget.blur();
+      return;
+    }
+    if (
+      event.key === 'Enter' &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+      const segment = document.segments.find((candidate) => candidate.id === segmentId);
+      if (segment === undefined) return;
+      const nextId = `caption-${crypto.randomUUID()}`;
+      const edit = splitCaptionCue(
+        document,
+        segmentId,
+        event.currentTarget.value,
+        event.currentTarget.selectionStart,
+        nextId,
+      );
+      replaceDocumentForEdit(edit, [segmentId]);
+      return;
+    }
+    if (
+      event.key === 'Backspace' &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.currentTarget.selectionStart === 0 && event.currentTarget.selectionEnd === 0
+    ) {
+      const segment = document.segments.find((candidate) => candidate.id === segmentId);
+      if (segment === undefined) return;
+      const previous = document.segments
+        .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+        .filter(({ candidate }) => candidate.id !== segmentId && candidate.startUs < segment.startUs)
+        .sort(
+          (left, right) =>
+            right.candidate.startUs - left.candidate.startUs ||
+            right.candidateIndex - left.candidateIndex,
+        )[0]?.candidate;
+      if (previous === undefined) return;
+      event.preventDefault();
+      const edit = mergeCaptionCueWithPrevious(
+        document,
+        segmentId,
+        event.currentTarget.value,
+        drafts[previous.id],
+      );
+      replaceDocumentForEdit(edit, [segmentId, previous.id]);
+    }
+  };
   return (
     <section aria-label={`Captions ${document.language}`}>
       <header className="captions-slot-header">
@@ -509,8 +645,11 @@ function CaptionSlotEditor({
                       {Math.round(confidence * 100)}%
                     </span>
                   )}
-                  <input
-                    type="text"
+                  <textarea
+                    ref={(element) => {
+                      if (element === null) editorRefs.current.delete(segment.id);
+                      else editorRefs.current.set(segment.id, element);
+                    }}
                     className="caption-source"
                     aria-label={`Caption text ${cueNumber}`}
                     title={source.length > 0 ? `Source: ${source}` : 'Manual caption text'}
@@ -524,21 +663,12 @@ function CaptionSlotEditor({
                         [segment.id]: value,
                       }));
                     }}
-                    onBlur={(event) => commitSegmentText(segment.id, event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') {
-                        setDrafts((current) => {
-                          const next = { ...current };
-                          delete next[segment.id];
-                          return next;
-                        });
-                        event.currentTarget.blur();
-                      } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-                        event.preventDefault();
-                        commitSegmentText(segment.id, event.currentTarget.value);
-                        event.currentTarget.blur();
-                      }
+                    rows={2}
+                    onBlur={(event) => {
+                      if (suppressedBlurIds.current.delete(segment.id)) return;
+                      commitSegmentText(segment.id, event.currentTarget.value);
                     }}
+                    onKeyDown={(event) => handleCueKeyDown(event, segment.id)}
                   />
                   {segment.textOverride !== undefined && (
                     <button
