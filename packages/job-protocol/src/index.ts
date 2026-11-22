@@ -13,6 +13,25 @@ export {
 } from './export-dimensions.js';
 export type { H264ExportDimensionsResult } from './export-dimensions.js';
 
+export {
+  SPEECH_TEXT_MAX_BYTES,
+  SPEECH_TEXT_MAX_GRAPHEMES,
+  parseSpeechSynthesisTiming,
+  parseSpeechSynthesizeV1,
+  parseSpeechTranscript,
+  parseSpeechTranscribeV1,
+} from './speech.js';
+export type {
+  SpeechConsentRequest,
+  SpeechLanguage,
+  SpeechModel,
+  SpeechSynthesisTiming,
+  SpeechSynthesizeV1,
+  SpeechTranscript,
+  SpeechTranscribeV1,
+  SpeechWord,
+} from './speech.js';
+
 export type {
   WorkerCapability,
   LocalGpuWorkerJobType,
