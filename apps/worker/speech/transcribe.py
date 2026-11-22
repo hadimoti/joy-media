@@ -352,7 +352,10 @@ def transcribe(request: dict, output_dir: Path) -> None:
                 break
 
             # Transcribe chunk
-            transcribe_lang = language if language != "auto" else None
+            transcribe_lang = {
+                "en-US": "en",
+                "fa-IR": "fa",
+            }.get(language, language) if language != "auto" else None
             segments, _info = model.transcribe(
                 str(chunk_wav),
                 language=transcribe_lang,

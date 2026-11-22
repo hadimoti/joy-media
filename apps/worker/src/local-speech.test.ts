@@ -1,7 +1,17 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import type * as ChildProcess from 'node:child_process';
+import { describe, expect, it, vi } from 'vitest';
 import {
   readSpeechDerivative,
   runSpeechJob,
@@ -9,6 +19,17 @@ import {
   type SpeechAvailability,
   type SpeechModelRunner,
 } from './local-speech.js';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof ChildProcess>();
+  return {
+    ...actual,
+    spawnSync: (command: string, args: readonly string[], options: unknown) =>
+      args[0] === '-c'
+        ? { status: 0 }
+        : actual.spawnSync(command, args, options as Parameters<typeof actual.spawnSync>[2]),
+  };
+});
 
 const noCancel = () => false;
 const noProgress = async () => undefined;
@@ -52,6 +73,141 @@ function availability(value: SpeechAvailability): SpeechAvailability {
 describe('local speech worker runner', () => {
   it('treats absent speech configuration as unavailable', () => {
     expect(speechAvailabilityFromEnvironment({})).toEqual({ synthesis: {} });
+  });
+
+  it.each([
+    { name: 'only STT configured', stt: true, tts: false },
+    { name: 'only TTS configured', stt: false, tts: true },
+    { name: 'both configured', stt: true, tts: true },
+    { name: 'neither configured', stt: false, tts: false },
+  ])('reports independent availability and capabilities when $name', ({ stt, tts }) => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-speech-availability-'));
+    const runnerDir = join(root, 'runners');
+    const modelDir = join(root, 'models');
+    mkdirSync(runnerDir);
+    for (const name of ['transcribe.py', 'synthesize_kokoro.py', 'synthesize_chatterbox.py'])
+      writeFileSync(join(runnerDir, name), 'fixture');
+    for (const name of [
+      'faster-whisper-large-v3-turbo',
+      'kokoro-82m',
+      'chatterbox-en',
+      'chatterbox-fa',
+    ])
+      mkdirSync(join(modelDir, name), { recursive: true });
+    const sttPython = join(root, 'stt-python.exe');
+    const ttsPython = join(root, 'tts-python.exe');
+    writeFileSync(sttPython, 'fixture STT executable');
+    writeFileSync(ttsPython, 'fixture TTS executable');
+    try {
+      const result = speechAvailabilityFromEnvironment({
+        JOY_MEDIA_SPEECH_STT_PYTHON: stt ? sttPython : undefined,
+        JOY_MEDIA_SPEECH_TTS_PYTHON: tts ? ttsPython : undefined,
+        JOY_MEDIA_SPEECH_RUNNER_DIR: runnerDir,
+        JOY_MEDIA_SPEECH_MODEL_DIR: modelDir,
+      });
+      expect(result.transcribe?.runner.command).toBe(stt ? sttPython : undefined);
+      expect(result.synthesis).toEqual(
+        tts
+          ? {
+              'kokoro-82m': expect.objectContaining({ runner: { command: ttsPython, prefixArgs: [join(runnerDir, 'synthesize_kokoro.py')] } }),
+              'chatterbox-en': expect.objectContaining({ runner: { command: ttsPython, prefixArgs: [join(runnerDir, 'synthesize_chatterbox.py')] } }),
+              'chatterbox-fa': expect.objectContaining({ runner: { command: ttsPython, prefixArgs: [join(runnerDir, 'synthesize_chatterbox.py')] } }),
+            }
+          : {},
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not use the retired single-interpreter variable as a fallback', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-speech-legacy-env-'));
+    const runnerDir = join(root, 'runners');
+    const modelDir = join(root, 'models');
+    const legacyPython = join(root, 'legacy-python.exe');
+    mkdirSync(runnerDir);
+    for (const name of ['transcribe.py', 'synthesize_kokoro.py', 'synthesize_chatterbox.py'])
+      writeFileSync(join(runnerDir, name), 'fixture');
+    for (const name of [
+      'faster-whisper-large-v3-turbo',
+      'kokoro-82m',
+      'chatterbox-en',
+      'chatterbox-fa',
+    ])
+      mkdirSync(join(modelDir, name), { recursive: true });
+    writeFileSync(legacyPython, 'fixture legacy executable');
+    try {
+      expect(
+        speechAvailabilityFromEnvironment({
+          JOY_MEDIA_SPEECH_PYTHON: legacyPython,
+          JOY_MEDIA_SPEECH_RUNNER_DIR: runnerDir,
+          JOY_MEDIA_SPEECH_MODEL_DIR: modelDir,
+        }),
+      ).toEqual({ synthesis: {} });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('runs transcription and synthesis with their separately configured executables', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-speech-executable-routing-'));
+    const derivatives = join(root, 'derivatives');
+    const sttPython = join(root, 'stt-python.exe');
+    const ttsPython = join(root, 'tts-python.exe');
+    const sttArgv0 = join(root, 'stt-argv0.txt');
+    const ttsArgv0 = join(root, 'tts-argv0.txt');
+    copyFileSync(process.execPath, sttPython);
+    copyFileSync(process.execPath, ttsPython);
+    const sttScript = [
+      "const fs=require('node:fs');const a=process.argv;",
+      `fs.writeFileSync(${JSON.stringify(sttArgv0)},process.argv[0]);`,
+      "const r=JSON.parse(fs.readFileSync(a[a.indexOf('--request')+1],'utf8'));const o=a[a.indexOf('--output-dir')+1];",
+      "fs.writeFileSync(o+'/transcript.json',JSON.stringify({language:r.language,words:[{text:'Hello',startUs:0,endUs:50000}],speakers:[],provenance:{providerId:'local',modelId:r.modelId,createdAt:new Date().toISOString()}}));",
+    ].join('');
+    const ttsScript = [
+      "const fs=require('node:fs');const a=process.argv;",
+      `fs.writeFileSync(${JSON.stringify(ttsArgv0)},process.argv[0]);`,
+      "const o=a[a.indexOf('--output-dir')+1];",
+      `fs.writeFileSync(o+'/voice.wav',Buffer.from(${JSON.stringify(wavBytes().toString('base64'))},'base64'));`,
+      "fs.writeFileSync(o+'/timings.json',JSON.stringify({durationUs:100000,timingSource:'native',words:[]}));",
+    ].join('');
+    const config = availability({
+      transcribe: modelRunner({ command: sttPython, prefixArgs: ['-e', sttScript, '--'] }, root),
+      synthesis: {
+        'kokoro-82m': modelRunner(
+          { command: ttsPython, prefixArgs: ['-e', ttsScript, '--'] },
+          root,
+        ),
+      },
+    });
+    const source = join(root, 'source.wav');
+    writeFileSync(source, wavBytes());
+    try {
+      await runSpeechJob({
+        jobId: 'routed-stt',
+        jobType: 'speech.transcribe',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'faster-whisper-large-v3-turbo' },
+        sourcePath: source,
+        availability: config,
+        derivativeDirectory: derivatives,
+        cancelled: noCancel,
+        progress: noProgress,
+      });
+      await runSpeechJob({
+        jobId: 'routed-tts',
+        jobType: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+        availability: config,
+        derivativeDirectory: derivatives,
+        consent: { acknowledged: true, purpose: 'general' },
+        cancelled: noCancel,
+        progress: noProgress,
+      });
+      expect(readFileSync(sttArgv0, 'utf8')).toBe(sttPython);
+      expect(readFileSync(ttsArgv0, 'utf8')).toBe(ttsPython);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('writes a staged transcription request, validates its JSON, and retains a checked derivative', async () => {
