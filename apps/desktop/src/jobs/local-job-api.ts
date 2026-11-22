@@ -241,11 +241,20 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
           throw new JobProtocolError(422, 'transcription JSON does not match its request');
         }
       }
+      // The Worker's receipt carries the derivative type nested as descriptor.mimeType; accept that real shape
+      // (and a top-level mimeType). Reading only the top-level field made every real speech job fail here.
+      const descriptor = isRecord(result.descriptor) ? result.descriptor : undefined;
+      const reportedMimeType =
+        typeof result.mimeType === 'string'
+          ? result.mimeType
+          : typeof descriptor?.mimeType === 'string'
+            ? descriptor.mimeType
+            : undefined;
       orchestrator.complete(workerId, jobId, leaseToken, {
         kind: result.kind,
         ...(typeof result.sha256 === 'string' ? { sha256: result.sha256 } : {}),
         ...(typeof result.bytes === 'number' ? { bytes: result.bytes } : {}),
-        ...(typeof result.mimeType === 'string' ? { mimeType: result.mimeType } : {}),
+        ...(reportedMimeType === undefined ? {} : { mimeType: reportedMimeType }),
         ...(result.speech === undefined ? {} : { speech: result.speech }),
         resultJson: JSON.stringify(result),
       });

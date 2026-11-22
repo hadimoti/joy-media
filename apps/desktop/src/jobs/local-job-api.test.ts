@@ -501,6 +501,56 @@ describe('local job API', () => {
       expect(database.jobDispatch.get(leased.jobId)).toMatchObject({ status: 'done' });
     });
 
+    it('completes with the receipt shape the real Worker sends (derivative type nested in descriptor)', async () => {
+      const leased = await queueSpeechAndLease('speech.synthesize');
+      const audio = Buffer.from('RIFF-wav-data');
+      const uploaded = await uploadSpeechDerivative(
+        leased.jobId,
+        leased.leaseToken,
+        'audio/wav',
+        audio,
+      );
+      expect(uploaded.response.status).toBe(200);
+      // Exactly the fields of apps/worker SpeechWorkerDerivative: no top-level mimeType.
+      const complete = await postJson(`/v1/workers/${WORKER}/jobs/${leased.jobId}/complete`, {
+        leaseToken: leased.leaseToken,
+        result: {
+          kind: 'speech.synthesize',
+          sha256: uploaded.sha256,
+          bytes: audio.length,
+          localRef: 'speech-local-ref',
+          descriptor: { mimeType: 'audio/wav', durationUs: 800_000 },
+          speech: { durationUs: 800_000, timingSource: 'unavailable', words: [] },
+        },
+      });
+      expect(complete.status).toBe(200);
+      expect(database.jobDispatch.get(leased.jobId)).toMatchObject({ status: 'done' });
+    });
+
+    it('still rejects a receipt whose nested type does not match the job', async () => {
+      const leased = await queueSpeechAndLease('speech.synthesize');
+      const audio = Buffer.from('RIFF-wav-data');
+      const uploaded = await uploadSpeechDerivative(
+        leased.jobId,
+        leased.leaseToken,
+        'audio/wav',
+        audio,
+      );
+      expect(uploaded.response.status).toBe(200);
+      const complete = await postJson(`/v1/workers/${WORKER}/jobs/${leased.jobId}/complete`, {
+        leaseToken: leased.leaseToken,
+        result: {
+          kind: 'speech.synthesize',
+          sha256: uploaded.sha256,
+          bytes: audio.length,
+          descriptor: { mimeType: 'application/json' },
+          speech: { durationUs: 800_000, timingSource: 'unavailable', words: [] },
+        },
+      });
+      expect(complete.status).toBe(422);
+      expect(database.jobDispatch.get(leased.jobId)).toMatchObject({ status: 'running' });
+    });
+
     it('requires valid synthesis timing and rejects speech writes after cancellation', async () => {
       const leased = await queueSpeechAndLease('speech.synthesize');
       const jobId = leased.jobId;
