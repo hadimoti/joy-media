@@ -298,7 +298,13 @@ export class WorkerRuntime {
         readonly negativePrompt?: string;
         readonly imageAssetId?: string;
         readonly fixture?: boolean;
-        readonly consent?: SpeechConsentRequest;
+        readonly schemaVersion?: number;
+        readonly language?: 'fa-IR' | 'en-US';
+        readonly modelId?: string;
+        readonly text?: string;
+        readonly purpose?: 'general' | 'personal-noncommercial';
+        readonly voiceId?: string;
+        readonly worker?: { readonly consent?: SpeechConsentRequest };
         readonly params?: Record<string, unknown>;
       };
     },
@@ -333,9 +339,13 @@ export class WorkerRuntime {
           derivativeDirectory,
           cancelled: options.cancelled,
           progress: options.progress,
-          ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
+          ...(job.assetId === undefined || job.assetId === 'speech-output'
+            ? {}
+            : { assetId: job.assetId }),
           ...(job.leaseToken === undefined ? {} : { leaseToken: job.leaseToken }),
-          ...(job.payload?.consent === undefined ? {} : { consent: job.payload.consent }),
+          ...(job.payload?.worker?.consent === undefined
+            ? {}
+            : { consent: job.payload.worker.consent }),
           ...(this.options.downloadJobAsset === undefined
             ? {}
             : { downloadJobAsset: this.options.downloadJobAsset }),
@@ -793,6 +803,16 @@ export class WorkerRuntime {
     )
       throw new Error('retained derivative integrity check failed');
     return bytes;
+  }
+
+  removeDerivative(result: WorkerDerivativeReceipt): void {
+    if (result.kind !== 'speech.transcribe' && result.kind !== 'speech.synthesize') return;
+    const localRef = result.localRef;
+    if (!/^speech-[A-Za-z0-9._-]{1,110}$/.test(localRef)) return;
+    const directory = this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
+    rmSync(join(directory, `${localRef}.${result.kind === 'speech.transcribe' ? 'json' : 'wav'}`), {
+      force: true,
+    });
   }
 }
 

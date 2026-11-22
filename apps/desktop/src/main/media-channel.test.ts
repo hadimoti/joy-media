@@ -41,12 +41,12 @@ function setup(
     Pick<MediaChannelDeps, 'readDerivativeRange' | 'statDerivative' | 'voiceConsent'>
   > = {},
 ) {
-  const db = new LocalDatabase({ filePath: ':memory:', now: () => 'T0' });
+  const db = new LocalDatabase({ filePath: ':memory:', now: () => '2026-11-23T00:00:00.000Z' });
   const assetLibrary = typeof library === 'function' ? library(db) : library;
   let ids = 0;
   const orchestrator = createJobOrchestrator({
     store: db.jobDispatch,
-    now: () => 'T0',
+    now: () => '2026-11-23T00:00:00.000Z',
     newId: () => `job-${++ids}`,
     newLeaseToken: () => 'lease-token',
   });
@@ -239,7 +239,9 @@ describe('desktop.media channels', () => {
 
   it('binds a generated voice consent to its registered source and rejects cross-asset reuse', async () => {
     const consentManager = createVoiceConsentManager();
-    const { db, handlers } = setup(undefined, undefined, { voiceConsent: consentManager });
+    const { db, orchestrator, handlers } = setup(undefined, undefined, {
+      voiceConsent: consentManager,
+    });
     const firstBytes = new Uint8Array([1, 2, 3]);
     const secondBytes = new Uint8Array([4, 5, 6]);
     const addAudio = async (id: string, bytes: Uint8Array) => {
@@ -272,11 +274,19 @@ describe('desktop.media channels', () => {
       consent: { acknowledged: true, purpose: 'general' },
     });
     expect(result).toMatchObject({ ok: true, data: { jobId: 'job-1' } });
+    expect(db.jobDispatch.get('job-1')?.refId).toBe('voice-a');
     const queuedPayload = JSON.parse(db.jobDispatch.get('job-1')!.payloadJson!);
+    expect(queuedPayload.worker).toEqual({
+      consent: { acknowledged: true, purpose: 'general' },
+    });
     expect(queuedPayload.voiceId).toBeTruthy();
     expect(consentManager.getVoice(queuedPayload.voiceId)).toMatchObject({
       ownerUserId: 'desktop-local',
       allowedUsersOrTeams: ['desktop-local'],
+    });
+    expect(orchestrator.lease('worker-1')).toMatchObject({
+      refId: 'voice-a',
+      payload: { worker: { consent: { acknowledged: true, purpose: 'general' } } },
     });
 
     await expect(
@@ -328,6 +338,29 @@ describe('desktop.media channels', () => {
     const jobId = (run.data as { jobId: string }).jobId;
     expect(handlers['desktop.media.job.cancel']({ jobId })).toMatchObject({
       data: { status: 'cancelled', error: 'CANCELED' },
+    });
+  });
+
+  it('queues built-in synthesis with the desktop-owned output reference and validated consent', async () => {
+    const { db, orchestrator, handlers } = setup();
+    db.jobDispatch.savePresence({
+      workerId: 'worker-1',
+      capabilities: ['speech.synthesize', 'speech.model.kokoro-82m'],
+      lastHelloAt: 'T0',
+    });
+    const result = await handlers['desktop.media.speech.run']({
+      jobType: 'speech.synthesize',
+      payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      consent: { acknowledged: true, purpose: 'general' },
+    });
+    expect(result).toMatchObject({ ok: true, data: { jobId: 'job-1' } });
+    expect(db.jobDispatch.get('job-1')?.refId).toBe('speech-output');
+    expect(JSON.parse(db.jobDispatch.get('job-1')!.payloadJson!)).toMatchObject({
+      worker: { consent: { acknowledged: true, purpose: 'general' } },
+    });
+    expect(orchestrator.lease('worker-1')).toMatchObject({
+      refId: 'speech-output',
+      payload: { worker: { consent: { acknowledged: true, purpose: 'general' } } },
     });
   });
 
@@ -794,7 +827,10 @@ describe('desktop.media channels', () => {
       data: { workerId: string; capabilities: string[]; lastHelloAt: string }[];
     };
     expect(listed.data).toHaveLength(1);
-    expect(listed.data[0]).toMatchObject({ workerId: 'w-1', lastHelloAt: 'T0' });
+    expect(listed.data[0]).toMatchObject({
+      workerId: 'w-1',
+      lastHelloAt: '2026-11-23T00:00:00.000Z',
+    });
     expect([...listed.data[0]!.capabilities].sort()).toEqual(['audio.ml-denoise', 'render.export']);
   });
 

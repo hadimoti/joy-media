@@ -47,7 +47,7 @@ describe('local job API', () => {
       derivativeDirectory,
       sourceSize: async () => reportedSourceSize,
       openSource: (refId) => {
-        if (refId !== 'ref-1') throw new Error('unknown ref');
+        if (refId !== 'ref-1' && refId !== 'voice-reference') throw new Error('unknown ref');
         return Readable.from([Buffer.from(SOURCE)]);
       },
       completeAi: async (request) => {
@@ -116,6 +116,7 @@ describe('local job API', () => {
 
   async function queueSpeechAndLease(
     jobType: 'speech.transcribe' | 'speech.synthesize',
+    referenceId?: string,
   ): Promise<{ jobId: string; leaseToken: string; payload: Record<string, unknown> }> {
     const payload: Record<string, unknown> =
       jobType === 'speech.transcribe'
@@ -128,7 +129,7 @@ describe('local job API', () => {
     });
     const submitted = orchestrator.submit({
       jobType,
-      refId: jobType === 'speech.synthesize' ? 'speech-output' : 'ref-1',
+      refId: jobType === 'speech.synthesize' ? (referenceId ?? 'speech-output') : 'ref-1',
       kind: jobType,
       payload,
     });
@@ -349,6 +350,33 @@ describe('local job API', () => {
         headers: { 'x-joy-lease-token': synthesis.leaseToken },
       });
       expect(builtIn.status).toBe(409);
+    });
+
+    it('serves the selected reference bytes for English synthesis', async () => {
+      const synthesis = await queueSpeechAndLease('speech.synthesize', 'voice-reference');
+      const source = await call(`/v1/workers/${WORKER}/jobs/${synthesis.jobId}/source`, {
+        headers: { 'x-joy-lease-token': synthesis.leaseToken },
+      });
+      expect(source.status).toBe(200);
+      expect(Buffer.from(await source.arrayBuffer())).toEqual(SOURCE);
+    });
+
+    it('deletes a failed speech derivative from the desktop after upload', async () => {
+      const synthesis = await queueSpeechAndLease('speech.synthesize');
+      const { response } = await uploadSpeechDerivative(
+        synthesis.jobId,
+        synthesis.leaseToken,
+        'audio/wav',
+        Buffer.from('wav bytes'),
+      );
+      expect(response.status).toBe(200);
+      expect(readdirSync(derivativeDirectory)).toHaveLength(1);
+      const failed = await postJson(`/v1/workers/${WORKER}/jobs/${synthesis.jobId}/fail`, {
+        error: 'runner failed after upload',
+        leaseToken: synthesis.leaseToken,
+      });
+      expect(failed.status).toBe(200);
+      expect(readdirSync(derivativeDirectory)).toEqual([]);
     });
 
     it('accepts JSON only for transcription and WAV only for synthesis', async () => {

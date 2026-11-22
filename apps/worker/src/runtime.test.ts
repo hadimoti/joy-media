@@ -551,6 +551,64 @@ describe('Worker runtime', () => {
     }
   });
 
+  it('uses the desktop-validated consent envelope and skips source reads for built-in synthesis', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-worker-speech-consent-'));
+    const runner: SpeechModelRunner = {
+      runner: { command: process.execPath, prefixArgs: ['-e', 'process.exit(1)'] },
+      modelPath: root,
+      scriptPath: join(root, 'runner.py'),
+    };
+    const downloadJobAsset = vi.fn(async () => {
+      throw new Error('built-in synthesis must not read a source');
+    });
+    const runtime = new WorkerRuntime(
+      { workerId: 'speech-consent-worker', createdAt: '2026-11-22T00:00:00.000Z' },
+      {
+        ffmpeg: false,
+        ffprobe: false,
+        comfy: false,
+        mlDenoise: false,
+        aiBroker: false,
+        speech: { synthesis: { 'kokoro-82m': runner } },
+      },
+      { derivativeDirectory: root, downloadJobAsset },
+    );
+    const base = {
+      id: 'speech-consent',
+      type: 'speech.synthesize',
+      assetId: 'speech-output',
+      leaseToken: 'lease-speech-consent',
+      payload: {
+        schemaVersion: 1,
+        language: 'en-US',
+        modelId: 'kokoro-82m',
+        text: 'Hello',
+        purpose: 'general',
+      },
+    } as const;
+    const options = { cancelled: () => false, progress: async () => undefined };
+    await expect(runtime.run(base, options)).rejects.toThrow('Speech synthesis consent is required');
+    let acceptedError: unknown;
+    try {
+      await runtime.run(
+        {
+          ...base,
+          payload: {
+            ...base.payload,
+            worker: { consent: { acknowledged: true, purpose: 'general' } },
+          },
+        },
+        options,
+      );
+    } catch (error) {
+      acceptedError = error;
+    }
+    expect(acceptedError).toBeInstanceOf(Error);
+    expect((acceptedError as Error).message).not.toContain('consent');
+    expect(downloadJobAsset).not.toHaveBeenCalled();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('asks the desktop for a mask job source that is not in its own registry, before the runner starts', async () => {
     const staged: string[] = [];
     const runtime = new WorkerRuntime(

@@ -894,9 +894,10 @@ export function createMediaChannelHandlers(
       jobPayload = {
         ...parsed,
         purpose,
+        worker: { consent: { acknowledged: true, purpose } },
         ...(voiceId === undefined ? {} : { voiceId }),
       };
-      jobRefId = BUILTIN_SPEECH_OUTPUT_REF_ID;
+      jobRefId = sourceAsset?.id ?? BUILTIN_SPEECH_OUTPUT_REF_ID;
     }
 
     const result = deps.orchestrator.submit({

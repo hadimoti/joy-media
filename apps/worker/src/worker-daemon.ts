@@ -3,7 +3,7 @@ import {
   WorkerSessionExpiredError,
   type WorkerControlPlaneClient,
 } from './control-plane-client.js';
-import type { WorkerRuntime } from './runtime.js';
+import type { WorkerDerivativeReceipt, WorkerRuntime } from './runtime.js';
 import type { GpuPreviewHost } from './gpu-preview-host.js';
 
 export class WorkerDaemon {
@@ -49,6 +49,7 @@ export class WorkerDaemon {
       let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
       let heartbeatStopped = false;
       let cancelRequested = false;
+      let speechDerivative: WorkerDerivativeReceipt | undefined;
       // Heartbeats end before any terminal report (complete or fail). Once a job is finishing, a
       // heartbeat could only get LEASE_INVALID from the control plane and log a spurious error.
       const stopHeartbeat = (): void => {
@@ -97,6 +98,12 @@ export class WorkerDaemon {
             await sendHeartbeat();
           },
         });
+        if (
+          result.state === 'completed' &&
+          (result.result.kind === 'speech.transcribe' || result.result.kind === 'speech.synthesize')
+        ) {
+          speechDerivative = result.result;
+        }
         if (gpuPreviewError !== undefined) throw gpuPreviewError;
         const reportCanceled = async (): Promise<void> => {
           stopHeartbeat();
@@ -104,8 +111,13 @@ export class WorkerDaemon {
         };
         // A cancel never reaches upload or complete: the control plane rejects completion of a
         // canceled job, which would mark it FAILED instead of CANCELED.
-        if (result.state !== 'completed' || cancelRequested) await reportCanceled();
-        else {
+        if (result.state !== 'completed' || cancelRequested) {
+          try {
+            await reportCanceled();
+          } finally {
+            if (speechDerivative !== undefined) this.runtime.removeDerivative(speechDerivative);
+          }
+        } else {
           // Upload verified bytes for browser-consumable derivatives. Fixture and
           // provider receipts remain Worker-local until their own contracts land.
           if (
@@ -132,6 +144,8 @@ export class WorkerDaemon {
             stopHeartbeat();
             await this.client.complete(job.id, result.result, job.leaseToken);
           }
+          if (cancelRequested && speechDerivative !== undefined)
+            this.runtime.removeDerivative(speechDerivative);
         }
         leasedJobId = undefined;
         leasedJobToken = undefined;
@@ -142,6 +156,7 @@ export class WorkerDaemon {
         // the session store has already been cleared by the client, so keep
         // polling would only produce an endless "not authorized" loop. Exit so
         // the desktop app's supervisor can start the Worker again with a fresh token.
+        if (speechDerivative !== undefined) this.runtime.removeDerivative(speechDerivative);
         if (error instanceof WorkerSessionExpiredError) throw error;
         const message = error instanceof Error ? error.message : 'unknown Worker failure';
         this.runtime.log.write(`Worker job failed: ${message.slice(0, 240)}`);
