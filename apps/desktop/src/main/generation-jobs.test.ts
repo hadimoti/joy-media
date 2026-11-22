@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -641,4 +649,165 @@ describe('generation job manager', () => {
       expect.any(AbortSignal),
     );
   });
+
+  it('reads a completed picture back as bytes with its MIME type and file name', async () => {
+    const probe = vi.fn(async (): Promise<ProbedGeneratedMedia> => ({
+      kind: 'image',
+      extension: 'png',
+    }));
+    const { manager } = harness({ probe });
+    const started = await manager.start({ profileId: PROFILE.id, kind: 'image', prompt: 'red' });
+    await waitForState(manager, started.id, 'completed');
+
+    const result = await manager.readBytes(started.id);
+
+    expect(result).toMatchObject({
+      mimeType: 'image/png',
+      fileName: 'generation-1.png',
+      job: { id: started.id, state: 'completed' },
+    });
+    expect(Buffer.from(result?.bytes ?? [])).toEqual(IMAGE_BYTES);
+  });
+
+  it('reads a completed video back as bytes with its MIME type and file name', async () => {
+    const { manager, store, generatedDirectory } = harness();
+    const filePath = path.join(generatedDirectory, 'generation-video-1.mp4');
+    seedGeneratedFile(filePath, VIDEO_BYTES);
+    store.store.save(
+      pendingVideo({
+        id: 'generation-video-1',
+        state: 'completed',
+        filePath,
+        sha256: sha256Hex(VIDEO_BYTES),
+      }),
+    );
+
+    const result = await manager.readBytes('generation-video-1');
+
+    expect(result).toMatchObject({ mimeType: 'video/mp4', fileName: 'generation-video-1.mp4' });
+    expect(Buffer.from(result?.bytes ?? [])).toEqual(VIDEO_BYTES);
+  });
+
+  it('returns nothing for an unfinished, unknown, incomplete, or malformed job id', async () => {
+    const { manager, store, generatedDirectory } = harness();
+    const filePath = path.join(generatedDirectory, 'generation-video-2.mp4');
+    seedGeneratedFile(filePath, VIDEO_BYTES);
+    store.store.save(pendingVideo({ id: 'generation-video-2', state: 'running', filePath }));
+    store.store.save(pendingVideo({ id: 'generation-video-3', state: 'completed', filePath }));
+
+    await expect(manager.readBytes('generation-video-2')).resolves.toBeUndefined();
+    await expect(manager.readBytes('generation-video-3')).resolves.toBeUndefined();
+    await expect(manager.readBytes('generation-404')).resolves.toBeUndefined();
+    await expect(manager.readBytes('../generation-1')).resolves.toBeUndefined();
+  });
+
+  it('refuses a generated file whose bytes no longer match the recorded sha256', async () => {
+    const { manager, store, generatedDirectory } = harness();
+    const filePath = path.join(generatedDirectory, 'generation-video-4.mp4');
+    seedGeneratedFile(filePath, Buffer.from('tampered-video'));
+    store.store.save(
+      pendingVideo({
+        id: 'generation-video-4',
+        state: 'completed',
+        filePath,
+        sha256: sha256Hex(VIDEO_BYTES),
+      }),
+    );
+
+    await expect(manager.readBytes('generation-video-4')).rejects.toThrow(
+      'does not match its recorded checksum',
+    );
+  });
+
+  it('refuses a recorded file that sits outside the generated directory', async () => {
+    const { manager, store, directory, generatedDirectory } = harness();
+    mkdirSync(generatedDirectory, { recursive: true });
+    const filePath = path.join(directory, 'outside-generation-5.mp4');
+    seedGeneratedFile(filePath, VIDEO_BYTES);
+    store.store.save(
+      pendingVideo({
+        id: 'generation-video-5',
+        state: 'completed',
+        filePath,
+        sha256: sha256Hex(VIDEO_BYTES),
+      }),
+    );
+
+    await expect(manager.readBytes('generation-video-5')).rejects.toThrow(
+      'outside the generated directory',
+    );
+  });
+
+  it('refuses a link inside the generated directory that points outside it', async () => {
+    const { manager, store, directory, generatedDirectory } = harness();
+    // A directory junction (Windows) or symlink (POSIX): creatable without admin rights on Windows.
+    const outsideDirectory = path.join(directory, 'outside-generation-6');
+    seedGeneratedFile(path.join(outsideDirectory, 'generation-video-6.mp4'), VIDEO_BYTES);
+    mkdirSync(generatedDirectory, { recursive: true });
+    symlinkSync(outsideDirectory, path.join(generatedDirectory, 'linked'), 'junction');
+    const filePath = path.join(generatedDirectory, 'linked', 'generation-video-6.mp4');
+    store.store.save(
+      pendingVideo({
+        id: 'generation-video-6',
+        state: 'completed',
+        filePath,
+        sha256: sha256Hex(VIDEO_BYTES),
+      }),
+    );
+
+    await expect(manager.readBytes('generation-video-6')).rejects.toThrow(
+      'outside the generated directory',
+    );
+  });
+
+  it('refuses an empty file, a file over the cap, and an extension it cannot name', async () => {
+    const { manager, store, generatedDirectory } = harness({ maxVideoBytes: 8 });
+    const emptyPath = path.join(generatedDirectory, 'generation-video-7.mp4');
+    seedGeneratedFile(emptyPath, Buffer.alloc(0));
+    store.store.save(
+      pendingVideo({
+        id: 'generation-video-7',
+        state: 'completed',
+        filePath: emptyPath,
+        sha256: sha256Hex(Buffer.alloc(0)),
+      }),
+    );
+    const largePath = path.join(generatedDirectory, 'generation-video-8.mp4');
+    seedGeneratedFile(largePath, VIDEO_BYTES);
+    store.store.save(
+      pendingVideo({
+        id: 'generation-video-8',
+        state: 'completed',
+        filePath: largePath,
+        sha256: sha256Hex(VIDEO_BYTES),
+      }),
+    );
+    const oddPath = path.join(generatedDirectory, 'generation-video-9.ts');
+    seedGeneratedFile(oddPath, Buffer.from('ab'));
+    store.store.save(
+      pendingVideo({
+        id: 'generation-video-9',
+        state: 'completed',
+        filePath: oddPath,
+        sha256: sha256Hex(Buffer.from('ab')),
+      }),
+    );
+
+    await expect(manager.readBytes('generation-video-7')).rejects.toThrow(
+      'outside the allowed range',
+    );
+    await expect(manager.readBytes('generation-video-8')).rejects.toThrow(
+      'outside the allowed range',
+    );
+    await expect(manager.readBytes('generation-video-9')).rejects.toThrow('type is not supported');
+  });
 });
+
+function sha256Hex(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function seedGeneratedFile(filePath: string, bytes: Buffer): void {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, bytes);
+}

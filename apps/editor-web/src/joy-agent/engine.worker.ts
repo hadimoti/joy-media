@@ -8,6 +8,8 @@ import {
 } from './bounded-tool-loop.js';
 import {
   createHostRpcClient,
+  HOST_RPC_DEFAULT_DEADLINE_MS,
+  HOST_RPC_MAX_DEADLINE_MS,
   HostRpcError,
   type HostRpcJson,
   type HostRpcRun,
@@ -77,22 +79,22 @@ const CONNECTION_TIMEOUT_MS = PROVIDER_CONNECTION_CALL_TIMEOUT_MS;
 const PROBE_MAX_BYTES = 64 * 1024;
 const MAX_PLAN_ONLY_RESULT_BYTES = 65_536;
 /** Explicit synthetic media probes are independently bounded below 16 KiB each. */
-const MEDIA_CAPABILITY_PROBE_TIMEOUT_MS = 15_000;
-const MEDIA_CAPABILITY_MODALITY_TIMEOUT_MS = 4_000;
+const MEDIA_CAPABILITY_PROBE_TIMEOUT_MS = 25_000;
+const MEDIA_CAPABILITY_MODALITY_TIMEOUT_MS = 20_000;
 const MEDIA_CAPABILITY_PROBE_MAX_RESPONSE_BYTES = 16 * 1024;
 const MEDIA_CAPABILITY_PROBE_MAX_REQUEST_BYTES = 8 * 1024;
-const MEDIA_CAPABILITY_PROBE_MAX_TOKENS = 8;
+const MEDIA_CAPABILITY_PROBE_MAX_TOKENS = 1024;
 
 /**
  * Tiny product-owned test fixtures. They are inline bytes, never a project
  * asset, local file, Blob URL, public upload URL, or generated credential.
  *
- * - image: 1×1 PNG
+ * - image: 16×16 solid green PNG
  * - audio: 1-sample, silent 8-bit PCM WAV
  * - video: 16×16 one-frame black WebM
  */
 const SYNTHETIC_IMAGE_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/7QzP6QAAAABJRU5ErkJggg==' as const;
+  'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFUlEQVR4nGNg+M9AGhrVMKph+GoAAJHq/wEkpOWMAAAAAElFTkSuQmCC' as const;
 const SYNTHETIC_AUDIO_WAV_BASE64 =
   'UklGRiUAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQEAAACA' as const;
 const SYNTHETIC_VIDEO_WEBM_BASE64 =
@@ -516,6 +518,18 @@ async function sendObservationEvidence(
         callProvider(call, body, signal, MAX_MULTIMODAL_RESPONSE_BYTES).then((reply) => reply.text),
     });
     active.transport = transport;
+    // `active.maxBytes` bounds raw evidence bytes; the direct provider request also carries
+    // base64 (~4/3 expansion), data-URI prefixes, prompt text, and JSON envelope framing.
+    const promptBytes = new TextEncoder().encode(active.prompt).byteLength;
+    const encodedRequestBudgetBytes = Math.min(
+      MAX_MULTIMODAL_REQUEST_BYTES,
+      evidenceBytes +
+        Math.ceil(evidenceBytes / 3) +
+        4 +
+        active.evidence.length * 128 +
+        promptBytes +
+        1024,
+    );
     transport.grant(
       issueObservationConsent(
         {
@@ -527,7 +541,7 @@ async function sendObservationEvidence(
           evidenceIds: active.evidenceIds,
           modalities: ['image'],
           maxRequests: 1,
-          maxBytes: active.maxBytes,
+          maxBytes: Math.max(active.maxBytes, encodedRequestBudgetBytes),
           expiresAtMs: active.expiresAtMs,
         },
         { modelId: connection.modelId, modalities: ['image'] },
@@ -1382,7 +1396,7 @@ function systemInstruction(
                 'media_contact_sheet',
               ].includes(name),
             )
-          ? 'Use read_project_context first, then qc_report_read for the saved report. Use only frameIds listed by that report. media_frames_view and media_contact_sheet send selected images only through the host consent flow when the cached image capability is supported, privacy policy permits it, the user has approved the consent card, and the per-run frame budget has room. If JOY refuses, explain the refusal and do not claim to have seen the frames. Treat returned analysis as bounded model observation, not a measurement. If the user asks to fix findings, call qc_repair_run; JOY builds one deterministic plan and waits for the owner to approve it in the plan card. Do not claim edits were applied unless the repair result says they were. Use validate_proposal only for other requested edits after reviewing the report and any approved frame analysis; a successful validation creates a reversible preview and never applies an edit. Do not invent report, frame, object, clip, asset, property, track, or template IDs.'
+          ? 'Use read_project_context first, then call qc_report_read with reportId "latest" for the saved report. Next, call media_contact_sheet or media_frames_view with an evenly spaced subset of the report\'s frameIds covering cuts and findings before proposing repairs or concluding (never exceed report.run.frameBudget — 12 frames total per run by default across calls). Use only frameIds listed by that report. media_frames_view and media_contact_sheet send selected images only through the host consent flow when the cached image capability is supported, privacy policy permits it, the user has approved the consent card, and the per-run frame budget has room. If JOY refuses, explain the refusal and do not claim to have seen the frames. Treat returned analysis as bounded model observation, not a measurement. If the user asks to fix findings, call qc_repair_run after inspecting frames; JOY builds one deterministic plan and waits for the owner to approve it in the plan card. Do not claim edits were applied unless the repair result says they were. Use validate_proposal only for other requested edits after reviewing the report and any approved frame analysis; a successful validation creates a reversible preview and never applies an edit. Do not invent report, frame, object, clip, asset, property, track, or template IDs.'
           : structured &&
               allowedToolNames.some((name) =>
                 [
@@ -1579,9 +1593,17 @@ async function run(request: JoyAgentRunRequest): Promise<void> {
           consumeBudget(active, 'check');
           const remainingMs = active.budget.deadlineAtMs - Date.now();
           if (remainingMs <= 0) consumeBudget(active, 'check');
+          const maxMethodDeadlineMs =
+            method === 'qc_report_read' ||
+            method === 'media_frames_view' ||
+            method === 'media_contact_sheet' ||
+            method === 'qc_repair_run' ||
+            method === 'generate_media'
+              ? HOST_RPC_MAX_DEADLINE_MS
+              : HOST_RPC_DEFAULT_DEADLINE_MS;
           try {
             const hostResult = await hostRpc.call(active.rpcRun, method, args, {
-              deadlineMs: Math.max(1, Math.min(15_000, remainingMs)),
+              deadlineMs: Math.max(1, Math.min(maxMethodDeadlineMs, remainingMs)),
             });
             return hostResult;
           } catch (error) {
@@ -1623,13 +1645,23 @@ async function run(request: JoyAgentRunRequest): Promise<void> {
         return;
       }
       const result =
-        outcome.kind === 'clarification'
-          ? { kind: 'clarification', question: outcome.question }
-          : { kind: 'answer', text: outcome.text };
+        outcome.kind === 'generation'
+          ? {
+              kind: 'generation',
+              requestId: outcome.requestId,
+              mediaKind: outcome.mediaKind,
+            }
+          : outcome.kind === 'clarification'
+            ? { kind: 'clarification', question: outcome.question }
+            : { kind: 'answer', text: outcome.text };
       assertSafeResult(result);
       emit(active, 'completed', {
         message:
-          outcome.kind === 'clarification' ? 'JOY needs one clarification' : 'JOY answer ready',
+          outcome.kind === 'generation'
+            ? 'JOY handed the generation request to the host'
+            : outcome.kind === 'clarification'
+              ? 'JOY needs one clarification'
+              : 'JOY answer ready',
         result,
       });
       return;

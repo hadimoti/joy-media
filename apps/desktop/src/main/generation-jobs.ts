@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdir, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
@@ -48,6 +48,20 @@ const VIDEO_EXTENSIONS = new Set([
   'asf',
   'ogg',
 ]);
+const GENERATED_MIME_TYPES: ReadonlyMap<string, string> = new Map([
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['webp', 'image/webp'],
+  ['mp4', 'video/mp4'],
+  ['mov', 'video/quicktime'],
+  ['mkv', 'video/x-matroska'],
+  ['webm', 'video/webm'],
+  ['avi', 'video/x-msvideo'],
+  ['mpeg', 'video/mpeg'],
+  ['mpg', 'video/mpeg'],
+  ['ogg', 'video/ogg'],
+]);
 
 export interface GenerationDownload {
   readonly body: AsyncIterable<Uint8Array>;
@@ -77,6 +91,14 @@ export interface GenerationJobsOptions {
   readonly videoTimeoutMs?: number;
 }
 
+/** A finished generated file, read back and verified against the sha256 recorded when it was saved. */
+export interface GeneratedMediaBytes {
+  readonly bytes: Uint8Array;
+  readonly mimeType: string;
+  readonly fileName: string;
+  readonly job: GenerationJobRecord;
+}
+
 export interface GenerationJobs {
   start(request: {
     readonly profileId: string;
@@ -86,6 +108,11 @@ export interface GenerationJobs {
   status(jobId: string): GenerationJobRecord | undefined;
   cancel(jobId: string): Promise<GenerationJobRecord | undefined>;
   list(): readonly GenerationJobRecord[];
+  /**
+   * Reads a completed job's file. Returns undefined when there is nothing to read; rejects when
+   * the file fails a check (outside the generated directory, wrong size, sha256 mismatch, unknown type).
+   */
+  readBytes(jobId: string): Promise<GeneratedMediaBytes | undefined>;
   resume(): void;
   stop(): void;
 }
@@ -740,6 +767,57 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
     },
     status(jobId) {
       return read(jobId);
+    },
+    async readBytes(jobId) {
+      if (!ID_PATTERN.test(jobId)) return undefined;
+      const job = read(jobId);
+      if (
+        job === undefined ||
+        job.state !== 'completed' ||
+        job.filePath === undefined ||
+        job.sha256 === undefined
+      ) {
+        return undefined;
+      }
+
+      // Resolve links before comparing, so a link inside the directory that points outside is refused.
+      const directory = await realpath(options.generatedDirectory);
+      const file = await realpath(job.filePath);
+      const relative = path.relative(directory, file);
+      if (
+        relative === '' ||
+        relative === '..' ||
+        relative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relative)
+      ) {
+        throw new Error('The generated file is outside the generated directory.');
+      }
+      const extension = path.extname(file).slice(1).toLowerCase();
+      const mimeType = GENERATED_MIME_TYPES.get(extension);
+      if (mimeType === undefined || !mimeType.startsWith(`${job.kind}/`)) {
+        throw new Error('The generated file type is not supported.');
+      }
+
+      // Check the size before reading so an oversized file is never loaded into memory.
+      const limit = job.kind === 'image' ? maxImageBytes : maxVideoBytes;
+      const info = await stat(file);
+      if (!info.isFile() || info.size === 0 || info.size > limit) {
+        throw new Error('The generated file size is outside the allowed range.');
+      }
+      const buffer = await readFile(file);
+      if (buffer.byteLength === 0 || buffer.byteLength > limit) {
+        throw new Error('The generated file size is outside the allowed range.');
+      }
+      const digest = createHash('sha256').update(buffer).digest('hex');
+      if (digest !== job.sha256) {
+        throw new Error('The generated file does not match its recorded checksum.');
+      }
+      return {
+        bytes: new Uint8Array(buffer),
+        mimeType,
+        fileName: path.basename(file),
+        job,
+      };
     },
     async cancel(jobId) {
       const job = read(jobId);

@@ -671,6 +671,7 @@ import {
   type MissingExportClip,
 } from './export-missing-media.js';
 import { MissingExportDialog } from './MissingExportDialog.js';
+import { createDesktopGenerationHost } from './joy-agent/desktop-generation-host.js';
 
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
 // One missing-media host per editor session, so the panel's list and operations share state.
@@ -1545,6 +1546,7 @@ function EditorWorkspace({
   const [mediaReadyRevision, setMediaReadyRevision] = useState(0);
   /** Last decoded RGBA per timeline clip id — feeds dual-texture transitions. */
   const clipFrameCacheRef = useRef<Map<string, ImageDataLike>>(new Map());
+  const partnerStillSourceUrlRef = useRef<Map<string, string>>(new Map());
   const [clipFrameTick, setClipFrameTick] = useState(0);
   const partnerVideoRef = useRef<HTMLVideoElement | null>(null);
   const partnerDecoderRef = useRef<HtmlMediaDecoder | null>(null);
@@ -2326,6 +2328,7 @@ function EditorWorkspace({
       }
       partnerCanvasRef.current = null;
       clipFrameCacheRef.current.clear();
+      partnerStillSourceUrlRef.current.clear();
       recordPreviewResourceReleased(
         'partner-decoder',
         `${previewResourcePrefixRef.current}:partner`,
@@ -2342,12 +2345,26 @@ function EditorWorkspace({
         transitionClipTimes(session.timelineProject),
       );
       if (transition === undefined) return;
-      const { video, decoder } = ensurePartnerDecoder();
       for (const clipId of [transition.leftClipId, transition.rightClipId]) {
         const clip = findVideoClipById(session.timelineProject, clipId);
         if (clip === undefined) continue;
-        const source = await mediaResolver.resolve(playbackAssetId(session.visualProject, clip));
+        const resolvedAssetId = playbackAssetId(session.visualProject, clip);
+        const assetKind = session.visualProject.assets[resolvedAssetId]?.kind ?? clip.kind;
+        const source = await mediaResolver.resolve(resolvedAssetId);
         const sourceUrl = new URL(source.url, window.location.href).href;
+        if (assetKind === 'image') {
+          if (
+            clipFrameCacheRef.current.has(clip.id) &&
+            partnerStillSourceUrlRef.current.get(clip.id) === sourceUrl
+          ) {
+            continue;
+          }
+          const bitmap = await decodeStillFrame(sourceUrl);
+          rememberClipFrame(clip.id, bitmap);
+          partnerStillSourceUrlRef.current.set(clip.id, sourceUrl);
+          continue;
+        }
+        const { video, decoder } = ensurePartnerDecoder();
         activeMediaConsumersRef.current.add(video);
         if (video.src !== sourceUrl) {
           video.src = sourceUrl;
@@ -2404,15 +2421,27 @@ function EditorWorkspace({
         (transition !== undefined
           ? findVideoClipById(session.timelineProject, transition.leftClipId)
           : undefined);
-      // No video under the playhead (a gap): the Monitor must not keep the last frame it drew.
-      if (clip === undefined) setPreviewVideoFrame(undefined);
+      const clipAssetId =
+        clip === undefined ? undefined : playbackAssetId(session.visualProject, clip);
+      const clipAssetKind =
+        clipAssetId === undefined ? undefined : session.visualProject.assets[clipAssetId]?.kind;
+      const isVideoPlayableClip =
+        clip !== undefined &&
+        clip.kind === 'video' &&
+        (clipAssetKind === undefined || clipAssetKind === 'video');
+      // No playable video under the playhead (a gap or still-image clip): clear any prior decoded video frame.
+      if (!isVideoPlayableClip) {
+        setPreviewVideoFrame(undefined);
+        if (transition !== undefined && clip !== undefined && !play) {
+          await captureTransitionPartnerFrames(playheadUs).catch(() => undefined);
+        }
+        return false;
+      }
       if (
         video === null ||
         replacementAudio === null ||
         clock === null ||
-        composition === undefined ||
-        clip === undefined ||
-        clip.kind !== 'video'
+        composition === undefined
       )
         return false;
       const source = await mediaResolver.resolve(playbackAssetId(session.visualProject, clip));
@@ -6012,6 +6041,19 @@ function EditorWorkspace({
       return content;
     };
     const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
+    const desktopGenerationHost =
+      api.id === 'agent' && isDesktopHost()
+        ? createDesktopGenerationHost({
+            projectId: controlPlaneProject.controlPlaneProjectId,
+            projectTitle: controlPlaneProject.title,
+            session: context.session,
+            audioState: context.audioState,
+            client: mediaControlPlaneClient,
+            getPlayheadUs: () => context.state.playheadUs,
+            onAudioState: context.setAudioState,
+            originalAssetCache: originalAssetCachePromise,
+          })
+        : undefined;
     const previewVisualProject =
       agentPreviewState.document?.baseRevision === context.session.projectRevisionId
         ? agentPreviewState.document.preview
@@ -7459,6 +7501,12 @@ function EditorWorkspace({
           joyAgentEngineClient={joyAgentEngineClientRef.current!}
           joyAgentRunController={joyAgentRunController}
           observationAdapterFactory={observationAdapterFactory}
+          {...(desktopGenerationHost === undefined
+            ? {}
+            : {
+                generationAdapter: desktopGenerationHost.adapter,
+                generatedMedia: desktopGenerationHost.generatedMedia,
+              })}
           resolveAudioAssetUrl={resolveAudioAssetUrl}
           agentPresenceStore={appAgentPresenceStore}
           agentPreviewStore={appAgentPreviewStore}

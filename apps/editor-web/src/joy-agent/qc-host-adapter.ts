@@ -27,6 +27,13 @@
 
 import { QC_DEFAULT_RUN_FRAME_BUDGET } from './qc-request-intent.js';
 import {
+  collectTimelineAssetClips,
+  mapAssetQcReportsToTimelineFindings,
+  resolveTimelineAssetReports,
+  type ResolvedTimelineAssetClip,
+  type TimelineAssetQcFinding,
+} from './timeline-asset-qc.js';
+import {
   createTimelineContactSheet,
   MAX_TIMELINE_CONTACT_SHEET_FRAMES,
 } from '../media-observation/contact-sheet.js';
@@ -72,6 +79,7 @@ export interface QcTimelineSource {
   readonly durationUs: number;
   readonly cutTimesUs: readonly number[];
   readonly textBoxes: readonly TimelineQcTextBox[];
+  readonly assetClips?: readonly ResolvedTimelineAssetClip[];
   /** Undefined when the host cannot capture composed frames. */
   readonly composition: Omit<CompositionObservationRequest, 'outputTimesUs'> | undefined;
 }
@@ -83,7 +91,16 @@ export interface QcTimelineLike {
       string,
       | {
           readonly tracks: readonly {
-            readonly clips: readonly { readonly startUs: number; readonly durationUs: number }[];
+            readonly enabled?: boolean;
+            readonly clips: readonly {
+              readonly id?: string;
+              readonly kind?: string;
+              readonly assetId?: string;
+              readonly startUs: number;
+              readonly durationUs: number;
+              readonly sourceInUs?: number;
+              readonly playbackRate?: number;
+            }[];
           }[];
         }
       | undefined
@@ -117,7 +134,8 @@ export function qcTimelineSourceFromTimeline(
   const cutTimesUs = [...starts]
     .filter((timeUs) => timeUs > 0 && timeUs < durationUs)
     .sort((left, right) => left - right);
-  return Object.freeze({ durationUs, cutTimesUs, textBoxes, composition });
+  const assetClips = collectTimelineAssetClips(root);
+  return Object.freeze({ durationUs, cutTimesUs, textBoxes, assetClips, composition });
 }
 
 export interface QcHostIdentity {
@@ -192,11 +210,17 @@ export interface QcHostAdapterDeps {
    * (its `run` then names the model and counts the frames). The Joy Code panel shows one report card from it.
    */
   readonly onReport?: (report: Readonly<Record<string, unknown>>) => void;
+  readonly checkAsset?: (
+    assetId: string,
+    signal: AbortSignal,
+  ) => Promise<Readonly<Record<string, unknown>> | undefined>;
+  readonly getMasterGain?: () => number;
 }
 
 export interface QcHostAdapterSharedState {
   readonly evidenceStore: EvidenceStore;
   readonly reports: Map<string, StoredReport>;
+  readonly assetReports: Map<string, Readonly<Record<string, unknown>>>;
   latestReportId: string | undefined;
   counter: number;
   inflight: QcHostSharedInflight | undefined;
@@ -213,6 +237,7 @@ export function createQcHostAdapterSharedState(): QcHostAdapterSharedState {
   return {
     evidenceStore: createEvidenceStore(),
     reports: new Map(),
+    assetReports: new Map(),
     latestReportId: undefined,
     counter: 0,
     inflight: undefined,
@@ -278,6 +303,8 @@ interface StoredReport {
 export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
   const shared = deps.sharedState;
   const reports = shared?.reports ?? new Map<string, StoredReport>();
+  const assetReportsCache =
+    shared?.assetReports ?? new Map<string, Readonly<Record<string, unknown>>>();
   let latestReportId = shared?.latestReportId;
   let counter = shared?.counter ?? 0;
   let inflight = shared?.inflight;
@@ -510,6 +537,31 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
       if (!identityIsCurrent())
         return failure('authority-unavailable', 'The project changed, so no check was stored.');
 
+      let assetFindings: readonly TimelineAssetQcFinding[] = [];
+      if (
+        deps.checkAsset !== undefined &&
+        source.assetClips !== undefined &&
+        source.assetClips.length > 0
+      ) {
+        const assetReports = await resolveTimelineAssetReports({
+          clips: source.assetClips,
+          cache: assetReportsCache,
+          checkAsset: deps.checkAsset,
+          signal,
+        });
+        if (disposed || signal.aborted) return failure('cancelled', 'The check was cancelled.');
+        if (!identityIsCurrent())
+          return failure('authority-unavailable', 'The project changed, so no check was stored.');
+        const masterGain = deps.getMasterGain?.() ?? 1;
+        assetFindings = mapAssetQcReportsToTimelineFindings({
+          clips: source.assetClips,
+          reports: assetReports,
+          timesUs: plan.timesUs,
+          frameIdAt: timelineQcFrameId,
+          masterGain,
+        }).filter((finding) => inRanges(finding.startUs, finding.endUs));
+      }
+
       const built = buildTimelineReport({
         reportId,
         projectId: identity.projectId,
@@ -519,6 +571,7 @@ export function createQcHostAdapter(deps: QcHostAdapterDeps): QcHostAdapter {
         coverage: plan.coverage,
         missedCutTimesUs: plan.missedCutTimesUs,
         textChecks: result.textChecks,
+        assetFindings,
         ...(textMeasurementNote === undefined ? {} : { textMeasurementNote }),
       });
       remember(reportId, {
@@ -977,6 +1030,8 @@ export interface EditorQcAdapterInput {
   /** Receives the report when it is stored and again when frames were sent for it. */
   readonly onReport?: QcHostAdapterDeps['onReport'];
   readonly sharedState?: QcHostAdapterSharedState;
+  readonly checkAsset?: QcHostAdapterDeps['checkAsset'];
+  readonly getMasterGain?: QcHostAdapterDeps['getMasterGain'];
 }
 
 /**
@@ -988,6 +1043,8 @@ export function createEditorQcAdapter(input: EditorQcAdapterInput): QcHostAdapte
   return createQcHostAdapter({
     evidenceStore: input.sharedState?.evidenceStore ?? createEvidenceStore(),
     ...(input.sharedState === undefined ? {} : { sharedState: input.sharedState }),
+    ...(input.checkAsset === undefined ? {} : { checkAsset: input.checkAsset }),
+    ...(input.getMasterGain === undefined ? {} : { getMasterGain: input.getMasterGain }),
     identity: () =>
       input.isCurrent()
         ? {
@@ -1051,6 +1108,7 @@ interface TimelineReportInput {
   };
   readonly missedCutTimesUs: readonly number[];
   readonly textChecks: readonly TimelineQcTextAnalysis[];
+  readonly assetFindings?: readonly TimelineAssetQcFinding[];
   readonly textMeasurementNote?: string;
 }
 
@@ -1060,6 +1118,17 @@ function buildTimelineReport(input: TimelineReportInput): { readonly [key: strin
   const add = (finding: { readonly [key: string]: HostRpcJson }): void => {
     findings.push({ id: `qc-finding-${findings.length + 1}`, state: 'measured', ...finding });
   };
+  for (const finding of input.assetFindings ?? [])
+    add({
+      type: finding.type,
+      severity: finding.severity,
+      startUs: finding.startUs,
+      endUs: finding.endUs,
+      label: finding.label,
+      ...(finding.measured === undefined ? {} : { measured: finding.measured }),
+      fixable: finding.fixable,
+      evidenceIds: finding.evidenceIds,
+    });
   for (const check of input.textChecks) {
     const midpointUs = Math.floor(check.startUs + (check.endUs - check.startUs) / 2);
     if (!check.safeArea.inside90Percent)

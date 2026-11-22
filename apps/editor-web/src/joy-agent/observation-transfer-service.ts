@@ -514,7 +514,9 @@ function parseConnection(value: unknown): ByokSessionConfig | undefined {
   )
     return undefined;
   if (
-    (value.provider !== 'openrouter' && value.provider !== 'openai-compatible') ||
+    (value.provider !== 'openrouter' &&
+      value.provider !== 'openai-compatible' &&
+      value.provider !== 'custom') ||
     typeof value.baseUrl !== 'string' ||
     value.baseUrl.length === 0 ||
     value.baseUrl.length > 2_048 ||
