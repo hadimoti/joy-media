@@ -7,6 +7,8 @@
  * values for pure red, green, blue, white and black.
  */
 
+import { overFrameBackdrop } from './frame-backdrop.js';
+
 /** The four scopes the colour panel can show. */
 export type ScopeKind = 'waveform' | 'parade' | 'vectorscope' | 'histogram';
 
@@ -54,9 +56,10 @@ export function sampleScopePixels(
     for (let column = 0; column < pixels.width; column += stride) {
       const offset = (row * pixels.width + column) * 4;
       if (offset + 2 >= pixels.data.length) break;
-      const red = pixels.data[offset]! / 255;
-      const green = pixels.data[offset + 1]! / 255;
-      const blue = pixels.data[offset + 2]! / 255;
+      const alpha = pixels.data[offset + 3] ?? 255;
+      const red = overFrameBackdrop('r', pixels.data[offset]!, alpha) / 255;
+      const green = overFrameBackdrop('g', pixels.data[offset + 1]!, alpha) / 255;
+      const blue = overFrameBackdrop('b', pixels.data[offset + 2]!, alpha) / 255;
       samples.push({
         column,
         row,

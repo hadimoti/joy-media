@@ -1770,17 +1770,17 @@ h2 {
   position: relative;
   overflow: hidden;
   background:
-    linear-gradient(45deg, #1a1a1c 25%, transparent 25%),
-    linear-gradient(-45deg, #1a1a1c 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #1a1a1c 75%),
-    linear-gradient(-45deg, transparent 75%, #1a1a1c 75%);
+    linear-gradient(45deg, #2a2a2f 25%, transparent 25%),
+    linear-gradient(-45deg, #2a2a2f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2a2a2f 75%),
+    linear-gradient(-45deg, transparent 75%, #2a2a2f 75%);
   background-size: 16px 16px;
   background-position:
     0 0,
     0 8px,
     8px -8px,
     -8px 0;
-  background-color: #121214;
+  background-color: #151518;
 }
 .monitor-canvas-wrap[data-monitor-background='black'] {
   background: #000000;
@@ -1970,6 +1970,9 @@ h2 {
 }
 .monitor-overlay-svg.is-border rect {
   stroke: #ffffff66;
+}
+.monitor-overlay-svg.is-frame-edge rect {
+  stroke: #ffffff2e;
 }
 .monitor-overlay-svg.is-title-safe rect {
   stroke: var(--joy-accent);
