@@ -107,11 +107,12 @@ describe('local masking runner', () => {
   it('ends the whole runner tree when the job is cancelled, not only the router', async () => {
     const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-mask-cancel-'));
     const pidFile = join(derivativeDirectory, 'grandchild.pid');
-    // The router role: start the model script as a child, then wait for it.
+    // The router role: start the model script as a child, then wait for it. On Windows the child is detached
+    // from Node's own job object, as the Python router's child is; elsewhere it stays in the router's group.
     const router = [
       "const {spawn}=require('node:child_process');",
       "const fs=require('node:fs');",
-      `const g=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',detached:true});`,
+      `const g=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',detached:process.platform==='win32'});`,
       `fs.writeFileSync(${JSON.stringify(pidFile)},String(g.pid));`,
       "g.on('exit',()=>process.exit(0));",
     ].join('');
