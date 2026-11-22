@@ -36,6 +36,7 @@ import type {
 import type { SignInAttemptContext, SignInAttempts } from './oauth/sign-in-attempts.js';
 import type { GenerationJobs } from './generation-jobs.js';
 import type { GenerationJobKind } from '../store/generation-job-store.js';
+import type { GenerationJobRecord } from '../store/generation-job-store.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import {
   isAgentSlotConfigured,
@@ -135,6 +136,11 @@ export type IpcHandler = (
 /** Builds the channel -> handler dispatch table. Never exposed directly to the renderer. */
 /** The longest the library settings reply waits for the drive type; see `driveTypeOf`. */
 export const DRIVE_TYPE_WAIT_MS = 400;
+
+function stripGenerationFilePath(job: GenerationJobRecord): Omit<GenerationJobRecord, 'filePath'> {
+  const { filePath: _filePath, ...rendererJob } = job;
+  return rendererJob;
+}
 
 export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcHandler> {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -412,7 +418,10 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         return { ok: false, error: 'Generation is not available in this build' };
       }
       try {
-        return { ok: true, data: await deps.generationJobs.start(request) };
+        return {
+          ok: true,
+          data: stripGenerationFilePath(await deps.generationJobs.start(request)),
+        };
       } catch {
         return { ok: false, error: 'The generation job could not be started' };
       }
@@ -422,7 +431,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (jobId === undefined) return { ok: false, error: 'Invalid generation job id' };
       const job = deps.generationJobs?.status(jobId);
       if (job === undefined) return { ok: false, error: 'Unknown generation job id' };
-      return { ok: true, data: job };
+      return { ok: true, data: stripGenerationFilePath(job) };
     },
     'desktop.generation.cancel': async (payload): Promise<IpcResult> => {
       const jobId = asJobId(payload);
@@ -432,13 +441,32 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       }
       const job = await deps.generationJobs.cancel(jobId);
       if (job === undefined) return { ok: false, error: 'Unknown generation job id' };
-      return { ok: true, data: job };
+      return { ok: true, data: stripGenerationFilePath(job) };
     },
     'desktop.generation.list': (): IpcResult => {
       if (deps.generationJobs === undefined) {
         return { ok: false, error: 'Generation is not available in this build' };
       }
-      return { ok: true, data: deps.generationJobs.list() };
+      return { ok: true, data: deps.generationJobs.list().map(stripGenerationFilePath) };
+    },
+    'desktop.generation.bytes': async (payload): Promise<IpcResult> => {
+      const jobId = asJobId(payload);
+      if (jobId === undefined) return { ok: false, error: 'Invalid generation job id' };
+      if (deps.generationJobs === undefined) {
+        return { ok: false, error: 'Generation is not available in this build' };
+      }
+      try {
+        const result = await deps.generationJobs.readBytes(jobId);
+        if (result === undefined) return { ok: false, error: 'Generated media is not available' };
+        // The renderer addresses media by job id only; the local file path never crosses IPC.
+        const { filePath: _filePath, ...job } = result.job;
+        return {
+          ok: true,
+          data: { bytes: result.bytes, mimeType: result.mimeType, fileName: result.fileName, job },
+        };
+      } catch {
+        return { ok: false, error: 'Generated media could not be read' };
+      }
     },
     'desktop.provider-profile.save': async (payload, saveContext): Promise<IpcResult> => {
       throwIfAttemptSignalCancelled(saveContext?.signal);

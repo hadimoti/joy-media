@@ -213,6 +213,26 @@ describe('generate_media in the bounded tool loop', () => {
       code: 'JOY_AGENT_GENERATION_BUDGET_EXCEEDED',
     });
   });
+
+  it('ends the run when the host accepts a terminal generation handoff', async () => {
+    const host = generationHost(() => ({
+      ok: true,
+      terminal: 'generation',
+      requestId: 'generation-request-1',
+      kind: 'image',
+    }));
+    const { outcome } = await runScenario(
+      [contextBatch, [['handoff', 'generate_media', picture]]],
+      host,
+    );
+
+    expect(outcome).toEqual({
+      kind: 'generation',
+      requestId: 'generation-request-1',
+      mediaKind: 'image',
+    });
+    expect(host.mock.calls.filter(([method]) => method === 'generate_media')).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -263,6 +283,40 @@ async function invoke(method: Method, args: HostRpcJson, context = handlerContex
 }
 
 describe('generate_media host bridge', () => {
+  it('returns an enqueued request without waiting for approval or job completion', async () => {
+    const requestApproval = vi.fn(async () => false);
+    const start = vi.fn(() => 'job-1');
+    const awaitJob = vi.fn(async () => ({
+      jobId: 'job-1',
+      kind: 'image' as const,
+      status: 'completed' as const,
+    }));
+    const enqueue = vi.fn(() => 'generation-request-1');
+    const method = methodFor(
+      {
+        requestApproval,
+        start,
+        awaitJob,
+        enqueue,
+        attach: vi.fn(() => ({ assetId: 'a', placed: false })),
+      },
+      'generate_media',
+    );
+
+    const result = await invoke(method, picture);
+
+    expect(enqueue).toHaveBeenCalledWith(picture, expect.anything());
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(awaitJob).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: true,
+      terminal: 'generation',
+      requestId: 'generation-request-1',
+      kind: 'image',
+    });
+  });
+
   it('does not start a provider job unless the cost card is allowed', async () => {
     const requestApproval = vi.fn(async () => false);
     const start = vi.fn(() => 'job-1');
@@ -398,6 +452,65 @@ describe('generate_media host bridge', () => {
       code: 'JOY_AGENT_GENERATION_JOB_UNAVAILABLE',
     });
   });
+
+  it('allows a completed job from a prior run when the adapter confirms it', async () => {
+    const attach = vi.fn(() => ({ assetId: 'generated-prior-run', placed: false }));
+    const canAttachCompletedJob = vi.fn(async (jobId: string) => jobId === 'job-from-prior-run');
+    const method = methodFor(
+      {
+        requestApproval: async () => true,
+        start: () => 'job-current-run',
+        awaitJob: async () => ({
+          jobId: 'job-current-run',
+          kind: 'image',
+          status: 'completed',
+        }),
+        canAttachCompletedJob,
+        attach,
+      },
+      'attach_generated_media',
+    );
+
+    expect(await invoke(method, { jobId: 'job-from-prior-run', target: 'library' })).toEqual({
+      ok: true,
+      assetId: 'generated-prior-run',
+      placed: false,
+    });
+    expect(canAttachCompletedJob).toHaveBeenCalledWith('job-from-prior-run', expect.anything());
+    expect(attach).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['false', async () => false],
+    ['absent', undefined],
+  ] as const)(
+    'refuses a cross-run attach when canAttachCompletedJob is %s',
+    async (_label, guard) => {
+      const attach = vi.fn(() => ({ assetId: 'unexpected', placed: false }));
+      const method = methodFor(
+        {
+          requestApproval: async () => true,
+          start: () => 'job-current-run',
+          awaitJob: async () => ({
+            jobId: 'job-current-run',
+            kind: 'image',
+            status: 'completed',
+          }),
+          ...(guard === undefined ? {} : { canAttachCompletedJob: guard }),
+          attach,
+        },
+        'attach_generated_media',
+      );
+
+      expect(
+        await invoke(method, { jobId: 'job-from-prior-run', target: 'library' }),
+      ).toMatchObject({
+        ok: false,
+        code: 'JOY_AGENT_GENERATION_JOB_UNAVAILABLE',
+      });
+      expect(attach).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects malformed arguments in the host parser before the adapter runs', () => {
     const requestApproval = vi.fn(async () => true);

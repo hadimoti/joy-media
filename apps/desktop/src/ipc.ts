@@ -12,6 +12,7 @@ export const IPC_CHANNELS = [
   'desktop.generation.status',
   'desktop.generation.cancel',
   'desktop.generation.list',
+  'desktop.generation.bytes',
   'desktop.provider-profile.save',
   'desktop.provider-profile.list',
   'desktop.provider-profile.delete',
