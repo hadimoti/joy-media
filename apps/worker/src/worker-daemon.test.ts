@@ -14,6 +14,47 @@ import type { GpuPreviewHost } from './gpu-preview-host.js';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 describe('WorkerDaemon', () => {
+  it.each(['speech.transcribe', 'speech.synthesize'] as const)(
+    'uploads the checked %s derivative before completing',
+    async (kind) => {
+      let stopped = false;
+      const uploaded: string[] = [];
+      const derivative = {
+        kind,
+        sha256: 'a'.repeat(64),
+        bytes: 3,
+        localRef: 'speech-job-aaaaaaaaaaaaaaaa',
+        descriptor: kind === 'speech.transcribe'
+          ? { mimeType: 'application/json' }
+          : { mimeType: 'audio/wav', durationUs: 100_000 },
+        ...(kind === 'speech.synthesize'
+          ? { speech: { durationUs: 100_000, timingSource: 'unavailable', words: [] } }
+          : {}),
+      } as const;
+      const client = {
+        hello: async () => undefined,
+        lease: async () => ({ id: 'speech-job', projectId: 'project-1', type: kind }),
+        heartbeat: async () => ({ cancelRequested: false }),
+        uploadDerivative: async (_jobId: string, result: { kind: string }) => { uploaded.push(result.kind); },
+        complete: async (_jobId: string, result: { kind: string; speech?: unknown }) => {
+          expect(result.kind).toBe(kind);
+          if (kind === 'speech.synthesize') expect(result.speech).toMatchObject({ timingSource: 'unavailable' });
+          stopped = true;
+        },
+        fail: async () => undefined,
+      } as unknown as WorkerControlPlaneClient;
+      const runtime = {
+        hello: () => ({ capabilities: [] }),
+        localAssetIds: () => [],
+        log: { write: () => undefined },
+        run: async () => ({ state: 'completed' as const, result: derivative }),
+        readDerivative: () => new Uint8Array([1, 2, 3]),
+      } as unknown as WorkerRuntime;
+      await new WorkerDaemon(client, runtime).run({ pollIntervalMs: 1, stopped: () => stopped });
+      expect(uploaded).toEqual([kind]);
+    },
+  );
+
   it('keeps an export leased while the async export stage exceeds the short lease window', async () => {
     let stop = false;
     let lastHeartbeat = Date.now();

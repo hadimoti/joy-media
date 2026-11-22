@@ -155,10 +155,31 @@ function runnerOf(value: string | undefined, env: NodeJS.ProcessEnv): MaskingRun
 }
 
 /** The router starts the model script as its own child, so a cancel has to end the whole tree, not only the router. */
-function killProcessTree(child: ReturnType<typeof spawn>): void {
+export function killProcessTree(child: ReturnType<typeof spawn>): void {
   if (child.pid !== undefined && process.platform === 'win32') {
-    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-    return;
+    const script = [
+      `$root = ${child.pid}`,
+      '$processes = @(Get-CimInstance Win32_Process)',
+      '$frontier = @($root); $descendants = @()',
+      'while ($frontier.Count -gt 0) { $children = @($processes | Where-Object { $frontier -contains [int]$_.ParentProcessId }); $ids = @($children | ForEach-Object { [int]$_.ProcessId }); if ($ids.Count -eq 0) { break }; $descendants += $ids; $frontier = $ids }',
+      '@($descendants + $root | Select-Object -Unique) | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }',
+    ].join('; ');
+    const treeKill = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      stdio: 'ignore',
+      timeout: 5_000,
+    });
+    if (treeKill.error === undefined && treeKill.status === 0) return;
+    spawnSync('taskkill.exe', ['/pid', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore',
+      timeout: 1_000,
+    });
+    try {
+      process.kill(child.pid, 'SIGKILL');
+      return;
+    } catch {
+      child.kill();
+      return;
+    }
   }
   if (child.pid !== undefined) {
     try {
