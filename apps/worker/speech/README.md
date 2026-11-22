@@ -15,23 +15,23 @@ Example paths below are placeholders outside the repo. Use your own locations.
 
 ## 1. Owner decisions and known gaps
 
-| Item | State |
-| --- | --- |
-| Installer packaging of Python, models, and runners | **Owner decision.** Not designed here. |
-| Four env names from the brief (`..._STT_PYTHON`, `..._TTS_PYTHON`, `..._RUNNER_DIR`, `..._MODEL_DIR`) | **Not what the integrated code reads.** See section 3. |
-| Separate STT and TTS Python executables | **Not wired.** `local-speech.ts` uses one `JOY_MEDIA_SPEECH_PYTHON` for every runner. Separate interpreters need a source change and an owner call. |
-| Desktop test names (`JOY_MEDIA_SPEECH_WHISPER_PYTHON`, `..._TTS_PYTHON`, `..._WHISPER_SCRIPT`, `..._TTS_SCRIPT`) | Appear only in [`worker-env.test.ts`](../../desktop/src/jobs/worker-env.test.ts) as inherited pass-through. The worker does not read them. |
-| Upstream licenses | **Not verified** in this session (see section 9). |
-| Measured cold-start time and VRAM | **Not recorded** in the repo. Measure on the target GPU before quoting numbers. |
+| Item                                                                                                             | State                                                                                                                                               |
+| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Installer packaging of Python, models, and runners                                                               | **Owner decision.** Not designed here.                                                                                                              |
+| Four env names from the brief (`..._STT_PYTHON`, `..._TTS_PYTHON`, `..._RUNNER_DIR`, `..._MODEL_DIR`)            | **Not what the integrated code reads.** See section 3.                                                                                              |
+| Separate STT and TTS Python executables                                                                          | **Not wired.** `local-speech.ts` uses one `JOY_MEDIA_SPEECH_PYTHON` for every runner. Separate interpreters need a source change and an owner call. |
+| Desktop test names (`JOY_MEDIA_SPEECH_WHISPER_PYTHON`, `..._TTS_PYTHON`, `..._WHISPER_SCRIPT`, `..._TTS_SCRIPT`) | Appear only in [`worker-env.test.ts`](../../desktop/src/jobs/worker-env.test.ts) as inherited pass-through. The worker does not read them.          |
+| Upstream licenses                                                                                                | **Not verified** in this session (see section 9).                                                                                                   |
+| Measured cold-start time and VRAM                                                                                | **Not recorded** in the repo. Measure on the target GPU before quoting numbers.                                                                     |
 
 ## 2. Model IDs (integrated source)
 
-| Model ID | Job type | Language | Notes |
-| --- | --- | --- | --- |
-| `faster-whisper-large-v3-turbo` | `speech.transcribe` | `fa-IR`, `en-US` | Also used for post-TTS alignment. |
-| `kokoro-82m` | `speech.synthesize` | `en-US` only | Fixed voice `af_heart`; `voiceId` is rejected. |
-| `chatterbox-en` | `speech.synthesize` | `en-US` only | Optional reference audio. |
-| `chatterbox-fa` | `speech.synthesize` | `fa-IR` only | **Optional, non-commercial, personal use only.** See section 8. |
+| Model ID                        | Job type            | Language         | Notes                                                           |
+| ------------------------------- | ------------------- | ---------------- | --------------------------------------------------------------- |
+| `faster-whisper-large-v3-turbo` | `speech.transcribe` | `fa-IR`, `en-US` | Also used for post-TTS alignment.                               |
+| `kokoro-82m`                    | `speech.synthesize` | `en-US` only     | Fixed voice `af_heart`; `voiceId` is rejected.                  |
+| `chatterbox-en`                 | `speech.synthesize` | `en-US` only     | Optional reference audio.                                       |
+| `chatterbox-fa`                 | `speech.synthesize` | `fa-IR` only     | **Optional, non-commercial, personal use only.** See section 8. |
 
 Source: [`speech.ts`](../../../packages/job-protocol/src/speech.ts).
 
@@ -41,16 +41,16 @@ Read by `speechAvailabilityFromEnvironment` in [`local-speech.ts`](../src/local-
 Set every path as an **absolute** path. A relative value makes that capability
 silently unavailable.
 
-| Variable | Required | Meaning |
-| --- | --- | --- |
-| `JOY_MEDIA_SPEECH_PYTHON` | yes | Absolute path to the one Python executable used by all runners. |
-| `JOY_MEDIA_SPEECH_SCRIPT_DIR` | no | Folder holding the runner scripts. Defaults to this `speech` folder next to the worker build. |
-| `JOY_MEDIA_SPEECH_FFMPEG` | no | Absolute path to `ffmpeg`. If unset, the runner calls `ffmpeg` from `PATH`. |
-| `JOY_MEDIA_SPEECH_STT_MODEL_PATH` | for STT | Model folder for `faster-whisper-large-v3-turbo`. |
-| `JOY_MEDIA_SPEECH_KOKORO_MODEL_PATH` | for Kokoro | Model folder for `kokoro-82m`. |
-| `JOY_MEDIA_SPEECH_CHATTERBOX_EN_MODEL_PATH` | for Chatterbox EN | Model folder for `chatterbox-en`. |
-| `JOY_MEDIA_SPEECH_CHATTERBOX_FA_MODEL_PATH` | optional | Model folder for `chatterbox-fa`. |
-| `JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT` | no | Overrides the Chatterbox runner path for both Chatterbox IDs. |
+| Variable                                    | Required          | Meaning                                                                                       |
+| ------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
+| `JOY_MEDIA_SPEECH_PYTHON`                   | yes               | Absolute path to the one Python executable used by all runners.                               |
+| `JOY_MEDIA_SPEECH_SCRIPT_DIR`               | no                | Folder holding the runner scripts. Defaults to this `speech` folder next to the worker build. |
+| `JOY_MEDIA_SPEECH_FFMPEG`                   | no                | Absolute path to `ffmpeg`. If unset, the runner calls `ffmpeg` from `PATH`.                   |
+| `JOY_MEDIA_SPEECH_STT_MODEL_PATH`           | for STT           | Model folder for `faster-whisper-large-v3-turbo`.                                             |
+| `JOY_MEDIA_SPEECH_KOKORO_MODEL_PATH`        | for Kokoro        | Model folder for `kokoro-82m`.                                                                |
+| `JOY_MEDIA_SPEECH_CHATTERBOX_EN_MODEL_PATH` | for Chatterbox EN | Model folder for `chatterbox-en`.                                                             |
+| `JOY_MEDIA_SPEECH_CHATTERBOX_FA_MODEL_PATH` | optional          | Model folder for `chatterbox-fa`.                                                             |
+| `JOY_MEDIA_SPEECH_CHATTERBOX_SCRIPT`        | no                | Overrides the Chatterbox runner path for both Chatterbox IDs.                                 |
 
 Mapping to the brief: `SCRIPT_DIR` is the runner-folder setting; the per-model
 `*_MODEL_PATH` variables replace a single `MODEL_DIR`. The separate STT and TTS
@@ -141,11 +141,11 @@ fetches from a hub.
 
 The worker probes module availability with `find_spec` and does not load weights:
 
-| Runner | Modules probed | Other check |
-| --- | --- | --- |
-| STT (`transcribe.py`) | `faster_whisper`, `torch` | Model folder must exist. |
-| Kokoro (`synthesize_kokoro.py`) | `kokoro`, `torch`, `misaki`, `spacy`, `en_core_web_sm` | Config, weights, voice file present. |
-| Chatterbox (`synthesize_chatterbox.py`) | `chatterbox`, `torch`, `torchaudio` | Package `chatterbox-tts` or `chatterbox`, version **>= 0.1.7**. |
+| Runner                                  | Modules probed                                         | Other check                                                     |
+| --------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------- |
+| STT (`transcribe.py`)                   | `faster_whisper`, `torch`                              | Model folder must exist.                                        |
+| Kokoro (`synthesize_kokoro.py`)         | `kokoro`, `torch`, `misaki`, `spacy`, `en_core_web_sm` | Config, weights, voice file present.                            |
+| Chatterbox (`synthesize_chatterbox.py`) | `chatterbox`, `torch`, `torchaudio`                    | Package `chatterbox-tts` or `chatterbox`, version **>= 0.1.7**. |
 
 Because all runners share `JOY_MEDIA_SPEECH_PYTHON`, one environment must
 contain every package above. The probe result is cached in process memory, and
@@ -202,16 +202,16 @@ No license text or provenance record for these components is in the repo. The
 upstream pointers below are for the owner to check. Their license terms were
 **not verified** in this session: the web search was denied permission.
 
-| Component | Upstream pointer | License status |
-| --- | --- | --- |
-| faster-whisper | github.com/SYSTRAN/faster-whisper | Unverified |
-| Whisper large-v3-turbo weights | huggingface.co/openai/whisper-large-v3-turbo | Unverified |
-| Kokoro-82M weights and voices | huggingface.co/hexgrad/Kokoro-82M | Unverified |
-| Kokoro Python package | github.com/hexgrad/kokoro | Unverified |
-| Misaki, spaCy, `en_core_web_sm` | Their PyPI and GitHub pages | Unverified |
-| Chatterbox (`chatterbox-en`) | github.com/resemble-ai/chatterbox | Unverified |
-| `chatterbox-fa` weights and Persian tokenizer | Source not recorded in repo | **Unknown. Restricted to non-commercial by the integrated code.** |
-| PyTorch, torchaudio, FFmpeg | Their official pages | Unverified |
+| Component                                     | Upstream pointer                             | License status                                                    |
+| --------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------- |
+| faster-whisper                                | github.com/SYSTRAN/faster-whisper            | Unverified                                                        |
+| Whisper large-v3-turbo weights                | huggingface.co/openai/whisper-large-v3-turbo | Unverified                                                        |
+| Kokoro-82M weights and voices                 | huggingface.co/hexgrad/Kokoro-82M            | Unverified                                                        |
+| Kokoro Python package                         | github.com/hexgrad/kokoro                    | Unverified                                                        |
+| Misaki, spaCy, `en_core_web_sm`               | Their PyPI and GitHub pages                  | Unverified                                                        |
+| Chatterbox (`chatterbox-en`)                  | github.com/resemble-ai/chatterbox            | Unverified                                                        |
+| `chatterbox-fa` weights and Persian tokenizer | Source not recorded in repo                  | **Unknown. Restricted to non-commercial by the integrated code.** |
+| PyTorch, torchaudio, FFmpeg                   | Their official pages                         | Unverified                                                        |
 
 Before any distribution, the owner records each license in writing and confirms
 it allows the intended use.

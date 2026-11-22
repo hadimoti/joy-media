@@ -176,8 +176,8 @@ export const timelineControlCases = Object.freeze([
     'Split at playhead',
     'toolbar.edit',
     'Playhead is inside a clip on an unlocked track.',
-    'ABSENT in baseline; pending implementation. Expected once built: a toolbar button named Split at playhead that splits the clip under the playhead, like the S shortcut.',
-    `Baseline: no "Split at playhead" aria-label or title in ${PANEL}; S shortcut at apps/editor-web/src/keyboard-shortcuts.ts:228; the command is only in the clip context menu at ${COMMANDS}:601.`,
+    'A toolbar button named Split at playhead splits the clip under the playhead once, like the S shortcut; disabled when no eligible clip, on a locked track, or at a clip edge.',
+    `Present: aria-label "Split at playhead" at ${PANEL}:3475; S shortcut at apps/editor-web/src/keyboard-shortcuts.ts:228; the same command is in the clip context menu at ${COMMANDS}:601.`,
   ),
 
   // Zoom
