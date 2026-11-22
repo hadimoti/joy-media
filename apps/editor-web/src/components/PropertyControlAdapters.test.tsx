@@ -152,6 +152,56 @@ describe('property control adapters', () => {
     vi.unstubAllGlobals();
   });
 
+  it('releases pointer capture and clears an interrupted gesture on Escape and window blur', () => {
+    const harness = createHarness(5);
+    const adapter = createTransientControlAdapter(harness.interaction, 'Scale');
+    let capturedPointer: number | undefined;
+    const target = {
+      setPointerCapture: vi.fn((pointerId: number) => {
+        capturedPointer = pointerId;
+      }),
+      hasPointerCapture: vi.fn((pointerId: number) => capturedPointer === pointerId),
+      releasePointerCapture: vi.fn((pointerId: number) => {
+        if (capturedPointer === pointerId) capturedPointer = undefined;
+      }),
+    } as unknown as HTMLElement;
+    const listeners = new Map<string, EventListener>();
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((name: string, listener: EventListener) =>
+        listeners.set(name, listener),
+      ),
+      removeEventListener: vi.fn((name: string) => listeners.delete(name)),
+      setTimeout: vi.fn(),
+    });
+    let bindings!: ReturnType<typeof useNumberScrub>;
+    function Probe() {
+      bindings = useNumberScrub({ value: harness.value, adapter, step: 0.5 });
+      return null;
+    }
+    renderToStaticMarkup(<Probe />);
+
+    bindings.onPointerDown(pointer(0, target, 1));
+    bindings.onPointerMove(pointer(8, target, 1));
+    expect(capturedPointer).toBe(1);
+    bindings.onKeyDown({ key: 'Escape', preventDefault: vi.fn() } as unknown as KeyboardEvent<HTMLElement>);
+    bindings.onPointerUp(pointer(8, target, 1));
+    expect(capturedPointer).toBeUndefined();
+    expect(target.releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(harness.value).toBe(5);
+    expect(harness.commit).not.toHaveBeenCalled();
+
+    bindings.onPointerDown(pointer(0, target, 2));
+    bindings.onPointerMove(pointer(8, target, 2));
+    expect(capturedPointer).toBe(2);
+    listeners.get('blur')?.(new Event('blur'));
+    bindings.onPointerUp(pointer(8, target, 2));
+    expect(capturedPointer).toBeUndefined();
+    expect(target.releasePointerCapture).toHaveBeenCalledWith(2);
+    expect(harness.value).toBe(5);
+    expect(harness.commit).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it('does not start pointer gestures when disabled', () => {
     const harness = createHarness(2);
     const adapter = createTransientControlAdapter(harness.interaction, 'Scale');

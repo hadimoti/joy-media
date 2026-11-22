@@ -49,6 +49,13 @@ export function useNumberScrub({
     if (gesture === null) return;
     gestureRef.current = null;
     window.removeEventListener('blur', windowBlurHandlerRef.current);
+    if (
+      gesture.accepted &&
+      typeof gesture.target.hasPointerCapture === 'function' &&
+      gesture.target.hasPointerCapture(gesture.pointerId)
+    ) {
+      gesture.target.releasePointerCapture(gesture.pointerId);
+    }
     if (gesture.accepted) {
       if (cancel) adapterRef.current.cancel();
       else if (commit) adapterRef.current.commit();

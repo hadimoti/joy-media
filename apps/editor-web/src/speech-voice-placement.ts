@@ -13,6 +13,19 @@ export interface SpeechVoicePlacementArgs {
   readonly clipId: string;
 }
 
+/** Convert the captured Generate position into the selected caption layer's clock. */
+export function speechCaptionOffsetUs(capturedStartUs: number, captionStartUs: number): number {
+  if (
+    !Number.isSafeInteger(capturedStartUs) ||
+    capturedStartUs < 0 ||
+    !Number.isSafeInteger(captionStartUs) ||
+    captionStartUs < 0
+  ) {
+    throw new Error('The captured speech and caption start positions must be valid.');
+  }
+  return Math.max(0, capturedStartUs - captionStartUs);
+}
+
 /** Build a single atomic voice clip insertion after its durable audio asset exists. */
 export function buildSpeechVoicePlacement({
   composition,

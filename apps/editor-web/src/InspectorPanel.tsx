@@ -1910,6 +1910,7 @@ export function SpeedSection({
   const [draftRate, setDraftRate] = useState(String(rate));
   const [rateError, setRateError] = useState<string | undefined>();
   const rateCommittedRef = useRef(false);
+  const rateEscapeRef = useRef(false);
   const scrubDirectionRef = useRef(1);
 
   useEffect(() => {
@@ -1936,6 +1937,10 @@ export function SpeedSection({
   };
 
   const commitDraftRate = () => {
+    if (rateEscapeRef.current) {
+      rateEscapeRef.current = false;
+      return;
+    }
     if (rateCommittedRef.current) return;
     const next = Number(draftRate);
     const valid = validInspectorSpeedRate(next, supportsReverse);
@@ -2136,7 +2141,9 @@ export function SpeedSection({
                     if (rateScrub.onKeyDown(event)) return;
                     if (event.key === 'Escape') {
                       event.preventDefault();
-                      rateAdapter.cancel();
+                      rateEscapeRef.current = true;
+                      setDraftRate(String(rate));
+                      setRateError(undefined);
                     } else if (event.key === 'Enter') {
                       event.preventDefault();
                       commitDraftRate();
