@@ -75,6 +75,58 @@ export function isInteractiveTarget(target: EventTarget | null): boolean {
   return false;
 }
 
+/** The clip's own keyboard behavior for Enter and Space. */
+export function timelineClipSpaceBehavior(
+  key: string,
+  selected: boolean,
+  modified: boolean,
+): 'select' | 'bubble' | 'native' | 'ignore' {
+  if (key === 'Enter') return 'select';
+  if (key !== ' ') return 'ignore';
+  if (modified) return 'native';
+  return selected ? 'bubble' : 'select';
+}
+
+/**
+ * True when Space may reach the editor transport from an ordinary editor
+ * surface or the selected timeline clip body. Nested controls and dialog
+ * contents keep their native or component-owned keys.
+ */
+export function canUseEditorSpaceTarget(target: EventTarget | null): boolean {
+  if (target === null || typeof target !== 'object' || isEditableTarget(target)) return false;
+  type ElementLike = Partial<HTMLElement> & { readonly tagName?: string };
+  let element: ElementLike | null = target as ElementLike;
+  let clip: ElementLike | undefined;
+  let nestedInteractive = false;
+  const interactiveTags = new Set(['A', 'BUTTON', 'DETAILS', 'SUMMARY']);
+  const interactiveRoles = new Set([
+    'button', 'checkbox', 'link', 'menuitem', 'option', 'radio', 'slider', 'switch', 'tab',
+  ]);
+  while (element !== null) {
+    const role = element.getAttribute?.('role')?.toLowerCase();
+    if (role === 'dialog' || role === 'alertdialog') return false;
+    if (element.getAttribute?.('aria-roledescription') === 'timeline clip') {
+      if (
+        element.getAttribute('aria-pressed') !== 'true' ||
+        !element.getAttribute('data-clip-id')
+      )
+        return false;
+      clip = element;
+      break;
+    }
+    if (
+      interactiveTags.has(element.tagName?.toUpperCase() ?? '') ||
+      element.hasAttribute?.('data-trim-edge') === true ||
+      (role !== undefined && interactiveRoles.has(role))
+    ) {
+      nestedInteractive = true;
+    }
+    element = element.parentElement ?? null;
+  }
+  if (clip !== undefined) return !nestedInteractive;
+  return !isInteractiveTarget(target);
+}
+
 /**
  * True when text is selected on the page (a chat reply, a label). Ctrl+C then copies that text, and Ctrl+X
  * leaves it alone, instead of copying or cutting the selected timeline clip.

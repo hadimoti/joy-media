@@ -121,8 +121,8 @@ describe('Space key handlers', () => {
       handlers.keyDown(event);
       return event;
     };
-    const up = (target: EventTarget) => {
-      const event = new KeyboardEvent('keyup', { key: ' ', cancelable: true });
+    const up = (target: EventTarget, init: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent('keyup', { key: ' ', cancelable: true, ...init });
       Object.defineProperty(event, 'target', { value: target });
       handlers.keyUp(event);
       return event;
@@ -148,6 +148,14 @@ describe('Space key handlers', () => {
     down(document.body, { repeat: true });
     up(document.body);
     expect(onTap).not.toHaveBeenCalled();
+  });
+
+  it('a repeated-key flood still produces one tap toggle', () => {
+    const { onTap, down, up } = setup();
+    down(document.body);
+    for (let repeat = 0; repeat < 8; repeat += 1) down(document.body, { repeat: true });
+    up(document.body);
+    expect(onTap).toHaveBeenCalledTimes(1);
   });
 
   it('Space in a text field types a space: nothing is prevented and nothing plays', () => {
@@ -210,6 +218,38 @@ describe('Space key handlers', () => {
     document.body.append(button);
     expect(down(button).defaultPrevented).toBe(false);
     up(button);
+    expect(onTap).not.toHaveBeenCalled();
+  });
+
+  it('selected clip Space reaches playback while unselected clip Space remains selection-owned', () => {
+    const { gesture, onTap, down, up } = setup();
+    const clip = document.createElement('div');
+    clip.setAttribute('role', 'button');
+    clip.setAttribute('aria-roledescription', 'timeline clip');
+    clip.setAttribute('aria-pressed', 'true');
+    clip.setAttribute('data-clip-id', 'clip-1');
+    const pressed = down(clip);
+    expect(pressed.defaultPrevented).toBe(true);
+    up(clip);
+    expect(onTap).toHaveBeenCalledTimes(1);
+
+    onTap.mockClear();
+    clip.setAttribute('aria-pressed', 'false');
+    expect(down(clip).defaultPrevented).toBe(false);
+    expect(gesture.isDown()).toBe(false);
+    expect(onTap).not.toHaveBeenCalled();
+  });
+
+  it('does not start on IME or repeated Space and cancels if a modifier appears on release', () => {
+    const { gesture, onTap, down, up } = setup();
+    const composing = down(document.body, { isComposing: true });
+    expect(composing.defaultPrevented).toBe(false);
+    expect(gesture.isDown()).toBe(false);
+    down(document.body);
+    down(document.body, { repeat: true });
+    expect(gesture.isDown()).toBe(true);
+    up(document.body, { shiftKey: true });
+    expect(gesture.isDown()).toBe(false);
     expect(onTap).not.toHaveBeenCalled();
   });
 });
