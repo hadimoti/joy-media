@@ -3781,7 +3781,9 @@ function EditorWorkspace({
         controlPlaneProject.controlPlaneProjectId,
         request,
         {
-          referenceAssetId: options.referenceAssetId,
+          ...(options.referenceAssetId !== undefined
+            ? { referenceAssetId: options.referenceAssetId }
+            : {}),
           consent: options.consent,
           signal: options.signal,
         },
