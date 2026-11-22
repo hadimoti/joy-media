@@ -1685,6 +1685,12 @@ export function TimelinePanel({
   const selectedTrackView =
     selected === undefined ? undefined : tracks.find((t) => t.id === selected.track.id);
   const selectedLocked = selectedTrackView?.locked === true;
+  const canSplitAtPlayhead =
+    selected !== undefined &&
+    selectedTrackView !== undefined &&
+    !selectedLocked &&
+    playheadUs > selected.clip.startUs &&
+    playheadUs < selected.clip.startUs + selected.clip.durationUs;
   const canDuplicate = selected !== undefined && !selectedLocked;
   const canDelete = selected !== undefined && !selectedLocked;
 
@@ -3462,6 +3468,19 @@ export function TimelinePanel({
             }}
           >
             <TrashIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Split at playhead"
+            title="Split at playhead (S)"
+            disabled={!canSplitAtPlayhead}
+            onClick={() => {
+              if (!canSplitAtPlayhead || selected === undefined) return;
+              dispatchSplitAt(selected.track.id, selected.clip.id, playheadUs);
+            }}
+          >
+            <ScissorsIcon />
           </button>
         </div>
 
