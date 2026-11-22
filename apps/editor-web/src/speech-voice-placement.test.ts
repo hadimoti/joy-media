@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Composition } from '@joy-media/project-schema';
-import { buildSpeechVoicePlacement, speechCaptionOffsetUs } from './speech-voice-placement.js';
+import {
+  buildSpeechVoicePlacement,
+  speechCaptionPlacement,
+  speechCaptionOffsetUs,
+} from './speech-voice-placement.js';
 
 const audio = {
   id: 'voice-asset',
@@ -12,6 +16,28 @@ const audio = {
 describe('buildSpeechVoicePlacement', () => {
   it('uses the captured Generate position relative to the caption layer start', () => {
     expect(speechCaptionOffsetUs(5_000_000, 1_000_000)).toBe(4_000_000);
+  });
+
+  it.each([
+    {
+      name: 'before the first caption clip',
+      speechStartUs: 2_000_000,
+      expected: { clipStartUs: 2_000_000, clipEndUs: 10_000_000, offsetUs: 0 },
+    },
+    {
+      name: 'inside the caption clip',
+      speechStartUs: 6_000_000,
+      expected: { clipStartUs: 5_000_000, clipEndUs: 10_000_000, offsetUs: 1_000_000 },
+    },
+    {
+      name: 'after the caption clip',
+      speechStartUs: 12_000_000,
+      expected: { clipStartUs: 5_000_000, clipEndUs: 14_000_000, offsetUs: 7_000_000 },
+    },
+  ])('places generated words $name', ({ speechStartUs, expected }) => {
+    expect(speechCaptionPlacement(5_000_000, 5_000_000, speechStartUs, 2_000_000)).toEqual(
+      expected,
+    );
   });
 
   it('chooses the first unlocked compatible track without overlap', () => {
