@@ -31,7 +31,9 @@ def runner_for(request_path: Path) -> Path:
     mode = selection.get("mode") if isinstance(selection, dict) else None
     # Auto preserves the fast local matte path for the two modes BiRefNet
     # understands; all precise or temporal modes require SAM 2.
-    use_birefnet = provider == "birefnet" or (provider == "auto" and mode in {"subject", "person"})
+    # BiRefNet only mattes still images; every video request, whatever the provider says, goes to SAM 2.
+    is_image = request.get("sourceKind") == "image"
+    use_birefnet = is_image and (provider == "birefnet" or (provider == "auto" and mode in {"subject", "person"}))
     return Path(__file__).with_name("joy_mask_runner.py" if use_birefnet else "joy_sam2_runner.py")
 
 
