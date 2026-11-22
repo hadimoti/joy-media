@@ -95,7 +95,7 @@ describe('Monitor overlays', () => {
           view={{ zoom: 1, panX: 0, panY: 0 }}
           frame={FRAME}
           viewportSize={VIEWPORT}
-          options={DEFAULT_MONITOR_VIEW_OPTIONS}
+          options={{ ...DEFAULT_MONITOR_VIEW_OPTIONS, canvasBorder: false }}
           onGuidesChange={() => undefined}
         />,
       ),

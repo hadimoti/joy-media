@@ -73,6 +73,12 @@ export interface BuildRenderFrameOptions {
   >;
   /** Optional evaluator-provided layer order for universal timeline tracks. */
   readonly zIndexByObjectId?: Readonly<Record<string, number>>;
+  /**
+   * Colour drawn behind every node. Defaults to the dark frame colour, which export and quality-check
+   * captures rely on. The Monitor passes a fully transparent colour so the checkerboard shows where
+   * nothing is drawn.
+   */
+  readonly background?: Rgba;
 }
 
 /**
@@ -320,7 +326,7 @@ export function buildRenderFrameIR(
     compositionId,
     timeUs,
     viewport: { width, height, dpr: 1 },
-    background: DARK_BG,
+    background: options.background ?? DARK_BG,
     nodes,
     ...(colorGrade ? { colorGrade } : {}),
   };

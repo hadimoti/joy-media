@@ -38,14 +38,14 @@ function storage(seed: Record<string, string> = {}) {
 const FRAME = { width: 1920, height: 1080 };
 
 describe('Monitor View options: defaults and saved values', () => {
-  it('starts with every overlay off except the pixel grid, which only shows at 800 per cent', () => {
+  it('starts with every overlay off except the canvas border (the frame is transparent, so its edge must show) and the pixel grid, which only shows at 800 per cent', () => {
     expect(DEFAULT_MONITOR_VIEW_OPTIONS).toMatchObject({
       titleSafe: false,
       actionSafe: false,
       grid: false,
       centreMarks: false,
       rulers: false,
-      canvasBorder: false,
+      canvasBorder: true,
       pixelGrid: true,
       showPerformanceStats: false,
       background: 'checkerboard',

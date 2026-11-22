@@ -64,7 +64,7 @@ export const DEFAULT_MONITOR_VIEW_OPTIONS: MonitorViewOptions = {
   grid: false,
   centreMarks: false,
   rulers: false,
-  canvasBorder: false,
+  canvasBorder: true,
   pixelGrid: true,
   showPerformanceStats: false,
   background: 'checkerboard',

@@ -158,6 +158,8 @@ import {
 
 /** How long the project stays unchanged before its library card is refreshed. */
 const PROJECT_CARD_SAVE_DELAY_MS = 3000;
+/** The Monitor draws nothing behind the clips, so an empty frame shows the transparency grid. */
+export const MONITOR_EMPTY_FRAME_BACKGROUND = Object.freeze({ r: 0, g: 0, b: 0, a: 0 });
 
 export function MonitorPanel({
   agentPreviewSurfaceVisible = true,
@@ -875,12 +877,17 @@ function MonitorPanelContent({
         composition.width,
         composition.height,
         resolved,
-        renderFrameOptions(
-          gradedProject,
-          timelineProject,
-          state.playheadUs,
-          imageSizesFromCache(state.playheadUs),
-        ),
+        {
+          ...renderFrameOptions(
+            gradedProject,
+            timelineProject,
+            state.playheadUs,
+            imageSizesFromCache(state.playheadUs),
+          ),
+          // Nothing drawn means transparent here, so the Monitor shows its checkerboard (or the black or
+          // grey it was set to) instead of a solid colour. Export keeps its own solid background.
+          background: MONITOR_EMPTY_FRAME_BACKGROUND,
+        },
       ),
       previewVisualProject,
     );
