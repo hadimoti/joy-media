@@ -5,6 +5,10 @@ import {
 } from '@joy-media/provider-sdk';
 import type { CaptionDocumentV1 } from '@joy-media/project-schema';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
+import {
+  DesktopSpeechError,
+  type SpeechTranscribeV1,
+} from './local-media-client.js';
 
 interface TranscriptionFixture {
   readonly language: string;
@@ -136,8 +140,56 @@ export async function transcribeReferenceCaption(
   documentId: string,
   language: 'fa-IR' | 'en-US',
   client: BrowserControlPlaneClient = new BrowserControlPlaneClient(),
-  options: { readonly media?: Blob; readonly mediaType?: string } = {},
+  options: {
+    readonly media?: Blob;
+    readonly mediaType?: string;
+    readonly workerRequest?: {
+      readonly projectId: string;
+      readonly assetId: string;
+      readonly request: SpeechTranscribeV1;
+    };
+    readonly loadMedia?: () => Promise<{ readonly media: Blob; readonly mediaType?: string }>;
+    readonly signal?: AbortSignal;
+    readonly onProgress?: (percent: number) => void;
+  } = {},
 ): Promise<CaptionDocumentV1> {
+  if (options.workerRequest !== undefined) {
+    const worker = options.workerRequest;
+    try {
+      const transcript = await client.runLocalTranscription(
+        worker.projectId,
+        worker.assetId,
+        worker.request,
+        options.signal,
+        options.onProgress,
+      );
+      return captionDocumentFromTranscription(documentId, transcript);
+    } catch (error) {
+      const canUseLoopback =
+        error instanceof DesktopSpeechError &&
+        (error.code === 'SETUP_REQUIRED' || error.code === 'SOURCE_UNAVAILABLE');
+      if (!canUseLoopback || options.loadMedia === undefined) throw error;
+      const loaded = await options.loadMedia();
+      if (options.signal?.aborted) {
+        throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
+      }
+      const live = await client.transcribeSpeech(
+        language,
+        loaded.mediaType === undefined
+          ? { media: loaded.media }
+          : { media: loaded.media, mediaType: loaded.mediaType },
+      );
+      if (options.signal?.aborted) {
+        throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
+      }
+      return captionDocumentFromTranscription(documentId, {
+        language: live.language,
+        words: live.words,
+        speakers: live.speakers,
+        provenance: live.provenance,
+      });
+    }
+  }
   try {
     const live = await tryLiveTranscription(language, client, options.media, options.mediaType);
     return captionDocumentFromTranscription(documentId, {
