@@ -3680,6 +3680,15 @@ function EditorWorkspace({
             candidate.kind === 'video' &&
             !isControlTimelineElement(timelineElementKindForClip(candidate, elementKinds)),
         );
+        // A voice recording (an audio clip) is spoken word too: the picture lookup above skips audio on purpose, so
+        // fall back to the audio clip under the playhead. Subtitles for a voice-over need no video.
+        const spokenAudioAtPlayhead = flattenRootTimelineVideoClips(session.timelineProject).find(
+          (candidate) =>
+            session.visualProject.assets[candidate.assetId]?.kind === 'audio' &&
+            !isControlTimelineElement(timelineElementKindForClip(candidate, elementKinds)) &&
+            state.playheadUs >= candidate.startUs &&
+            state.playheadUs < candidate.startUs + candidate.durationUs,
+        );
         const clip =
           selectedMedia ??
           activeVideoClipAt(
@@ -3687,7 +3696,8 @@ function EditorWorkspace({
             state.playheadUs,
             state.selectedIds,
             session.visualProject,
-          );
+          ) ??
+          spokenAudioAtPlayhead;
         if (clip === undefined || clip.kind !== 'video')
           throw new Error('Place a media clip before transcribing.');
         const transcript = await transcribeReferenceCaption(

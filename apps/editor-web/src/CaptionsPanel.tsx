@@ -907,7 +907,10 @@ function CaptionSlotEditor({
             <span className="caption-status-dot" aria-hidden="true" />
             <div>
               <strong>Local transcription</strong>
-              <span>Requires a local Whisper endpoint configured in provider settings.</span>
+              <span>
+                Uses the local Whisper model when it is installed (see Speech-to-text setup below);
+                otherwise a local Whisper endpoint saved in provider settings.
+              </span>
             </div>
           </div>
           <div className="caption-generate-actions">
