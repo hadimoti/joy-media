@@ -68,6 +68,7 @@ For step-by-step workflows, see the [v1.1.2 designer guide](docs/USER-GUIDE-v1.1
 
 ## Fixes
 
+- **Animate.** Channel labels stay readable, and the previous and next keyframe controls stay together above the graph in narrow panels.
 - **Arabic and Persian text.** Arabic final yeh keeps its two dots and Persian final yeh stays dotless. URLs stay together and read left to right in mixed-script titles and captions. These fixes apply to preview and export.
 - **Title-only projects export.** A project that holds only titles now exports over the background. Before, the export refused it with "No playable visual clips are available for export".
 - **Add to timeline starts at the playhead.** Before, the clip went after the clips already on the first track.

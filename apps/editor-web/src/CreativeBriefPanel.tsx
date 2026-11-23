@@ -7,7 +7,7 @@
  * runner supplied by the built-in JOY Agent Engine.
  */
 
-import { useReducer, useEffect, useState, useCallback, useRef } from 'react';
+import { useReducer, useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react';
 import type { CreativeBriefV1, ProjectRevisionId } from '@joy-media/agent-tools';
 import { validateCreativeBrief } from '@joy-media/agent-tools';
 import {
@@ -125,7 +125,6 @@ export function CreativeBriefPanel({
   const previousStorageProjectIdRef = useRef<string | null>(null);
   const hydratedBriefKeyRef = useRef<string | null>(null);
   const scopeRef = useRef({ projectId, revisionId });
-  scopeRef.current = { projectId, revisionId };
   const invocationSequenceRef = useRef(0);
   const activeInvocationRef = useRef<
     | {
@@ -162,19 +161,30 @@ export function CreativeBriefPanel({
     [acknowledgeCancellation],
   );
 
-  useEffect(() => {
+  const cancelInvalidatedInvocation = useCallback(
+    (invocation: NonNullable<typeof activeInvocationRef.current>) => {
+      if (activeInvocationRef.current !== invocation) return;
+      activeInvocationRef.current = undefined;
+      invocation.controller.abort();
+      acknowledgeCancellation(invocation);
+      setActiveRunId(undefined);
+      dispatch({ type: 'reset' });
+    },
+    [acknowledgeCancellation],
+  );
+
+  useLayoutEffect(() => {
+    // Invalidate the previous run when the new scope commits, before a passive
+    // effect or a settling provider result can observe stale ownership.
+    scopeRef.current = { projectId, revisionId };
     const invocation = activeInvocationRef.current;
     if (
       invocation !== undefined &&
       (invocation.projectId !== projectId || invocation.revisionId !== revisionId)
     ) {
-      activeInvocationRef.current = undefined;
-      invocation.controller.abort();
-      acknowledgeCancellation(invocation);
-      setActiveRunId(undefined);
-      if (isCollecting(state)) dispatch({ type: 'reset' });
+      cancelInvalidatedInvocation(invocation);
     }
-  }, [acknowledgeCancellation, projectId, revisionId, state]);
+  }, [cancelInvalidatedInvocation, projectId, revisionId]);
 
   useEffect(() => {
     const previousStorageProjectId = previousStorageProjectIdRef.current;
@@ -282,7 +292,10 @@ export function CreativeBriefPanel({
             onRunStart?.(runId);
           },
         });
-        if (!isCurrent()) return;
+        if (!isCurrent()) {
+          cancelInvalidatedInvocation(invocation);
+          return;
+        }
         const validation = validateCreativeBrief(brief);
         if (
           !validation.valid ||
@@ -303,11 +316,11 @@ export function CreativeBriefPanel({
           onRunTerminal?.(invocation.runId, 'completed');
         }
       } catch (error) {
-        if (activeInvocationRef.current !== invocation) return;
-        if (
-          invocation.controller.signal.aborted ||
-          (error instanceof JoyAgentTaskError && error.code === 'cancelled')
-        ) {
+        if (!isCurrent()) {
+          cancelInvalidatedInvocation(invocation);
+          return;
+        }
+        if (error instanceof JoyAgentTaskError && error.code === 'cancelled') {
           dispatch({ type: 'reset' });
           acknowledgeCancellation(invocation);
           return;
@@ -328,6 +341,7 @@ export function CreativeBriefPanel({
     [
       onBriefReady,
       acknowledgeCancellation,
+      cancelInvalidatedInvocation,
       onRunStart,
       onRunTerminal,
       optedIn,

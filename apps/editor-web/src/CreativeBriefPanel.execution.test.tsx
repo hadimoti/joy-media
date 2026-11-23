@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
@@ -20,13 +20,36 @@ afterEach(() => {
   container = undefined;
 });
 
-function renderPanel(props: React.ComponentProps<typeof CreativeBriefPanel>): void {
+function renderPanel(
+  props: React.ComponentProps<typeof CreativeBriefPanel>,
+  beforePanel?: React.ReactNode,
+): void {
   if (container === undefined) {
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
   }
-  act(() => root!.render(<CreativeBriefPanel {...props} embedded />));
+  act(() =>
+    root!.render(
+      <>
+        {beforePanel}
+        <CreativeBriefPanel {...props} embedded />
+      </>,
+    ),
+  );
+}
+
+function PassiveScopeChangeProbe({
+  revisionId,
+  onRevisionPassiveEffect,
+}: {
+  readonly revisionId: string;
+  readonly onRevisionPassiveEffect: () => void;
+}) {
+  useEffect(() => {
+    if (revisionId === 'rev-2') onRevisionPassiveEffect();
+  }, [onRevisionPassiveEffect, revisionId]);
+  return null;
 }
 
 async function enterRequest(value: string): Promise<void> {
@@ -93,6 +116,75 @@ describe('Creative Brief invocation ownership', () => {
     expect(saved.size).toBe(0);
     expect(onBriefReady).not.toHaveBeenCalled();
     expect(onRunTerminal).toHaveBeenCalledExactlyOnceWith('brief-old', 'cancelled');
+  });
+
+  it('releases the old owner at revision commit before a stale Brief settles', async () => {
+    let resolveOldBrief: ((brief: ReturnType<typeof briefFixture>) => void) | undefined;
+    let oldRunOptions: CreativeBriefRunOptions | undefined;
+    let activeSharedRunId: string | undefined;
+    const onRunTerminal = vi.fn((runId: string) => {
+      if (activeSharedRunId === runId) activeSharedRunId = undefined;
+    });
+    const runBrief = vi.fn((_request: string, runOptions?: CreativeBriefRunOptions) => {
+      if (activeSharedRunId !== undefined) {
+        return Promise.reject(
+          new JoyAgentTaskError('cancelled', 'Another JOY run already owns the workspace.'),
+        );
+      }
+
+      const runId = runBrief.mock.calls.length === 1 ? 'brief-old' : 'brief-next';
+      activeSharedRunId = runId;
+      runOptions?.onRunStart?.(runId);
+      if (runId === 'brief-old') {
+        oldRunOptions = runOptions;
+        return new Promise<ReturnType<typeof briefFixture>>((resolve) => {
+          resolveOldBrief = resolve;
+        });
+      }
+      return new Promise<ReturnType<typeof briefFixture>>(() => {});
+    });
+
+    renderPanel({
+      projectId: 'project-1',
+      revisionId: 'rev-1',
+      optedIn: true,
+      runBrief,
+      onRunTerminal,
+    });
+    await enterRequest('Improve pacing');
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[aria-label="Improve project"]')?.click();
+    });
+    expect(activeSharedRunId).toBe('brief-old');
+
+    const ownerBeforePassiveCleanup = vi.fn<(runId: string | undefined) => void>();
+    const settleBeforePanelPassiveCleanup = () => {
+      ownerBeforePassiveCleanup(activeSharedRunId);
+      resolveOldBrief?.(briefFixture('project-1', 'rev-1', 'Improve pacing'));
+    };
+    renderPanel(
+      {
+        projectId: 'project-1',
+        revisionId: 'rev-2',
+        optedIn: true,
+        runBrief,
+        onRunTerminal,
+      },
+      <PassiveScopeChangeProbe
+        revisionId="rev-2"
+        onRevisionPassiveEffect={settleBeforePanelPassiveCleanup}
+      />,
+    );
+    await act(async () => {});
+
+    expect(ownerBeforePassiveCleanup).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(oldRunOptions?.signal?.aborted).toBe(true);
+    expect(onRunTerminal).toHaveBeenCalledExactlyOnceWith('brief-old', 'cancelled');
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[aria-label="Improve project"]')?.click();
+    });
+    expect(runBrief).toHaveBeenCalledTimes(2);
+    expect(activeSharedRunId).toBe('brief-next');
   });
 
   it('releases the exact Brief run when the panel unmounts', async () => {
