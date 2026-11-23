@@ -45,6 +45,7 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 
 ### Joy Code and chat
 
+- Joy Code can look up title, caption and transition presets and use supported choices in an edit preview.
 - The Joy Code Settings button is a gear icon, not a sun.
 - A sign-in section shows "Signed in." when you already have a saved sign-in. This does not show yet for xAI.
 - When a provider says your usage limit is reached, the app says "Usage limit reached". Before, it said the model was incompatible or that you were offline.
@@ -58,6 +59,7 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 
 ## Fixes
 
+- **Arabic and Persian text.** Arabic final yeh keeps its two dots and Persian final yeh stays dotless. URLs stay together and read left to right in mixed-script titles and captions. These fixes apply to preview and export.
 - **Title-only projects export.** A project that holds only titles now exports over the background. Before, the export refused it with "No playable visual clips are available for export".
 - **Add to timeline starts at the playhead.** Before, the clip went after the clips already on the first track.
 
@@ -78,7 +80,6 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 - **Subtitle cues.** Each subtitle cue is one whole spoken part, so a long sentence stays one long cue. Cutting cues to a short length, and repairing Persian half-spaces, are not done yet.
 - **Reference voice.** A reference voice must be a clip on the timeline. A file that is only in the Asset Library cannot be picked yet.
 - **Persian voice licence.** The Persian voice model is for non-commercial use only (CC-BY-NC-4.0).
-- **Arabic final yeh.** In the exported video, the final yeh of some Arabic titles has no two dots with the default title font. Reproduced on 23 Nov. This is not fixed in this release.
 
 ## Not yet checked on screen
 

@@ -4,6 +4,7 @@ import type {
   JoyTimelineOperation,
 } from '@joy-media/joy-agent-engine';
 import { JOY_CAPTION_TEMPLATES } from '@joy-media/captions-core';
+import { listTransitionShaders, resolveTransitionShaderId } from '@joy-media/transition-shaders';
 import { TEXT_TEMPLATES } from '../text-template-catalog.js';
 import {
   createJoyAgentPagedContext,
@@ -82,10 +83,12 @@ const HOST_CONTEXT_DOMAINS = [
   'assets',
   'visual-objects',
   'titles',
+  'presets',
   'looks',
   'library',
 ] as const;
 type HostContextDomain = (typeof HOST_CONTEXT_DOMAINS)[number];
+const TRANSITION_PRESET_OPERATION_IDS = ['dissolve', 'wipe', 'slide'] as const;
 const MAX_HOST_PAGE_SIZE = 32;
 const LOOK_INSTANCE_ID_PATTERN = /^look-[A-Za-z0-9][A-Za-z0-9-]{7,64}$/;
 const LOOK_DEFINITION_ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
@@ -1376,8 +1379,68 @@ function nextPage<T extends HostRpcJson>(
 function pageForContext(
   context: JoyAgentPagedContext,
   input: ReturnType<typeof parseContextReadArgs>,
+  canPrepare: boolean,
 ): HostRpcJson {
   const revision = context.snapshot.revision;
+  if (input.domain === 'presets') {
+    const titles = TEXT_TEMPLATES.map((template) => ({
+      family: 'title',
+      id: template.id,
+      name: template.label,
+      description: template.description,
+      category: template.category,
+      operations: ['text.insertTemplate', 'text.setTemplate'],
+      runnable: canPrepare,
+    }));
+    const captions = JOY_CAPTION_TEMPLATES.map((template) => ({
+      family: 'caption',
+      id: template.id,
+      name: template.name,
+      description: template.description,
+      karaoke: template.karaoke,
+      operation: 'caption.setTemplate',
+      runnable: canPrepare,
+    }));
+    const transitions = listTransitionShaders().map((transition) => {
+      const operationId = TRANSITION_PRESET_OPERATION_IDS.find(
+        (id) => resolveTransitionShaderId(id) === transition.id,
+      );
+      return {
+        family: 'transition',
+        id: transition.id,
+        name: transition.label,
+        description: transition.description,
+        runnable: canPrepare && operationId !== undefined,
+        ...(operationId === undefined
+          ? { status: 'Available in the editor. Joy Code cannot prepare this transition.' }
+          : { operation: 'transition.addAtJunction', operationId }),
+      };
+    });
+    const suggestions = [
+      { family: 'filter', id: 'interview-neutral', name: 'Interview Neutral' },
+      { family: 'filter', id: 'warm-documentary', name: 'Warm Documentary' },
+      { family: 'effect', id: 'readable-backdrop', name: 'Readable Backdrop' },
+      { family: 'delivery', id: 'portrait-9-16', name: 'Portrait 9:16' },
+    ].map((suggestion) => ({
+      ...suggestion,
+      runnable: false,
+      status: 'Style suggestion for manual editing.',
+    }));
+    const query = input.query;
+    const records = [...titles, ...captions, ...transitions, ...suggestions].filter(
+      (preset) =>
+        query === undefined ||
+        [preset.family, preset.id.toLowerCase(), preset.name.toLowerCase()].some((value) =>
+          value.includes(query),
+        ),
+    );
+    return {
+      projectId: context.snapshot.projectId,
+      revision,
+      domain: 'presets',
+      ...nextPage(records, input.cursor, input.pageSize),
+    };
+  }
   if (input.domain === 'overview') {
     if (input.cursor !== 0 || input.query !== undefined)
       throw diagnostic('JOY_AGENT_RPC_INVALID_REQUEST', { field: 'cursor' });
@@ -1430,7 +1493,7 @@ function pageForContext(
       catalogs: {
         text: TEXT_TEMPLATES.map((template) => template.id),
         captions: JOY_CAPTION_TEMPLATES.map((template) => template.id),
-        transitions: ['dissolve', 'wipe', 'slide'],
+        transitions: [...TRANSITION_PRESET_OPERATION_IDS],
       },
     };
   }
@@ -1769,7 +1832,7 @@ export function createJoyAgentHostRpcMethods(
       context.signal.throwIfAborted();
       if (input.domain === 'library')
         return pageForLibrary(options.context, input, options.readLibraryCatalog);
-      return pageForContext(options.context, input);
+      return pageForContext(options.context, input, options.prepareProposal !== undefined);
     },
     parseResult: parseContextPageResult,
   };

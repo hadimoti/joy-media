@@ -104,6 +104,65 @@ function safeEntityReference() {
 }
 
 describe('JOY Agent trusted host tool bridge', () => {
+  it('exposes runnable shipped presets and labels unsupported ones suggestion-only through ordinary context reads', async () => {
+    const methods = createJoyAgentHostRpcMethods({
+      context: createJoyAgentPagedContext({ projectId: 'project-1', revision: 'revision-1' }),
+      prepareProposal: () => preparedResult(),
+    });
+    const first = (await invoke(methods, 'read_project_context', {
+      domain: 'presets',
+      cursor: 0,
+      pageSize: 32,
+    })) as { revision: string; items: Array<Record<string, unknown>>; nextCursor?: number };
+    expect(first.revision).toBe('revision-1');
+    expect(first.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ family: 'title', id: 'rtl-editorial-title', runnable: true }),
+        expect.objectContaining({ family: 'caption', id: 'joy-rtl-classic', runnable: true }),
+      ]),
+    );
+    expect(first.nextCursor).toEqual(expect.any(Number));
+    const rest: Array<Record<string, unknown>> = [];
+    let cursor = first.nextCursor!;
+    while (true) {
+      const page = (await invoke(methods, 'read_project_context', {
+        domain: 'presets',
+        cursor,
+        pageSize: 32,
+      })) as { items: Array<Record<string, unknown>>; nextCursor?: number };
+      rest.push(...page.items);
+      if (page.nextCursor === undefined) break;
+      cursor = page.nextCursor;
+    }
+    expect([...first.items, ...rest]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          family: 'transition',
+          id: 'gl:fade',
+          operationId: 'dissolve',
+          runnable: true,
+        }),
+        expect.objectContaining({ family: 'transition', id: 'joy:dipToBlack', runnable: false }),
+        expect.objectContaining({ family: 'filter', id: 'warm-documentary', runnable: false }),
+      ]),
+    );
+    const dip = await invoke(methods, 'read_project_context', {
+      domain: 'presets',
+      query: 'joy:dipToBlack',
+    });
+    expect(dip).toMatchObject({
+      items: [expect.objectContaining({ id: 'joy:dipToBlack', runnable: false })],
+    });
+    const readOnly = createJoyAgentHostRpcMethods({
+      context: createJoyAgentPagedContext({ projectId: 'project-1', revision: 'revision-1' }),
+    });
+    await expect(
+      invoke(readOnly, 'read_project_context', { domain: 'presets', query: 'JOY-CLEAN' }),
+    ).resolves.toMatchObject({
+      items: [expect.objectContaining({ id: 'joy-clean', runnable: false })],
+    });
+  });
+
   it('keeps snapshot bridges legacy-only without observation and exposes all six observation methods with one', () => {
     const input = { projectId: 'project-1', revision: 'revision-1' };
     const withoutObservation = createJoyAgentHostRpcMethodsForSnapshot(input, () =>
