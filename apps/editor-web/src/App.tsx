@@ -8076,6 +8076,9 @@ function EditorWorkspace({
                 aria-busy={exporting}
               >
                 <ExportIcon />
+                <span className="header-export-label" aria-hidden="true">
+                  Export MP4
+                </span>
                 {exportPresetWarning !== undefined && (
                   <span
                     className="header-export-warning-badge"
