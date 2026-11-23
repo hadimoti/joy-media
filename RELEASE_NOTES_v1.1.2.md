@@ -1,6 +1,8 @@
 # JOY Media v1.1.2
 
-JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video editor for Windows, with no account and no server. This version shows your pictures in the Asset Library, adds smart guides and snapping on the Monitor, and makes the Joy Code chat and settings clearer when something goes wrong.
+JOY Media v1.1.2 is an update to v1.1.1. It remains a local Windows desktop editor: core editing does not require a JOY account or hosted JOY server. Optional AI providers have their own account, connection and usage requirements. This version shows your pictures in the Asset Library, adds smart guides and snapping on the Monitor, and makes the Joy Code chat and settings clearer when something goes wrong.
+
+For step-by-step workflows, see the [v1.1.2 designer guide](docs/USER-GUIDE-v1.1.2.md).
 
 ## What is new
 
