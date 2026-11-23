@@ -1,0 +1,6 @@
+3844eb34d7d8c56c2f06411145a39a05473bcb6fe1ce4ec2cdfe5a5c0d0f19ae  joy-media-bundle.mjs
+f343605583fe88f2b4b825db2adef582f2f90c9f056e56948f1c5f3e031fbecf  joy-media-release-manifest.json
+da59a4b72dd7046ae1c4b64622473257a79cdb01f3f601cf45539f70fab45175  joy-media-windows-x64-v1.1.2.zip
+0a4eadad00fab59cd1d070eaf307111130ac9eb54dabcffd8385d665eb16145b  joy-media.exe
+54f8f0472187f21ec36affdb728232f8ac90d006a4baf10acf834091ae3689a8  joy-worker.exe
+87ccffa1dbd0504e06b048ab6ab636303ba5d53148a3b1bfe41ef8bf286f86ff  joy-media-setup.exe
