@@ -9,6 +9,7 @@ import {
   runJoyAgentTask,
   runScopedCreativeSkillToolLoop,
 } from './entry-points.js';
+import { validateCreativeBrief } from '@joy-media/agent-tools';
 import type { JoyAgentEngineClient, JoyAgentRunIterator } from './engine-client.js';
 import type { HostRpcMethods } from './host-rpc.js';
 import {
@@ -182,6 +183,93 @@ describe('JOY Agent entry points', () => {
       }),
     ).rejects.toMatchObject({ code: 'failed' });
     expect(client.startRun).not.toHaveBeenCalled();
+  });
+
+
+  it('gives an ordinary Creative Brief request a usable model contract and validates the final brief', async () => {
+    const client = fakeClient([
+      event('completed', {
+        result: {
+          schemaVersion: 1,
+          snapshotRevisionId: 'rev-1',
+          projectId: 'project-1',
+          request: 'improve it',
+          interpretedGoal: {
+            userIntent: 'improve it',
+            inferredGoal: 'The opening holds too long.',
+            resolvedGoal: 'Tighten the opening scene.',
+            confidence: 'medium',
+          },
+          distinction: { facts: [], inferences: [] },
+          assumptions: [],
+          recommendations: [
+            {
+              id: 'pacing-001',
+              kind: 'pacing',
+              confidence: 'medium',
+              evidence: [],
+              rationale: 'The opening scene runs long.',
+              expectedBenefit: 'Better retention.',
+              risk: 'none',
+              scope: {},
+            },
+          ],
+          blockedBy: [],
+          requiresHumanDecision: [],
+          intelligence: { brand: {}, scenes: [], project: {}, rules: [] },
+          warnings: [],
+        },
+      }),
+    ]);
+    const brief = await runCreativeBriefTask({
+      client,
+      projectId: 'project-1',
+      revisionId: 'rev-1',
+      request: 'improve it',
+      context: { projectId: 'project-1', revision: 'rev-1' },
+    });
+    // The request the model received carries the contract and the bindings.
+    const request = vi.mocked(client.startRun).mock.calls[0]?.[0];
+    expect(request?.taskKind).toBe('creative-brief');
+    expect(request?.prompt).toContain('project-1');
+    expect(request?.prompt).toContain('rev-1');
+    expect(request?.prompt).toContain('interpretedGoal');
+    expect(request?.prompt).toContain('recommendations');
+    expect((request?.prompt ?? '').length).toBeLessThanOrEqual(8_000);
+    // The final brief still satisfies the independent validator.
+    expect(validateCreativeBrief(brief).errors).toEqual([]);
+    expect(brief.projectId).toBe('project-1');
+    expect(brief.snapshotRevisionId).toBe('rev-1');
+  });
+
+  it('rejects a Creative Brief that is bound to another project', async () => {
+    const client = fakeClient([
+      event('completed', {
+        result: {
+          schemaVersion: 1,
+          snapshotRevisionId: 'rev-1',
+          projectId: 'project-2',
+          request: 'improve it',
+          interpretedGoal: {
+            userIntent: 'improve it',
+            inferredGoal: 'x',
+            resolvedGoal: 'y',
+            confidence: 'low',
+          },
+          distinction: { facts: [], inferences: [] },
+          recommendations: [],
+        },
+      }),
+    ]);
+    await expect(
+      runCreativeBriefTask({
+        client,
+        projectId: 'project-1',
+        revisionId: 'rev-1',
+        request: 'improve it',
+        context: { projectId: 'project-1', revision: 'rev-1' },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-result' });
   });
 
   it('keeps the Creative Brief entry point explicitly plan-only with bounded context', async () => {

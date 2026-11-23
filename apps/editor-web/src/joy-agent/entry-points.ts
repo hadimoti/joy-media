@@ -1,5 +1,12 @@
 import type { CreativeBriefV1, CreativeSkillAvailability } from '@joy-media/agent-tools';
-import { resolveCreativeSkillAvailability, validateCreativeBrief } from '@joy-media/agent-tools';
+import {
+  resolveCreativeSkillAvailability,
+  validateCreativeBrief,
+  buildCreativeBriefModelPrompt,
+  completeCreativeBriefFromModelOutput,
+  CreativeBriefContractError,
+  CREATIVE_BRIEF_MODEL_REQUEST_MAX_CHARS,
+} from '@joy-media/agent-tools';
 import type { JoyAgentEngineClient, JoyAgentRunHost } from './engine-client.js';
 import {
   createCreativeSkillEditorPrimitives,
@@ -291,10 +298,19 @@ export async function runCreativeBriefTask(input: {
   readonly onRunStart?: (runId: string) => void;
   readonly allowRemote?: boolean;
 }): Promise<CreativeBriefV1> {
+  // The model is given the Creative Brief contract for this exact request, so
+  // it knows every field, the exact project and revision to echo, and the
+  // allowed enums. The contract is the model-facing half of the same contract
+  // the independent validator enforces below.
+  const request = input.request.slice(0, CREATIVE_BRIEF_MODEL_REQUEST_MAX_CHARS);
   const event = await runJoyAgentTask({
     client: input.client,
     taskKind: 'creative-brief',
-    prompt: input.request,
+    prompt: buildCreativeBriefModelPrompt({
+      request,
+      projectId: input.projectId,
+      revisionId: input.revisionId,
+    }),
     baseRevision: input.revisionId,
     context: input.context,
     ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
@@ -303,7 +319,30 @@ export async function runCreativeBriefTask(input: {
   });
   if (event.result === undefined)
     throw new JoyAgentTaskError('empty-result', 'JOY returned no Creative Brief');
-  const validation = validateCreativeBrief(event.result);
+  // Host-owned fields (schema version, project and revision bindings, the
+  // recorded request, metadata, the intelligence shell) are completed here.
+  // A binding the model got wrong is rejected, never silently rewritten.
+  let brief: CreativeBriefV1;
+  try {
+    brief = completeCreativeBriefFromModelOutput({
+      output: event.result,
+      projectId: input.projectId,
+      revisionId: input.revisionId,
+      request,
+    });
+  } catch (error) {
+    if (error instanceof CreativeBriefContractError)
+      throw new JoyAgentTaskError(
+        'invalid-result',
+        `JOY Creative Brief failed the contract: ${error.code}${
+          error.field === undefined ? '' : ` (${error.field})`
+        } - ${error.message}`,
+      );
+    throw error;
+  }
+  // Independent validation: the completed brief must still satisfy every rule
+  // of the Creative Brief contract. The prompt contract is not a substitute.
+  const validation = validateCreativeBrief(brief);
   if (!validation.valid)
     throw new JoyAgentTaskError(
       'invalid-result',
@@ -312,7 +351,6 @@ export async function runCreativeBriefTask(input: {
         .map((error) => error.message)
         .join('; ')}`,
     );
-  const brief = event.result as CreativeBriefV1;
   if (brief.projectId !== input.projectId || brief.snapshotRevisionId !== input.revisionId)
     throw new JoyAgentTaskError(
       'stale-result',

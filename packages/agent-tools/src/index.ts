@@ -376,6 +376,23 @@ export type {
 } from './model-adapter.js';
 export { isModelAdapterInputV1, isModelAdapterOutputV1 } from './model-adapter.js';
 
+export type {
+  CreativeBriefModelBindingV1,
+  CreativeBriefModelContractV1,
+  CreativeBriefCompletionInput,
+  CreativeBriefContractErrorCode,
+} from './creative-brief-contract.js';
+export {
+  CREATIVE_BRIEF_MODEL_CONTRACT_VERSION,
+  CREATIVE_BRIEF_MODEL_PROMPT_MAX_CHARS,
+  CREATIVE_BRIEF_MODEL_REQUEST_MAX_CHARS,
+  CREATIVE_BRIEF_MODEL_ADAPTER_LABEL,
+  CreativeBriefContractError,
+  buildCreativeBriefModelContract,
+  buildCreativeBriefModelPrompt,
+  completeCreativeBriefFromModelOutput,
+} from './creative-brief-contract.js';
+
 // ==========================================================================
 // Async Runtime Contract - WP-37 S4-F6
 // Production-facing exports only. Fake adapters are NOT exported.
