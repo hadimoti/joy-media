@@ -84,22 +84,23 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
       data-agent-active={presence.active ? 'true' : undefined}
       data-agent-phase={presence.active ? presence.phase : undefined}
     >
-      {SvgIcon !== undefined ? (
-        <span className="panel-tab-svg" aria-hidden>
-          <SvgIcon />
-        </span>
-      ) : iconUrl !== undefined ? (
-        <span
-          className="panel-tab-icon"
-          style={{
-            WebkitMaskImage: `url(${iconUrl})`,
-            maskImage: `url(${iconUrl})`,
-          }}
-          aria-hidden
-        />
-      ) : (
-        <span className="panel-tab-fallback">{label}</span>
-      )}
+      {api.id !== 'agent' &&
+        (SvgIcon !== undefined ? (
+          <span className="panel-tab-svg" aria-hidden>
+            <SvgIcon />
+          </span>
+        ) : iconUrl !== undefined ? (
+          <span
+            className="panel-tab-icon"
+            style={{
+              WebkitMaskImage: `url(${iconUrl})`,
+              maskImage: `url(${iconUrl})`,
+            }}
+            aria-hidden
+          />
+        ) : (
+          <span className="panel-tab-fallback">{label}</span>
+        ))}
       <span className="panel-tab-label">{label}</span>
       {/* The close button is the only way to close a tab (it is not in the group menu, and a click or a middle-click on the tab never closes it). */}
       {

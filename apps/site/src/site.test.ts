@@ -156,16 +156,21 @@ describe('static checks (PLAN-v4 7e, source and build)', () => {
     }
   });
 
-  it('loads only same-site images from /img/, each with a description and an existing file', () => {
+  it('loads only same-site images from /img/ with appropriate alternative text', () => {
     const assets = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets');
     for (const [path, html] of markup) {
       for (const tagText of html.match(/<[a-z]+[^>]*\ssrc=[^>]*>/gi) ?? []) {
         expect(tagText, path).toMatch(/^<img\s/);
         const src = /\ssrc="([^"]+)"/.exec(tagText)?.[1] ?? '';
         expect(src.startsWith('/img/'), `${path} image ${src}`).toBe(true);
-        expect(/\salt="[^"]{8,}"/.test(tagText), `${path} image ${src} needs a description`).toBe(
-          true,
-        );
+        if (src === '/img/joy-media-mark.png') {
+          expect(tagText).toMatch(/\salt=""/u);
+          expect(tagText).toMatch(/\saria-hidden="true"/u);
+        } else {
+          expect(/\salt="[^"]{8,}"/.test(tagText), `${path} image ${src} needs a description`).toBe(
+            true,
+          );
+        }
         expect(existsSync(join(assets, src.slice(1))), `${path} image ${src} exists`).toBe(true);
       }
     }
@@ -189,6 +194,7 @@ describe('static checks (PLAN-v4 7e, source and build)', () => {
 
   it('allows only GitHub-repository links externally, and internal links resolve', () => {
     const served = new Set(Object.keys(files));
+    const assets = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets');
     for (const [path, html] of markup) {
       for (const href of hrefs(html)) {
         if (href.startsWith('#')) {
@@ -200,7 +206,10 @@ describe('static checks (PLAN-v4 7e, source and build)', () => {
           const page =
             target === '/' ? 'index.html' : (PAGE_FILES as Record<string, string>)[target];
           const asset = target.slice(1);
-          const resolves = page !== undefined ? served.has(page) : served.has(asset);
+          const resolves =
+            page !== undefined
+              ? served.has(page)
+              : served.has(asset) || (asset.startsWith('img/') && existsSync(join(assets, asset)));
           expect(resolves, `${path} internal link ${href}`).toBe(true);
         } else {
           throw new Error(`${path} has a link that is neither internal nor https: ${href}`);

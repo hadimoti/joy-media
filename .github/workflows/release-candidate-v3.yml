@@ -81,12 +81,14 @@ jobs:
           test "$(pnpm --version)" = '11.15.0'
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
+      - name: Compile workspace dependencies for Vitest
+        run: pnpm typecheck
       - name: Run Vitest shard ${{ matrix.shard }} of 3 (retries disabled, JSON report)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p test-output/hosted-verify
-          node node_modules/vitest/vitest.mjs run --retry=0 --shard=${{ matrix.shard }}/3 --reporter=json --outputFile=test-output/hosted-verify/shard-${{ matrix.shard }}.json
+          node node_modules/vitest/vitest.mjs run --retry=0 --shard=${{ matrix.shard }}/3 --reporter=dot --reporter=json --outputFile.json=test-output/hosted-verify/shard-${{ matrix.shard }}.json
           test -s test-output/hosted-verify/shard-${{ matrix.shard }}.json
       # Transport only: the merge job reads the report from this run alone. The merge decides whether the shards are complete.
       - name: Upload the shard report (one day, this run only)
@@ -124,18 +126,18 @@ jobs:
           test "$(pnpm --version)" = '11.15.0'
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
-      - name: Collect the full Vitest collection on this exact commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p test-output/hosted-verify/prep
-          node node_modules/vitest/vitest.mjs list --json > test-output/hosted-verify/prep/list.json
-          test -s test-output/hosted-verify/prep/list.json
       - name: Run the static release commands once on this commit (typecheck, lint, format, goldens)
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p test-output/hosted-verify/prep
           node tooling/release/src/hosted-verify.mjs commands --out test-output/hosted-verify/prep/commands.json
+      - name: Collect the full Vitest collection on this exact commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          node node_modules/vitest/vitest.mjs list --json > test-output/hosted-verify/prep/list.json
+          test -s test-output/hosted-verify/prep/list.json
       - name: Run the production dependency audit
         shell: bash
         run: pnpm run audit:prod
@@ -622,14 +624,14 @@ jobs:
           PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-responsive-1-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          # Per-viewport: wp32 panel-reachability + per-panel overflow; golden-path login-gate overflow + axe scan; wp35
+          # Per-viewport: wp32 panel-reachability + per-panel overflow; golden-path first-screen overflow + axe scan; wp35
           # loaded-timeline transport/workspace geometry. --grep unions the three, then assert-playwright-titles verifies each of
           # the 3 EXACT test titles ran and passed at that viewport (identity, not just a count).
-          grep_re='(keeps project controls, workspace navigation|login gate loads without fatal|renders backend track titles, mixed elements)'
+          grep_re='(keeps project controls, workspace navigation|first screen loads without fatal|renders professional track codes, mixed elements)'
           req_titles=(
             'keeps project controls, workspace navigation, and keyboard menus reachable'
-            'login gate loads without fatal browser errors or horizontal overflow'
-            'renders backend track titles, mixed elements, and Quarter preview controls'
+            'first screen loads without fatal browser errors or horizontal overflow'
+            'renders professional track codes, mixed elements, and Quarter preview controls'
           )
           for profile in desktop-compact desktop-minimum desktop-1280 desktop-1440 desktop-1581 desktop-1920; do
             echo "::group::responsive checkpoints @ $profile"

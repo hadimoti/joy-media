@@ -232,6 +232,7 @@ namespace JoyMedia.Setup
         public InstallerForm()
         {
             InitializeComponent();
+            Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             this.Load += InstallerForm_Load;
         }
 

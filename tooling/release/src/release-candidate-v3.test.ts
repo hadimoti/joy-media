@@ -160,15 +160,22 @@ describe('release-candidate-v3 workflow', () => {
   it('runs the three Vitest shards and verifies exact coverage against the collected list', () => {
     const shard = v3.jobs['hosted-verify-shard'];
     expect(shard.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3] } });
-    const shardRun = (shard.steps ?? []).map((step) => step.run ?? '').join('\n');
-    expect(shardRun).toContain('--retry=0 --shard=${{ matrix.shard }}/3');
+    const shardSteps = shard.steps ?? [];
+    const shardTypecheck = shardSteps.findIndex((step) => step.run === 'pnpm typecheck');
+    const shardTests = shardSteps.findIndex((step) =>
+      step.run?.includes('--retry=0 --shard=${{ matrix.shard }}/3'),
+    );
+    expect(shardTypecheck).toBeGreaterThanOrEqual(0);
+    expect(shardTypecheck).toBeLessThan(shardTests);
     const prepare = v3.jobs['hosted-prepare'];
     expect(prepare.env).toEqual(shard.env);
     const prepareSteps = prepare.steps ?? [];
-    expect(prepareSteps.some((step) => step.run?.includes('vitest.mjs list --json'))).toBe(true);
-    expect(prepareSteps.some((step) => step.run?.includes('hosted-verify.mjs commands'))).toBe(
-      true,
+    const collect = prepareSteps.findIndex((step) => step.run?.includes('vitest.mjs list --json'));
+    const staticChecks = prepareSteps.findIndex((step) =>
+      step.run?.includes('hosted-verify.mjs commands'),
     );
+    expect(staticChecks).toBeGreaterThanOrEqual(0);
+    expect(staticChecks).toBeLessThan(collect);
     expect(prepareSteps.some((step) => step.run === 'pnpm run audit:prod')).toBe(true);
     const verify = v3.jobs['hosted-verify'];
     expect(needsOf(verify)).toEqual(
@@ -296,6 +303,21 @@ describe('release-candidate-v3 workflow', () => {
       expect(run).toContain(profile);
     }
     expect(run).toContain('assert-playwright-titles.mjs');
+    const titles = [...run.matchAll(/^\s*'([^']+)'\s*$/gmu)].map((match) => match[1]!);
+    const specPaths = [...run.matchAll(/tests\/e2e\/[\w.-]+\.spec\.ts/gu)].map((match) => match[0]);
+    const specs = specPaths.map((path) =>
+      readFileSync(join(resolve(HERE, '../../..'), path), 'utf8'),
+    );
+    const selector = /^\s*grep_re='([^']+)'/mu.exec(run)?.[1];
+    expect(titles).toHaveLength(3);
+    expect(selector).toBeDefined();
+    for (const title of titles) {
+      expect(
+        specs.some((source) => source.includes(`test('${title}'`)),
+        title,
+      ).toBe(true);
+      expect(title).toMatch(new RegExp(selector!, 'u'));
+    }
     expect(
       v3.jobs['acceptance-responsive'].steps?.some(
         (step) => step.name === 'Verify acceptance teardown',

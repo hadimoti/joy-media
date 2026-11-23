@@ -53,7 +53,7 @@ import { PanelShell } from './PanelShell.js';
 import { lookEntityOptions } from './look-entities.js';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import { approvalPolicyForAgentPolicy } from './agent-policy-settings.js';
-import { JoyCodeLogo } from './JoyCodeLogo.js';
+import { JoyCodeProcessingIcon } from './JoyCodeProcessingIcon.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import { matchJoyCodeIntentId, type JoyCodeThreadStatus } from './joy-code-history.js';
 import {
@@ -4294,7 +4294,7 @@ export function AgentPanel({
     if (pending === undefined || pending.qcRepair !== undefined) return [];
     return extractPendingChanges(pending.plan, project);
   }, [pending, project]);
-  const isThinking = thinkingThreadId === activeThread?.id;
+  const isThinking = thinkingThreadId !== undefined && thinkingThreadId === activeThread?.id;
   const composerPresenceActive = presenceState.targets.some(
     (target) => target.panelId === 'agent' && target.sectionId === 'composer',
   );
@@ -4311,6 +4311,7 @@ export function AgentPanel({
     liveAgentPhase !== 'completed' &&
     liveAgentPhase !== 'failed' &&
     liveAgentPhase !== 'cancelled';
+  const isProcessing = (isThinking || liveAgentBusy) && liveAgentPhase !== 'awaiting-approval';
   const activeRunId = selectActiveJoyAgentRunId(agentRunId, presenceState, runLifecycle.run);
 
   const uploadJoyCodeFiles = async (fileList: FileList | null) => {
@@ -4408,7 +4409,6 @@ export function AgentPanel({
               aria-pressed={composerCapability === 'edit'}
               onClick={() => setComposerCapability('edit')}
             >
-              <JoyCodeLogo variant="mark" />
               Edit
             </button>
             <button
@@ -4450,6 +4450,9 @@ export function AgentPanel({
               Looks
             </button>
 
+            <span className="joy-code-processing-slot" aria-hidden="true">
+              <JoyCodeProcessingIcon processing={isProcessing} />
+            </span>
             {onOpenSettings !== undefined && (
               <button
                 type="button"
@@ -4619,7 +4622,6 @@ export function AgentPanel({
           >
             {activeThread?.messages.length === 0 && (
               <div className="joy-code-welcome">
-                <JoyCodeLogo variant="horizontal" label="Joy Code" />
                 <h3 className="joy-code-welcome-title">What should we edit?</h3>
               </div>
             )}
@@ -4660,11 +4662,6 @@ export function AgentPanel({
                   className={`joy-code-message is-${message.role}`}
                   aria-label={message.role === 'user' ? 'You' : 'Joy Code'}
                 >
-                  {message.role === 'assistant' && (
-                    <span className="joy-code-avatar" aria-hidden="true">
-                      <JoyCodeLogo variant="mark" />
-                    </span>
-                  )}
                   <div>
                     <strong>{message.role === 'user' ? 'You' : 'Joy Code'}</strong>
                     {message.parts !== undefined && message.parts.length > 0 ? (
@@ -4755,9 +4752,6 @@ export function AgentPanel({
                 aria-label="Joy Code is thinking"
                 role="status"
               >
-                <span className="joy-code-avatar" aria-hidden="true">
-                  <JoyCodeLogo variant="mark" thinking />
-                </span>
                 <div>
                   <strong>Joy Code</strong>
                   <p>Thinking…</p>

@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import joyCodeMarkUrl from './brand-assets/joy-code-mark.png';
 import { UI_ICONS } from './ui-icons.js';
 
 /** Shared inline SVG icon set for common editor buttons (WP-16 UI pass). */
@@ -599,10 +598,6 @@ export function FlowProvenanceIcon() {
 
 export function ProgramOutputIcon() {
   return <PngMaskIcon src={UI_ICONS.programOutput} size={12} />;
-}
-
-export function JoyBrandMarkIcon({ size = 16 }: { readonly size?: number } = {}) {
-  return <PngMaskIcon src={joyCodeMarkUrl} size={size} />;
 }
 
 export function TimelineVideoTrackIcon({ size = 14 }: { readonly size?: number } = {}) {

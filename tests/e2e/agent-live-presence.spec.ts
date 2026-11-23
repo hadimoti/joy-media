@@ -20,10 +20,21 @@ test.describe('built-in JOY Agent live presence', () => {
     page,
   }) => {
     const composer = page.getByLabel('Message Joy Code');
+    const processingIcon = page.locator('.joy-code-processing-icon');
+    const codeTab = page.locator('.panel-tab[aria-label="Joy Code"]');
+    await expect(codeTab).toBeVisible();
+    await expect(codeTab.locator('img, .panel-tab-icon, .panel-tab-svg')).toHaveCount(0);
+    await expect(processingIcon).toHaveCount(0);
     await composer.fill('Update the selected caption style');
     await composer.press('Enter');
+    await expect(processingIcon).toBeVisible();
+    await expect(processingIcon).toHaveCSS('animation-name', 'joy-code-processing-spin');
+    await expect
+      .poll(() => processingIcon.evaluate((img: HTMLImageElement) => img.naturalWidth))
+      .toBe(128);
 
     await expect(page.getByRole('status').filter({ hasText: 'Approval required' })).toBeAttached();
+    await expect(processingIcon).toHaveCount(0);
     await expect(composer).toBeFocused();
 
     await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
@@ -46,9 +57,11 @@ test.describe('built-in JOY Agent live presence', () => {
   test('Follow activates the routed nested feature tab without stealing input focus', async ({
     page,
   }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     const composer = page.getByLabel('Message Joy Code');
     await composer.fill('Update the selected caption style');
     await composer.press('Enter');
+    await expect(page.locator('.joy-code-processing-icon')).toHaveCSS('animation-name', 'none');
     await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
     await page.getByRole('menuitemcheckbox', { name: 'Follow target' }).click();
     await expect(composer).toBeFocused();

@@ -11,6 +11,7 @@ $zipPath = Join-Path $distReleases "joy-media-windows-x64-v$Version.zip"
 $outExe = Join-Path $distReleases "joy-media-setup.exe"
 $srcCs = Join-Path $PSScriptRoot "Setup.cs"
 $srcUserPath = Join-Path $PSScriptRoot "UserPath.cs"
+$appIcon = Join-Path $repoRoot "apps\desktop\build\joy-media.ico"
 
 # The installer displays and registers InstallerEngine.ProductVersion; refuse to embed a payload
 # whose version does not match it so the Add/Remove Programs entry can never lie.
@@ -21,6 +22,9 @@ if ($sourceVersion -ne $Version) {
 
 if (-not (Test-Path $zipPath)) {
     throw "Payload zip not found at $zipPath. Run desktop packager first."
+}
+if (-not (Test-Path -LiteralPath $appIcon -PathType Leaf)) {
+    throw "Windows application icon not found at $appIcon."
 }
 
 $csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
@@ -39,7 +43,7 @@ if (-not $csc -or -not (Test-Path $csc)) {
 Write-Host "Compiling $outExe with payload $zipPath..."
 & $csc /target:winexe /optimize+ /platform:x64 `
     /reference:System.dll,System.Core.dll,Microsoft.CSharp.dll,System.Drawing.dll,System.Windows.Forms.dll,System.IO.Compression.dll,System.IO.Compression.FileSystem.dll `
-    "/resource:$zipPath,payload.zip" "/out:$outExe" $srcCs $srcUserPath
+    "/win32icon:$appIcon" "/resource:$zipPath,payload.zip" "/out:$outExe" $srcCs $srcUserPath
 
 if ($LASTEXITCODE -ne 0) {
     throw "Compilation failed with code $LASTEXITCODE"
