@@ -111,7 +111,7 @@ Each one has one plain sentence, and the default says so.
 
 ## 4a. The quality check and where its pictures go (T-B05)
 
-These words are new in T-B05. There was no old text. The quality check is not available yet; T-B05 saves preferences for it. These words describe saved limits and privacy choices and do not mean picture handling is implemented. They are not prices or caps on run cost. The defaults are the ones in ADR-0045 section 8: 12 frames a check, 16 frames a run, 3 fix rounds, and the switch off. A policy saved before these settings loads with those defaults, and nothing else already saved changes.
+The quality check runs in v1.1.2. The owner's answers below provide the shipped wording for its frame limits and privacy controls. The defaults from ADR-0045 section 8 are 12 frames per check, 16 frames per run, three fix rounds, and the switch off. Policies saved before these settings use those defaults.
 
 | Old text       | New text                                                                                                                                           | Where it is                                                         | Owner's answer                                                                                               |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |

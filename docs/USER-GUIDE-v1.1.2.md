@@ -4,7 +4,7 @@ This guide covers the Windows desktop editor's main design workflows. Menu label
 
 ## Install and check the download
 
-1. Open the [JOY Media releases](https://github.com/hadimoti/joy-media/releases) page and download the v1.1.2 Windows installer and `SHA256SUMS.txt` from the same release.
+1. Download the Windows x64 installer `joy-media-setup.exe` and `SHA256SUMS.txt` from the [v1.1.2 release](https://github.com/hadimoti/joy-media/releases/tag/v1.1.2). The portable ZIP is on the same page.
 2. In PowerShell, calculate the installer hash:
 
    ```powershell
@@ -38,7 +38,43 @@ Use **Workspace** in the editor header to choose a layout:
 
 Panel tabs sit along each dock group's edge. When the group is too narrow to show every tab, open Dockview's overflow menu to reach the hidden panels. Workspace presets keep their own layouts; choose **Custom** to arrange panels for a particular task.
 
+### Menus and shortcuts
+
+| Menu     | Common actions                                                                                                                                                                                                                                     |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| File     | Open **Projects Library**, import or export an editable project, or export the current video. An editable project keeps project data for further editing.                                                                                          |
+| Edit     | Undo and redo with **Ctrl+Z** and **Ctrl+Y**. Cut, copy and paste with **Ctrl+X**, **Ctrl+C** and **Ctrl+V**. **N** toggles snapping. Press **Ctrl+K** to search the Command Palette. Use **Asset Library Folder** to manage the library location. |
+| Clip     | Select a clip and press **S** to split at the playhead, **Ctrl+D** to duplicate, or **Delete** to remove it. **Speed** is available for video clips.                                                                                               |
+| Joy Code | Open the composer or its settings, choose Execution Mode, show or follow the active target, and stop the active run.                                                                                                                               |
+| View     | Open a panel by name. Press **F11** to toggle fullscreen.                                                                                                                                                                                          |
+| Window   | Focus Media, Program Monitor, Timeline or Inspector. Use **Ctrl+M** to minimize or **Alt+F4** to close the window.                                                                                                                                 |
+
+### Feature index
+
+Use the **View** menu to open a panel that is missing from the current workspace. Many tools show their editing controls after you select a timeline clip, layer or track.
+
+| Surface                            | What to use it for                                                                                                                                              |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create → Media                     | Import video, audio and images. Use the library filters and Grid or List view to find assets, then place them at the playhead.                                  |
+| Create → Text and Captions         | Add titles, lower thirds or captions. Select the result to edit typography, alignment, cues or timing. See [Typography and captions](#typography-and-captions). |
+| Create → Audio                     | Enhance a voice or audio clip, adjust the mix, and inspect audio runtime availability.                                                                          |
+| Create → Templates                 | Browse the built-in categories, such as Titles and Lower Thirds, or find saved templates and favorites. Open **My Motions** for saved motion work.              |
+| Enhance → Animate                  | Choose a motion preset or use animation controls to keyframe a selected layer. Inspect the resulting property lanes in the Timeline.                            |
+| Enhance → Transitions              | Choose a transition at a cut between two clips, then review the junction in the Monitor.                                                                        |
+| Enhance → Effects and Filters      | Select a clip before applying a preset. Inspect the clip's effect stack to adjust or remove the effect.                                                         |
+| Enhance → Color                    | Grade with adjustments, wheels, curves and HSL. Use Looks for reusable treatments and Scopes to inspect the image.                                              |
+| Enhance → Adjustment Layers        | Place adjustments on their own layer, then use the Timeline to control where they affect the composition.                                                       |
+| Program Monitor                    | Scrub and play, change preview quality and zoom, crop a visual clip, and position or scale a layer with on-canvas controls.                                     |
+| Timeline and Flow                  | Arrange tracks and clips in the Timeline. Switch to **Flow** for the project's node view.                                                                       |
+| Inspector                          | See the selected clip's properties. Visual, Enhancements, Mask, Effects, Audio and Speed tabs depend on the selection.                                          |
+| 3D Scene and Camera                | Open the scene and camera panels when working on 3D scene elements.                                                                                             |
+| History and Jobs                   | Inspect edit history and follow asynchronous jobs such as renders.                                                                                              |
+| Workflows, Diagnostics and Plugins | Open workflow tools, inspect runtime information, or manage installed plugins from their respective panels.                                                     |
+| Canvas format and Export           | Set the aspect ratio and dimensions in the header. Use the export preset and MP4 controls when the composition is ready.                                        |
+
 ## Create, Enhance and refine
+
+![Color tools alongside the Monitor and Timeline](images/v1.1.2/color.png)
 
 - In **Edit**, use the **Media**, **Text** and **Captions** libraries to browse assets and add them to the project. A library category is selected from its category rail; search and browse the cards in the adjacent area.
 - In **Enhance**, choose **Motion** for animation presets or **Color** for grading controls. Effects and Transitions are available in the same workspace.
@@ -78,9 +114,17 @@ Open **Automate → Joy Code**. The gear button opens **Joy Code Settings**, wit
 3. In **Tools and permissions**, allow only the capabilities you want Joy Code to use, such as reading or changing the timeline, importing media, accessing files, generating media, spending with a provider, rendering previews or exporting.
 4. In **Live preview**, choose whether changes are shown on the canvas while Joy Code works. The **Media support check** can send three tiny test clips to the configured provider to check picture, sound and video understanding; it does not send your project or media, but the provider may charge for those checks.
 
-Joy Code does not have the same behavior for every result. A **native** operation is one the app can stage in its own project and show in the rendered preview/approval flow. A **suggestion-only** result is guidance for you to apply manually; it does not become an edit merely because Joy Code described it. Use the app's available preview and approval controls to tell which applies. Unsupported preset types remain suggestion-only.
+| Setting               | What it controls                                                                                                                                                                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| AI models             | Connection profiles, the Workhorse and Creative Brief assignments, model selection, effort level and model instructions. Use **Refresh list** to request the provider's current catalog or enter a **Model ID** when the connection supports it.             |
+| Safety and limits     | Select the execution mode and set autonomy, cost, local-only and quality check limits. Quality check has separate limits for frames per check, frames per run and fix rounds. Turn on **Never send frames to a remote model** to keep the frames on this PC. |
+| Live preview          | Choose how proposed changes are shown while Joy Code runs. Use the preview and approval controls to inspect a proposed change before applying it.                                                                                                            |
+| Tools and permissions | Control project and timeline edits, imports, local file access, AI media generation, paid provider use, preview rendering and export.                                                                                                                        |
+| Media support check   | Check which media a connected model can understand. The check uses short test inputs for the selected media type.                                                                                                                                            |
 
-The source tree is integrating six scoped Joy Code agent guides under `.agent/skills/joy-code-*`. These are workflow instructions for agents; they do not add runtime features or override the app's configured permissions and approval flow.
+Use **Edit** for changes, **Creative Brief** for design direction, **Recipes** for reusable workflows and **Looks** for supported look workflows. During a run, the **Joy Code** menu shows the activity and can jump to or follow its target. Use **Stop** in the current composer or **Stop active run** in the menu.
+
+Joy Code can stage supported title, caption and transition presets for preview and approval. Ordinary filters and effects are suggestions you can apply from **Enhance**. The [bundled Joy Code skills](../.agent/skills) give agents workflows for typography, captions, transitions, color, motion and export review.
 
 ## Audio, Timeline and delivery
 
