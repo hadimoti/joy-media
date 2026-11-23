@@ -182,6 +182,18 @@ function installDesktopBridge(): void {
 }
 
 describe('JOY Agent Settings connection status', () => {
+  it('identifies the current settings page as navigation changes', async () => {
+    const rendered = await render(client());
+    const current = () => rendered.querySelectorAll('nav button[aria-current="page"]');
+    expect(current()).toHaveLength(1);
+    expect(current()[0]?.textContent?.trim()).toBe('AI models');
+
+    await act(async () => buttonByText(rendered, 'Safety and limits').click());
+
+    expect(current()).toHaveLength(1);
+    expect(current()[0]?.textContent?.trim()).toBe('Safety and limits');
+  });
+
   beforeEach(() => {
     installDesktopBridge();
   });

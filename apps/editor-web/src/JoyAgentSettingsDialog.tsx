@@ -1122,6 +1122,7 @@ export function JoyAgentSettingsDialog({
                   key={id}
                   type="button"
                   className={`button-secondary joy-settings-nav-item ${activeTab === id ? 'is-active' : ''}`}
+                  aria-current={activeTab === id ? 'page' : undefined}
                   onClick={() => setActiveTab(id)}
                 >
                   <span className="joy-settings-nav-icon">{icon}</span>

@@ -89,9 +89,9 @@
   overflow-y: auto;
   flex-direction: column;
   gap: 8px;
-  width: 230px;
+  width: var(--joy-settings-nav-width);
   padding: 16px 12px 12px;
-  border-right: 1px solid var(--joy-border);
+  border-inline-end: 1px solid var(--joy-border);
   background: var(--joy-bg-panel);
 }
 
@@ -114,6 +114,7 @@
 /* A row in the left list. It carries the standard button class and looks like
    a list row, not like a boxed button. */
 .joy-agent-settings-dialog .joy-settings-nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -125,7 +126,7 @@
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-md);
   font-weight: 500;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition:
     background 0.15s ease,
@@ -135,6 +136,11 @@
 .joy-agent-settings-dialog .joy-settings-nav-item:hover {
   background: var(--joy-bg-hover);
   color: var(--joy-text);
+}
+
+.joy-agent-settings-dialog .joy-settings-nav-item:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: -2px;
 }
 
 .joy-agent-settings-dialog .joy-settings-nav-item.is-active {
@@ -147,9 +153,8 @@
 .joy-agent-settings-dialog .joy-settings-nav-item.is-active::before {
   content: '';
   position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
+  inset-inline-start: 0;
+  inset-block: 6px;
   width: 3px;
   border-radius: 0 3px 3px 0;
   background: var(--joy-accent);
@@ -171,9 +176,9 @@
 }
 
 .joy-settings-nav-label {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 .joy-settings-sidebar-footer {
@@ -230,16 +235,18 @@
 /* One grid for every page: 8 px from a label to its input, 16 px between fields and inside a
    card, 24 px between cards. Labels stand above their inputs, left aligned. */
 .joy-agent-settings-dialog {
+  --joy-settings-nav-width: clamp(144px, 23vw, 230px);
   --joy-gap-label: 8px;
   --joy-gap-field: 16px;
   --joy-pad-card: 16px;
-  --joy-gap-card: 24px;
+  --joy-gap-card: clamp(14px, 2vw, 24px);
   --joy-control-height: 36px;
 }
 
 .joy-agent-settings-main {
   position: absolute;
-  inset: 0 0 0 230px;
+  inset-block: 0;
+  inset-inline: var(--joy-settings-nav-width) 0;
   /* The app's global `main` rule gives a page 100vh; this one is exactly as tall as the frame above the footer. */
   height: auto;
   max-height: none;
