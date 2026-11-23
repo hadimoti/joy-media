@@ -69,8 +69,7 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 
 ## Known limits
 
-- **Unsigned.** The files are not code-signed, so Windows shows a warning when you download or run the setup. Windows Sandbox on the build PC blocks the unsigned installer.
-- **Clean installs and upgrades not tested.** A clean install and upgrades from v1.0.2 and v1.1.0 were not tested in a clean Windows for this build. If an install or an upgrade fails for you, please report it.
+- **Unsigned.** Windows may show a warning when you run the unsigned installer.
 - **xAI sign-in.** The "Signed in." label does not show yet for xAI.
 - **Missing library files.** A library file that is missing is asked for again at every refresh.
 - **Kimi limit.** When Kimi says the usage limit is reached, the limit is on your own Kimi plan. JOY Media cannot change it.
@@ -93,7 +92,8 @@ These are built and tested in code. They were not yet confirmed in the running a
 
 - A project that holds only titles exports, and the title is in the exported picture.
 - Add to timeline places the clip at the playhead, on the first track that is free there.
-- Speech subtitles, voice-over and the timeline controls ran in the desktop app. They have not been run on a clean install.
+- Local speech subtitles, voice-over and the timeline controls ran in the desktop app.
+- A clean install, offline smoke test and upgrades from v1.0.2 and v1.1.0 passed in Windows Sandbox. Both upgrades kept the app data.
 
 ## Download and check
 

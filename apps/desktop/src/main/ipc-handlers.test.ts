@@ -1392,7 +1392,7 @@ describe('legacy provider profiles (v1.1.0)', () => {
     });
     expect(refused).toEqual({
       ok: false,
-      error: expect.stringContaining('explicit consent'),
+      error: 'Confirm the public connection before sending it a key.',
     });
   });
 

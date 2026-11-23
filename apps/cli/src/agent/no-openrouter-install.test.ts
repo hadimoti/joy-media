@@ -106,7 +106,7 @@ describe('first CLI install without an OpenRouter profile or key', () => {
     process.env.OPENROUTER_API_KEY = 'sk-or-environment-only-test-key';
     await expect(
       resolveAgentConfig({ baseUrl: 'https://custom.example.com/v1', model: 'custom-model' }),
-    ).rejects.toThrow(/explicit consent/);
+    ).rejects.toThrow(/Confirm the public connection before sending it a key/);
   });
 
   it('does not send an environment key to a consented custom endpoint without a saved key', async () => {
