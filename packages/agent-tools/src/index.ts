@@ -388,6 +388,7 @@ export {
   CREATIVE_BRIEF_MODEL_REQUEST_MAX_CHARS,
   CREATIVE_BRIEF_MODEL_ADAPTER_LABEL,
   CreativeBriefContractError,
+  CREATIVE_BRIEF_REQUEST_TRUNCATED_CODE,
   buildCreativeBriefModelContract,
   buildCreativeBriefModelPrompt,
   completeCreativeBriefFromModelOutput,

@@ -44,9 +44,14 @@ export const CREATIVE_BRIEF_MODEL_ADAPTER_LABEL = 'joy-agent-provider';
 /** Failure classes of the contract, so a rejection names a subtype. */
 export type CreativeBriefContractErrorCode =
   | 'model-output-not-object'
+  | 'binding-invalid'
   | 'binding-mismatch'
+  | 'prompt-budget-exceeded'
   | 'unsupported-schema-version'
   | 'invalid-brief';
+
+/** Warning code recorded when the request was shortened before the model saw it. */
+export const CREATIVE_BRIEF_REQUEST_TRUNCATED_CODE = 'request-truncated';
 
 export class CreativeBriefContractError extends Error {
   readonly code: CreativeBriefContractErrorCode;
@@ -73,6 +78,8 @@ export interface CreativeBriefModelBindingV1 {
   readonly snapshotRevisionId: string;
   readonly projectId: string;
   readonly request: string;
+  /** True when the request shown to the model was shortened to fit the budget. */
+  readonly requestTruncated: boolean;
 }
 
 /** The bounded shape of the object the model may return. */
@@ -207,12 +214,14 @@ export function buildCreativeBriefModelContract(input: {
   readonly projectId: string;
   readonly revisionId: string;
   readonly request: string;
+  readonly requestTruncated?: boolean;
 }): CreativeBriefModelContractV1 {
   const echo: CreativeBriefModelBindingV1 = {
     schemaVersion: 1,
     snapshotRevisionId: input.revisionId,
     projectId: input.projectId,
     request: input.request,
+    requestTruncated: input.requestTruncated === true,
   };
   return {
     contractVersion: CREATIVE_BRIEF_MODEL_CONTRACT_VERSION,
@@ -276,43 +285,98 @@ export function buildCreativeBriefModelPrompt(input: {
   readonly projectId: string;
   readonly revisionId: string;
 }): string {
-  const render = (request: string): string => {
-    const contract = buildCreativeBriefModelContract({
-      projectId: input.projectId,
-      revisionId: input.revisionId,
-      request,
-    });
-    const rules = CONTRACT_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\n');
-    return [
-      'JOY Creative Brief request. Analyse the attached project context and answer with one JSON object that matches the contract below.',
-      '',
-      'USER REQUEST:',
-      request,
-      '',
-      `CONTRACT (binding, version ${contract.contractVersion}):`,
-      JSON.stringify(contract),
-      '',
-      'RULES:',
-      rules,
-      '',
-      'Answer with the JSON object only.',
-    ].join('\n');
-  };
-  // The request text is carried twice (the request section and the contract
-  // echo), so the request budget is what the fixed prompt leaves free. The
-  // contract itself is never truncated.
-  const fixedLength = render('').length;
-  const requestBudget = Math.max(
-    0,
-    Math.min(
-      CREATIVE_BRIEF_MODEL_REQUEST_MAX_CHARS,
-      Math.floor((CREATIVE_BRIEF_MODEL_PROMPT_MAX_CHARS - fixedLength) / 2),
-    ),
-  );
-  const prompt = render(input.request.slice(0, requestBudget));
-  return prompt.length <= CREATIVE_BRIEF_MODEL_PROMPT_MAX_CHARS
-    ? prompt
-    : prompt.slice(0, CREATIVE_BRIEF_MODEL_PROMPT_MAX_CHARS);
+  const resolved = resolveCreativeBriefRequest(input);
+  return renderCreativeBriefPrompt({
+    ...input,
+    request: resolved.request,
+    truncated: resolved.truncated,
+  });
+}
+
+/**
+ * Resolve the request text that the model actually sees.
+ *
+ * The request is carried twice in the prompt (the request section and the
+ * contract echo), so the bound is what the fixed prompt leaves free. When the
+ * request is shortened, the caller and the brief are told, so user content is
+ * never lost silently.
+ */
+function resolveCreativeBriefRequest(input: {
+  readonly request: string;
+  readonly projectId: string;
+  readonly revisionId: string;
+}): { readonly request: string; readonly truncated: boolean } {
+  const { request } = input;
+  if (
+    request.length <= CREATIVE_BRIEF_MODEL_REQUEST_MAX_CHARS &&
+    renderCreativeBriefPrompt({ ...input, truncated: false }).length <=
+      CREATIVE_BRIEF_MODEL_PROMPT_MAX_CHARS
+  ) {
+    return { request, truncated: false };
+  }
+  const fixedLength = renderCreativeBriefPrompt({
+    ...input,
+    request: '',
+    truncated: true,
+  }).length;
+  if (fixedLength > CREATIVE_BRIEF_MODEL_PROMPT_MAX_CHARS) {
+    throw new CreativeBriefContractError(
+      'prompt-budget-exceeded',
+      'The project context identifiers are too long to build a Creative Brief request.',
+    );
+  }
+  let remaining = CREATIVE_BRIEF_MODEL_PROMPT_MAX_CHARS - fixedLength;
+  let length = 0;
+  for (const character of request) {
+    const cost = character.length + JSON.stringify(character).length - 2;
+    if (cost > remaining || length + character.length > CREATIVE_BRIEF_MODEL_REQUEST_MAX_CHARS) {
+      break;
+    }
+    remaining -= cost;
+    length += character.length;
+  }
+  return { request: request.slice(0, length), truncated: true };
+}
+
+function renderCreativeBriefPrompt(input: {
+  readonly request: string;
+  readonly projectId: string;
+  readonly revisionId: string;
+  readonly truncated: boolean;
+}): string {
+  const contract = buildCreativeBriefModelContract({
+    projectId: input.projectId,
+    revisionId: input.revisionId,
+    request: input.request,
+    requestTruncated: input.truncated,
+  });
+  const rules = [
+    ...CONTRACT_RULES,
+    ...(input.truncated
+      ? [
+          'The user request was shortened before it reached you. Answer only from the request text you can see and never claim to have seen the part that was cut.',
+        ]
+      : []),
+  ]
+    .map((rule, index) => `${index + 1}. ${rule}`)
+    .join('\n');
+  return [
+    'JOY Creative Brief request. Analyse the attached project context and answer with one JSON object that matches the contract below.',
+    '',
+    'USER REQUEST:',
+    input.request,
+    ...(input.truncated
+      ? ['', 'NOTE: the user request above was shortened to fit the JOY prompt budget.']
+      : []),
+    '',
+    `CONTRACT (binding, version ${contract.contractVersion}):`,
+    JSON.stringify(contract),
+    '',
+    'RULES:',
+    rules,
+    '',
+    'Answer with the JSON object only.',
+  ].join('\n');
 }
 
 export interface CreativeBriefCompletionInput {
@@ -329,6 +393,35 @@ export interface CreativeBriefCompletionInput {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Check one echoed binding.
+ *
+ * An absent binding is filled by the host. A supplied binding must be the
+ * current one: a blank, non-string or foreign value is rejected with a
+ * redacted error that names the field and never the value.
+ */
+function assertBinding(
+  output: Record<string, unknown>,
+  field: 'projectId' | 'snapshotRevisionId',
+  expected: string,
+  label: string,
+): void {
+  if (!Object.prototype.hasOwnProperty.call(output, field)) return;
+  const value = output[field];
+  if (typeof value !== 'string' || value.trim() === '')
+    throw new CreativeBriefContractError(
+      'binding-invalid',
+      `The Creative Brief carries an invalid ${field} binding.`,
+      field,
+    );
+  if (value !== expected)
+    throw new CreativeBriefContractError(
+      'binding-mismatch',
+      `The Creative Brief is bound to another ${label}.`,
+      field,
+    );
 }
 
 /**
@@ -357,29 +450,45 @@ export function completeCreativeBriefFromModelOutput(
       'The model returned a Creative Brief that is not schema version 1.',
       'schemaVersion',
     );
-  if (typeof output.projectId === 'string' && output.projectId.trim() !== '') {
-    if (output.projectId !== input.projectId)
-      throw new CreativeBriefContractError(
-        'binding-mismatch',
-        'The Creative Brief is bound to another project.',
-        'projectId',
-      );
-  }
-  if (typeof output.snapshotRevisionId === 'string' && output.snapshotRevisionId.trim() !== '') {
-    if (output.snapshotRevisionId !== input.revisionId)
-      throw new CreativeBriefContractError(
-        'binding-mismatch',
-        'The Creative Brief is bound to another revision.',
-        'snapshotRevisionId',
-      );
-  }
-  const intelligence = isRecord(output.intelligence) ? output.intelligence : {};
-  // The model keeps the wording of the request it answered; the host text is
-  // the fallback when the model did not echo one.
-  const recordedRequest =
-    typeof output.request === 'string' && output.request.trim() !== ''
-      ? output.request
-      : input.request;
+  // A binding is either absent or exactly right. A supplied binding that is
+  // blank, of another type, or of another value is a rejection, never a
+  // silent rewrite. The supplied value is never echoed into the error.
+  assertBinding(output, 'projectId', input.projectId, 'project');
+  assertBinding(output, 'snapshotRevisionId', input.revisionId, 'revision');
+  // The brief always records the exact trusted request. A model that rewrote
+  // the request does not get to change what the user asked for.
+  const recordedRequest = input.request;
+  // A list the model authored is kept exactly as authored. Only an absent
+  // list becomes an empty one, so a malformed list still reaches the
+  // independent validator instead of being normalized away.
+  const authoredList = (value: unknown): unknown => (value === undefined ? [] : value);
+  const suppliedWarnings = authoredList(output.warnings);
+  // When the request was shortened before the model saw it, the brief says so
+  // instead of losing that user content silently.
+  const resolved = resolveCreativeBriefRequest({
+    request: recordedRequest,
+    projectId: input.projectId,
+    revisionId: input.revisionId,
+  });
+  const warnings = Array.isArray(suppliedWarnings)
+    ? resolved.truncated
+      ? [
+          ...suppliedWarnings,
+          {
+            code: CREATIVE_BRIEF_REQUEST_TRUNCATED_CODE,
+            message:
+              'The brief request was shortened before the model saw it, so this brief answers the shortened request.',
+            severity: 'warning',
+          },
+        ]
+      : suppliedWarnings
+    : suppliedWarnings;
+  const intelligence =
+    output.intelligence === undefined
+      ? { brand: {}, scenes: [], project: {}, rules: [] }
+      : isRecord(output.intelligence)
+        ? { brand: {}, scenes: [], project: {}, rules: [], ...output.intelligence }
+        : output.intelligence;
   const brief = {
     schemaVersion: 1,
     snapshotRevisionId: input.revisionId,
@@ -387,19 +496,12 @@ export function completeCreativeBriefFromModelOutput(
     request: recordedRequest,
     interpretedGoal: output.interpretedGoal,
     distinction: output.distinction,
-    assumptions: Array.isArray(output.assumptions) ? output.assumptions : [],
-    recommendations: Array.isArray(output.recommendations) ? output.recommendations : [],
-    blockedBy: Array.isArray(output.blockedBy) ? output.blockedBy : [],
-    requiresHumanDecision: Array.isArray(output.requiresHumanDecision)
-      ? output.requiresHumanDecision
-      : [],
-    intelligence: {
-      brand: isRecord(intelligence.brand) ? intelligence.brand : {},
-      scenes: Array.isArray(intelligence.scenes) ? intelligence.scenes : [],
-      project: isRecord(intelligence.project) ? intelligence.project : {},
-      rules: Array.isArray(intelligence.rules) ? intelligence.rules : [],
-    },
-    warnings: Array.isArray(output.warnings) ? output.warnings : [],
+    assumptions: authoredList(output.assumptions),
+    recommendations: authoredList(output.recommendations),
+    blockedBy: authoredList(output.blockedBy),
+    requiresHumanDecision: authoredList(output.requiresHumanDecision),
+    intelligence,
+    warnings,
     meta: {
       generatedAt: input.generatedAt ?? new Date().toISOString(),
       modelAdapter: input.modelAdapter ?? CREATIVE_BRIEF_MODEL_ADAPTER_LABEL,
