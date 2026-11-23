@@ -25,6 +25,7 @@ import { CreativeBriefDisplay } from './CreativeBriefDisplay.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
+import { JoyAgentTaskError } from './joy-agent/entry-points.js';
 import { CONNECT_MODEL_FIRST_TITLE } from './joy-code-run-gate.js';
 import { JoyCodeConnectButton, connectOnCardClick } from './joy-code-run-controls.js';
 import {
@@ -70,6 +71,8 @@ export interface CreativeBriefPanelProps {
   readonly noModelConnected?: boolean;
   /** Opens JOY Agent Settings (the connect step). */
   readonly onConnectModel?: () => void;
+  /** An active app run that belongs to this Creative Brief. */
+  readonly onStop?: () => void;
 }
 
 /** Versioned disclosure shown immediately before project-level opt-in. */
@@ -103,6 +106,7 @@ export function CreativeBriefPanel({
   storage,
   noModelConnected = false,
   onConnectModel,
+  onStop,
 }: CreativeBriefPanelProps) {
   const [state, dispatch] = useReducer(creativeBriefReducer, INITIAL_BRIEF_STATE);
   const [requestText, setRequestText] = useState('');
@@ -221,6 +225,10 @@ export function CreativeBriefPanel({
         });
       }
     } catch (error) {
+      if (error instanceof JoyAgentTaskError && error.code === 'cancelled') {
+        dispatch({ type: 'reset' });
+        return;
+      }
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       dispatch({
         type: 'collect-error',
@@ -285,6 +293,10 @@ export function CreativeBriefPanel({
         });
       }
     } catch (error) {
+      if (error instanceof JoyAgentTaskError && error.code === 'cancelled') {
+        dispatch({ type: 'reset' });
+        return;
+      }
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       dispatch({
         type: 'collect-error',
@@ -303,6 +315,8 @@ export function CreativeBriefPanel({
   ]);
 
   // Render based on current state
+  const collecting = isCollecting(state);
+  const canStop = collecting && onStop !== undefined;
   const panelContent = (
     <div className="creative-brief-panel" aria-label="Creative brief panel">
       <AgentPreviewBadge surface="Creative Brief" />
@@ -361,22 +375,22 @@ export function CreativeBriefPanel({
             onChange={(e) => setRequestText(e.target.value)}
             placeholder="Describe what you want to improve..."
             aria-label="Describe creative improvement"
-            disabled={isCollecting(state) || noModelConnected}
+            disabled={collecting || noModelConnected}
           />
           <button
             className="creative-brief-panel-button"
-            onClick={handleImprove}
+            onClick={canStop ? onStop : handleImprove}
             disabled={
-              isCollecting(state) || (!runBrief && !isUnavailable(state)) || noModelConnected
+              !canStop && (collecting || (!runBrief && !isUnavailable(state)) || noModelConnected)
             }
             title={noModelConnected ? CONNECT_MODEL_FIRST_TITLE : undefined}
-            aria-label="Improve project"
+            aria-label={canStop ? 'Stop Creative Brief' : 'Improve project'}
           >
-            Improve project
+            {canStop ? 'Stop' : collecting ? 'Processing…' : 'Improve project'}
           </button>
 
-          {isCollecting(state) && (
-            <span className="creative-brief-panel-status" aria-label="Processing request">
+          {collecting && (
+            <span className="sr-only" role="status" aria-label="Processing request">
               Processing...
             </span>
           )}

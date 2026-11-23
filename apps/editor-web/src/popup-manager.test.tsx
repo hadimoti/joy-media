@@ -515,7 +515,10 @@ describe('app menu bar on the popup manager', () => {
     hasSelection: true,
     supportsSpeed: true,
     exporting: false,
+    followAgentTarget: false,
     onAction: vi.fn(),
+    onToggleFollowAgentTarget: vi.fn(),
+    onClearFollowAgentTarget: vi.fn(),
   };
 
   function menubarTrigger(label: string): HTMLButtonElement {

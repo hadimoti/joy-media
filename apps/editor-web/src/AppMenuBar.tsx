@@ -144,13 +144,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
             <button
               type="button"
               className="app-menu-trigger"
-              aria-label={
-                group.id === 'agent' && activity.phase === 'awaiting-approval'
-                  ? 'Joy Code, approval required'
-                  : group.id === 'agent' && activity.status !== 'idle'
-                    ? `Joy Code, ${phase.toLowerCase()}`
-                    : undefined
-              }
+              aria-describedby={group.id === 'agent' ? `${menuId}-activity` : undefined}
               aria-haspopup="menu"
               aria-expanded={isOpen}
               aria-controls={menuId}
@@ -179,6 +173,11 @@ export function AppMenuBar(props: AppMenuBarProps) {
                 />
               )}
             </button>
+            {group.id === 'agent' && (
+              <span id={`${menuId}-activity`} className="sr-only" role="status">
+                {activity.phase === 'awaiting-approval' ? 'Approval required' : phase}
+              </span>
+            )}
             {isOpen && (
               <ul
                 className="app-menu-dropdown"
@@ -234,9 +233,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
                             ? activity.status === 'failed'
                               ? `View error · ${targetText}`
                               : `${phase} · ${targetText}${activity.progress === undefined ? '' : ` · ${activity.progress.current} of ${activity.progress.total}`}`
-                            : item.id === 'agent.stop' && terminal
-                              ? 'View status'
-                              : item.label}
+                            : item.label}
                         </span>
                         {item.id === 'agent.follow' && (
                           <span aria-hidden="true">{followAgentTarget ? '✓' : ''}</span>

@@ -636,6 +636,7 @@ import {
   AgentPresenceProvider,
   PanelIdentityContext,
   createAgentPresenceStore,
+  type JoyAgentTarget,
 } from './agent-presence.js';
 import { AgentPreviewProvider, useAgentPreviewSnapshot } from './agent-preview-store.js';
 import { featureActivationRoute, type FeatureToolId } from './feature-architecture.js';
@@ -1292,6 +1293,8 @@ function EditorWorkspace({
     };
   }, []);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
+  const [followAgentTarget, setFollowAgentTarget] = useState(false);
+  const clearFollowAgentTarget = useCallback(() => setFollowAgentTarget(false), []);
   const [agentConnectionStatus, setAgentConnectionStatus] = useState<ByokSessionStatus | undefined>(
     () => joyAgentEngineClientRef.current?.getStatus(),
   );
@@ -5995,6 +5998,17 @@ function EditorWorkspace({
       root.focus({ preventScroll: true });
     }, 80);
   }, []);
+  const showAgentTarget = useCallback(
+    (target: JoyAgentTarget) => {
+      const routed =
+        target.sectionId === undefined ? undefined : featureActivationRoute(target.sectionId);
+      activatePanel(routed?.toolId ?? target.panelId);
+      if (target.panelId === 'agent' && target.capability !== undefined) {
+        issueAgentPanelCommand('select-capability', target.capability);
+      }
+    },
+    [activatePanel, issueAgentPanelCommand],
+  );
   const runMenuAction = useCallback(
     (id: AppMenuActionId) => {
       const panelId = panelIdFromMenuAction(id);
@@ -6069,9 +6083,26 @@ function EditorWorkspace({
           setAgentSettingsOpen(true);
           break;
         case 'agent.stop':
+          {
+            const runId = appAgentPresenceStore.getState().runId;
+            if (runId !== undefined) {
+              activatePanel('agent');
+              issueAgentPanelCommand('stop', undefined, runId);
+            }
+          }
           break;
         case 'agent.showTarget':
+          {
+            const current = appAgentPresenceStore.getState();
+            const target =
+              current.targets.find((entry) => entry.panelId !== 'agent') ??
+              current.targets[0] ??
+              current.terminalTarget;
+            if (target !== undefined) showAgentTarget(target);
+          }
+          break;
         case 'agent.follow':
+          setFollowAgentTarget((current) => !current);
           break;
         case 'agent.active':
           break;
@@ -6106,6 +6137,7 @@ function EditorWorkspace({
       cutSelectedClips,
       exportEditableProject,
       handleExport,
+      issueAgentPanelCommand,
       onBackToLibrary,
       openPopup,
       pasteClipsAtPlayhead,
@@ -6113,6 +6145,7 @@ function EditorWorkspace({
       runSelectedClipAction,
       toggleSnapping,
       undo,
+      showAgentTarget,
     ],
   );
   const runPaletteAction = useCallback(
@@ -7937,17 +7970,11 @@ function EditorWorkspace({
                 hasSelection={state.selectedIds.length > 0}
                 supportsSpeed={supportsSpeed}
                 exporting={exporting}
+                followAgentTarget={followAgentTarget}
+                onToggleFollowAgentTarget={() => setFollowAgentTarget((current) => !current)}
+                onClearFollowAgentTarget={clearFollowAgentTarget}
                 onAction={runMenuAction}
-                onShowAgentTarget={(target) => {
-                  const routed =
-                    target.sectionId === undefined
-                      ? undefined
-                      : featureActivationRoute(target.sectionId);
-                  activatePanel(routed?.toolId ?? target.panelId);
-                  if (target.panelId === 'agent' && target.capability !== undefined) {
-                    issueAgentPanelCommand('select-capability', target.capability);
-                  }
-                }}
+                onShowAgentTarget={showAgentTarget}
                 onStopAgentRun={(runId) => {
                   activatePanel('agent');
                   issueAgentPanelCommand('stop', undefined, runId);

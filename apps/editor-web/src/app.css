@@ -10422,6 +10422,7 @@ label {
 }
 .joy-code-creative-brief .creative-brief-panel-input > .creative-brief-panel-button {
   min-height: 1.8rem;
+  min-inline-size: 7.25rem;
   margin-bottom: 0.1rem;
   padding: 0 0.65rem;
   border: 1px solid color-mix(in srgb, var(--joy-accent) 62%, var(--joy-border));

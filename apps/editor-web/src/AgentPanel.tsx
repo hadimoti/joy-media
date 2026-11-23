@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { TimelineContextMenu, type TimelineContextMenuState } from './TimelineContextMenu.js';
 import { buildReadOnlyTextMenuItems, buildTextFieldMenuItems } from './text-field-menu.js';
 import type { SpikeProject } from '@joy-media/project-schema';
@@ -1914,6 +1922,8 @@ export function AgentPanel({
     [],
   );
 
+  const stopFromMenu = useEffectEvent((runId: string) => stopActiveRun(runId, 'agent-menu-stop'));
+
   useEffect(() => {
     if (command === undefined || handledCommandRef.current === command.serial) return;
     handledCommandRef.current = command.serial;
@@ -1921,59 +1931,8 @@ export function AgentPanel({
       if (command.capability !== undefined) setComposerCapability(command.capability);
       return;
     }
-    if (command.type === 'stop' && pending !== undefined) {
-      if (!isExpectedJoyAgentRun(command.runId, pending.runId)) return;
-      pending.qcRepair?.resolve(false);
-      auditRef.current.record({
-        planId: pending.plan.planId,
-        action: 'plan-rejected',
-        userId: 'local-owner',
-        metadata: { source: 'agent-menu-stop' },
-      });
-      appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
-      updateThreadStatus(pending.threadId, 'draft');
-      setPending(undefined);
-      clearAgentPreviewForSourceRun(pending.runId);
-      agentPresenceStore?.clear();
-      setAgentPhase('cancelled');
-      return;
-    }
-    const commandRunId = selectActiveJoyAgentRunId(agentRunId, presenceState, runLifecycle.run);
-    if (command.type === 'stop') {
-      if (!isExpectedJoyAgentRun(command.runId, commandRunId)) return;
-      const recipeCancelled = cancelRecipeInvocation(commandRunId);
-      if (!recipeCancelled && commandRunId === undefined) return;
-      if (!recipeCancelled && commandRunId !== undefined) {
-        cancelRunLifecycle(commandRunId);
-        if (joyAgentEngineClient !== undefined) void joyAgentEngineClient.cancel(commandRunId);
-      }
-      // Stop revokes activeModelRunIdRef before the async engine iterator can
-      // deliver its terminal event, so keep the confirmation on the action.
-      if (recipeCancelled || commandRunId !== undefined) {
-        appendMessage(activeThread.id, 'assistant', 'JOY run cancelled. No edits were applied.');
-      }
-      activeModelRunIdRef.current = undefined;
-      discardPreparedModelChange(commandRunId);
-      agentPresenceStore?.clear();
-      clearAgentPreviewForSourceRun(commandRunId);
-      setAgentPhase('cancelled');
-    }
-    setPending(undefined);
-  }, [
-    activeThread.id,
-    agentPresenceStore,
-    agentPreviewStore,
-    agentRunId,
-    cancelRunLifecycle,
-    cancelRecipeInvocation,
-    clearAgentPreviewForSourceRun,
-    command,
-    discardPreparedModelChange,
-    joyAgentEngineClient,
-    pending,
-    presenceState,
-    runLifecycle.run,
-  ]);
+    if (command.type === 'stop' && command.runId !== undefined) stopFromMenu(command.runId);
+  }, [command]);
 
   function appendMessage(_threadId: string, role: 'user' | 'assistant', body: string): void {
     const now = new Date().toISOString();
@@ -3348,16 +3307,18 @@ export function AgentPanel({
     clearAgentPreviewForSourceRun(pending.runId);
   }
 
-  function stopActiveRun(expectedRunId: string) {
-    if (!isExpectedJoyAgentRun(expectedRunId, activeRunId)) return;
+  function stopActiveRun(
+    expectedRunId: string,
+    source: 'agent-menu-stop' | 'composer-stop' = 'composer-stop',
+  ) {
+    if (!isExpectedJoyAgentRun(expectedRunId, pending?.runId ?? activeRunId)) return;
     if (pending !== undefined) {
-      if (pending.runId !== expectedRunId) return;
       pending.qcRepair?.resolve(false);
       auditRef.current.record({
         planId: pending.plan.planId,
         action: 'plan-rejected',
         userId: 'local-owner',
-        metadata: { source: 'composer-stop' },
+        metadata: { source },
       });
       appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
       updateThreadStatus(pending.threadId, 'draft');
@@ -3367,10 +3328,13 @@ export function AgentPanel({
       setAgentPhase('cancelled');
       return;
     }
-    if (joyAgentEngineClient === undefined) return;
-    cancelRunLifecycle(expectedRunId);
-    void joyAgentEngineClient.cancel(expectedRunId);
-    appendMessage(activeThread.id, 'assistant', 'JOY run cancelled. No edits were applied.');
+    if (!cancelRecipeInvocation(expectedRunId)) {
+      if (joyAgentEngineClient === undefined) return;
+      cancelRunLifecycle(expectedRunId);
+      void joyAgentEngineClient.cancel(expectedRunId);
+    }
+    // Revoking the active run prevents its async iterator from also acknowledging Stop.
+    appendMessage(activeThread.id, 'assistant', 'JOY run cancelled.');
     activeModelRunIdRef.current = undefined;
     discardPreparedModelChange(expectedRunId);
     setAgentPhase('cancelled');
@@ -4501,6 +4465,11 @@ export function AgentPanel({
               {...(onOpenSettings === undefined ? {} : { onConnectModel: onOpenSettings })}
               {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
               {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
+              {...(activeRunId !== undefined &&
+              presenceState.runId === activeRunId &&
+              presenceState.targets.some((target) => target.capability === 'creative-brief')
+                ? { onStop: () => stopActiveRun(activeRunId) }
+                : {})}
               embedded
             />
           </div>

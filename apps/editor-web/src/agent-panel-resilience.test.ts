@@ -110,18 +110,18 @@ describe('AgentPanel stop cancellation messaging', () => {
   });
 
   it('keeps Stop confirmation immediate because cancelling revokes the async event stream', () => {
-    expect(panelSource).toContain('if (recipeCancelled || commandRunId !== undefined) {');
+    expect(panelSource).toContain(
+      "appendMessage(activeThread.id, 'assistant', 'JOY run cancelled.');",
+    );
     expect(panelSource).toContain(
       "if (event.phase === 'cancelled')\n              appendMessage(threadId, 'assistant', 'JOY run cancelled. No edits were applied.');",
     );
   });
 
   it('rejects a pending proposal before reaching engine cancellation', () => {
-    const pendingStopStart = panelSource.indexOf(
-      "if (command.type === 'stop' && pending !== undefined) {",
-    );
+    const pendingStopStart = panelSource.indexOf('function stopActiveRun(');
     const runCancellationStart = panelSource.indexOf(
-      'const commandRunId = selectActiveJoyAgentRunId',
+      'if (!cancelRecipeInvocation(expectedRunId))',
       pendingStopStart,
     );
     const pendingStop = panelSource.slice(pendingStopStart, runCancellationStart);
@@ -131,13 +131,16 @@ describe('AgentPanel stop cancellation messaging', () => {
     expect(pendingStop).toContain('setPending(undefined);');
     expect(pendingStop).toContain('clearAgentPreviewForSourceRun(pending.runId);');
     expect(pendingStop).toContain('return;');
-    expect(panelSource).toContain('isExpectedJoyAgentRun(command.runId, pending.runId)');
+    expect(pendingStop).toContain(
+      'isExpectedJoyAgentRun(expectedRunId, pending?.runId ?? activeRunId)',
+    );
   });
 
   it('validates a menu Stop against the current active run before cancelling', () => {
-    expect(panelSource).toContain('isExpectedJoyAgentRun(command.runId, commandRunId)');
-    expect(panelSource).toContain('function stopActiveRun(expectedRunId: string)');
-    expect(panelSource).toContain('isExpectedJoyAgentRun(expectedRunId, activeRunId)');
+    expect(panelSource).toContain('stopFromMenu(command.runId)');
+    expect(panelSource).toContain(
+      'isExpectedJoyAgentRun(expectedRunId, pending?.runId ?? activeRunId)',
+    );
     expect(panelSource).toContain(
       "data-agent-action={liveAgentBusy && activeRunId !== undefined ? 'stop' : 'submit'}",
     );

@@ -3,6 +3,7 @@ import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
+import { JoyAgentTaskError } from './joy-agent/entry-points.js';
 import { CONNECT_MODEL_FIRST_TITLE } from './joy-code-run-gate.js';
 
 (
@@ -98,6 +99,39 @@ describe('Creative Brief without a connected model', () => {
 });
 
 describe('Creative Brief with a connected model', () => {
+  it('stops a collecting brief and keeps its draft ready to resubmit', async () => {
+    let cancel: (() => void) | undefined;
+    const runBrief = vi.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          cancel = () => reject(new JoyAgentTaskError('cancelled', 'Creative Brief cancelled'));
+        }),
+    );
+    const onStop = vi.fn(() => cancel?.());
+    renderInto(
+      <CreativeBriefPanel revisionId="rev-1" optedIn runBrief={runBrief} onStop={onStop} />,
+    );
+    const draft = container?.querySelector<HTMLTextAreaElement>('textarea');
+    if (draft == null) throw new Error('No Creative Brief draft');
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+        draft,
+        'Refine the typography',
+      );
+      draft.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => improveButton().click());
+    const stop = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Stop Creative Brief"]',
+    );
+    expect(stop?.disabled).toBe(false);
+    await act(async () => stop?.click());
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(draft.value).toBe('Refine the typography');
+    expect(improveButton().disabled).toBe(false);
+    expect(container?.querySelector('[aria-label="Error occurred"]')).toBeNull();
+  });
+
   it('enables Improve project and shows no connect hover text', () => {
     render({ noModelConnected: false });
     expect(improveButton().disabled).toBe(false);
