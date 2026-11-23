@@ -266,6 +266,49 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
     );
   });
 
+  test('keeps Animate channel labels and key controls visible in a narrow dock', async ({
+    page,
+  }) => {
+    await selectReferenceClip(page);
+    await openMotionPanel(page);
+    await page.addStyleTag({
+      content: '.motion-panel { inline-size: 320px; max-inline-size: 100%; }',
+    });
+    const motion = page.locator('.motion-panel');
+    await motion.getByRole('tab', { name: 'Presets' }).click();
+    await motion
+      .locator('.motion-field', { hasText: 'Preset' })
+      .locator('select')
+      .selectOption('joy-fade-in');
+    await motion.getByRole('button', { name: 'Apply motion preset' }).click();
+    const opacity = motion.getByRole('button', { name: 'opacity', exact: true });
+    await opacity.click();
+    const layout = await motion.evaluate((panel) => {
+      function bounds<T extends Element>(selector: string): T {
+        const element = panel.querySelector<T>(selector);
+        if (element === null) throw new Error(`Missing Animate element: ${selector}`);
+        return element;
+      }
+      const label = bounds('.motion-lane-label.active');
+      const lane = label.closest('.motion-lane')!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const text = range.getBoundingClientRect();
+      const labelBox = label.getBoundingClientRect();
+      const prev = bounds('[aria-label="Jump to previous key"]').getBoundingClientRect();
+      const next = bounds('[aria-label="Jump to next key"]').getBoundingClientRect();
+      const toolbar = bounds('.graph-editor-toolbar').getBoundingClientRect();
+      const plot = bounds('svg[aria-label="opacity editable value graph"]').getBoundingClientRect();
+      return {
+        textFits:
+          text.left >= Math.max(lane.left, labelBox.left) - 1 && text.right <= labelBox.right + 1,
+        navigationAligned: Math.abs(prev.top - next.top) <= 1,
+        toolbarAbovePlot: toolbar.bottom <= plot.top + 1,
+      };
+    });
+    expect(layout).toEqual({ textFits: true, navigationAligned: true, toolbarAbovePlot: true });
+  });
+
   test('R5 CASE-82 applies and removes an HTML scene from the selected clip', async ({
     page,
   }, testInfo) => {

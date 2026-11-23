@@ -7448,7 +7448,7 @@ label {
 }
 .motion-presets-channels {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: min-content;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -7471,24 +7471,24 @@ label {
   padding: 1.4rem 0.75rem;
 }
 .motion-lanes {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.3rem 0.45rem;
 }
 .motion-lane {
-  display: flex;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 0.45rem;
   min-width: 0;
 }
 .motion-lane-label {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  width: 2.25rem;
-  height: 16px;
-  flex: none;
-  text-align: right;
+  min-height: 16px;
+  text-align: end;
+  white-space: nowrap;
   background: transparent;
   border: none;
   color: var(--joy-text-secondary);
@@ -7502,7 +7502,6 @@ label {
   color: var(--joy-accent);
 }
 .motion-lane-track {
-  flex: 1 1 auto;
   min-width: 0;
   width: 100%;
   height: 16px;
@@ -7512,11 +7511,17 @@ label {
   border-radius: var(--radius-xs);
 }
 .motion-graph {
-  display: flex;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 32rem);
+  flex: none;
+  min-width: 0;
   gap: 0.4rem;
   margin-top: 0.3rem;
 }
-.motion-graph svg {
+.motion-graph > svg {
+  display: block;
+  width: 100%;
+  height: auto;
   background: #0a0a0b;
   border: 1px solid #2e2e32;
   border-radius: 0.2rem;
@@ -12231,10 +12236,15 @@ label {
   border-color: var(--joy-accent-dim);
 }
 .graph-editor-toolbar {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  margin-bottom: 0.4rem;
+}
+.graph-editor-navigation {
+  display: flex;
+  flex: none;
+  gap: 0.35rem;
 }
 .audio-panel,
 .effects-panel,
