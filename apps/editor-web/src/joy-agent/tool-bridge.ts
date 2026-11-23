@@ -5,6 +5,7 @@ import type {
 } from '@joy-media/joy-agent-engine';
 import { JOY_CAPTION_TEMPLATES } from '@joy-media/captions-core';
 import { listTransitionShaders, resolveTransitionShaderId } from '@joy-media/transition-shaders';
+import { BUILTIN_PRESETS } from '@joy-media/visual-effects';
 import { TEXT_TEMPLATES } from '../text-template-catalog.js';
 import {
   createJoyAgentPagedContext,
@@ -1416,18 +1417,17 @@ function pageForContext(
           : { operation: 'transition.addAtJunction', operationId }),
       };
     });
-    const suggestions = [
-      { family: 'filter', id: 'interview-neutral', name: 'Interview Neutral' },
-      { family: 'filter', id: 'warm-documentary', name: 'Warm Documentary' },
-      { family: 'effect', id: 'readable-backdrop', name: 'Readable Backdrop' },
-      { family: 'delivery', id: 'portrait-9-16', name: 'Portrait 9:16' },
-    ].map((suggestion) => ({
-      ...suggestion,
+    const effectPresets = BUILTIN_PRESETS.map((preset) => ({
+      family: 'effect-preset',
+      id: preset.id,
+      name: preset.name,
+      ...(preset.description === undefined ? {} : { description: preset.description }),
+      effectIds: preset.effects.map((effect) => effect.effectId),
       runnable: false,
-      status: 'Style suggestion for manual editing.',
+      status: 'Available in Effect Studio. Joy Code has no effect-preset apply operation.',
     }));
     const query = input.query;
-    const records = [...titles, ...captions, ...transitions, ...suggestions].filter(
+    const records = [...titles, ...captions, ...transitions, ...effectPresets].filter(
       (preset) =>
         query === undefined ||
         [preset.family, preset.id.toLowerCase(), preset.name.toLowerCase()].some((value) =>

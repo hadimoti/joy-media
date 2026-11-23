@@ -12,6 +12,7 @@ import {
   type JoyAgentPreparedHostResult,
 } from './tool-bridge.js';
 import { createJoyAgentPagedContext } from './context-snapshot.js';
+import { BUILTIN_PRESETS } from '@joy-media/visual-effects';
 
 const digest = 'a'.repeat(64);
 const bindingDigest = 'b'.repeat(64);
@@ -143,7 +144,30 @@ describe('JOY Agent trusted host tool bridge', () => {
           runnable: true,
         }),
         expect.objectContaining({ family: 'transition', id: 'joy:dipToBlack', runnable: false }),
-        expect.objectContaining({ family: 'filter', id: 'warm-documentary', runnable: false }),
+      ]),
+    );
+    const effectPresets = [...first.items, ...rest].filter(
+      (item) => item.family === 'effect-preset',
+    );
+    expect(effectPresets.map((item) => item.id)).toEqual(
+      BUILTIN_PRESETS.map((preset) => preset.id),
+    );
+    expect(effectPresets.every((item) => item.runnable === false)).toBe(true);
+    expect(effectPresets.every((item) => typeof item.status === 'string')).toBe(true);
+    for (const preset of BUILTIN_PRESETS) {
+      expect(effectPresets).toContainEqual(
+        expect.objectContaining({
+          id: preset.id,
+          effectIds: preset.effects.map((effect) => effect.effectId),
+        }),
+      );
+    }
+    expect([...first.items, ...rest].map((item) => item.id)).not.toEqual(
+      expect.arrayContaining([
+        'interview-neutral',
+        'warm-documentary',
+        'readable-backdrop',
+        'portrait-9-16',
       ]),
     );
     const dip = await invoke(methods, 'read_project_context', {
