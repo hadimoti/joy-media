@@ -63,7 +63,10 @@ export function LibraryRail({
     const next = items[nextIndex];
     if (next === undefined) return;
     onSelect(next.id);
-    listRef.current?.querySelectorAll<HTMLButtonElement>('button[role="tab"]')[nextIndex]?.focus();
+    const target =
+      listRef.current?.querySelectorAll<HTMLButtonElement>('button[role="tab"]')[nextIndex];
+    target?.focus();
+    target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   };
 
   return (

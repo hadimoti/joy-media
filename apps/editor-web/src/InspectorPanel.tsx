@@ -7,6 +7,7 @@
  */
 
 import './InspectorPanel.css';
+import './designer-ui-polish.css';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   audioClipPropertyBinding,

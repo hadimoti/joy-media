@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import './designer-ui-polish.css';
 import { ChevronDownIcon } from './icons.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
 import { usePopup } from './popup-manager.js';

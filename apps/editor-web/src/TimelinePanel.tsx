@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type PointerEvent,
 } from 'react';
+import './designer-ui-polish.css';
 import {
   buildRulerTicks,
   clipRateLabel,
