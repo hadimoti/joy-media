@@ -10,6 +10,8 @@ Build layered compositions, refine typography, motion and color, and finish them
 
 </div>
 
+![Fullscreen JOY Media workspace with a bilingual motion title, animation controls, Inspector and Timeline](docs/images/v1.1.2/studio.png)
+
 ## Make a composition
 
 1. **Start with a project.** Set its canvas format, bring in media, and organize layers and tracks.
@@ -41,6 +43,7 @@ Match the `Hash` value with the installer entry in `SHA256SUMS.txt`. The v1.1.2 
 
 ## Guides
 
+- [Projects in a restored window](docs/images/v1.1.2/projects.png) · [Typography](docs/images/v1.1.2/typography.png) · [Color](docs/images/v1.1.2/color.png) · [Joy Code Settings](docs/images/v1.1.2/joy-code-settings.png) · [Frame from the exported MP4](docs/images/v1.1.2/rendered-frame.png)
 - [v1.1.2 guide for designers](docs/USER-GUIDE-v1.1.2.md)
 - [v1.1.2 release notes and known limits](RELEASE_NOTES_v1.1.2.md)
 - [Developer and contributor guide](docs/DEVELOPMENT.md)

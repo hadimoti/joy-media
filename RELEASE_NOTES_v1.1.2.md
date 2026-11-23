@@ -6,6 +6,11 @@ For step-by-step workflows, see the [v1.1.2 designer guide](docs/USER-GUIDE-v1.1
 
 ## What is new
 
+### Workspace
+
+- JOY Media opens fullscreen. Use the window controls to restore a smaller window.
+- Projects, workspace tabs, the Inspector, the Program Monitor and the Timeline use clearer grouping and keyboard focus. On wider layouts the export button says **Export MP4**.
+
 ### Speech on your PC
 
 - **Subtitles from speech.** The Captions panel can make subtitles from a voice recording on the timeline, in English or Persian. Recognition runs on your PC with the faster-whisper large-v3-turbo model. No account and no server are needed.
@@ -48,7 +53,9 @@ For step-by-step workflows, see the [v1.1.2 designer guide](docs/USER-GUIDE-v1.1
 ### Joy Code and chat
 
 - Joy Code can look up title, caption and transition presets and use supported choices in an edit preview.
-- The Joy Code Settings button is a gear icon, not a sun.
+- The bundled Joy Code skills cover titles, captions, transitions, color, motion and export review. They help the agent choose presets and work through previews and approvals.
+- The Joy Code menu shows activity, the current target and Stop. The composer keeps Stop within reach while a request runs.
+- Open Joy Code Settings from the gear beside the composer tabs. Use the category sidebar to move between models, safety, live preview, permissions and media support.
 - A sign-in section shows "Signed in." when you already have a saved sign-in. This does not show yet for xAI.
 - When a provider says your usage limit is reached, the app says "Usage limit reached". Before, it said the model was incompatible or that you were offline.
 - MiniMax gets a bigger answer budget, so it can think longer before it replies. If a model still runs out of room, the chat says "The model ran out of room" instead of saying you are offline.
@@ -99,8 +106,4 @@ These are built and tested in code. They were not yet confirmed in the running a
 
 ## Download and check
 
-Every file of this release will be listed here with its SHA-256 hash by the release step. This list is not filled in yet.
-
-After you download, compare the hash of each file with that list. In PowerShell, use `Get-FileHash` on the downloaded file.
-
-[Placeholder: file hashes will be listed here by the release step.]
+Download `SHA256SUMS.txt` with the installer or portable ZIP. In PowerShell, use `Get-FileHash` to compare the downloaded file with its SHA-256 entry. [Windows downloads](https://github.com/hadimoti/joy-media/releases/tag/v1.1.2) · [Installation guide](docs/USER-GUIDE-v1.1.2.md#install-and-check-the-download)

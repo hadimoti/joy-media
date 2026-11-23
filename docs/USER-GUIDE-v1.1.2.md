@@ -18,6 +18,8 @@ The first launch opens the editor in native fullscreen. Use the Restore control 
 
 ## Projects and workspaces
 
+![Projects in a restored JOY Media window](images/v1.1.2/projects.png)
+
 ### Create or open a project
 
 On the **Projects** screen, choose **New project**, select a canvas format, enter a name and choose **Create project**. Use the search field, sort menu, and **Grid view / List view** controls to find existing work. Click a project card to open it; use its actions menu to rename, duplicate or move it to Trash. The **Trash** tab lets you restore or permanently remove a project.
@@ -47,6 +49,8 @@ For a keyed change, move the playhead to the time you want, select a property in
 
 ## Typography and captions
 
+![The Text tools, Program Monitor and Inspector for a bilingual title](images/v1.1.2/typography.png)
+
 ### Text
 
 Open **Edit → Text**, choose a title or text asset, and add it to the project. Select the resulting layer and edit its text and available styling controls. The editor handles Persian and Arabic shaping in preview and export; keep URLs and mixed-script strings as intended, and review the rendered result at full size.
@@ -64,6 +68,8 @@ To create captions from speech, select the voice clip on the Timeline and use th
 **License note:** Chatterbox Persian Expressive by Ramin Mahmoodi is distributed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/), which permits non-commercial use only. Review the model's [license and attribution](https://huggingface.co/ramin-mahmoodi/Chatterbox-Persian-Expressive) before using it.
 
 ## Joy Code, settings and permissions
+
+![Joy Code Settings with AI models, safety, live preview, permissions and media support](images/v1.1.2/joy-code-settings.png)
 
 Open **Automate → Joy Code**. The gear button opens **Joy Code Settings**, with pages for **AI models**, **Safety and limits**, **Live preview**, **Tools and permissions**, and **Media support check**.
 
