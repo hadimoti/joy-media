@@ -609,25 +609,22 @@ export function evaluateEndpoint(
   }
   if (isLoopbackHostname(url.hostname)) {
     if (!isCustomProviderId(provider)) {
-      return refuse('BASE_URL_REFUSED', 'Only a custom endpoint may use a local address.');
+      return refuse('BASE_URL_REFUSED', 'Only a custom connection may use a local address.');
     }
     return allowedVerdict('loopback', url);
   }
   if (url.protocol !== 'https:') {
-    return refuse('BASE_URL_INSECURE', 'A remote endpoint must use https://.');
+    return refuse('BASE_URL_INSECURE', 'A remote service address must start with https://.');
   }
   if (isCustomProviderId(provider)) {
     if (isPrivateOrInternalHost(url.hostname)) {
       return refuse(
         'BASE_URL_REFUSED',
-        'A custom endpoint may not name a private, link-local or internal address.',
+        'A custom connection cannot use a private, link-local or internal address.',
       );
     }
     if (options.consentToPublicEndpoint !== true) {
-      return refuse(
-        'CONSENT_REQUIRED',
-        'A public endpoint needs your explicit consent before any key is sent to it.',
-      );
+      return refuse('CONSENT_REQUIRED', 'Confirm the public connection before sending it a key.');
     }
     return allowedVerdict('public', url);
   }

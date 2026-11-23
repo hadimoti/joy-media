@@ -25,9 +25,9 @@ const connected: QualityCheckPrivacyNoticeInput = {
 };
 
 describe('the quality check privacy notice (T-B05)', () => {
-  it('shows saved limits and the model for a future quality check', () => {
+  it('shows the active limits and model for the quality check', () => {
     expect(framePrivacyNoticeLine(connected)).toBe(
-      'For a future quality check, the saved limits are 12 pictures per check and 16 across the run, with OpenRouter, model openrouter/auto.',
+      'The quality check can send up to 12 pictures per check and 16 per run to OpenRouter (openrouter/auto).',
     );
     expect(frameDestinationOf(connected)).toBe('remote');
   });
@@ -38,14 +38,14 @@ describe('the quality check privacy notice (T-B05)', () => {
       provider: 'openai-compatible',
       modelId: 'local/model',
     });
-    expect(line).toContain(`${SETTINGS_MODELS.yourOwnEndpoint}, model local/model.`);
+    expect(line).toContain(`${SETTINGS_MODELS.yourOwnEndpoint} (local/model).`);
     expect(line).not.toContain('openai-compatible');
   });
 
   it('follows the budgets the user has set', () => {
     const line = framePrivacyNoticeLine({ ...connected, framesPerCheck: 4, framesPerRun: 40 });
     expect(line).toBe(
-      'For a future quality check, the saved limits are 4 pictures per check and 40 across the run, with OpenRouter, model openrouter/auto.',
+      'The quality check can send up to 4 pictures per check and 40 per run to OpenRouter (openrouter/auto).',
     );
   });
 
@@ -119,23 +119,27 @@ describe('the quality check privacy notice (T-B05)', () => {
       return section;
     }
 
-    it('shows saved remote settings and says picture approval is not available yet', async () => {
+    it('shows the limits and explains approval for remote sharing', async () => {
       const section = await renderCard(connected);
 
       expect(section.getAttribute('data-frame-destination')).toBe('remote');
       expect(section.getAttribute('aria-label')).toBe(SETTINGS_FRAME_PRIVACY_NOTICE.title);
-      expect(section.textContent).toContain(SETTINGS_FRAME_PRIVACY_NOTICE.approvalUnavailable);
       expect(section.textContent).toContain(
-        'For a future quality check, the saved limits are 12 pictures per check and 16 across the run, with OpenRouter, model openrouter/auto.',
+        'JOY Media asks before sharing pictures with a remote model.',
+      );
+      expect(section.textContent).toContain(
+        'The quality check can send up to 12 pictures per check and 16 per run to OpenRouter (openrouter/auto).',
       );
     });
 
-    it('does not show picture approval as available when it is not available yet', async () => {
+    it('omits remote sharing approval when pictures stay on this PC', async () => {
       const section = await renderCard({ ...connected, neverSendFramesToRemoteModel: true });
 
       expect(section.getAttribute('data-frame-destination')).toBe('kept-on-pc');
       expect(section.textContent).toContain(SETTINGS_FRAME_PRIVACY_NOTICE.neverRemote);
-      expect(section.textContent).not.toContain(SETTINGS_FRAME_PRIVACY_NOTICE.approvalUnavailable);
+      expect(section.textContent).not.toContain(
+        'JOY Media asks before sharing pictures with a remote model.',
+      );
     });
   });
 });

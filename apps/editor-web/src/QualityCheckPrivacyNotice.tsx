@@ -7,7 +7,7 @@ import {
 } from './settings-wording.js';
 import './QualityCheckPrivacyNotice.css';
 
-/** The destination described by saved preferences for a future quality check. */
+/** The destination described by the quality check preferences. */
 export type FrameDestination = 'no-model' | 'kept-on-pc' | 'remote';
 
 export interface QualityCheckPrivacyNoticeInput {
@@ -42,7 +42,7 @@ export function frameDestinationOf(input: QualityCheckPrivacyNoticeInput): Frame
   return 'remote';
 }
 
-/** The provider's name in plain words. A custom endpoint is named as one. */
+/** The provider's name in plain words. Custom providers share the settings label. */
 function providerNameOf(provider: string | undefined): string {
   if (provider === undefined || provider.trim() === '') return SETTINGS_MODELS.providerTagNone;
   if (provider === 'openai-compatible' || provider === 'custom') {
@@ -80,8 +80,8 @@ export function QualityCheckPrivacyNotice(input: QualityCheckPrivacyNoticeInput)
       <p className="quality-check-privacy-notice__title">{SETTINGS_FRAME_PRIVACY_NOTICE.title}</p>
       <p className="quality-check-privacy-notice__line">{framePrivacyNoticeLine(input)}</p>
       {destination === 'remote' && (
-        <p className="quality-check-privacy-notice__pending">
-          {SETTINGS_FRAME_PRIVACY_NOTICE.approvalUnavailable}
+        <p className="quality-check-privacy-notice__approval">
+          {SETTINGS_FRAME_PRIVACY_NOTICE.remoteApproval}
         </p>
       )}
     </section>

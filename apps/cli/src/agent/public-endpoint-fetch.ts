@@ -335,7 +335,7 @@ export function createPublicEndpointFetch(options: PublicEndpointFetchOptions = 
     const body = bodyBytes(init?.body);
     const addresses = await answerFor(resolveHost, hostname, signal);
     if (addresses.length === 0 || addresses.some((address) => isRefusedAddress(address))) {
-      throw refused('This endpoint name resolves to a private address.');
+      throw refused('This service name resolves to a private address.');
     }
     return sendPinned(url, hostname, addresses, init, body, request);
   };

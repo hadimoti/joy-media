@@ -550,7 +550,7 @@ export async function configureJoyAgent(
   await dialog.getByLabel('Your API key').fill(apiKey);
   await dialog
     .getByRole('checkbox', {
-      name: 'I understand that custom endpoints may log requests according to their own policy.',
+      name: 'I understand that custom services may log requests according to their own policy.',
     })
     .check();
   await dialog

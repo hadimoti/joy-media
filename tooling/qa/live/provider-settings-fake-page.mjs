@@ -124,7 +124,7 @@ export function createFakeApp(options = {}) {
     if (tail.includes('Saved connections')) return state.profiles > 0;
     if (tail.includes('1 models ready')) return state.modelsFound;
     if (tail.includes('joy-settings-model-chip')) return state.drawerOpen && state.modelsFound;
-    if (tail.includes('Media capability check complete')) return state.mediaChecked;
+    if (tail.includes('Media support check complete')) return state.mediaChecked;
     if (tail.includes('Hello from the JOY QA stub.')) return state.hello;
     if (tail.includes('Reverted.')) return state.stage === 'reverted';
     if (tail.includes('JOY run cancelled')) return state.cancelled;

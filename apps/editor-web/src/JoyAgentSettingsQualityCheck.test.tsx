@@ -130,7 +130,7 @@ describe('the Quality check section of Joy Code settings (T-B05)', () => {
   });
 
   it('uses singular words for a one-frame, one-round limit', () => {
-    expect(qualityCheckTag(1, 1)).toBe('1 frame a check, 1 fix round');
+    expect(qualityCheckTag(1, 1)).toBe('1 frame per check · 1 fix round');
   });
 
   it('keeps a multi-digit run budget while typing and commits it on blur', async () => {
@@ -242,16 +242,18 @@ describe('the Quality check section of Joy Code settings (T-B05)', () => {
     });
   });
 
-  it('shows saved limits and model settings for the future quality check', async () => {
+  it('shows the active limits and model for the quality check', async () => {
     const rendered = await render(DEFAULT_AGENT_POLICY, vi.fn(), connectedStatus);
     await openQualityCheck(rendered);
 
     const card = rendered.querySelector<HTMLElement>('.quality-check-privacy-notice');
     expect(card?.getAttribute('data-frame-destination')).toBe('remote');
     expect(card?.textContent).toContain(
-      'For a future quality check, the saved limits are 12 pictures per check and 16 across the run, with OpenRouter, model openrouter/auto.',
+      'The quality check can send up to 12 pictures per check and 16 per run to OpenRouter (openrouter/auto).',
     );
-    expect(card?.textContent).toContain(SETTINGS_FRAME_PRIVACY_NOTICE.approvalUnavailable);
+    expect(card?.textContent).toContain(
+      'JOY Media asks before sharing pictures with a remote model.',
+    );
   });
 
   it('shows that no model is connected without claiming a quality check is running', async () => {
@@ -274,6 +276,8 @@ describe('the Quality check section of Joy Code settings (T-B05)', () => {
     const card = rendered.querySelector<HTMLElement>('.quality-check-privacy-notice');
     expect(card?.getAttribute('data-frame-destination')).toBe('kept-on-pc');
     expect(card?.textContent).toContain(SETTINGS_FRAME_PRIVACY_NOTICE.neverRemote);
-    expect(card?.textContent).not.toContain(SETTINGS_FRAME_PRIVACY_NOTICE.approvalUnavailable);
+    expect(card?.textContent).not.toContain(
+      'JOY Media asks before sharing pictures with a remote model.',
+    );
   });
 });

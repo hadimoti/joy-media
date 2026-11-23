@@ -276,6 +276,13 @@
   font-weight: 600;
 }
 
+.joy-settings-section-desc {
+  margin: 3px 0 0;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-md);
+  line-height: 1.45;
+}
+
 /* The sections of a page, one under the other. */
 .joy-settings-page,
 .agent-slots,
