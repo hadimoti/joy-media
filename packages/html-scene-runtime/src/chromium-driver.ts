@@ -75,6 +75,9 @@ export function createChromiumSceneDriver(
             '--disable-extensions',
             '--disable-sync',
             '--no-first-run',
+            // A private profile per capture. A shared profile can hand this run to a Chrome that is still exiting
+            // (the same profile lock), and the spawn then waits until the timeout.
+            `--user-data-dir=${join(temporaryDirectory, 'chrome-profile')}`,
             '--hide-scrollbars',
             '--force-device-scale-factor=1',
             '--host-resolver-rules=MAP * 0.0.0.0, EXCLUDE localhost',
@@ -91,7 +94,13 @@ export function createChromiumSceneDriver(
         }
         return { rgba: decodePngRgba(screenshotPath, request.width, request.height, timeoutMs) };
       } finally {
-        rmSync(temporaryDirectory, { recursive: true, force: true });
+        // Chrome's helper processes can still hold profile files for a moment after the browser exits (Windows).
+        rmSync(temporaryDirectory, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 100,
+        });
       }
     },
   };
