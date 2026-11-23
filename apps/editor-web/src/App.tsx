@@ -4896,6 +4896,8 @@ function EditorWorkspace({
           compositionSets: [exportVisualProject.compositions, session.timelineProject.compositions],
           hiddenClipIds: exportHiddenClipIds,
           durationUs,
+          frameRate,
+          frameCount: totalFrames,
         });
         // All used visuals missing and accepted is valid: the export is a background-only video.
         if (
