@@ -237,3 +237,90 @@ test('Chromium Pixi RTL text preserves Arabic dots, Persian yeh, and URL order',
   expect(result.rendererPng).toMatch(/^data:image\/png;base64,/u);
   expect(result.referencePng).toMatch(/^data:image\/png;base64,/u);
 });
+
+test('Chromium draws styled RTL URL fragments on one line in left-to-right order', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const rendererModule =
+    '/@fs/' + resolve(process.cwd(), 'packages/renderer-pixi/src/browser.ts').replaceAll('\\', '/');
+  const result = await page.evaluate(async (rendererModuleUrl) => {
+    const { createBrowserPixiRenderer } = await import(rendererModuleUrl);
+    const width = 640;
+    const height = 300;
+    const head = 'https://example.com/';
+    const tail = 'long-path?q=42';
+    const white = { r: 255, g: 255, b: 255, a: 255 };
+    const spans = [
+      { text: 'عنوان ', color: white },
+      { text: head, color: { r: 230, g: 35, b: 40, a: 255 } },
+      { text: tail, color: { r: 30, g: 230, b: 45, a: 255 } },
+    ];
+    const text = spans.map((span) => span.text).join('');
+    const fontFamily = 'Vazirmatn Variable';
+    await document.fonts.load('30px "Vazirmatn Variable"', text);
+    const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
+    try {
+      renderer.render({
+        version: 1,
+        compositionId: 'styled-url-regression',
+        timeUs: 0,
+        viewport: { width, height, dpr: 1 },
+        background: { r: 11, g: 14, b: 25, a: 255 },
+        nodes: [
+          {
+            kind: 'text',
+            id: 'styled-url',
+            zIndex: 0,
+            opacity: 1,
+            color: white,
+            transform: { translateX: 590, translateY: 10, scaleX: 1, scaleY: 1 },
+            text,
+            spans,
+            direction: 'rtl',
+            align: 'right',
+            fontFamily,
+            fontSizePx: 30,
+            maxWidth: 270,
+          },
+        ],
+      });
+      const bounds = (points: { x: number; y: number }[]) => ({
+        count: points.length,
+        left: Math.min(...points.map(({ x }) => x)),
+        right: Math.max(...points.map(({ x }) => x)),
+        top: Math.min(...points.map(({ y }) => y)),
+        bottom: Math.max(...points.map(({ y }) => y)),
+      });
+      const cutoff = performance.now() + 5_000;
+      do {
+        const image = renderer.readPixels(width, height);
+        const red: { x: number; y: number }[] = [];
+        const green: { x: number; y: number }[] = [];
+        if (image) {
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              const offset = (y * width + x) * 4;
+              const r = image.data[offset]!;
+              const g = image.data[offset + 1]!;
+              if (r > 150 && g < 80) red.push({ x, y });
+              if (g > 150 && r < 80) green.push({ x, y });
+            }
+          }
+        }
+        if (red.length > 0 && green.length > 0) return { red: bounds(red), green: bounds(green) };
+        await new Promise<void>((done) => requestAnimationFrame(() => done()));
+      } while (performance.now() < cutoff);
+      throw new Error('Styled URL colors were not rendered');
+    } finally {
+      renderer.destroy();
+    }
+  }, rendererModule);
+  expect(result.red.count).toBeGreaterThan(100);
+  expect(result.green.count).toBeGreaterThan(100);
+  expect(result.red.right).toBeLessThan(result.green.left);
+  expect(Math.min(result.red.bottom, result.green.bottom)).toBeGreaterThan(
+    Math.max(result.red.top, result.green.top),
+  );
+  expect(result.red.top).toBeGreaterThan(38);
+});

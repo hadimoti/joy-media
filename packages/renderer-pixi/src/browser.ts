@@ -70,7 +70,7 @@ import { createGlTransitionFilter, type GlTransitionFilterHandle } from './gl-tr
 import { dualTextureBitmapsReady } from './transition-bitmaps.js';
 import { registerPixiTextDirection } from './pixi-text-direction.js';
 export { pixiTextDirectionOf } from './pixi-text-direction.js';
-import { layoutTextSpanOffsets } from './text-span-layout.js';
+import { layoutTextSpanOffsets, layoutWrappedTextSpans } from './text-span-layout.js';
 import {
   canvasFontFamilyStack,
   countTextGraphemes,
@@ -655,22 +655,41 @@ export async function createBrowserPixiRenderer(
     const fontFamilies = usesRtlRendering
       ? canvasFontFamilyStack(node.text, node.fontFamily)
       : [node.fontFamily ?? 'Arial'];
-    const offsets = layoutTextSpanOffsets(
-      spans,
-      node.align ?? 'left',
-      direction,
-      createTextMeasurement(node, fontFamilies, usesRtlRendering),
-    );
+    const measure = createTextMeasurement(node, fontFamilies, usesRtlRendering);
+    const lineHeight = (node.fontSizePx ?? 16) * (node.lineHeight ?? 1.25);
+    const runs = (() => {
+      if (!usesRtlRendering || !/https?:\/\//iu.test(node.text)) {
+        const offsets = layoutTextSpanOffsets(spans, node.align ?? 'left', direction, measure);
+        return spans.map((span, index) => ({
+          ...span,
+          direction: node.direction,
+          x: offsets[index] ?? 0,
+          y: 0,
+        }));
+      }
+      const maxWidth = (node.maxWidth ?? Infinity) / (Math.abs(node.transform.scaleX) || 1);
+      const wrapped = wrapTextByWords(node.text, maxWidth, measure, node.direction);
+      return layoutWrappedTextSpans(
+        node.text,
+        spans,
+        wrapped.text.split(/\r\n|\n|\r/u),
+        wrapped.lineDirections,
+        wrapped.lineDirections.map((lineDirection) =>
+          resolveCanvasTextAlign(node.align ?? 'left', lineDirection),
+        ),
+        measure,
+      ).flatMap((line, lineIndex) => line.map((span) => ({ ...span, y: lineIndex * lineHeight })));
+    })();
     const { maxWidth: _maxWidth, spans: _spans, fill: _fill, ...baseNode } = node;
 
-    while (container.spanTexts.length < spans.length) {
+    while (container.spanTexts.length < runs.length) {
       const text = new Text();
       container.spanTexts.push(text);
       container.addChild(text);
     }
 
     for (const [index, text] of container.spanTexts.entries()) {
-      const span = spans[index];
+      const span = runs[index];
       if (span === undefined) {
         text.text = '';
         text.position.set(0, 0);
@@ -680,13 +699,14 @@ export async function createBrowserPixiRenderer(
       const spanNode: TextNode = {
         ...baseNode,
         text: span.text,
+        ...(span.direction === undefined ? {} : { direction: span.direction }),
         color: span.color,
         fill: { kind: 'solid', color: span.color },
         align: 'left',
       };
       updateTextVisual(text, spanNode, textureGeneration, span.color);
       text.label = `text:${node.id}:span:${index}`;
-      text.position.set(offsets[index] ?? 0, 0);
+      text.position.set(span.x, span.y);
       text.visible = true;
     }
     container.label = `text:${node.id}`;

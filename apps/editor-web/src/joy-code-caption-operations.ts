@@ -3,7 +3,7 @@ import {
   JOY_CAPTION_TEMPLATES,
   type CaptionCommand,
 } from '@joy-media/captions-core';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import { IDENTITY_CAPTION_CLIP_STYLE, type JoyProjectV1 } from '@joy-media/project-schema';
 import type { JoyCodePlanOperationV1 } from '@joy-media/agent-tools';
 import { CAPTION_BURN_IN_KEY } from './caption-burn-in.js';
 
@@ -97,8 +97,9 @@ export function compileJoyCodeCaptionOperation(
         },
       };
       break;
-    case 'caption.setTemplate':
-      if (!JOY_CAPTION_TEMPLATES.some((template) => template.id === operation.templateId))
+    case 'caption.setTemplate': {
+      const template = JOY_CAPTION_TEMPLATES.find((entry) => entry.id === operation.templateId);
+      if (template === undefined)
         return {
           ok: false,
           error: {
@@ -106,11 +107,27 @@ export function compileJoyCodeCaptionOperation(
             message: `caption template "${operation.templateId}" is not in the catalog`,
           },
         };
+      const style = captionClip.style ?? {
+        ...IDENTITY_CAPTION_CLIP_STYLE,
+        textColor: rgbHex(template.textColor),
+        align: template.align,
+        highlightColor: rgbHex(template.activeWordColor),
+        ...(template.plateColor === undefined
+          ? {}
+          : {
+              plateColor: rgbHex(template.plateColor),
+              plateOpacity: template.plateColor.a / 255,
+            }),
+      };
       command = {
-        type: 'caption.setStyle',
-        payload: { documentId: document.id, styleRef: operation.templateId },
+        type: 'caption.setClipStyle',
+        payload: {
+          clipId: captionClip.id,
+          style: { ...style, templateId: template.id },
+        },
       };
       break;
+    }
     default:
       return {
         ok: false,
@@ -125,7 +142,8 @@ export function compileJoyCodeCaptionOperation(
     return {
       ok: true,
       project: applied.project,
-      affectedIds: [operation.captionClipId, document.id],
+      affectedIds:
+        operation.kind === 'caption.setTemplate' ? [captionClip.id] : [captionClip.id, document.id],
       summary: `Apply ${operation.kind}`,
     };
   } catch (error) {
@@ -149,4 +167,11 @@ function findCaptionClip(project: JoyProjectV1, clipId: string) {
     }
   }
   return undefined;
+}
+
+function rgbHex(color: { readonly r: number; readonly g: number; readonly b: number }): string {
+  return (
+    '#' +
+    [color.r, color.g, color.b].map((channel) => channel.toString(16).padStart(2, '0')).join('')
+  );
 }

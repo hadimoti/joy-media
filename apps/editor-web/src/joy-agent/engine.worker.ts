@@ -1413,7 +1413,7 @@ function systemInstruction(
               ? 'Use read_project_context before validate_proposal. Send typed operations only to validate_proposal. If the canonical host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget. A successful validation creates an immutable preview, never an applied edit. Do not invent object, clip, asset, property, track, or template IDs.'
               : 'Return a concise answer or clarification only. Plan-only mode cannot create edit operations.';
   const presetInstruction =
-    taskKind === 'joy-code' && structured && !lookOnly
+    taskKind === 'joy-code' && structured && allowedToolNames.includes('validate_proposal')
       ? ' For styling, read the "presets" domain with a title, caption, or transition query. Use runnable IDs and the listed operations. Choose an RTL title or caption preset for Persian or Arabic. Use karaoke only with reliable word timing. Preserve text and timing when restyling captions. Confirm the exact target and a real junction before proposing a transition, using its operationId. Present unavailable presets as suggestions. Use the existing Living Look tools for supported look requests.'
       : '';
   // The literal operation registry call is kept here for release verification
