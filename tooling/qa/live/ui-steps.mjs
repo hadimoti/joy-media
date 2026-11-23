@@ -41,7 +41,9 @@ export function readOpenMenu() {
   return {
     open: true,
     group: menu.closest('.app-menu')?.querySelector('.app-menu-trigger')?.textContent?.trim() ?? '',
-    items: [...menu.querySelectorAll('button[role="menuitem"]')].map((button) => ({
+    items: [
+      ...menu.querySelectorAll('button[role="menuitem"], button[role="menuitemcheckbox"]'),
+    ].map((button) => ({
       label: button.querySelector('.app-menu-item-label')?.textContent?.trim() ?? '',
       shortcut: button.querySelector('.app-menu-item-shortcut')?.textContent?.trim() ?? '',
       disabled: button.disabled === true,

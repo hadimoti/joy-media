@@ -2321,7 +2321,7 @@ export function AgentPanel({
         return Promise.reject(
           new JoyAgentTaskError('failed', 'No Creative Brief runner is configured.'),
         );
-      if (!canStartJoyAgentSurfaceRun(activeModelRunIdRef.current))
+      if (pending !== undefined || !canStartJoyAgentSurfaceRun(activeModelRunIdRef.current))
         return Promise.reject(
           new JoyAgentTaskError('cancelled', 'Another JOY run already owns the workspace.'),
         );
@@ -2342,7 +2342,7 @@ export function AgentPanel({
         },
       });
     },
-    [creativeBriefRunner, handleCreativeBriefRunEvent],
+    [creativeBriefRunner, handleCreativeBriefRunEvent, pending],
   );
 
   const handOffCreativeBrief = useCallback(
@@ -3302,6 +3302,7 @@ export function AgentPanel({
             // adapter rejects the draft.
             if (!awaitingPreviewRender) agentPresenceStore?.dispatch(presenceEvent);
             if (event.phase === 'completed') {
+              activeModelRunIdRef.current = undefined;
               const generationHandoff = generationHandoffFromResult(event.result);
               const pendingGeneration =
                 generationHandoff === undefined
@@ -4027,8 +4028,9 @@ export function AgentPanel({
       });
     } catch (error) {
       if (isTerminalPreparedChangeError(error)) {
-        discardPreparedModelChange(sourceRunIdForPreparedPlan(prepared.planId));
-        void joyAgentEngineClient?.cancel(sourceRunIdForPreparedPlan(prepared.planId));
+        discardPreparedModelChange(sourceRunId);
+        if (activeModelRunIdRef.current === sourceRunId) activeModelRunIdRef.current = undefined;
+        void joyAgentEngineClient?.cancel(sourceRunId);
       }
       finishRecipeInvocation(sourceRunId);
       if (lifecycleRun !== undefined)

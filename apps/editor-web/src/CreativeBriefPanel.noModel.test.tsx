@@ -3,7 +3,7 @@ import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
-import { JoyAgentTaskError } from './joy-agent/entry-points.js';
+import { JoyAgentTaskError, type CreativeBriefRunOptions } from './joy-agent/entry-points.js';
 import { CONNECT_MODEL_FIRST_TITLE } from './joy-code-run-gate.js';
 
 (
@@ -101,12 +101,12 @@ describe('Creative Brief without a connected model', () => {
 describe('Creative Brief with a connected model', () => {
   it('stops a collecting brief and keeps its draft ready to resubmit', async () => {
     let cancel: (() => void) | undefined;
-    const runBrief = vi.fn(
-      () =>
-        new Promise<never>((_resolve, reject) => {
-          cancel = () => reject(new JoyAgentTaskError('cancelled', 'Creative Brief cancelled'));
-        }),
-    );
+    const runBrief = vi.fn((_request: string, options?: CreativeBriefRunOptions) => {
+      options?.onRunStart?.('brief-collecting');
+      return new Promise<never>((_resolve, reject) => {
+        cancel = () => reject(new JoyAgentTaskError('cancelled', 'Creative Brief cancelled'));
+      });
+    });
     const onStop = vi.fn(() => cancel?.());
     renderInto(
       <CreativeBriefPanel revisionId="rev-1" optedIn runBrief={runBrief} onStop={onStop} />,
@@ -126,7 +126,7 @@ describe('Creative Brief with a connected model', () => {
     );
     expect(stop?.disabled).toBe(false);
     await act(async () => stop?.click());
-    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onStop).toHaveBeenCalledExactlyOnceWith('brief-collecting');
     expect(draft.value).toBe('Refine the typography');
     expect(improveButton().disabled).toBe(false);
     expect(container?.querySelector('[aria-label="Error occurred"]')).toBeNull();
