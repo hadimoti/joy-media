@@ -1,0 +1,225 @@
+{
+  "schema": "joy-media.sandbox-lifecycle/1",
+  "startedAt": "2026-11-23T20:54:38.287Z",
+  "steps": [
+    {
+      "id": "sandbox-identity",
+      "result": "pass",
+      "detail": "WDAGUtilityAccount on 0EAAB976-DD96-4"
+    },
+    {
+      "id": "setup-digest",
+      "result": "pass",
+      "detail": "3d362e22b078e569738a8e8a7d2d4bc100493ad5e204b8056da0e14440051349"
+    },
+    {
+      "id": "setup-signature-status",
+      "result": "pass",
+      "detail": "NotSigned"
+    },
+    {
+      "id": "control-signed-program",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "install-silent",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "installed",
+      "result": "pass",
+      "detail": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media"
+    },
+    {
+      "id": "exe-version",
+      "result": "pass",
+      "detail": "1.1.2"
+    },
+    {
+      "id": "offline-smoke",
+      "result": "pass",
+      "detail": "exit=0; evidence=True"
+    },
+    {
+      "id": "open-window",
+      "result": "pass",
+      "detail": "title: JOY Media"
+    },
+    {
+      "id": "joy-cmd-version-reported",
+      "result": "pass",
+      "detail": "JOY Media CLI v1.1.2"
+    },
+    {
+      "id": "joy-media-cmd-version-reported",
+      "result": "pass",
+      "detail": "JOY Media CLI v1.1.2"
+    },
+    {
+      "id": "render-entrypoint-wrote-manifest",
+      "result": "pass",
+      "detail": "{\"type\":\"start\",\"projectId\":\"sandbox-offline-smoke\",\"title\":\"Sandbox Offline Smoke\",\"preset\":\"mp4\",\"outDir\":\"C:\\\\work\\\\a14-render\",\"totalFrames\":1,\"totalClips\":1,\"concurrency\":2,\"ts\":\"2026-11-23T20:55:10.325Z\"}\r\n{\"type\":\"track\",\"projectId\":\"sandbox-offline-smoke\",\"trackId\":\"track-v1\",\"trackName\":\"Video 1\",\"clipCount\":1}\r\n{\"type\":\"clip\",\"projectId\":\"sandbox-offline-smoke\",\"trackId\":\"track-v1\",\"clipId\":\"smoke-clip\",\"progress\":1,\"framesRendered\":1,\"totalFrames\":1}\r\n{\"type\":\"complete\",\"projectId\":\"sandbox-offline-smoke\",\"preset\":\"mp4\",\"outDir\":\"C:\\\\work\\\\a14-render\",\"artifactPath\":\"C:\\\\work\\\\a14-render\\\\sandbox-offline-smoke.mp4.manifest.json\",\"totalFrames\":1,\"durationMs\":2,\"ts\":\"2026-11-23T20:55:10.326Z\",\"mediaProduced\":false,\"manifestWritten\":true,\"message\":\"Manifest only - no video file written. This command records the render plan; it does not encode media.\",\"warnings\":[\"Project composition is 16x16 @ 30 fps, but preset \\\"mp4\\\" is fixed at 1080x1920 @ 30 fps; frame counts use the preset rate.\"]}"
+    },
+    {
+      "id": "project-fixture-import-export",
+      "result": "pass",
+      "detail": "import: {\"id\":\"sandbox-offline-smoke\",\"title\":\"Sandbox Offline Smoke\",\"revision\":1,\"replaced\":false} | export: {\"id\":\"sandbox-offline-smoke\",\"title\":\"Sandbox Offline Smoke\",\"revision\":1,\"path\":\"C:\\\\work\\\\offline-smoke-export.json\"}"
+    },
+    {
+      "id": "offline-cli-smoke",
+      "result": "pass",
+      "detail": "doctor=pass; render=pass"
+    },
+    {
+      "id": "sandbox-network-adapter-absent",
+      "result": "pass",
+      "detail": "Windows Sandbox networking was disabled and adapter enumeration returned zero."
+    },
+    {
+      "id": "close-app",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "no-process-after-close",
+      "result": "pass",
+      "detail": "processes left: 0"
+    },
+    {
+      "id": "uninstall",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "folder-removed",
+      "result": "pass",
+      "detail": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media after 4 s"
+    }
+  ],
+  "identity": {
+    "user": "WDAGUtilityAccount",
+    "computer": "0EAAB976-DD96-4"
+  },
+  "beforeInstall": {
+    "name": "beforeInstall",
+    "installFolderExists": false,
+    "installFileCount": 0,
+    "pathHasJoy": false,
+    "joyKey": null,
+    "uninstallKey": false,
+    "desktopShortcut": false,
+    "startMenuShortcut": false
+  },
+  "afterInstall": {
+    "name": "afterInstall",
+    "installFolderExists": true,
+    "installFileCount": 5488,
+    "pathHasJoy": true,
+    "joyKey": null,
+    "uninstallKey": true,
+    "desktopShortcut": true,
+    "startMenuShortcut": true
+  },
+  "offlineSmokeEvidence": {
+    "schema": "joy-media.offline-smoke-evidence/1",
+    "startedAt": "2026-11-23T20:54:51.313Z",
+    "finishedAt": "2026-11-23T20:55:00.281Z",
+    "steps": [
+      {
+        "id": "launch",
+        "result": "pass",
+        "detail": "pid=8300; title=JOY Media"
+      },
+      {
+        "id": "import",
+        "result": "pass",
+        "detail": "Imported bundled fixture as sandbox-offline-smoke."
+      },
+      {
+        "id": "export",
+        "result": "pass",
+        "detail": "Exported sandbox-offline-smoke to the Sandbox work folder."
+      },
+      {
+        "id": "doctor",
+        "result": "pass",
+        "detail": "doctor returned ok=true."
+      },
+      {
+        "id": "render",
+        "result": "pass",
+        "detail": "render wrote its manifest in the Sandbox work folder."
+      }
+    ],
+    "network": {
+      "networkingDisabled": true,
+      "adapterPresent": false,
+      "adapterCount": 0,
+      "reason": "run.wsb sets Networking=Disable; Get-NetAdapter returned no adapters.",
+      "adapterNames": []
+    }
+  },
+  "whileRunning": {
+    "name": "whileRunning",
+    "installFolderExists": true,
+    "installFileCount": 5488,
+    "pathHasJoy": true,
+    "joyKey": "\"C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media\\joy-media.exe\" \"%1\"",
+    "uninstallKey": true,
+    "desktopShortcut": true,
+    "startMenuShortcut": true
+  },
+  "cliSmoke": {
+    "schema": "joy-media.cli-smoke/1",
+    "checks": [
+      {
+        "id": "joy-cmd-version-reported",
+        "result": "pass",
+        "detail": "JOY Media CLI v1.1.2"
+      },
+      {
+        "id": "joy-media-cmd-version-reported",
+        "result": "pass",
+        "detail": "JOY Media CLI v1.1.2"
+      },
+      {
+        "id": "doctor-json-reported",
+        "result": "pass",
+        "detail": "{\r\n  \"ok\": true,\r\n  \"summary\": {\r\n    \"pass\": 3,\r\n    \"warn\": 0,\r\n    \"fail\": 0,\r\n    \"skip\": 1\r\n  },\r\n  \"checks\": [\r\n    {\r\n      \"id\": \"node\",\r\n      \"label\": \"Node.js Runtime\",\r\n      \"status\": \"pass\",\r\n      \"message\": \"v24.20.0 (supported \u003e= 22)\"\r\n    },\r\n    {\r\n      \"id\": \"sqlite\",\r\n      \"label\": \"Built-in SQLite Engine\",\r\n      \"status\": \"pass\",\r\n      \"message\": \"Functional\"\r\n    },\r\n    {\r\n      \"id\": \"gpu\",\r\n      \"label\": \"Hardware GPU\",\r\n      \"status\": \"pass\",\r\n      \"message\": \"AMD Radeon(TM) Graphics\",\r\n      \"details\": {\r\n        \"name\": \"AMD Radeon(TM) Graphics\"\r\n      }\r\n    },\r\n    {\r\n      \"id\": \"edge\",\r\n      \"label\": \"Production Edge\",\r\n      \"status\": \"skip\",\r\n      \"message\": \"not configured\"\r\n    }\r\n  ],\r\n  \"dataLocation\": {\r\n    \"path\": \"C:\\\\Users\\\\WDAGUtilityAccount\\\\AppData\\\\Roaming\\\\@joy-media\\\\desktop\\\\joy-media.sqlite3\",\r\n    \"source\": \"APPDATA\"\r\n  }\r\n}"
+      },
+      {
+        "id": "render-entrypoint-wrote-manifest",
+        "result": "pass",
+        "detail": "{\"type\":\"start\",\"projectId\":\"sandbox-offline-smoke\",\"title\":\"Sandbox Offline Smoke\",\"preset\":\"mp4\",\"outDir\":\"C:\\\\work\\\\a14-render\",\"totalFrames\":1,\"totalClips\":1,\"concurrency\":2,\"ts\":\"2026-11-23T20:55:10.325Z\"}\r\n{\"type\":\"track\",\"projectId\":\"sandbox-offline-smoke\",\"trackId\":\"track-v1\",\"trackName\":\"Video 1\",\"clipCount\":1}\r\n{\"type\":\"clip\",\"projectId\":\"sandbox-offline-smoke\",\"trackId\":\"track-v1\",\"clipId\":\"smoke-clip\",\"progress\":1,\"framesRendered\":1,\"totalFrames\":1}\r\n{\"type\":\"complete\",\"projectId\":\"sandbox-offline-smoke\",\"preset\":\"mp4\",\"outDir\":\"C:\\\\work\\\\a14-render\",\"artifactPath\":\"C:\\\\work\\\\a14-render\\\\sandbox-offline-smoke.mp4.manifest.json\",\"totalFrames\":1,\"durationMs\":2,\"ts\":\"2026-11-23T20:55:10.326Z\",\"mediaProduced\":false,\"manifestWritten\":true,\"message\":\"Manifest only - no video file written. This command records the render plan; it does not encode media.\",\"warnings\":[\"Project composition is 16x16 @ 30 fps, but preset \\\"mp4\\\" is fixed at 1080x1920 @ 30 fps; frame counts use the preset rate.\"]}"
+      }
+    ],
+    "offline": {
+      "projectRoundTrip": {
+        "result": "pass",
+        "detail": "import: {\"id\":\"sandbox-offline-smoke\",\"title\":\"Sandbox Offline Smoke\",\"revision\":1,\"replaced\":false} | export: {\"id\":\"sandbox-offline-smoke\",\"title\":\"Sandbox Offline Smoke\",\"revision\":1,\"path\":\"C:\\\\work\\\\offline-smoke-export.json\"}"
+      },
+      "doctor": {
+        "result": "pass",
+        "detail": "{\r\n  \"ok\": true,\r\n  \"summary\": {\r\n    \"pass\": 3,\r\n    \"warn\": 0,\r\n    \"fail\": 0,\r\n    \"skip\": 1\r\n  },\r\n  \"checks\": [\r\n    {\r\n      \"id\": \"node\",\r\n      \"label\": \"Node.js Runtime\",\r\n      \"status\": \"pass\",\r\n      \"message\": \"v24.20.0 (supported \u003e= 22)\"\r\n    },\r\n    {\r\n      \"id\": \"sqlite\",\r\n      \"label\": \"Built-in SQLite Engine\",\r\n      \"status\": \"pass\",\r\n      \"message\": \"Functional\"\r\n    },\r\n    {\r\n      \"id\": \"gpu\",\r\n      \"label\": \"Hardware GPU\",\r\n      \"status\": \"pass\",\r\n      \"message\": \"AMD Radeon(TM) Graphics\",\r\n      \"details\": {\r\n        \"name\": \"AMD Radeon(TM) Graphics\"\r\n      }\r\n    },\r\n    {\r\n      \"id\": \"edge\",\r\n      \"label\": \"Production Edge\",\r\n      \"status\": \"skip\",\r\n      \"message\": \"not configured\"\r\n    }\r\n  ],\r\n  \"dataLocation\": {\r\n    \"path\": \"C:\\\\Users\\\\WDAGUtilityAccount\\\\AppData\\\\Roaming\\\\@joy-media\\\\desktop\\\\joy-media.sqlite3\",\r\n    \"source\": \"APPDATA\"\r\n  }\r\n}"
+      },
+      "render": {
+        "result": "pass",
+        "detail": "{\"type\":\"start\",\"projectId\":\"sandbox-offline-smoke\",\"title\":\"Sandbox Offline Smoke\",\"preset\":\"mp4\",\"outDir\":\"C:\\\\work\\\\offline-smoke-render\",\"totalFrames\":1,\"totalClips\":1,\"concurrency\":2,\"ts\":\"2026-11-23T20:55:10.728Z\"}\r\n{\"type\":\"track\",\"projectId\":\"sandbox-offline-smoke\",\"trackId\":\"track-v1\",\"trackName\":\"Video 1\",\"clipCount\":1}\r\n{\"type\":\"clip\",\"projectId\":\"sandbox-offline-smoke\",\"trackId\":\"track-v1\",\"clipId\":\"smoke-clip\",\"progress\":1,\"framesRendered\":1,\"totalFrames\":1}\r\n{\"type\":\"complete\",\"projectId\":\"sandbox-offline-smoke\",\"preset\":\"mp4\",\"outDir\":\"C:\\\\work\\\\offline-smoke-render\",\"artifactPath\":\"C:\\\\work\\\\offline-smoke-render\\\\sandbox-offline-smoke.mp4.manifest.json\",\"totalFrames\":1,\"durationMs\":1,\"ts\":\"2026-11-23T20:55:10.729Z\",\"mediaProduced\":false,\"manifestWritten\":true,\"message\":\"Manifest only - no video file written. This command records the render plan; it does not encode media.\",\"warnings\":[\"Project composition is 16x16 @ 30 fps, but preset \\\"mp4\\\" is fixed at 1080x1920 @ 30 fps; frame counts use the preset rate.\"]}"
+      },
+      "cliResult": "pass"
+    }
+  },
+  "afterUninstall": {
+    "name": "afterUninstall",
+    "installFolderExists": false,
+    "installFileCount": 0,
+    "pathHasJoy": false,
+    "joyKey": null,
+    "uninstallKey": false,
+    "desktopShortcut": false,
+    "startMenuShortcut": false
+  },
+  "finishedAt": "2026-11-23T20:55:23.020Z"
+}

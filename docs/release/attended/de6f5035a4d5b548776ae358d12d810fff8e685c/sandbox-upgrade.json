@@ -1,0 +1,170 @@
+{
+  "schema": "joy-media.sandbox-upgrade/1",
+  "startedAt": "2026-11-23T20:28:50.0683697Z",
+  "steps": [
+    {
+      "id": "sandbox-identity",
+      "result": "pass",
+      "detail": "WDAGUtilityAccount on 0EAAB976-DD96-4"
+    },
+    {
+      "id": "v102-zip-digest",
+      "result": "pass",
+      "detail": "e59ee15f2f881cd6620ad59e9f1d9fdc4f9b82efaf221f4e6041c079978d59ca"
+    },
+    {
+      "id": "new-setup-digest",
+      "result": "pass",
+      "detail": "3d362e22b078e569738a8e8a7d2d4bc100493ad5e204b8056da0e14440051349"
+    },
+    {
+      "id": "v102-install",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "v102-open-window",
+      "result": "pass",
+      "detail": "title: JOY Studio"
+    },
+    {
+      "id": "v102-still-running",
+      "result": "pass",
+      "detail": "after 20 s"
+    },
+    {
+      "id": "v102-close",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "v102-no-process-left",
+      "result": "pass",
+      "detail": "processes left: 0"
+    },
+    {
+      "id": "new-install-over",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "stale-files-from-v102",
+      "result": "pass",
+      "detail": "files in v1.0.2 but not in the upgraded folder: 2"
+    },
+    {
+      "id": "data-marker-kept",
+      "result": "pass",
+      "detail": "upgrade-marker.txt"
+    },
+    {
+      "id": "data-files-lost",
+      "result": "pass",
+      "detail": "files from before the upgrade missing afterwards: 0"
+    },
+    {
+      "id": "v112-open-window",
+      "result": "pass",
+      "detail": "title: JOY Media"
+    },
+    {
+      "id": "v112-still-running",
+      "result": "pass",
+      "detail": "after 45 s"
+    },
+    {
+      "id": "v112-close",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "v112-no-process-left",
+      "result": "pass",
+      "detail": "processes left: 0"
+    },
+    {
+      "id": "uninstall",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "folder-removed",
+      "result": "pass",
+      "detail": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media"
+    }
+  ],
+  "identity": {
+    "user": "WDAGUtilityAccount",
+    "computer": "0EAAB976-DD96-4"
+  },
+  "fromVersion": "1.0.2",
+  "fromMode": "zip",
+  "toVersion": "1.1.2",
+  "S0-clean": {
+    "name": "S0-clean",
+    "installFolderExists": false,
+    "installFileCount": 0,
+    "appPackageVersion": null,
+    "uninstallDisplayVersion": null,
+    "pathEntries": 0,
+    "joyKey": null,
+    "dataFolderExists": false,
+    "dataFileCount": 0
+  },
+  "S1-v102-installed": {
+    "name": "S1-v102-installed",
+    "installFolderExists": true,
+    "installFileCount": 817,
+    "appPackageVersion": "1.0.2",
+    "uninstallDisplayVersion": "1.0.2",
+    "pathEntries": 1,
+    "joyKey": null,
+    "dataFolderExists": false,
+    "dataFileCount": 0
+  },
+  "S2-v102-after-run": {
+    "name": "S2-v102-after-run",
+    "installFolderExists": true,
+    "installFileCount": 817,
+    "appPackageVersion": "1.0.2",
+    "uninstallDisplayVersion": "1.0.2",
+    "pathEntries": 1,
+    "joyKey": "\"C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media\\joy-media.exe\" \"%1\"",
+    "dataFolderExists": true,
+    "dataFileCount": 51
+  },
+  "S3-upgraded": {
+    "name": "S3-upgraded",
+    "installFolderExists": true,
+    "installFileCount": 5611,
+    "appPackageVersion": "1.1.2",
+    "uninstallDisplayVersion": "1.1.2",
+    "pathEntries": 1,
+    "joyKey": "\"C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media\\joy-media.exe\" \"%1\"",
+    "dataFolderExists": true,
+    "dataFileCount": 52
+  },
+  "S4-v112-after-run": {
+    "name": "S4-v112-after-run",
+    "installFolderExists": true,
+    "installFileCount": 5611,
+    "appPackageVersion": "1.1.2",
+    "uninstallDisplayVersion": "1.1.2",
+    "pathEntries": 1,
+    "joyKey": "\"C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media\\joy-media.exe\" \"%1\"",
+    "dataFolderExists": true,
+    "dataFileCount": 63
+  },
+  "S5-uninstalled": {
+    "name": "S5-uninstalled",
+    "installFolderExists": false,
+    "installFileCount": 0,
+    "appPackageVersion": null,
+    "uninstallDisplayVersion": null,
+    "pathEntries": 0,
+    "joyKey": null,
+    "dataFolderExists": true,
+    "dataFileCount": 63
+  },
+  "finishedAt": "2026-11-23T20:31:01.0511278Z"
+}

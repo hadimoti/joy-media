@@ -1,0 +1,66 @@
+{
+  "schema": "joy-media.attended-receipt/1",
+  "scenario": {
+    "id": "project.persistence.fresh-process",
+    "status": "passed",
+    "firstAttemptPassed": true,
+    "retries": 0
+  },
+  "candidateSha": "de6f5035a4d5b548776ae358d12d810fff8e685c",
+  "app": {
+    "exeSha256": "0a4eadad00fab59cd1d070eaf307111130ac9eb54dabcffd8385d665eb16145b",
+    "unpackedDir": "C:\\jgp\\v112\\integration\\apps\\desktop\\dist\\joy-media-win32-x64"
+  },
+  "run": {
+    "id": "f20a0e0e-e38c-4562-beaa-d456b729a963",
+    "attempt": 1,
+    "startedAt": "2026-11-23T20:50:07.587Z",
+    "finishedAt": "2026-11-23T20:50:48.235Z",
+    "operator": "owner-at-pc",
+    "mode": "scripted",
+    "manual": false
+  },
+  "guards": {
+    "joyKeyBefore": "af05be55222c86fece27e738b7e8a931cb4261c9797261c67dde3c71a4e5cac0",
+    "joyKeyAfter": "af05be55222c86fece27e738b7e8a931cb4261c9797261c67dde3c71a4e5cac0",
+    "ownerLibraryFilesBefore": 3221,
+    "ownerLibraryFilesAfter": 3221,
+    "installedFolderTouched": false
+  },
+  "checks": [
+    {
+      "name": "editable-project-exported",
+      "status": "passed",
+      "detail": "FreshProcess-f20a0e0e with fresh-process-f20a0e0e.mp4 exported as export-package.joyproject.json (58405 bytes); the source profile's saved state holds both"
+    },
+    {
+      "name": "fresh-profile-started",
+      "status": "passed",
+      "detail": "a new profile started on the scratch library C:\\jgp\\v112\\attended-seed-de6f5035\\fresh-library; host project FreshProcessHost-f20a0e0e is open"
+    },
+    {
+      "name": "project-imported-in-fresh-profile",
+      "status": "passed",
+      "detail": "imported FreshProcess-f20a0e0e as the open project; the fresh profile's saved state holds the project and a fresh-process-f20a0e0e.mp4 clip; the app showed no notice"
+    },
+    {
+      "name": "export-from-fresh-profile-probed",
+      "status": "passed",
+      "detail": "the app verified an MP4 rendered from the imported project: 1920x1080 video stream, 55.000 s, the imported clip's 55.000 s"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "export-package.joyproject.json",
+      "path": "export-package.joyproject.json",
+      "sha256": "b1752d9462cd2de927571097a20b6a8e08c3b30447371559d57752fb40b0fe23",
+      "bytes": 58405
+    },
+    {
+      "name": "export.mp4",
+      "path": "export.mp4",
+      "sha256": "66d7596742ccc71beeeeb9bdae87eedc5ec8bfeee45fd2f99336b2ee00378bba",
+      "bytes": 199717
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "schema": "joy-media.offline-smoke/1",
+  "candidateSha": "de6f5035a4d5b548776ae358d12d810fff8e685c",
+  "workflowSha": "de6f5035a4d5b548776ae358d12d810fff8e685c",
+  "runId": "local-sandbox-649179bcf36e4a5d99cb6eaec5c56af3",
+  "attempt": 1,
+  "artifact": {
+    "name": "joy-media-setup.exe",
+    "sha256": "3d362e22b078e569738a8e8a7d2d4bc100493ad5e204b8056da0e14440051349"
+  },
+  "builtAt": "2026-11-23T20:07:29.303Z",
+  "startedAt": "2026-11-23T20:54:51.313Z",
+  "finishedAt": "2026-11-23T20:55:00.281Z",
+  "steps": [
+    {
+      "id": "launch",
+      "result": "pass",
+      "detail": "pid=8300; title=JOY Media"
+    },
+    {
+      "id": "import",
+      "result": "pass",
+      "detail": "Imported bundled fixture as sandbox-offline-smoke."
+    },
+    {
+      "id": "export",
+      "result": "pass",
+      "detail": "Exported sandbox-offline-smoke to the Sandbox work folder."
+    },
+    {
+      "id": "doctor",
+      "result": "pass",
+      "detail": "doctor returned ok=true."
+    },
+    {
+      "id": "render",
+      "result": "pass",
+      "detail": "render wrote its manifest in the Sandbox work folder."
+    }
+  ],
+  "egress": {
+    "main": 0,
+    "renderer": 0,
+    "worker": 0,
+    "cli": 0,
+    "netLogSha256": "17db926992e7711691022808cc8cf8190dbbf9a6da912140420fbe88de85a63b",
+    "reason": "Zero by construction: Windows Sandbox networking was disabled and its adapter was absent."
+  },
+  "network": {
+    "networkingDisabled": true,
+    "adapterPresent": false,
+    "adapterCount": 0,
+    "reason": "run.wsb sets Networking=Disable; Get-NetAdapter returned no adapters.",
+    "adapterNames": []
+  },
+  "verdict": "pass"
+}
