@@ -351,10 +351,13 @@ export function SpeechGenerationPanel({
             ))}
           </select>
         </div>
-        {selectedEngine !== 'kokoro-82m' && referenceAssets.length === 0 && (
+        {selectedEngine !== 'kokoro-82m' && (
           <p className="speech-setup-hint" role="status">
-            {referenceRequired ? 'Persian needs a reference voice: ' : 'To clone a voice: '}
-            add a short, clean recording of that voice to the timeline, then choose it here.
+            {referenceAssets.length === 0
+              ? `${referenceRequired ? 'Persian needs a reference voice: ' : 'To clone a voice: '}add a short, clean recording of that voice to the timeline, then choose it here. `
+              : ''}
+            A clean recording of 5 to 10 seconds works best; a much longer clip can make the cloned
+            speech less clear.
           </p>
         )}
 

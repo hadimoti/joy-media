@@ -193,6 +193,20 @@ describe('SpeechGenerationPanel', () => {
     expect(view.textContent).toContain('to the timeline');
   });
 
+  it('advises a 5 to 10 second reference for engines that clone, not for Kokoro', async () => {
+    const view = await render(makeProps());
+    // Kokoro (the default) has no reference, so no length advice.
+    expect(view.textContent).not.toContain('5 to 10 seconds');
+    const language = view.querySelector<HTMLSelectElement>('select[name="language"]')!;
+    await act(async () => {
+      language.value = 'fa-IR';
+      language.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    // Persian with project audio available: the length advice shows, the "how to get a voice" part does not.
+    expect(view.textContent).toContain('A clean recording of 5 to 10 seconds works best');
+    expect(view.textContent).not.toContain('Persian needs a reference voice');
+  });
+
   it('disables Kokoro references and clears reference consent when switching engines', async () => {
     const view = await render(makeProps());
     const engine = view.querySelector<HTMLSelectElement>('select[name="engine"]')!;
