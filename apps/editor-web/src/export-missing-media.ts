@@ -94,6 +94,112 @@ export function exportLacksVisualSource(
   return sourcedVisualClipCount === 0 && !hasHtmlScenes && missingClipCount === 0;
 }
 
+interface ClipListLike {
+  readonly tracks: readonly {
+    readonly clips: readonly {
+      readonly id: string;
+      readonly startUs: number;
+      readonly durationUs: number;
+    }[];
+  }[];
+}
+
+/** A clip's place on the timeline, in microseconds. */
+interface ClipRange {
+  readonly startUs: number;
+  readonly durationUs: number;
+}
+
+/** The export's frame grid, as the frame loop renders it (App's export `paintFrame`). */
+interface ExportFrames {
+  readonly durationUs: number;
+  readonly frameRate: number;
+  readonly frameCount: number;
+}
+
+/** The time frame `index` is painted at: the frame loop's formula, capped to the last microsecond. */
+function exportFrameSampleUs(index: number, frames: ExportFrames): number {
+  return Math.min(frames.durationUs - 1, Math.floor((index * 1_000_000) / frames.frameRate));
+}
+
+/**
+ * Whether a frame of the export is painted at a time inside the range. Frames are a frame apart, so a range that lies
+ * between two frames is never painted, even when it overlaps the export: a title active from 4.99 s to 5 s of a 5 s
+ * export at 30 fps misses the last frame, which is painted at 4.9667 s (review P2).
+ */
+function exportFrameSamplesRange(range: ClipRange, frames: ExportFrames): boolean {
+  const startUs = Math.max(0, range.startUs);
+  const endUs = range.startUs + range.durationUs;
+  // The first frame painted at or after startUs. Starting one frame early absorbs float rounding at the boundary.
+  let index = Math.max(0, Math.ceil((startUs * frames.frameRate) / 1_000_000) - 1);
+  for (; index < frames.frameCount; index += 1) {
+    const sampleUs = exportFrameSampleUs(index, frames);
+    if (sampleUs >= endUs) return false;
+    if (sampleUs >= startUs) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a title or a shape is drawn in the export: a frame of the export is painted inside a visible timeline clip
+ * that binds it, or no clip binds it (an old project's overlay stays visible, as isBoundObjectActive draws it). Such an
+ * object draws over the background, so a project made only of titles has a visual source even with no video clip
+ * (defect 211). A clip outside the export length (review P1), or one that no frame falls in (review P2), does not
+ * count. Every range of a clip counts, because isBoundObjectActive reads every composition.
+ */
+export function exportHasDrawnTextOrShape(input: {
+  readonly visualObjects: Readonly<Record<string, { readonly id: string; readonly kind: string }>>;
+  /** `pluginData['joy.clipObjects']`: clip id to object id. */
+  readonly clipObjects: unknown;
+  readonly compositionSets: readonly Readonly<Record<string, ClipListLike>>[];
+  readonly hiddenClipIds: ReadonlySet<string>;
+  /** The export length in microseconds, as the frame loop renders it. */
+  readonly durationUs: number;
+  /** The export's frame rate and frame count: the frame loop paints each frame at its own sample time. */
+  readonly frameRate: number;
+  readonly frameCount: number;
+}): boolean {
+  const bindings: Record<string, unknown> =
+    input.clipObjects !== null &&
+    typeof input.clipObjects === 'object' &&
+    !Array.isArray(input.clipObjects)
+      ? (input.clipObjects as Record<string, unknown>)
+      : {};
+  const visibleClipRanges = new Map<string, ClipRange[]>();
+  for (const compositions of input.compositionSets) {
+    for (const composition of Object.values(compositions)) {
+      for (const track of composition.tracks) {
+        for (const clip of track.clips) {
+          if (input.hiddenClipIds.has(clip.id)) continue;
+          const ranges = visibleClipRanges.get(clip.id) ?? [];
+          ranges.push({ startUs: clip.startUs, durationUs: clip.durationUs });
+          visibleClipRanges.set(clip.id, ranges);
+        }
+      }
+    }
+  }
+  const frames: ExportFrames = {
+    durationUs: input.durationUs,
+    frameRate: input.frameRate,
+    frameCount: input.frameCount,
+  };
+  const boundToVisibleClip = new Set<string>();
+  const boundToAnyClip = new Set<string>();
+  for (const [clipId, objectId] of Object.entries(bindings)) {
+    if (typeof objectId !== 'string') continue;
+    boundToAnyClip.add(objectId);
+    const ranges = visibleClipRanges.get(clipId) ?? [];
+    if (ranges.some((range) => exportFrameSamplesRange(range, frames))) {
+      boundToVisibleClip.add(objectId);
+    }
+  }
+  return Object.values(input.visualObjects).some(
+    (object) =>
+      (object.kind === 'text' || object.kind === 'shape') &&
+      (boundToVisibleClip.has(object.id) || !boundToAnyClip.has(object.id)),
+  );
+}
+
 /**
  * The transitions the export may draw. A transition with a missing clip on either side is
  * dropped, so the clip that is present plays as a plain cut and nothing blends against nothing.
