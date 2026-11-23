@@ -455,6 +455,7 @@ import {
   isDesktopWindowMaximized,
   minimizeDesktopWindow,
   toggleMaximizeDesktopWindow,
+  toggleFullscreenDesktopWindow,
   closeDesktopWindow,
 } from './desktop-client.js';
 import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
@@ -6074,7 +6075,11 @@ function EditorWorkspace({
         case 'agent.active':
           break;
         case 'view.fullscreen':
-          if (!document.fullscreenElement) {
+          if (isDesktopHost()) {
+            void toggleFullscreenDesktopWindow()
+              .then(() => isDesktopWindowMaximized())
+              .then(setIsMaximized);
+          } else if (!document.fullscreenElement) {
             void document.documentElement.requestFullscreen();
           } else {
             void document.exitFullscreen();

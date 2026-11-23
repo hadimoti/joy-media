@@ -10,7 +10,7 @@ import {
 /**
  * Minimize, maximize / restore and close for the frameless desktop window. The editor header and the
  * Projects page both show it, so the window can be managed from every screen. Renders nothing in a
- * browser. The maximize state is read from the host and refreshed on resize.
+ * browser. The host's maximized or fullscreen state is refreshed on resize.
  */
 export function WindowControls(): ReactElement | null {
   const [isMaximized, setIsMaximized] = useState(false);

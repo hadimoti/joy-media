@@ -6,6 +6,9 @@ import {
   PACKAGED_LOADING_DELAY_MS,
   PACKAGED_RENDERER_ORIGIN,
   buildSecureWebPreferences,
+  isWindowMaximizedOrFullscreen,
+  toggleWindowFullscreen,
+  toggleWindowMaximize,
   devLoadingPageHtml,
   resolveRendererTarget,
 } from './window.js';
@@ -120,5 +123,54 @@ describe('buildSecureWebPreferences', () => {
       webviewTag: false,
       preload: '/path/to/preload.cjs',
     });
+  });
+});
+
+describe('desktop window presentation', () => {
+  function windowState(initial: { fullscreen?: boolean; maximized?: boolean } = {}) {
+    let fullscreen = initial.fullscreen ?? false;
+    let maximized = initial.maximized ?? false;
+    return {
+      isFullScreen: () => fullscreen,
+      setFullScreen: (next: boolean) => {
+        fullscreen = next;
+        if (next) maximized = false;
+      },
+      isMaximized: () => maximized,
+      maximize: () => {
+        maximized = true;
+      },
+      unmaximize: () => {
+        maximized = false;
+      },
+    };
+  }
+
+  it('starts the desktop window in native fullscreen by default', () => {
+    expect(windowModule.buildMainWindowOptions('/preload.cjs', true).fullscreen).toBe(true);
+    expect(windowModule.buildMainWindowOptions('/preload.cjs', false).fullscreen).toBe(true);
+  });
+
+  it('lets the restore control leave fullscreen for a normal window', () => {
+    const win = windowState({ fullscreen: true });
+    expect(isWindowMaximizedOrFullscreen(win)).toBe(true);
+    expect(toggleWindowMaximize(win)).toBe(false);
+    expect(win.isFullScreen()).toBe(false);
+    expect(win.isMaximized()).toBe(false);
+  });
+
+  it('keeps ordinary maximize and restore behavior outside fullscreen', () => {
+    const win = windowState();
+    expect(toggleWindowMaximize(win)).toBe(true);
+    expect(isWindowMaximizedOrFullscreen(win)).toBe(true);
+    expect(toggleWindowMaximize(win)).toBe(false);
+  });
+
+  it('toggles native fullscreen independently of monitor/document fullscreen', () => {
+    const win = windowState();
+    expect(toggleWindowFullscreen(win)).toBe(true);
+    expect(win.isFullScreen()).toBe(true);
+    expect(toggleWindowFullscreen(win)).toBe(false);
+    expect(win.isFullScreen()).toBe(false);
   });
 });

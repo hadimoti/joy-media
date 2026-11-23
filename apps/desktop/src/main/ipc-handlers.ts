@@ -109,7 +109,7 @@ export interface IpcHandlerDeps {
   /** Revokes a ChatGPT refresh token. Credentials stay in the main process. */
   readonly providerSignOut?: (record: ChatGptTokenRecord) => Promise<void>;
   readonly handleWindowControl?: (
-    action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
+    action: 'minimize' | 'maximize' | 'fullscreen' | 'close' | 'is-maximized',
   ) => Promise<boolean | void> | boolean | void;
   /** Flushes Electron's DOM storage after the renderer has written localStorage. */
   readonly flushStorageData?: () => void;
@@ -778,6 +778,10 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.window-maximize': async () => {
       const isMax = await deps.handleWindowControl?.('maximize');
       return { ok: true, data: isMax };
+    },
+    'desktop.window-fullscreen': async () => {
+      const isFullscreen = await deps.handleWindowControl?.('fullscreen');
+      return { ok: true, data: isFullscreen };
     },
     'desktop.window-close': async () => {
       await deps.handleWindowControl?.('close');

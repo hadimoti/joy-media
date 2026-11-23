@@ -69,4 +69,17 @@ describe('WindowControls', () => {
     await act(async () => button('Close window')?.click());
     expect(desktop.close).toHaveBeenCalledTimes(1);
   });
+
+  it('offers Restore from the Projects page when the desktop host is in fullscreen', async () => {
+    desktop.isMaximized.mockResolvedValue(true);
+    desktop.toggle.mockResolvedValue(false);
+    const view = mount();
+    await act(async () => undefined);
+    const restore = view.querySelector<HTMLButtonElement>('button[aria-label="Restore window"]');
+    expect(restore).not.toBeNull();
+
+    await act(async () => restore?.click());
+    expect(desktop.toggle).toHaveBeenCalledOnce();
+    expect(view.querySelector('button[aria-label="Maximize window"]')).not.toBeNull();
+  });
 });
