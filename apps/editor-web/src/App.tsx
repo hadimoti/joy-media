@@ -4895,6 +4895,7 @@ function EditorWorkspace({
           clipObjects: exportVisualProject.pluginData?.['joy.clipObjects'],
           compositionSets: [exportVisualProject.compositions, session.timelineProject.compositions],
           hiddenClipIds: exportHiddenClipIds,
+          durationUs,
         });
         // All used visuals missing and accepted is valid: the export is a background-only video.
         if (

@@ -31,7 +31,7 @@ describe.runIf(chromiumAvailable)('Chromium scene capture driver', () => {
       expect([...first.rgba.subarray(0, 4)]).toEqual([3, 4, 5, 255]);
       expect(first.rgba).toEqual(second.rgba);
     },
-    { timeout: 2 * CHROMIUM_TIMEOUT_MS + 30_000, retry: 2 },
+    { timeout: 2 * CHROMIUM_TIMEOUT_MS + 30_000, retry: 1 },
   );
 
   it(
@@ -72,6 +72,6 @@ describe.runIf(chromiumAvailable)('Chromium scene capture driver', () => {
       expect([...amber.rgba.subarray(0, 3)]).toEqual([233, 185, 73]);
       expect([...violet.rgba.subarray(0, 3)]).toEqual([81, 56, 238]);
     },
-    { timeout: 2 * CHROMIUM_TIMEOUT_MS + 30_000, retry: 2 },
+    { timeout: 2 * CHROMIUM_TIMEOUT_MS + 30_000, retry: 1 },
   );
 });

@@ -95,13 +95,20 @@ export function exportLacksVisualSource(
 }
 
 interface ClipListLike {
-  readonly tracks: readonly { readonly clips: readonly { readonly id: string }[] }[];
+  readonly tracks: readonly {
+    readonly clips: readonly {
+      readonly id: string;
+      readonly startUs: number;
+      readonly durationUs: number;
+    }[];
+  }[];
 }
 
 /**
- * Whether a title or a shape is drawn in the export: it is bound to a visible timeline clip, or no clip binds it
- * (an old project's overlay stays visible, as isBoundObjectActive draws it). Such an object draws over the
- * background, so a project made only of titles has a visual source even with no video clip (defect 211).
+ * Whether a title or a shape is drawn in the export: it is bound to a visible timeline clip that overlaps the export,
+ * or no clip binds it (an old project's overlay stays visible, as isBoundObjectActive draws it). Such an object draws
+ * over the background, so a project made only of titles has a visual source even with no video clip (defect 211).
+ * A title bound to a clip outside the export length would not be drawn, so it does not count (review P1).
  */
 export function exportHasDrawnTextOrShape(input: {
   readonly visualObjects: Readonly<Record<string, { readonly id: string; readonly kind: string }>>;
@@ -109,6 +116,8 @@ export function exportHasDrawnTextOrShape(input: {
   readonly clipObjects: unknown;
   readonly compositionSets: readonly Readonly<Record<string, ClipListLike>>[];
   readonly hiddenClipIds: ReadonlySet<string>;
+  /** The export length in microseconds, as the frame loop renders it. */
+  readonly durationUs: number;
 }): boolean {
   const bindings: Record<string, unknown> =
     input.clipObjects !== null &&
@@ -116,12 +125,17 @@ export function exportHasDrawnTextOrShape(input: {
     !Array.isArray(input.clipObjects)
       ? (input.clipObjects as Record<string, unknown>)
       : {};
-  const visibleClipIds = new Set<string>();
+  const visibleClipRanges = new Map<
+    string,
+    { readonly startUs: number; readonly durationUs: number }
+  >();
   for (const compositions of input.compositionSets) {
     for (const composition of Object.values(compositions)) {
       for (const track of composition.tracks) {
         for (const clip of track.clips) {
-          if (!input.hiddenClipIds.has(clip.id)) visibleClipIds.add(clip.id);
+          if (!input.hiddenClipIds.has(clip.id)) {
+            visibleClipRanges.set(clip.id, { startUs: clip.startUs, durationUs: clip.durationUs });
+          }
         }
       }
     }
@@ -131,7 +145,14 @@ export function exportHasDrawnTextOrShape(input: {
   for (const [clipId, objectId] of Object.entries(bindings)) {
     if (typeof objectId !== 'string') continue;
     boundToAnyClip.add(objectId);
-    if (visibleClipIds.has(clipId)) boundToVisibleClip.add(objectId);
+    const range = visibleClipRanges.get(clipId);
+    if (
+      range !== undefined &&
+      range.startUs < input.durationUs &&
+      range.startUs + range.durationUs > 0
+    ) {
+      boundToVisibleClip.add(objectId);
+    }
   }
   return Object.values(input.visualObjects).some(
     (object) =>
