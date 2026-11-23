@@ -3912,6 +3912,10 @@ export function TimelinePanel({
                     style={{ minWidth: `${laneWidthPx}px` }}
                     onKeyDown={(event) => {
                       if (event.key !== 'Enter' && event.key !== ' ') return;
+                      // Only the lane itself is the "Insert media" button. A key from a clip, a trim handle or any
+                      // other control inside the lane bubbles up here: it is theirs (or the editor transport's, for
+                      // Space), so it must not be marked as handled and must not open the library.
+                      if (event.target !== event.currentTarget) return;
                       event.preventDefault();
                       handleAddFromLibrary();
                     }}

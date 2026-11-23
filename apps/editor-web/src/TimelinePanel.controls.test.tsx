@@ -529,6 +529,23 @@ describe('TimelinePanel toolbar and track controls', () => {
     expect(mounted.callbacks.openAssetLibrary).toHaveBeenCalledOnce();
   });
 
+  it('lets Space from a selected clip reach the editor transport instead of the lane Insert media key', async () => {
+    mounted = await mount({ selectedIds: ['clip-a'] });
+    const clip = mounted.container.querySelector<HTMLElement>('[data-clip-id="clip-a"]')!;
+    expect(clip.getAttribute('aria-pressed')).toBe('true');
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => clip.dispatchEvent(space));
+    // The lane is an ancestor of the clip: its Insert media handler must not claim the key (that would set
+    // defaultPrevented, and the editor's Space handler skips a handled key, so playback never toggled).
+    expect(space.defaultPrevented).toBe(false);
+    expect(mounted.callbacks.openAssetLibrary).not.toHaveBeenCalled();
+
+    // Enter on a clip is the clip's own (select); it must not open the library either.
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => clip.dispatchEvent(enter));
+    expect(mounted.callbacks.openAssetLibrary).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['Visual runway. Open media library to add a layer.', 'Enter'],
     ['Audio runway. Open media library to add a layer.', ' '],
