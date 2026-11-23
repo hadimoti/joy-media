@@ -8,7 +8,7 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 // The setup exe's version resource: Explorer and Get-Item VersionInfo.ProductVersion read the informational
-// version, which must be exactly the app version (1.1.1); the file version has the fourth part.
+// version, which must be exactly the app version (1.1.2); the file version has the fourth part.
 [assembly: AssemblyTitle("JOY Media Setup")]
 [assembly: AssemblyProduct("JOY Media")]
 [assembly: AssemblyCompany("JOY Team")]
@@ -51,7 +51,7 @@ namespace JoyMedia.Setup
     {
         /// <summary>Single source of truth for the installer's product version. Keep in sync with
         /// the payload archive name passed to build-installer.ps1 (-Version).</summary>
-        public const string ProductVersion = "1.1.1";
+        public const string ProductVersion = "1.1.2";
 
         public static string GetInstallPath()
         {

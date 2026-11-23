@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..');
-const expectedVersion = '1.1.1';
+const expectedVersion = '1.1.2';
 
 function readRepositoryFile(relativePath: string): string {
   return readFileSync(resolve(repositoryRoot, relativePath), 'utf8');
@@ -93,7 +93,7 @@ describe('product version sources', () => {
     expect(versions).not.toContain('1.1.0');
     expect(versions).not.toContain('1.0.0');
     expect(versions).not.toContain('0.0.0');
-    expect(`JOY Media CLI v${cliVersion}`).toBe('JOY Media CLI v1.1.1');
-    expect(`v${cliVersion}`).toBe('v1.1.1');
+    expect(`JOY Media CLI v${cliVersion}`).toBe('JOY Media CLI v1.1.2');
+    expect(`v${cliVersion}`).toBe('v1.1.2');
   });
 });
