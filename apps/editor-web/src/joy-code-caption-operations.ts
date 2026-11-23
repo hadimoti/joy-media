@@ -1,9 +1,10 @@
 import {
   applyCaptionProjectCommand,
+  applyCaptionTemplateToClipStyle,
   JOY_CAPTION_TEMPLATES,
   type CaptionCommand,
 } from '@joy-media/captions-core';
-import { IDENTITY_CAPTION_CLIP_STYLE, type JoyProjectV1 } from '@joy-media/project-schema';
+import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { JoyCodePlanOperationV1 } from '@joy-media/agent-tools';
 import { CAPTION_BURN_IN_KEY } from './caption-burn-in.js';
 
@@ -107,23 +108,11 @@ export function compileJoyCodeCaptionOperation(
             message: `caption template "${operation.templateId}" is not in the catalog`,
           },
         };
-      const style = captionClip.style ?? {
-        ...IDENTITY_CAPTION_CLIP_STYLE,
-        textColor: rgbHex(template.textColor),
-        align: template.align,
-        highlightColor: rgbHex(template.activeWordColor),
-        ...(template.plateColor === undefined
-          ? {}
-          : {
-              plateColor: rgbHex(template.plateColor),
-              plateOpacity: template.plateColor.a / 255,
-            }),
-      };
       command = {
         type: 'caption.setClipStyle',
         payload: {
           clipId: captionClip.id,
-          style: { ...style, templateId: template.id },
+          style: applyCaptionTemplateToClipStyle(template, captionClip.style),
         },
       };
       break;
@@ -167,11 +156,4 @@ function findCaptionClip(project: JoyProjectV1, clipId: string) {
     }
   }
   return undefined;
-}
-
-function rgbHex(color: { readonly r: number; readonly g: number; readonly b: number }): string {
-  return (
-    '#' +
-    [color.r, color.g, color.b].map((channel) => channel.toString(16).padStart(2, '0')).join('')
-  );
 }

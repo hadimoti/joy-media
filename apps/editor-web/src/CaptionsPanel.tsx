@@ -20,6 +20,7 @@ import {
   IDENTITY_CAPTION_CLIP_STYLE,
 } from '@joy-media/project-schema';
 import {
+  applyCaptionTemplateToClipStyle,
   captionSlots,
   DEFAULT_CAPTION_TEMPLATE_ID,
   formatSrt,
@@ -28,6 +29,7 @@ import {
   parseSrt,
   parseWebVtt,
   resolveCaptionDirection,
+  resolveCaptionTemplate,
   searchCaptionSegments,
   segmentDisplayText,
   segmentMinConfidence,
@@ -492,7 +494,15 @@ function CaptionSlotEditor({
   const applyTemplate = (styleRef: string) => {
     onDispatch({
       label: 'Apply caption template',
-      commands: [{ type: 'caption.setStyle', payload: { documentId: document.id, styleRef } }],
+      commands: [
+        {
+          type: 'caption.setClipStyle',
+          payload: {
+            clipId: clip.id,
+            style: applyCaptionTemplateToClipStyle(resolveCaptionTemplate(styleRef), clip.style),
+          },
+        },
+      ],
     });
   };
   const clipStyle = clip.style ?? IDENTITY_CAPTION_CLIP_STYLE;
@@ -894,7 +904,7 @@ function CaptionSlotEditor({
       {activeTab === 'style' && (
         <CaptionStyleTab
           clipStyle={clipStyle}
-          templateId={document.styleRef ?? DEFAULT_CAPTION_TEMPLATE_ID}
+          templateId={clip.style?.templateId ?? document.styleRef ?? DEFAULT_CAPTION_TEMPLATE_ID}
           onApplyTemplate={applyTemplate}
           onChange={setClipStyle}
           animatedStyleRow={animatedStyleRow}

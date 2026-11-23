@@ -18,6 +18,7 @@ import {
   type TextNode,
   type TextSpan,
 } from '@joy-media/render-ir';
+import { IDENTITY_CAPTION_CLIP_STYLE, type CaptionClipStyleV2 } from '@joy-media/project-schema';
 import type { CaptionCue } from './index.js';
 import { activeCaptionWord, resolveCaptionTextDirection, segmentDisplayText } from './index.js';
 
@@ -97,6 +98,54 @@ export const JOY_CAPTION_TEMPLATES: readonly CaptionTemplate[] = [
     karaoke: false,
   },
 ];
+
+/** Select a clip preset and keep appearance edits that differ from its current preset. */
+export function applyCaptionTemplateToClipStyle(
+  template: CaptionTemplate,
+  style?: CaptionClipStyleV2,
+): CaptionClipStyleV2 {
+  const defaults = templateClipStyle(template);
+  if (style === undefined) return defaults;
+  if (style.templateId === undefined) return { ...style, templateId: template.id };
+
+  const previous = templateClipStyle(resolveCaptionTemplate(style.templateId));
+  return {
+    ...style,
+    templateId: template.id,
+    textColor: style.textColor === previous.textColor ? defaults.textColor : style.textColor,
+    highlightColor:
+      style.highlightColor === previous.highlightColor
+        ? defaults.highlightColor
+        : style.highlightColor,
+    plateColor: style.plateColor === previous.plateColor ? defaults.plateColor : style.plateColor,
+    plateOpacity:
+      style.plateOpacity === previous.plateOpacity ? defaults.plateOpacity : style.plateOpacity,
+    align: style.align === previous.align ? defaults.align : style.align,
+  };
+}
+
+function templateClipStyle(template: CaptionTemplate): CaptionClipStyleV2 {
+  return {
+    ...IDENTITY_CAPTION_CLIP_STYLE,
+    templateId: template.id,
+    textColor: rgbHex(template.textColor),
+    align: template.align,
+    highlightColor: rgbHex(template.activeWordColor),
+    ...(template.plateColor === undefined
+      ? {}
+      : {
+          plateColor: rgbHex(template.plateColor),
+          plateOpacity: template.plateColor.a / 255,
+        }),
+  };
+}
+
+function rgbHex(color: Rgba): string {
+  return (
+    '#' +
+    [color.r, color.g, color.b].map((channel) => channel.toString(16).padStart(2, '0')).join('')
+  );
+}
 
 export const DEFAULT_CAPTION_TEMPLATE_ID = 'joy-clean';
 

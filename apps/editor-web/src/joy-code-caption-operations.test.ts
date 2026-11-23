@@ -67,7 +67,15 @@ describe('Joy Code caption operations', () => {
     expect(styled.affectedIds).toEqual([target.id]);
     expect(styled.project.captionDocuments).toEqual(project.captionDocuments);
     expect(styled.project.compositions.root?.tracks[0]?.clips).toEqual([
-      { ...target, style: { ...target.style, templateId: 'joy-rtl-classic' } },
+      {
+        ...target,
+        style: {
+          ...target.style,
+          textColor: '#faf0dc',
+          align: 'start',
+          templateId: 'joy-rtl-classic',
+        },
+      },
       neighbor,
     ]);
   });
