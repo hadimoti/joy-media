@@ -124,7 +124,7 @@ Open **Automate → Joy Code**. The gear button opens **Joy Code Settings**, wit
 
 Use **Edit** for changes, **Creative Brief** for design direction, **Recipes** for reusable workflows and **Looks** for supported look workflows. During a run, the **Joy Code** menu shows the activity and can jump to or follow its target. Use **Stop** in the current composer or **Stop active run** in the menu.
 
-Joy Code can stage supported title, caption and transition presets for preview and approval. Ordinary filters and effects are suggestions you can apply from **Enhance**. The [bundled Joy Code skills](../.agent/skills) give agents workflows for typography, captions, transitions, color, motion and export review.
+Joy Code can stage supported title, caption and transition presets for preview and approval. Ordinary filters and effects are suggestions you can apply from **Enhance**. The [bundled Joy Code skills](../.agent/skills) give agents workflows for typography, captions, transitions, color, motion and export review. The Windows package also includes the guides under `resources/app/joy-code-skills`.
 
 ## Audio, Timeline and delivery
 

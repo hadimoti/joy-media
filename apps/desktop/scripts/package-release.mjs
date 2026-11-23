@@ -163,6 +163,22 @@ async function assembleUnpacked() {
     resolve(unpackedDir, 'speech'),
   );
 
+  for (const skill of [
+    'joy-code-caption-styling',
+    'joy-code-cuts-and-motion',
+    'joy-code-format-and-delivery',
+    'joy-code-look-and-effects',
+    'joy-code-speech-subtitles',
+    'joy-code-titles-and-lower-thirds',
+  ]) {
+    const destination = resolve(unpackedDir, 'joy-code-skills', skill);
+    await mkdir(destination, { recursive: true });
+    await cp(
+      resolve(repoRoot, '.agent', 'skills', skill, 'SKILL.md'),
+      resolve(destination, 'SKILL.md'),
+    );
+  }
+
   // Stage the internal workspace packages that the desktop main process and the Worker import (and
   // that those packages import, transitively) into node_modules, so the packaged runtime resolves
   // them without repository-root node_modules symlinks. The list is derived from the package
