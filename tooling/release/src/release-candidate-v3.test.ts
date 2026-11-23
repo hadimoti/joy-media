@@ -115,6 +115,23 @@ describe('release-candidate-v3 workflow', () => {
     }
   });
 
+  it('runs on the non-root Linux runner with preinstalled system tools', () => {
+    for (const [name, job] of Object.entries(v3.jobs)) {
+      expect.soft(job.services, name).toBeUndefined();
+    }
+    const commands = stepsOf(v3)
+      .map(({ step }) => step.run ?? '')
+      .join('\n');
+    expect.soft(commands).not.toMatch(/--with-deps|\bsudo\b|\bapt-get\b/u);
+    const nodeContracts = (v3.jobs['node-contracts'].steps ?? [])
+      .map((step) => step.run ?? '')
+      .join('\n');
+    expect(nodeContracts).toContain(
+      'pnpm exec vitest run --retry=0 apps/cli/src --no-file-parallelism',
+    );
+    expect(nodeContracts).not.toContain('usdc-invoice-ledger.pg.test.ts');
+  });
+
   it('checks out the source candidate for build/test jobs and receipt commit for receipt jobs', () => {
     const receiptJobs = new Set(['checksums', 'windows-candidate', 'offline-packaged-smoke']);
     for (const { job, step } of stepsOf(v3)) {
@@ -146,8 +163,7 @@ describe('release-candidate-v3 workflow', () => {
     const shardRun = (shard.steps ?? []).map((step) => step.run ?? '').join('\n');
     expect(shardRun).toContain('--retry=0 --shard=${{ matrix.shard }}/3');
     const prepare = v3.jobs['hosted-prepare'];
-    expect(prepare.env?.JOY_TEST_DATABASE_URL).toBe(shard.env?.JOY_TEST_DATABASE_URL);
-    expect(prepare.services?.postgres).toBeDefined();
+    expect(prepare.env).toEqual(shard.env);
     const prepareSteps = prepare.steps ?? [];
     expect(prepareSteps.some((step) => step.run?.includes('vitest.mjs list --json'))).toBe(true);
     expect(prepareSteps.some((step) => step.run?.includes('hosted-verify.mjs commands'))).toBe(
@@ -207,12 +223,19 @@ describe('release-candidate-v3 workflow', () => {
     expect(V3).toContain('$JOY_MEDIA_CI_EVIDENCE_ROOT/<candidate sha>/candidate-files');
     expect(V3).toContain('fails closed when that folder is missing');
     expect(run).toContain('candidate files are missing from the evidence store');
-    expect(job.steps?.some((step) => step.uses?.startsWith('actions/upload-artifact@'))).toBe(true);
-    expect(
-      v3.jobs['windows-candidate'].steps?.some((step) =>
-        step.uses?.startsWith('actions/download-artifact@'),
-      ),
-    ).toBe(true);
+    const windowsSteps = v3.jobs['windows-candidate'].steps ?? [];
+    const stage = windowsSteps.findIndex((step) => step.run?.includes('cp -a'));
+    const gate = windowsSteps.findIndex((step) => step.run?.includes('pnpm release:gate:local'));
+    expect(stage).toBeGreaterThanOrEqual(0);
+    expect(stage).toBeLessThan(gate);
+    expect(windowsSteps[stage]?.run).toContain('cp -a "$candidate_files_dir/." "$release_dir/"');
+    expect(windowsSteps[stage]?.run).toContain('checksums.ts verify --dir "$release_dir"');
+    expect(windowsSteps[stage]?.run).toContain(
+      'cmp "$release_dir/SHA256SUMS.txt" "$committed_sums"',
+    );
+    expect(job.steps?.some((step) => step.uses?.startsWith('actions/upload-artifact@'))).toBe(
+      false,
+    );
   });
 
   it('runs the existing offline-smoke receipt validator on the committed receipt', () => {
@@ -244,6 +267,9 @@ describe('release-candidate-v3 workflow', () => {
     expect(needsOf(v3.jobs['fixture-acceptance'])).toEqual(['validate-candidate']);
     expect(run).toContain('pnpm exec playwright test --retries=0');
     expect(run).toContain('measure-entry-bundle.mjs');
+    expect(run).toContain(
+      'pnpm --fail-if-no-match --filter @joy-media/test-control-plane exec tsx ../../tooling/e2e-server.ts',
+    );
     // The production-bundle smoke names only specs that exist; the deleted authenticated-smoke spec must not come back.
     expect(run).not.toContain('authenticated-smoke.spec.ts');
     expect(run).toContain('tests/e2e/wp32-real-project-journey.spec.ts');
