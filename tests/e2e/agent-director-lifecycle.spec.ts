@@ -175,7 +175,8 @@ test.describe('JOY Live Director lifecycle evidence', () => {
     await expect(proposal).toHaveAttribute('data-agent-preview-ready', 'true', {
       timeout: 20_000,
     });
-    await page.getByRole('button', { name: 'Stop agent', exact: true }).click();
+    await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
+    await page.getByRole('menuitem', { name: 'Stop active run' }).click();
 
     await expect(proposal).toHaveCount(0);
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);

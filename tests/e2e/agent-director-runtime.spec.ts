@@ -136,14 +136,12 @@ test.describe('JOY Live Director runtime boundary', () => {
     await composer.fill('Start an edit, then stop it.');
     await composer.press('Enter');
     await expect.poll(() => provider.stages.includes('structured-read')).toBe(true);
-    await page.getByRole('button', { name: 'Stop agent', exact: true }).click();
+    await page.getByRole('button', { name: /^Stop Joy Code / }).click();
     await expect(page.getByRole('region', { name: 'Joy Code composer' })).toHaveAttribute(
       'data-agent-phase',
       'cancelled',
     );
-    const cancellationMessage = page.getByText('JOY run cancelled. No edits were applied.', {
-      exact: true,
-    });
+    const cancellationMessage = page.getByText('JOY run cancelled.', { exact: true });
     await expect(cancellationMessage).toHaveCount(1);
     await expect(cancellationMessage).toBeVisible();
     await page.waitForTimeout(1_000);
