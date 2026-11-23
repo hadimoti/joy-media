@@ -1,10 +1,11 @@
-# JOY Media
+# ![JOY Media](docs/images/v1.1.2/github/editorial-cover.webp)
 
 **A Windows desktop editor for graphic and motion design.** Layer artwork and video, set type, animate with keyframes, and finish on a multitrack timeline.
 
-[**Download v1.1.2 for Windows**](https://github.com/hadimoti/joy-media/releases/tag/v1.1.2) · [Designer guide](docs/USER-GUIDE-v1.1.2.md) · [Release notes](RELEASE_NOTES_v1.1.2.md)
-
-![Build the frame. Set it in motion. The JOY Media mark on a taped paper card.](docs/images/v1.1.2/github/editorial-cover.webp)
+[![Windows downloads](docs/images/v1.1.2/github/windows-downloads.png)](https://github.com/hadimoti/joy-media/releases/tag/v1.1.2)
+[![Designer guide](docs/images/v1.1.2/github/designer-guide.png)](docs/USER-GUIDE-v1.1.2.md)
+[![Release notes](docs/images/v1.1.2/github/release-notes.png)](RELEASE_NOTES_v1.1.2.md)
+[![MIT License](docs/images/v1.1.2/github/mit-license.png)](LICENSE)
 
 ## From type on a canvas to a finished MP4
 
