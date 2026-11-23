@@ -130,7 +130,7 @@ function writeFileAtomic(path: string, content: string, mode: number): void {
   const tmp = `${path}.${process.pid}.${Date.now().toString(36)}.tmp`;
   try {
     writeFileSync(tmp, content, { encoding: 'utf8', mode });
-    renameSync(tmp, path);
+    renameWithRetry(tmp, path);
   } catch (error) {
     try {
       unlinkSync(tmp);
@@ -142,12 +142,40 @@ function writeFileAtomic(path: string, content: string, mode: number): void {
   makePrivate(path, mode);
 }
 
+/**
+ * Windows refuses to replace a config file that another process has open (a reader or a virus scanner) with EPERM,
+ * EACCES or EBUSY. The writer holds the config lock, so a short retry is safe; a refusal that persists still throws.
+ */
+function renameWithRetry(from: string, to: string): void {
+  const attempts = 60;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const transient = code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+      if (!transient || attempt >= attempts) throw error;
+      sleepSync(Math.min(50, 5 * attempt));
+    }
+  }
+}
+
 function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 const LOCK_STALE_MS = 10_000;
 const LOCK_WAIT_MS = 15_000;
+
+/**
+ * A held lock shows as EEXIST. On Windows, a lock directory that another process has just removed can refuse mkdir
+ * with EPERM until its delete finishes; that is the same busy lock, so the caller waits and tries again.
+ */
+function isLockBusy(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'EEXIST' || code === 'EPERM' || code === 'EBUSY';
+}
 
 /**
  * Serialise read-modify-write cycles on the config files across processes
@@ -161,7 +189,7 @@ function withNamedLock<T>(name: string, fn: () => T): T {
       mkdirSync(lock);
       break;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (!isLockBusy(error)) throw error;
       try {
         if (lockOwnerIsGone(lock)) rmSync(lock, { recursive: true, force: true });
       } catch {

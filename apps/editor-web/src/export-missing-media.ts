@@ -94,6 +94,52 @@ export function exportLacksVisualSource(
   return sourcedVisualClipCount === 0 && !hasHtmlScenes && missingClipCount === 0;
 }
 
+interface ClipListLike {
+  readonly tracks: readonly { readonly clips: readonly { readonly id: string }[] }[];
+}
+
+/**
+ * Whether a title or a shape is drawn in the export: it is bound to a visible timeline clip, or no clip binds it
+ * (an old project's overlay stays visible, as isBoundObjectActive draws it). Such an object draws over the
+ * background, so a project made only of titles has a visual source even with no video clip (defect 211).
+ */
+export function exportHasDrawnTextOrShape(input: {
+  readonly visualObjects: Readonly<Record<string, { readonly id: string; readonly kind: string }>>;
+  /** `pluginData['joy.clipObjects']`: clip id to object id. */
+  readonly clipObjects: unknown;
+  readonly compositionSets: readonly Readonly<Record<string, ClipListLike>>[];
+  readonly hiddenClipIds: ReadonlySet<string>;
+}): boolean {
+  const bindings: Record<string, unknown> =
+    input.clipObjects !== null &&
+    typeof input.clipObjects === 'object' &&
+    !Array.isArray(input.clipObjects)
+      ? (input.clipObjects as Record<string, unknown>)
+      : {};
+  const visibleClipIds = new Set<string>();
+  for (const compositions of input.compositionSets) {
+    for (const composition of Object.values(compositions)) {
+      for (const track of composition.tracks) {
+        for (const clip of track.clips) {
+          if (!input.hiddenClipIds.has(clip.id)) visibleClipIds.add(clip.id);
+        }
+      }
+    }
+  }
+  const boundToVisibleClip = new Set<string>();
+  const boundToAnyClip = new Set<string>();
+  for (const [clipId, objectId] of Object.entries(bindings)) {
+    if (typeof objectId !== 'string') continue;
+    boundToAnyClip.add(objectId);
+    if (visibleClipIds.has(clipId)) boundToVisibleClip.add(objectId);
+  }
+  return Object.values(input.visualObjects).some(
+    (object) =>
+      (object.kind === 'text' || object.kind === 'shape') &&
+      (boundToVisibleClip.has(object.id) || !boundToAnyClip.has(object.id)),
+  );
+}
+
 /**
  * The transitions the export may draw. A transition with a missing clip on either side is
  * dropped, so the clip that is present plays as a plain cut and nothing blends against nothing.

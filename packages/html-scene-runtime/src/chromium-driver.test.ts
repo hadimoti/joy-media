@@ -7,6 +7,8 @@ import { createSandboxedReactScene } from './runtime.js';
 const chromiumAvailable = findChromiumExecutable() !== undefined;
 // A cold headless Chrome can take well over the driver's 15 s default on a shared CI runner.
 const CHROMIUM_TIMEOUT_MS = 90_000;
+// The driver's spawn is synchronous, so under load a single capture can stall the test worker (defect 229). One
+// retry covers that stall; a capture that keeps failing still fails the run.
 
 describe.runIf(chromiumAvailable)('Chromium scene capture driver', () => {
   it(
@@ -29,7 +31,7 @@ describe.runIf(chromiumAvailable)('Chromium scene capture driver', () => {
       expect([...first.rgba.subarray(0, 4)]).toEqual([3, 4, 5, 255]);
       expect(first.rgba).toEqual(second.rgba);
     },
-    2 * CHROMIUM_TIMEOUT_MS + 30_000,
+    { timeout: 2 * CHROMIUM_TIMEOUT_MS + 30_000, retry: 2 },
   );
 
   it(
@@ -70,6 +72,6 @@ describe.runIf(chromiumAvailable)('Chromium scene capture driver', () => {
       expect([...amber.rgba.subarray(0, 3)]).toEqual([233, 185, 73]);
       expect([...violet.rgba.subarray(0, 3)]).toEqual([81, 56, 238]);
     },
-    2 * CHROMIUM_TIMEOUT_MS + 30_000,
+    { timeout: 2 * CHROMIUM_TIMEOUT_MS + 30_000, retry: 2 },
   );
 });

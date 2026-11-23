@@ -672,6 +672,7 @@ import { useMonitorTransportControls } from './monitor/useMonitorTransportContro
 import { monitorFps } from './monitor/monitor-timecode.js';
 import { MONITOR_FULLSCREEN_EVENT } from './monitor/monitor-transport-model.js';
 import {
+  exportHasDrawnTextOrShape,
   exportLacksVisualSource,
   missingExportAudioClipIds,
   missingExportVisualClipIds,
@@ -4888,8 +4889,21 @@ function EditorWorkspace({
         const hasHtmlScenes = Object.values(exportVisualProject.visualObjects).some(
           (object) => object.kind === 'html-scene',
         );
+        // A drawn title or shape is a visual source too: a title-only project exports over the background (defect 211).
+        const hasDrawnTextOrShape = exportHasDrawnTextOrShape({
+          visualObjects: exportVisualProject.visualObjects,
+          clipObjects: exportVisualProject.pluginData?.['joy.clipObjects'],
+          compositionSets: [exportVisualProject.compositions, session.timelineProject.compositions],
+          hiddenClipIds: exportHiddenClipIds,
+        });
         // All used visuals missing and accepted is valid: the export is a background-only video.
-        if (exportLacksVisualSource(exportClips.length, hasHtmlScenes, missingVisualIds.size))
+        if (
+          exportLacksVisualSource(
+            exportClips.length,
+            hasHtmlScenes || hasDrawnTextOrShape,
+            missingVisualIds.size,
+          )
+        )
           throw new Error('No playable visual clips are available for export');
         // Audio lanes use video leaves in the timeline model, but have no visual
         // boundary. Keep their mix inputs independent of visual preparation.
@@ -6438,12 +6452,16 @@ function EditorWorkspace({
       const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
       // The shared media placement writes the clip into the timeline, the project's own composition (the
       // Monitor and the export read the clip's time range from there) and the media binding as one Undo step.
+      // The playhead comes from the live ref: a dock panel can keep the closure of its first render. "first-free"
+      // puts the clip at the playhead on the first track that is free there, as speech and generation placement do.
+      const playheadUs = stateRef.current.playheadUs;
       const transaction = buildTimelineMediaImportTransaction(
         composition,
         [{ id: asset.assetId, ...asset }],
-        state.playheadUs,
+        playheadUs,
         new Set(),
         () => clipId,
+        { mode: 'first-free', startUs: playheadUs },
       );
       context.dispatchMediaPlacement(
         [
