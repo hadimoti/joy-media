@@ -23,7 +23,10 @@ export function useSpeechModelStatus(
   useEffect(() => {
     let active = true;
     let warned = false;
+    let latestRequest = 0;
+    let latestApplied = 0;
     const read = (): void => {
+      const request = ++latestRequest;
       let pending: ReturnType<SpeechStatusSource['speechStatus']>;
       try {
         pending = source.speechStatus();
@@ -32,7 +35,10 @@ export function useSpeechModelStatus(
       }
       void pending.then(
         (result) => {
-          if (active) setModels(result.models);
+          // A slow earlier read must not overwrite what a later read already showed.
+          if (!active || request < latestApplied) return;
+          latestApplied = request;
+          setModels(result.models);
         },
         (error: unknown) => {
           // Keep what is shown; the next tick tries again. Say so once, so a status that never arrives is findable.

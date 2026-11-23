@@ -252,6 +252,40 @@ class TestTranscribeRunner(unittest.TestCase):
 
     @patch("apps.worker.speech.transcribe.probe_duration_s")
     @patch("apps.worker.speech.transcribe.decode_window_wav")
+    def test_out_of_order_pieces_and_blank_pieces_do_not_corrupt_words(
+        self, mock_decode, mock_probe
+    ):
+        """A continuation piece that starts before the previous word stays its own word; blanks are dropped."""
+        mock_probe.return_value = 10.0
+
+        def fake_decode(ffmpeg_bin, source_path, start_s, duration_s, output_wav):
+            if start_s >= 10.0:
+                return False
+            output_wav.write_bytes(b"\x00" * 100)
+            return True
+
+        mock_decode.side_effect = fake_decode
+        pieces = [
+            MockWord(" later", start=2.0, end=2.4),
+            MockWord("-early", start=1.0, end=1.3),  # starts before "later": not a continuation
+            MockWord("   ", start=2.5, end=2.6),  # whitespace only: no word
+            MockWord(" end", start=2.7, end=3.0),
+        ]
+        mock_model = MagicMock()
+        mock_model.transcribe.side_effect = [([MockSegment(pieces)], MagicMock())]
+
+        with patch.object(runner, "WhisperModel", MagicMock(return_value=mock_model)):
+            runner.transcribe(self.base_request, self.output_dir)
+
+        with open(self.output_dir / "transcript.json", "r", encoding="utf-8") as f:
+            words = json.load(f)["words"]
+        self.assertEqual([word["text"] for word in words], ["-early", "later", "end"])
+        starts = [word["startUs"] for word in words]
+        self.assertEqual(starts, sorted(starts))
+        self.assertTrue(all(word["text"] for word in words))
+
+    @patch("apps.worker.speech.transcribe.probe_duration_s")
+    @patch("apps.worker.speech.transcribe.decode_window_wav")
     def test_silence(self, mock_decode, mock_probe):
         """Test audio with no speech / pure silence produces empty words without error."""
         mock_probe.return_value = 10.0

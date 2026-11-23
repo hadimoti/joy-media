@@ -3682,13 +3682,23 @@ function EditorWorkspace({
         );
         // A voice recording (an audio clip) is spoken word too: the picture lookup above skips audio on purpose, so
         // fall back to the audio clip under the playhead. Subtitles for a voice-over need no video.
-        const spokenAudioAtPlayhead = flattenRootTimelineVideoClips(session.timelineProject).find(
-          (candidate) =>
-            session.visualProject.assets[candidate.assetId]?.kind === 'audio' &&
-            !isControlTimelineElement(timelineElementKindForClip(candidate, elementKinds)) &&
-            state.playheadUs >= candidate.startUs &&
-            state.playheadUs < candidate.startUs + candidate.durationUs,
+        // A muted or disabled track is not audible, so it is not a subtitle source either (same rule as playback).
+        const mutedTrackIds = new Set(
+          timelineTrackFlags.filter((track) => track.muted === true).map((track) => track.id),
         );
+        const rootComposition =
+          session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+        const spokenAudioAtPlayhead = rootComposition?.tracks
+          .filter((track) => track.enabled && !mutedTrackIds.has(track.id))
+          .flatMap((track) => track.clips)
+          .find(
+            (candidate) =>
+              candidate.kind === 'video' &&
+              session.visualProject.assets[candidate.assetId]?.kind === 'audio' &&
+              !isControlTimelineElement(timelineElementKindForClip(candidate, elementKinds)) &&
+              state.playheadUs >= candidate.startUs &&
+              state.playheadUs < candidate.startUs + candidate.durationUs,
+          );
         const clip =
           selectedMedia ??
           activeVideoClipAt(
@@ -3768,6 +3778,7 @@ function EditorWorkspace({
       session,
       state.playheadUs,
       state.selectedIds,
+      timelineTrackFlags,
     ],
   );
   const generateSpeech = useCallback(

@@ -6,7 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createControlPlaneHttpServer, LocalControlPlane } from '@joy-media/test-control-plane';
-import { WorkerControlPlaneClient, WorkerSessionExpiredError } from './control-plane-client.js';
+import {
+  requestFailure,
+  WorkerControlPlaneClient,
+  WorkerSessionExpiredError,
+} from './control-plane-client.js';
 import type { WorkerRequestTimeoutError } from './control-plane-client.js';
 
 const stubMediaAuth = {
@@ -17,6 +21,41 @@ const stubMediaAuth = {
   sessionProfile: async (_req: IncomingMessage) => undefined,
   avatarBytes: async (_req: IncomingMessage) => undefined,
 };
+
+describe('requestFailure', () => {
+  const failure = (message: unknown) =>
+    requestFailure({ status: 422, body: { error: { message } } }).message;
+
+  it('keeps the local job API reasons (fixed plain text, including a media type)', () => {
+    expect(failure('speech derivative is missing or does not match the result')).toBe(
+      'Worker control-plane request failed (422): speech derivative is missing or does not match the result',
+    );
+    expect(failure('synthesis requires audio/wav')).toBe(
+      'Worker control-plane request failed (422): synthesis requires audio/wav',
+    );
+  });
+
+  it.each([
+    ['a Windows path', 'cannot read C:\\Users\\someone\\secret.wav'],
+    ['a POSIX path', 'open /home/someone/.ssh/id_rsa failed'],
+    ['a URL', 'see https://example.com/login?token=abc'],
+    ['a long token-like string', `bad token ${'a1B2c3D4'.repeat(6)}`],
+    ['markup from a proxy page', '<html><body>Bad gateway</body></html>'],
+    ['a quote-carrying string', 'password "hunter2" rejected'],
+    ['an empty message', '   '],
+  ])('drops %s instead of putting it in the error', (_label, message) => {
+    expect(failure(message)).toBe('Worker control-plane request failed (422)');
+  });
+
+  it('works when the body carries no error object', () => {
+    expect(requestFailure({ status: 500, body: undefined }).message).toBe(
+      'Worker control-plane request failed (500)',
+    );
+    expect(requestFailure({ status: 502, body: 'Bad gateway' }).message).toBe(
+      'Worker control-plane request failed (502)',
+    );
+  });
+});
 
 describe('WorkerControlPlaneClient', () => {
   it('asks the desktop for one AI completion on a held job and returns only the reply text', async () => {

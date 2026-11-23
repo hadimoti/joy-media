@@ -88,7 +88,17 @@ export class WorkerSessionExpiredError extends Error {
  * A refused control-plane request. The local job API answers with a short fixed reason ({error:{message}}), for
  * example "synthesis requires audio/wav"; keep it (single line, bounded) so a failure says why, not just the status.
  */
-function requestFailure(response: { readonly status: number; readonly body: unknown }): Error {
+/**
+ * Plain words only: no backslashes, drive letters, URLs, quotes or long token-like runs. A single slash is allowed
+ * (media types such as "audio/wav"); two or more look like a path and are dropped.
+ */
+const SAFE_SERVER_REASON = /^[A-Za-z0-9 ,.()/-]{1,160}$/u;
+const looksLikePath = (text: string): boolean => (text.match(/\//gu)?.length ?? 0) > 1;
+
+export function requestFailure(response: {
+  readonly status: number;
+  readonly body: unknown;
+}): Error {
   let reason = '';
   const body = response.body;
   if (typeof body === 'object' && body !== null) {
@@ -99,8 +109,17 @@ function requestFailure(response: { readonly status: number; readonly body: unkn
         : typeof error === 'object' && error !== null
           ? (error as { readonly message?: unknown }).message
           : undefined;
-    if (typeof message === 'string' && message.trim().length > 0) {
-      reason = `: ${message.replace(/\s+/gu, ' ').trim().slice(0, 160)}`;
+    if (typeof message === 'string') {
+      const normalized = message.replace(/\s+/gu, ' ').trim();
+      // The local job API sends short fixed reasons. Anything else (a proxy page, a path, a credential-looking
+      // string) is dropped, so the error never carries text we did not write.
+      if (
+        SAFE_SERVER_REASON.test(normalized) &&
+        !looksLikePath(normalized) &&
+        !/[A-Za-z0-9]{32,}/u.test(normalized)
+      ) {
+        reason = `: ${normalized}`;
+      }
     }
   }
   return new Error(`Worker control-plane request failed (${response.status})${reason}`);

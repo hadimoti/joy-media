@@ -59,6 +59,24 @@ describe('useSpeechModelStatus', () => {
     expect(seen).toEqual(READY);
   });
 
+  it('does not let a slow earlier read overwrite a newer one', async () => {
+    const resolvers: Array<(value: { models: readonly SpeechModelStatus[] }) => void> = [];
+    const speechStatus = vi
+      .fn<SpeechStatusSource['speechStatus']>()
+      .mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
+    await act(async () => root.render(<Probe source={{ speechStatus }} resetKey="p1" />));
+    // Read 1 is still in flight when the next tick starts read 2.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(resolvers).toHaveLength(2);
+    // The newer read answers first: ready. Then the older read answers late: setup required.
+    await act(async () => resolvers[1]!({ models: READY }));
+    expect(seen).toEqual(READY);
+    await act(async () => resolvers[0]!({ models: SETUP }));
+    expect(seen).toEqual(READY);
+  });
+
   it('stops polling and ignores a late answer after unmount', async () => {
     let resolveRead: (value: { models: readonly SpeechModelStatus[] }) => void = () => {};
     const speechStatus = vi

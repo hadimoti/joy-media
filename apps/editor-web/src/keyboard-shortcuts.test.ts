@@ -187,6 +187,16 @@ describe('canUseEditorSpaceTarget', () => {
     ruler.append(nestedButton);
     expect(canUseEditorSpaceTarget(nestedButton)).toBe(false);
   });
+
+  it('still refuses Space from a ruler that sits inside a dialog', () => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    const ruler = document.createElement('div');
+    ruler.setAttribute('role', 'slider');
+    ruler.setAttribute('data-editor-space-surface', '');
+    dialog.append(ruler);
+    expect(canUseEditorSpaceTarget(ruler)).toBe(false);
+  });
 });
 
 describe('timelineClipSpaceBehavior', () => {

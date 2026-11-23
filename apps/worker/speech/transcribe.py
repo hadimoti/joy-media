@@ -421,11 +421,15 @@ def transcribe(request: dict, output_dir: Path) -> None:
                     # apostrophe and has none ("-to" and "-speech" in "text-to-speech", "'s") continues the
                     # previous word; stripping its (missing) space would make it a separate word and the captions
                     # would read "text -to -speech".
+                    # Only a piece that really follows the previous word in time continues it; an out-of-order
+                    # piece stays its own word so the timings keep their order.
                     if (
                         chunk_words
                         and raw_text
                         and not raw_text[0].isspace()
                         and raw_text[0] in _CONTINUATION_CHARS
+                        and w_start_us >= chunk_words[-1]["startUs"]
+                        and len(raw_text.strip()) > 1
                     ):
                         previous = chunk_words[-1]
                         previous["text"] = previous["text"] + raw_text.strip()
@@ -435,6 +439,9 @@ def transcribe(request: dict, output_dir: Path) -> None:
                                 min(previous["confidence"], float(w_prob)), 4
                             )
                         continue
+
+                    if not raw_text.strip():
+                        continue  # a whitespace-only piece is not a word
 
                     word_entry: Dict[str, Any] = {
                         "text": raw_text.strip(),

@@ -244,12 +244,18 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
       // The Worker's receipt carries the derivative type nested as descriptor.mimeType; accept that real shape
       // (and a top-level mimeType). Reading only the top-level field made every real speech job fail here.
       const descriptor = isRecord(result.descriptor) ? result.descriptor : undefined;
-      const reportedMimeType =
-        typeof result.mimeType === 'string'
-          ? result.mimeType
-          : typeof descriptor?.mimeType === 'string'
-            ? descriptor.mimeType
-            : undefined;
+      const topLevelMimeType = typeof result.mimeType === 'string' ? result.mimeType : undefined;
+      const nestedMimeType =
+        typeof descriptor?.mimeType === 'string' ? descriptor.mimeType : undefined;
+      // Two different types in one receipt is a malformed or forged receipt: refuse it instead of picking one.
+      if (
+        topLevelMimeType !== undefined &&
+        nestedMimeType !== undefined &&
+        topLevelMimeType !== nestedMimeType
+      ) {
+        throw new JobProtocolError(422, 'receipt reports conflicting derivative types');
+      }
+      const reportedMimeType = topLevelMimeType ?? nestedMimeType;
       orchestrator.complete(workerId, jobId, leaseToken, {
         kind: result.kind,
         ...(typeof result.sha256 === 'string' ? { sha256: result.sha256 } : {}),

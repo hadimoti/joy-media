@@ -98,6 +98,7 @@ export function canUseEditorSpaceTarget(target: EventTarget | null): boolean {
   let element: ElementLike | null = target as ElementLike;
   let clip: ElementLike | undefined;
   let nestedInteractive = false;
+  let onSpaceSurface = false;
   const interactiveTags = new Set(['A', 'BUTTON', 'DETAILS', 'SUMMARY']);
   const interactiveRoles = new Set([
     'button',
@@ -113,8 +114,13 @@ export function canUseEditorSpaceTarget(target: EventTarget | null): boolean {
   while (element !== null) {
     const role = element.getAttribute?.('role')?.toLowerCase();
     if (role === 'dialog' || role === 'alertdialog') return false;
-    // The playhead ruler is a slider, but Space is not a slider key: it is the editor's play/pause there.
-    if (element.hasAttribute?.('data-editor-space-surface') === true) return !nestedInteractive;
+    // The playhead ruler is a slider, but Space is not a slider key: it is the editor's play/pause there. It does
+    // not count as an interactive ancestor, yet the walk goes on so a dialog around it still refuses the key.
+    if (element.hasAttribute?.('data-editor-space-surface') === true) {
+      onSpaceSurface = true;
+      element = element.parentElement ?? null;
+      continue;
+    }
     if (element.getAttribute?.('aria-roledescription') === 'timeline clip') {
       if (element.getAttribute('aria-pressed') !== 'true' || !element.getAttribute('data-clip-id'))
         return false;
@@ -131,6 +137,7 @@ export function canUseEditorSpaceTarget(target: EventTarget | null): boolean {
     element = element.parentElement ?? null;
   }
   if (clip !== undefined) return !nestedInteractive;
+  if (onSpaceSurface) return !nestedInteractive;
   return !isInteractiveTarget(target);
 }
 
