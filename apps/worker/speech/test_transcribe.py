@@ -213,6 +213,45 @@ class TestTranscribeRunner(unittest.TestCase):
 
     @patch("apps.worker.speech.transcribe.probe_duration_s")
     @patch("apps.worker.speech.transcribe.decode_window_wav")
+    def test_hyphen_and_apostrophe_pieces_continue_the_previous_word(
+        self, mock_decode, mock_probe
+    ):
+        """Whisper gives 'text-to-speech' as ' text', '-to', '-speech': one word, not three."""
+        mock_probe.return_value = 10.0
+
+        def fake_decode(ffmpeg_bin, source_path, start_s, duration_s, output_wav):
+            if start_s >= 10.0:
+                return False
+            output_wav.write_bytes(b"\x00" * 100)
+            return True
+
+        mock_decode.side_effect = fake_decode
+        pieces = [
+            MockWord(" local", start=1.0, end=1.3),
+            MockWord(" text", start=1.3, end=1.6),
+            MockWord("-to", start=1.6, end=1.8),
+            MockWord("-speech", start=1.8, end=2.3),
+            MockWord(" it", start=2.4, end=2.5),
+            MockWord("'s", start=2.5, end=2.7),
+            MockWord(" fine.", start=2.8, end=3.1),
+        ]
+        mock_model = MagicMock()
+        mock_model.transcribe.side_effect = [([MockSegment(pieces)], MagicMock())]
+
+        with patch.object(runner, "WhisperModel", MagicMock(return_value=mock_model)):
+            runner.transcribe(self.base_request, self.output_dir)
+
+        with open(self.output_dir / "transcript.json", "r", encoding="utf-8") as f:
+            words = json.load(f)["words"]
+        self.assertEqual(
+            [word["text"] for word in words], ["local", "text-to-speech", "it's", "fine."]
+        )
+        # The merged word spans all of its pieces.
+        self.assertEqual(words[1]["startUs"], 1_300_000)
+        self.assertEqual(words[1]["endUs"], 2_300_000)
+
+    @patch("apps.worker.speech.transcribe.probe_duration_s")
+    @patch("apps.worker.speech.transcribe.decode_window_wav")
     def test_silence(self, mock_decode, mock_probe):
         """Test audio with no speech / pure silence produces empty words without error."""
         mock_probe.return_value = 10.0

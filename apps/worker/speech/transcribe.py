@@ -37,6 +37,8 @@ OVERLAP_S = 1.0
 WINDOW_SIZE_S = CHUNK_DURATION_S + OVERLAP_S  # 31.0 seconds
 SAMPLE_RATE = 16000
 
+# A word piece that starts with one of these and has no leading space continues the previous word.
+_CONTINUATION_CHARS = "-‐‑‒–'’"
 _PUNCT_RE = re.compile(r"[\s\.,\/#!$%\^&\*;:{}=\-_`~()?'\"«»،؛؟\u200c\u200e\u200f]+")
 
 
@@ -414,8 +416,28 @@ def transcribe(request: dict, output_dir: Path) -> None:
                     if w_end_us <= w_start_us:
                         w_end_us = w_start_us + 10_000  # Minimum 10ms
 
+                    raw_text = str(w_text)
+                    # Whisper marks a new word with a leading space. A piece that starts with a hyphen or an
+                    # apostrophe and has none ("-to" and "-speech" in "text-to-speech", "'s") continues the
+                    # previous word; stripping its (missing) space would make it a separate word and the captions
+                    # would read "text -to -speech".
+                    if (
+                        chunk_words
+                        and raw_text
+                        and not raw_text[0].isspace()
+                        and raw_text[0] in _CONTINUATION_CHARS
+                    ):
+                        previous = chunk_words[-1]
+                        previous["text"] = previous["text"] + raw_text.strip()
+                        previous["endUs"] = max(previous["endUs"], w_end_us)
+                        if w_prob is not None and "confidence" in previous:
+                            previous["confidence"] = round(
+                                min(previous["confidence"], float(w_prob)), 4
+                            )
+                        continue
+
                     word_entry: Dict[str, Any] = {
-                        "text": str(w_text).strip(),
+                        "text": raw_text.strip(),
                         "startUs": w_start_us,
                         "endUs": w_end_us,
                     }
