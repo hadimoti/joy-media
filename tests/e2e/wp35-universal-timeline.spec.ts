@@ -191,8 +191,8 @@ test.describe('WP-35 universal timeline closeout', () => {
     page,
   }, testInfo) => {
     test.slow();
-    await page.setViewportSize({ width: 1613, height: 1066 });
     await openTimelineShowcaseWorkspace(page);
+    expect(page.viewportSize()).toEqual(testInfo.project.use.viewport);
     const trackNames = page.locator('.timeline-track-header .track-name');
     const visualTracks = page.locator('.timeline-track[data-track-family="visual"]');
     const audioTracks = page.locator('.timeline-track[data-track-family="audio"]');
