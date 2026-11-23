@@ -13,6 +13,7 @@ import {
   type PopupManager,
 } from './popup-manager.js';
 import { AppMenuBar } from './AppMenuBar.js';
+import { AgentPresenceProvider, createAgentPresenceStore } from './agent-presence.js';
 import {
   POPUP_IDS,
   REGISTERED_POPUP_IDS,
@@ -515,7 +516,6 @@ describe('app menu bar on the popup manager', () => {
     hasSelection: true,
     supportsSpeed: true,
     exporting: false,
-    followAgentTarget: false,
     onAction: vi.fn(),
     onToggleFollowAgentTarget: vi.fn(),
     onClearFollowAgentTarget: vi.fn(),
@@ -528,6 +528,85 @@ describe('app menu bar on the popup manager', () => {
     if (found === undefined) throw new Error(`missing menu ${label}`);
     return found;
   }
+
+  it('follows only the selected run even when presence is cleared and replaced in one render', async () => {
+    const store = createAgentPresenceStore();
+    const onShowAgentTarget = vi.fn();
+    const onClearFollowAgentTarget = vi.fn();
+    const firstTarget = { panelId: 'timeline' as const };
+    const nextTarget = { panelId: 'inspector' as const };
+    function publish(runId: string, target: typeof firstTarget | typeof nextTarget) {
+      store.beginRun(runId, 1);
+      store.dispatch({
+        protocolVersion: 1,
+        runId,
+        seq: 1,
+        at: '2026-11-23T12:00:00.000Z',
+        revision: 1,
+        kind: 'activity',
+        phase: 'thinking',
+        targets: [target],
+      });
+    }
+
+    publish('first', firstTarget);
+    await render(
+      <AgentPresenceProvider store={store}>
+        <PopupProvider>
+          <AppMenuBar
+            {...props}
+            followedAgentRunId="first"
+            onShowAgentTarget={onShowAgentTarget}
+            onClearFollowAgentTarget={onClearFollowAgentTarget}
+          />
+        </PopupProvider>
+      </AgentPresenceProvider>,
+    );
+    expect(onShowAgentTarget).toHaveBeenCalledOnce();
+    expect(onShowAgentTarget).toHaveBeenCalledWith(firstTarget);
+    await click(menubarTrigger('Joy Code'));
+    const follow = container?.querySelector('[role="menuitemcheckbox"]');
+    expect(follow?.getAttribute('aria-checked')).toBe('true');
+
+    await act(async () => {
+      store.clear();
+      publish('next', nextTarget);
+    });
+    expect(onShowAgentTarget).toHaveBeenCalledOnce();
+    expect(onClearFollowAgentTarget).toHaveBeenCalledWith('first');
+    expect(follow?.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('opens the Creative Brief when its validated result fails', async () => {
+    const store = createAgentPresenceStore();
+    const onShowAgentTarget = vi.fn();
+    const target = { panelId: 'agent', capability: 'creative-brief' } as const;
+    store.beginRun('brief', 1);
+    store.dispatch({
+      protocolVersion: 1,
+      runId: 'brief',
+      seq: 1,
+      at: '2026-11-23T12:00:00.000Z',
+      revision: 1,
+      kind: 'failed',
+      phase: 'failed',
+      targets: [target],
+    });
+    await render(
+      <AgentPresenceProvider store={store}>
+        <PopupProvider>
+          <AppMenuBar {...props} onShowAgentTarget={onShowAgentTarget} />
+        </PopupProvider>
+      </AgentPresenceProvider>,
+    );
+    await click(menubarTrigger('Joy Code'));
+    const action = [
+      ...(container?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []),
+    ].find((item) => item.textContent?.startsWith('View error'));
+    if (action === undefined) throw new Error('missing Creative Brief error action');
+    await click(action);
+    expect(onShowAgentTarget).toHaveBeenCalledWith(target);
+  });
 
   it('hovering another menu moves the open menu and Escape returns focus to the menu that is open', async () => {
     await render(

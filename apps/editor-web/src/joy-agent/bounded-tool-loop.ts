@@ -152,7 +152,7 @@ const READ_PROJECT_CONTEXT_TOOL: BrowserAgentToolDefinition = {
   function: {
     name: 'read_project_context',
     description:
-      'Read one frozen, paged project context domain. Use overview first; then query tracks, clips, assets, visual-objects, titles, presets, looks, the read-only asset library, or the attached Creative Brief with a cursor and optional query. The looks domain lists the reopened project’s applied Living Look instances — instance id, pinned pack id + version, entity bindings, missing/orphaned targets, hand-edited overrides — which is how you discover what look_update / look_reset_overrides / look_detach must target when there is no prior chat context. overview reports lookInstanceCount and orphanedLookInstanceCount.',
+      'Read one frozen, paged project context domain. Use overview first; then query tracks, clips, assets, visual-objects, titles, presets, skills, looks, the read-only asset library, or the attached Creative Brief with a cursor and optional query. When the user asks for subtitle, caption, title, cut, motion, look, effect, format, or delivery work, query skills for the matching guidance; query presets for current catalog IDs and runnable status. Skill guides are read-only guidance and do not grant operations. The looks domain lists the reopened project’s applied Living Look instances — instance id, pinned pack id + version, entity bindings, missing/orphaned targets, hand-edited overrides — which is how you discover what look_update / look_reset_overrides / look_detach must target when there is no prior chat context. overview reports lookInstanceCount and orphanedLookInstanceCount.',
     parameters: {
       type: 'object',
       properties: {
@@ -167,6 +167,7 @@ const READ_PROJECT_CONTEXT_TOOL: BrowserAgentToolDefinition = {
             'visual-objects',
             'titles',
             'presets',
+            'skills',
             'looks',
             'library',
           ],

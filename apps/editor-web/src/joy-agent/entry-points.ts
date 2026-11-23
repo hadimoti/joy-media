@@ -173,6 +173,10 @@ export interface RunJoyAgentTaskInput {
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
   /** Called after a run id is allocated and before the Worker iterator starts. */
   readonly onRunStart?: (runId: string) => void;
+  /** Abort the active engine queue and classify its event-less close as cancellation. */
+  readonly signal?: AbortSignal;
+  /** Covers cancellation initiated by an owner that does not hold this task's signal. */
+  readonly isCancelled?: () => boolean;
   /** Local-only policy must fail before any remote Worker/provider call. */
   readonly allowRemote?: boolean;
 }
@@ -199,6 +203,13 @@ export class JoyAgentTaskError extends Error {
     this.code = code;
     this.runErrorCode = runErrorCode;
   }
+}
+
+export interface CreativeBriefRunOptions {
+  readonly signal?: AbortSignal;
+  readonly isCancelled?: () => boolean;
+  readonly onRunStart?: (runId: string) => void;
+  readonly onEvent?: (event: JoyAgentSafeEvent) => void;
 }
 
 function newRunId(taskKind: JoyAgentTaskKind): string {
@@ -235,6 +246,8 @@ export async function runJoyAgentTask(input: RunJoyAgentTaskInput): Promise<JoyA
     );
   const runId = newRunId(input.taskKind);
   input.onRunStart?.(runId);
+  if (input.signal?.aborted)
+    throw new JoyAgentTaskError('cancelled', 'JOY Agent Engine run cancelled');
   const request: Omit<JoyAgentRunRequest, 'runEpoch'> = {
     runId,
     taskKind: input.taskKind,
@@ -246,21 +259,31 @@ export async function runJoyAgentTask(input: RunJoyAgentTaskInput): Promise<JoyA
   let completed: JoyAgentSafeEvent | undefined;
   let awaitingApproval: JoyAgentSafeEvent | undefined;
   let preparedProposal: JoyAgentPreparedProposal | undefined;
-  for await (const event of input.client.startRun(request, input.host)) {
-    input.onEvent?.(event);
-    if (event.phase === 'failed')
-      throw new JoyAgentTaskError(
-        'failed',
-        event.message ?? 'JOY Agent Engine failed',
-        runErrorCodeOf(event.errorCode),
-      );
-    if (event.phase === 'cancelled')
-      throw new JoyAgentTaskError('cancelled', 'JOY Agent Engine run cancelled');
-    if (event.phase === 'previewing' && event.proposal !== undefined)
-      preparedProposal = event.proposal;
-    if (event.phase === 'awaiting-approval') awaitingApproval = event;
-    if (event.phase === 'completed') completed = event;
+  const iterator = input.client.startRun(request, input.host);
+  const cancelOnAbort = () => void input.client.cancel(runId);
+  input.signal?.addEventListener('abort', cancelOnAbort, { once: true });
+  try {
+    if (input.signal?.aborted) cancelOnAbort();
+    for await (const event of iterator) {
+      input.onEvent?.(event);
+      if (event.phase === 'failed')
+        throw new JoyAgentTaskError(
+          'failed',
+          event.message ?? 'JOY Agent Engine failed',
+          runErrorCodeOf(event.errorCode),
+        );
+      if (event.phase === 'cancelled')
+        throw new JoyAgentTaskError('cancelled', 'JOY Agent Engine run cancelled');
+      if (event.phase === 'previewing' && event.proposal !== undefined)
+        preparedProposal = event.proposal;
+      if (event.phase === 'awaiting-approval') awaitingApproval = event;
+      if (event.phase === 'completed') completed = event;
+    }
+  } finally {
+    input.signal?.removeEventListener('abort', cancelOnAbort);
   }
+  if (input.signal?.aborted || input.isCancelled?.())
+    throw new JoyAgentTaskError('cancelled', 'JOY Agent Engine run cancelled');
   if (completed !== undefined) return completed;
   if (awaitingApproval !== undefined) {
     if (planOnly)
@@ -296,6 +319,8 @@ export async function runCreativeBriefTask(input: {
   readonly context: unknown;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
   readonly onRunStart?: (runId: string) => void;
+  readonly signal?: AbortSignal;
+  readonly isCancelled?: () => boolean;
   readonly allowRemote?: boolean;
 }): Promise<CreativeBriefV1> {
   // The model is given the Creative Brief contract for this exact request, so
@@ -315,6 +340,8 @@ export async function runCreativeBriefTask(input: {
     context: input.context,
     ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
     ...(input.onRunStart === undefined ? {} : { onRunStart: input.onRunStart }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.isCancelled === undefined ? {} : { isCancelled: input.isCancelled }),
     ...(input.allowRemote === undefined ? {} : { allowRemote: input.allowRemote }),
   });
   if (event.result === undefined)

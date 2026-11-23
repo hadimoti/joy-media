@@ -13,10 +13,10 @@ export interface AppMenuBarProps {
   /** True when the selected clip is a video clip, the only kind with a Speed tab. */
   readonly supportsSpeed: boolean;
   readonly exporting: boolean;
-  readonly followAgentTarget: boolean;
+  readonly followedAgentRunId?: string | undefined;
   readonly onAction: (id: AppMenuActionId) => void;
   readonly onToggleFollowAgentTarget: () => void;
-  readonly onClearFollowAgentTarget: () => void;
+  readonly onClearFollowAgentTarget: (runId: string) => void;
   readonly onShowAgentTarget?: (target: JoyAgentTarget) => void;
   readonly onStopAgentRun?: (runId: string) => void;
 }
@@ -54,7 +54,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
     onAction,
     onShowAgentTarget,
     onStopAgentRun,
-    followAgentTarget,
+    followedAgentRunId,
     onToggleFollowAgentTarget,
     onClearFollowAgentTarget,
   } = props;
@@ -70,6 +70,8 @@ export function AppMenuBar(props: AppMenuBarProps) {
     activity.status === 'completed' ||
     activity.status === 'failed' ||
     activity.status === 'cancelled';
+  const followAgentTarget =
+    followedAgentRunId !== undefined && activity.runId === followedAgentRunId && !terminal;
   const phase =
     activity.phase === 'awaiting-approval'
       ? 'Needs approval'
@@ -85,7 +87,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
   const targetKey =
     target === undefined
       ? ''
-      : `${target.panelId}:${target.sectionId ?? ''}:${target.entity?.id ?? ''}`;
+      : `${target.panelId}:${target.sectionId ?? ''}:${target.entity?.id ?? ''}:${target.capability ?? ''}`;
   targetRef.current = target;
   const { openId, open, toggle, close, registerRoot } = usePopupManager();
   const menuRefs = useRef(new Map<string, HTMLUListElement>());
@@ -94,12 +96,14 @@ export function AppMenuBar(props: AppMenuBarProps) {
   const baseId = useId();
   useEffect(() => {
     const currentTarget = targetRef.current;
-    if (!followAgentTarget || terminal || currentTarget === undefined) return;
+    if (!followAgentTarget || currentTarget === undefined) return;
     showTargetRef.current?.(currentTarget);
-  }, [followAgentTarget, terminal, targetKey]);
+  }, [followAgentTarget, targetKey]);
   useEffect(() => {
-    if (terminal) onClearFollowAgentTarget();
-  }, [terminal, activity.runId, onClearFollowAgentTarget]);
+    if (followedAgentRunId !== undefined && !followAgentTarget) {
+      onClearFollowAgentTarget(followedAgentRunId);
+    }
+  }, [followAgentTarget, followedAgentRunId, onClearFollowAgentTarget]);
   // Which menu-bar group is open, if any. Outside click and Escape are handled by the manager.
   const openGroupId =
     APP_MENU_GROUPS.find((group) => appMenuPopupId(group.id) === openId)?.id ?? null;
@@ -223,8 +227,13 @@ export function AppMenuBar(props: AppMenuBarProps) {
                           else if (item.id === 'agent.follow') onToggleFollowAgentTarget();
                           else if (item.id === 'agent.stop' && activity.runId !== undefined)
                             onStopAgentRun?.(activity.runId);
-                          else if (item.id === 'agent.active') onAction('agent.open');
-                          else onAction(item.id);
+                          else if (item.id === 'agent.active') {
+                            if (target !== undefined && onShowAgentTarget !== undefined) {
+                              onShowAgentTarget(target);
+                            } else {
+                              onAction('agent.open');
+                            }
+                          } else onAction(item.id);
                           close(popupId);
                         }}
                       >

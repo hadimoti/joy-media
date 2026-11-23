@@ -146,7 +146,7 @@ import {
   revokeJoyAgentComposerHostLease,
   type JoyAgentComposerHostLease,
 } from './joy-agent/composer-host-lease.js';
-import type { JoyAgentPhase } from './joy-agent/protocol.js';
+import type { JoyAgentPhase, JoyAgentSafeEvent } from './joy-agent/protocol.js';
 import type { HostRpcHandlerContext } from './joy-agent/host-rpc.js';
 import {
   createJoyAgentRunController,
@@ -202,7 +202,12 @@ import { createJoyAgentProposalStagingHandler } from './joy-agent/edit-proposal-
 import { buildJoyAgentContextInput } from './joy-agent/context-input.js';
 import { createCreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-skill-editor-deps.js';
 import type { CreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-skill-editor-primitives.js';
-import { listCreativeSkills, runEditorCreativeSkill } from './joy-agent/entry-points.js';
+import {
+  JoyAgentTaskError,
+  listCreativeSkills,
+  runEditorCreativeSkill,
+} from './joy-agent/entry-points.js';
+import type { CreativeBriefRunOptions } from './joy-agent/entry-points.js';
 import type { CreativeSkillRunScope } from './joy-agent/skill-runner.js';
 import { BUILT_IN_LOOK_PACKS, type LookDefinition } from '@joy-media/motion-core';
 import { CONTENT_FONT_FAMILIES } from '@joy-media/project-schema';
@@ -331,6 +336,11 @@ const OPENROUTER_PRIVACY_POLICY_HREF = 'https://openrouter.ai/privacy';
 const NOOP_SUBSCRIBE = () => () => {};
 const NOOP_PRESENCE_SNAPSHOT = (): AgentPresenceState => EMPTY_AGENT_PRESENCE;
 const NOOP_PREVIEW_BUNDLE = (): AgentPreviewBundle | undefined => undefined;
+const CREATIVE_BRIEF_TARGET: JoyAgentTarget = {
+  panelId: 'agent',
+  sectionId: 'composer',
+  capability: 'creative-brief',
+};
 
 function sameObservationTransferAuthority(
   left: ObservationTransferAuthority | undefined,
@@ -413,6 +423,11 @@ export function isExpectedJoyAgentRun(
   currentRunId: string | undefined,
 ): boolean {
   return expectedRunId !== undefined && expectedRunId === currentRunId;
+}
+
+/** All Joy Code launch surfaces share this one active-run admission check. */
+export function canStartJoyAgentSurfaceRun(activeRunId: string | undefined): boolean {
+  return activeRunId === undefined;
 }
 
 interface PendingPlan {
@@ -644,7 +659,10 @@ export function AgentPanel({
   readonly settings: AgentPolicyPreferences;
   readonly command?: AgentPanelCommand;
   readonly creativeBriefOptedIn?: boolean;
-  readonly creativeBriefRunner?: (requestText: string) => Promise<CreativeBriefV1>;
+  readonly creativeBriefRunner?: (
+    requestText: string,
+    options?: CreativeBriefRunOptions,
+  ) => Promise<CreativeBriefV1>;
   readonly onCreativeBriefOptIn?: () => Promise<void>;
   readonly joyAgentEngineClient?: JoyAgentEngineClient;
   /** App-owned lifecycle evidence; a test-only fallback is used when omitted. */
@@ -2227,6 +2245,106 @@ export function AgentPanel({
     });
   }
 
+  const handleCreativeBriefRunStart = useCallback(
+    (runId: string): void => {
+      if (!canStartJoyAgentSurfaceRun(activeModelRunIdRef.current)) {
+        void joyAgentEngineClient?.cancel(runId);
+        throw new JoyAgentTaskError('cancelled', 'Another JOY run already owns the workspace.');
+      }
+      activeModelRunIdRef.current = runId;
+      setAgentRunId(runId);
+      setAgentPhase('connecting');
+      agentPresenceStore?.beginRun(runId, latestSessionRef.current.historyCursorSequence);
+      agentPresenceStore?.dispatch({
+        protocolVersion: 1,
+        runId,
+        seq: 0,
+        at: new Date().toISOString(),
+        revision: latestSessionRef.current.historyCursorSequence,
+        kind: 'activity',
+        phase: 'connecting',
+        targets: [CREATIVE_BRIEF_TARGET],
+      });
+    },
+    [agentPresenceStore, joyAgentEngineClient],
+  );
+  const handleCreativeBriefRunEvent = useCallback(
+    (runId: string, event: JoyAgentSafeEvent): void => {
+      if (
+        activeModelRunIdRef.current !== runId ||
+        event.runId !== runId ||
+        event.phase === 'completed' ||
+        event.phase === 'failed' ||
+        event.phase === 'cancelled' ||
+        event.phase === 'awaiting-approval'
+      )
+        return;
+      setAgentPhase(event.phase);
+      agentPresenceStore?.dispatch({
+        protocolVersion: 1,
+        runId,
+        seq: event.seq,
+        at: event.at,
+        revision: latestSessionRef.current.historyCursorSequence,
+        kind: event.phase === 'planning' || event.phase === 'previewing' ? 'preview' : 'activity',
+        phase: event.phase,
+        targets: [CREATIVE_BRIEF_TARGET],
+        ...(event.progress === undefined ? {} : { progress: event.progress }),
+      });
+    },
+    [agentPresenceStore],
+  );
+  const handleCreativeBriefRunTerminal = useCallback(
+    (runId: string, status: 'completed' | 'failed' | 'cancelled'): void => {
+      if (activeModelRunIdRef.current !== runId) return;
+      const current = agentPresenceStore?.getState();
+      const phase = status;
+      agentPresenceStore?.dispatch({
+        protocolVersion: 1,
+        runId,
+        seq: Math.max(0, current?.runId === runId ? current.seq + 1 : 0),
+        at: new Date().toISOString(),
+        revision: latestSessionRef.current.historyCursorSequence,
+        kind: status,
+        phase,
+        targets: [CREATIVE_BRIEF_TARGET],
+      });
+      activeModelRunIdRef.current = undefined;
+      setAgentRunId((currentRunId) => (currentRunId === runId ? undefined : currentRunId));
+      setAgentPhase(status);
+    },
+    [agentPresenceStore],
+  );
+  const runCreativeBriefForPanel = useCallback(
+    (requestText: string, options?: CreativeBriefRunOptions): Promise<CreativeBriefV1> => {
+      if (creativeBriefRunner === undefined)
+        return Promise.reject(
+          new JoyAgentTaskError('failed', 'No Creative Brief runner is configured.'),
+        );
+      if (!canStartJoyAgentSurfaceRun(activeModelRunIdRef.current))
+        return Promise.reject(
+          new JoyAgentTaskError('cancelled', 'Another JOY run already owns the workspace.'),
+        );
+      let runId: string | undefined;
+      return creativeBriefRunner(requestText, {
+        ...(options?.signal === undefined ? {} : { signal: options.signal }),
+        isCancelled: () =>
+          options?.isCancelled?.() === true ||
+          (runId !== undefined && activeModelRunIdRef.current !== runId),
+        onRunStart: (startedRunId) => {
+          runId = startedRunId;
+          options?.onRunStart?.(startedRunId);
+        },
+        onEvent: (event) => {
+          if (runId === undefined) return;
+          handleCreativeBriefRunEvent(runId, event);
+          options?.onEvent?.(event);
+        },
+      });
+    },
+    [creativeBriefRunner, handleCreativeBriefRunEvent],
+  );
+
   const handOffCreativeBrief = useCallback(
     (brief: CreativeBriefV1): void => {
       const threadId = conversation.id;
@@ -2371,7 +2489,12 @@ export function AgentPanel({
 
   function submitPrompt(prompt: string) {
     const body = prompt.trim().slice(0, MAX_COMPOSER_PROMPT_CHARS);
-    if (body.length === 0 || thinkingThreadId !== undefined) return;
+    if (
+      body.length === 0 ||
+      thinkingThreadId !== undefined ||
+      !canStartJoyAgentSurfaceRun(activeModelRunIdRef.current)
+    )
+      return;
     const threadId = activeThread.id;
     if (CREDENTIAL_LIKE_PROMPT.test(body)) {
       appendMessage(
@@ -3346,6 +3469,7 @@ export function AgentPanel({
     if (
       recipeRunningId !== undefined ||
       recipeInvocationRef.current !== undefined ||
+      !canStartJoyAgentSurfaceRun(activeModelRunIdRef.current) ||
       thinkingThreadId !== undefined ||
       modelView !== undefined ||
       pending !== undefined ||
@@ -3491,6 +3615,7 @@ export function AgentPanel({
   }
 
   async function runLook(request: LivingLooksRunInput): Promise<void> {
+    if (!canStartJoyAgentSurfaceRun(activeModelRunIdRef.current)) return;
     if (request.kind === 'detach') {
       detachLook(request.instanceId);
       return;
@@ -3498,6 +3623,7 @@ export function AgentPanel({
     if (
       lookRunningId !== undefined ||
       recipeRunningId !== undefined ||
+      !canStartJoyAgentSurfaceRun(activeModelRunIdRef.current) ||
       thinkingThreadId !== undefined ||
       modelView !== undefined ||
       pending !== undefined
@@ -3712,6 +3838,7 @@ export function AgentPanel({
       !isAgentLookRunnerReady ||
       lookRunningId !== undefined ||
       recipeRunningId !== undefined ||
+      !canStartJoyAgentSurfaceRun(activeModelRunIdRef.current) ||
       thinkingThreadId !== undefined ||
       modelView !== undefined ||
       pending !== undefined
@@ -4464,11 +4591,13 @@ export function AgentPanel({
               noModelConnected={capability === undefined}
               {...(onOpenSettings === undefined ? {} : { onConnectModel: onOpenSettings })}
               {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
-              {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
+              {...(creativeBriefRunner === undefined ? {} : { runBrief: runCreativeBriefForPanel })}
+              onRunStart={handleCreativeBriefRunStart}
+              onRunTerminal={handleCreativeBriefRunTerminal}
               {...(activeRunId !== undefined &&
               presenceState.runId === activeRunId &&
               presenceState.targets.some((target) => target.capability === 'creative-brief')
-                ? { onStop: () => stopActiveRun(activeRunId) }
+                ? { onStop: (runId: string) => stopActiveRun(runId) }
                 : {})}
               embedded
             />

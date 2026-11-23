@@ -9,6 +9,7 @@
 
 import { useReducer, useEffect, useState, useCallback, useRef } from 'react';
 import type { CreativeBriefV1, ProjectRevisionId } from '@joy-media/agent-tools';
+import { validateCreativeBrief } from '@joy-media/agent-tools';
 import {
   creativeBriefReducer,
   INITIAL_BRIEF_STATE,
@@ -26,6 +27,7 @@ import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import { JoyAgentTaskError } from './joy-agent/entry-points.js';
+import type { CreativeBriefRunOptions } from './joy-agent/entry-points.js';
 import { CONNECT_MODEL_FIRST_TITLE } from './joy-code-run-gate.js';
 import { JoyCodeConnectButton, connectOnCardClick } from './joy-code-run-controls.js';
 import {
@@ -45,7 +47,10 @@ export interface CreativeBriefPanelProps {
   /** Current project revision ID. */
   readonly revisionId: ProjectRevisionId;
   /** Optional async function to run a brief request and return a Promise of CreativeBriefV1. */
-  readonly runBrief?: (request: string) => Promise<CreativeBriefV1>;
+  readonly runBrief?: (
+    request: string,
+    options?: CreativeBriefRunOptions,
+  ) => Promise<CreativeBriefV1>;
   /** Whether the user has explicitly opted in to Creative Brief. */
   readonly optedIn?: boolean;
   /** Optional async callback to request opt-in. */
@@ -72,7 +77,9 @@ export interface CreativeBriefPanelProps {
   /** Opens JOY Agent Settings (the connect step). */
   readonly onConnectModel?: () => void;
   /** An active app run that belongs to this Creative Brief. */
-  readonly onStop?: () => void;
+  readonly onRunStart?: (runId: string) => void;
+  readonly onRunTerminal?: (runId: string, status: 'completed' | 'failed' | 'cancelled') => void;
+  readonly onStop?: (runId: string) => void;
 }
 
 /** Versioned disclosure shown immediately before project-level opt-in. */
@@ -102,6 +109,8 @@ export function CreativeBriefPanel({
   onBriefReady,
   onBriefHydrated,
   onBriefCleared,
+  onRunStart,
+  onRunTerminal,
   embedded = false,
   storage,
   noModelConnected = false,
@@ -115,6 +124,57 @@ export function CreativeBriefPanel({
   const storageProjectId = projectId ?? `revision:${revisionId}`;
   const previousStorageProjectIdRef = useRef<string | null>(null);
   const hydratedBriefKeyRef = useRef<string | null>(null);
+  const scopeRef = useRef({ projectId, revisionId });
+  scopeRef.current = { projectId, revisionId };
+  const invocationSequenceRef = useRef(0);
+  const activeInvocationRef = useRef<
+    | {
+        readonly id: number;
+        readonly projectId: string | undefined;
+        readonly revisionId: ProjectRevisionId;
+        readonly controller: AbortController;
+        runId: string | undefined;
+        terminalAcknowledged: boolean;
+      }
+    | undefined
+  >(undefined);
+  const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined);
+
+  const acknowledgeCancellation = useCallback(
+    (invocation: NonNullable<typeof activeInvocationRef.current>) => {
+      if (invocation.runId !== undefined && !invocation.terminalAcknowledged) {
+        invocation.terminalAcknowledged = true;
+        onRunTerminal?.(invocation.runId, 'cancelled');
+      }
+    },
+    [onRunTerminal],
+  );
+
+  useEffect(
+    () => () => {
+      const invocation = activeInvocationRef.current;
+      if (invocation !== undefined) {
+        invocation.controller.abort();
+        acknowledgeCancellation(invocation);
+      }
+      activeInvocationRef.current = undefined;
+    },
+    [acknowledgeCancellation],
+  );
+
+  useEffect(() => {
+    const invocation = activeInvocationRef.current;
+    if (
+      invocation !== undefined &&
+      (invocation.projectId !== projectId || invocation.revisionId !== revisionId)
+    ) {
+      activeInvocationRef.current = undefined;
+      invocation.controller.abort();
+      acknowledgeCancellation(invocation);
+      setActiveRunId(undefined);
+      if (isCollecting(state)) dispatch({ type: 'reset' });
+    }
+  }, [acknowledgeCancellation, projectId, revisionId, state]);
 
   useEffect(() => {
     const previousStorageProjectId = previousStorageProjectIdRef.current;
@@ -174,68 +234,115 @@ export function CreativeBriefPanel({
     }
   }, [onOptIn]);
 
-  // Handle "Improve project" action
-  const handleImprove = useCallback(async () => {
-    const request = requestText.trim();
-    if (!request) {
-      return;
-    }
-
-    if (!optedIn) {
-      // Opt-in required - show consent state
-      dispatch({
-        type: 'collect-unavailable',
-        reason: 'Creative Brief opt-in required',
-      });
-      return;
-    }
-
-    if (!runBrief) {
-      // No adapter available - show unavailable
-      dispatch({
-        type: 'collect-unavailable',
-        reason: 'No brief runner configured',
-      });
-      return;
-    }
-
-    dispatch({
-      type: 'collect-start',
-      request,
-      revisionId,
-      projectId: 'unknown', // Will be populated by the actual brief
-    });
-
-    try {
-      const brief = await runBrief(request);
-      // Verify the brief matches the requested revision
-      if (brief.snapshotRevisionId === revisionId) {
-        if (storage) saveCreativeBrief(storage, storageProjectId, brief);
-        setRequestText(brief.request);
-        dispatch({
-          type: 'collect-success',
-          brief,
-          revisionId,
-        });
-        onBriefReady?.(brief);
-      } else {
-        dispatch({
-          type: 'collect-error',
-          error: `Brief revision mismatch: expected ${revisionId}, got ${brief.snapshotRevisionId}`,
-        });
-      }
-    } catch (error) {
-      if (error instanceof JoyAgentTaskError && error.code === 'cancelled') {
-        dispatch({ type: 'reset' });
+  const runRequest = useCallback(
+    async (request: string, retry: boolean): Promise<void> => {
+      if (!request.trim() || activeInvocationRef.current !== undefined) return;
+      if (!optedIn) {
+        dispatch({ type: 'collect-unavailable', reason: 'Creative Brief opt-in required' });
         return;
       }
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (!runBrief) {
+        dispatch({ type: 'collect-unavailable', reason: 'No brief runner configured' });
+        return;
+      }
+
+      const invocation = {
+        id: ++invocationSequenceRef.current,
+        projectId,
+        revisionId,
+        controller: new AbortController(),
+        runId: undefined as string | undefined,
+        terminalAcknowledged: false,
+      };
+      activeInvocationRef.current = invocation;
+      setActiveRunId(undefined);
       dispatch({
-        type: 'collect-error',
-        error: errorMessage,
+        type: retry ? 'retry' : 'collect-start',
+        request,
+        revisionId,
+        projectId: projectId ?? storageProjectId,
       });
-    }
-  }, [onBriefReady, optedIn, requestText, revisionId, runBrief, storage, storageProjectId]);
+
+      const isCurrent = () =>
+        activeInvocationRef.current === invocation &&
+        scopeRef.current.projectId === invocation.projectId &&
+        scopeRef.current.revisionId === invocation.revisionId &&
+        !invocation.controller.signal.aborted;
+      try {
+        const brief = await runBrief(request, {
+          signal: invocation.controller.signal,
+          isCancelled: () => !isCurrent(),
+          onRunStart: (runId) => {
+            if (activeInvocationRef.current !== invocation) {
+              invocation.controller.abort();
+              return;
+            }
+            invocation.runId = runId;
+            setActiveRunId(runId);
+            onRunStart?.(runId);
+          },
+        });
+        if (!isCurrent()) return;
+        const validation = validateCreativeBrief(brief);
+        if (
+          !validation.valid ||
+          brief.snapshotRevisionId !== invocation.revisionId ||
+          (invocation.projectId !== undefined && brief.projectId !== invocation.projectId) ||
+          brief.request !== request
+        ) {
+          throw new Error(
+            'Creative Brief failed current project, revision, or content validation.',
+          );
+        }
+        if (storage) saveCreativeBrief(storage, storageProjectId, brief);
+        setRequestText(brief.request);
+        dispatch({ type: 'collect-success', brief, revisionId: invocation.revisionId });
+        onBriefReady?.(brief);
+        if (invocation.runId !== undefined && !invocation.terminalAcknowledged) {
+          invocation.terminalAcknowledged = true;
+          onRunTerminal?.(invocation.runId, 'completed');
+        }
+      } catch (error) {
+        if (activeInvocationRef.current !== invocation) return;
+        if (
+          invocation.controller.signal.aborted ||
+          (error instanceof JoyAgentTaskError && error.code === 'cancelled')
+        ) {
+          dispatch({ type: 'reset' });
+          acknowledgeCancellation(invocation);
+          return;
+        }
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        dispatch({ type: 'collect-error', error: errorMessage });
+        if (invocation.runId !== undefined && !invocation.terminalAcknowledged) {
+          invocation.terminalAcknowledged = true;
+          onRunTerminal?.(invocation.runId, 'failed');
+        }
+      } finally {
+        if (activeInvocationRef.current === invocation) {
+          activeInvocationRef.current = undefined;
+          setActiveRunId(undefined);
+        }
+      }
+    },
+    [
+      onBriefReady,
+      acknowledgeCancellation,
+      onRunStart,
+      onRunTerminal,
+      optedIn,
+      projectId,
+      revisionId,
+      runBrief,
+      storage,
+      storageProjectId,
+    ],
+  );
+
+  const handleImprove = useCallback(
+    () => void runRequest(requestText.trim(), false),
+    [requestText, runRequest],
+  );
 
   // Handle reset
   const handleReset = useCallback(() => {
@@ -246,77 +353,14 @@ export function CreativeBriefPanel({
   }, [onBriefCleared, storage, storageProjectId]);
 
   // Handle retry
-  const handleRetry = useCallback(async () => {
+  const handleRetry = useCallback(() => {
     const request = displayedRequest || requestText;
-    if (!request.trim()) {
-      return;
-    }
-
-    if (!optedIn) {
-      dispatch({
-        type: 'collect-unavailable',
-        reason: 'Creative Brief opt-in required',
-      });
-      return;
-    }
-
-    if (!runBrief) {
-      dispatch({
-        type: 'collect-unavailable',
-        reason: 'No brief runner configured',
-      });
-      return;
-    }
-
-    dispatch({
-      type: 'retry',
-      request,
-      revisionId,
-      projectId: 'unknown',
-    });
-
-    try {
-      const brief = await runBrief(request);
-      if (brief.snapshotRevisionId === revisionId) {
-        if (storage) saveCreativeBrief(storage, storageProjectId, brief);
-        setRequestText(brief.request);
-        dispatch({
-          type: 'collect-success',
-          brief,
-          revisionId,
-        });
-        onBriefReady?.(brief);
-      } else {
-        dispatch({
-          type: 'collect-error',
-          error: `Brief revision mismatch: expected ${revisionId}, got ${brief.snapshotRevisionId}`,
-        });
-      }
-    } catch (error) {
-      if (error instanceof JoyAgentTaskError && error.code === 'cancelled') {
-        dispatch({ type: 'reset' });
-        return;
-      }
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      dispatch({
-        type: 'collect-error',
-        error: errorMessage,
-      });
-    }
-  }, [
-    displayedRequest,
-    onBriefReady,
-    requestText,
-    revisionId,
-    runBrief,
-    optedIn,
-    storage,
-    storageProjectId,
-  ]);
+    void runRequest(request.trim(), true);
+  }, [displayedRequest, requestText, runRequest]);
 
   // Render based on current state
   const collecting = isCollecting(state);
-  const canStop = collecting && onStop !== undefined;
+  const canStop = collecting && onStop !== undefined && activeRunId !== undefined;
   const panelContent = (
     <div className="creative-brief-panel" aria-label="Creative brief panel">
       <AgentPreviewBadge surface="Creative Brief" />
@@ -379,7 +423,15 @@ export function CreativeBriefPanel({
           />
           <button
             className="creative-brief-panel-button"
-            onClick={canStop ? onStop : handleImprove}
+            onClick={
+              canStop
+                ? () => {
+                    const invocation = activeInvocationRef.current;
+                    if (invocation?.runId !== undefined) onStop?.(invocation.runId);
+                    else invocation?.controller.abort();
+                  }
+                : handleImprove
+            }
             disabled={
               !canStop && (collecting || (!runBrief && !isUnavailable(state)) || noModelConnected)
             }

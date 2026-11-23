@@ -105,6 +105,80 @@ function safeEntityReference() {
 }
 
 describe('JOY Agent trusted host tool bridge', () => {
+  it('serves the six bundled Joy Code skill guides as paged, queryable, read-only context', async () => {
+    const prepareProposal = vi.fn(() => preparedResult());
+    const methods = createJoyAgentHostRpcMethods({
+      context: createJoyAgentPagedContext({ projectId: 'project-1', revision: 'revision-1' }),
+      prepareProposal,
+    });
+    const first = (await invoke(methods, 'read_project_context', {
+      domain: 'skills',
+      cursor: 0,
+      pageSize: 2,
+    })) as { domain: string; items: Array<Record<string, unknown>>; nextCursor?: number };
+    expect(first).toMatchObject({
+      domain: 'skills',
+      items: [
+        expect.objectContaining({ id: 'joy-code-speech-subtitles', mode: 'guidance-only' }),
+        expect.objectContaining({ id: 'joy-code-caption-styling', mode: 'guidance-only' }),
+      ],
+      nextCursor: 2,
+    });
+    if (first.nextCursor === undefined) throw new Error('Missing skills page cursor');
+    const second = await invoke(methods, 'read_project_context', {
+      domain: 'skills',
+      cursor: first.nextCursor,
+      pageSize: 2,
+    });
+    const third = await invoke(methods, 'read_project_context', {
+      domain: 'skills',
+      cursor: 4,
+      pageSize: 2,
+    });
+    const all = [
+      ...first.items,
+      ...(second as { items: Array<Record<string, unknown>> }).items,
+      ...(third as { items: Array<Record<string, unknown>> }).items,
+    ];
+    expect(all.map((guide) => guide.id)).toEqual([
+      'joy-code-speech-subtitles',
+      'joy-code-caption-styling',
+      'joy-code-titles-and-lower-thirds',
+      'joy-code-cuts-and-motion',
+      'joy-code-look-and-effects',
+      'joy-code-format-and-delivery',
+    ]);
+    expect(
+      all.every((guide) => typeof guide.guidance === 'string' && guide.operation === undefined),
+    ).toBe(true);
+
+    const filtered = (await invoke(methods, 'read_project_context', {
+      domain: 'skills',
+      query: 'caption',
+      cursor: 0,
+      pageSize: 2,
+    })) as { items: Array<Record<string, unknown>>; nextCursor?: number };
+    expect(filtered.items.map((guide) => guide.id)).toEqual([
+      'joy-code-speech-subtitles',
+      'joy-code-caption-styling',
+    ]);
+    expect(filtered.nextCursor).toBe(2);
+    if (filtered.nextCursor === undefined) throw new Error('Missing filtered skills page cursor');
+    const filteredNext = await invoke(methods, 'read_project_context', {
+      domain: 'skills',
+      query: 'caption',
+      cursor: filtered.nextCursor,
+      pageSize: 2,
+    });
+    expect(filteredNext).toMatchObject({
+      items: [
+        expect.objectContaining({ id: 'joy-code-titles-and-lower-thirds' }),
+        expect.objectContaining({ id: 'joy-code-format-and-delivery' }),
+      ],
+    });
+    expect(prepareProposal).not.toHaveBeenCalled();
+  });
+
   it('exposes runnable shipped presets and labels unsupported ones suggestion-only through ordinary context reads', async () => {
     const methods = createJoyAgentHostRpcMethods({
       context: createJoyAgentPagedContext({ projectId: 'project-1', revision: 'revision-1' }),

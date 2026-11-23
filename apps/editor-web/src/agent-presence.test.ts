@@ -34,7 +34,28 @@ describe('JOY agent presence reducer', () => {
     );
     expect(failed.status).toBe('failed');
     expect(failed.targets).toHaveLength(0);
+    expect(failed.terminalTarget).toEqual(target);
     expect(reduceAgentPresence(failed, event({ seq: 2, phase: 'thinking' }))).toBe(failed);
+  });
+
+  it('retains a failed Creative Brief target for error navigation but clears cancelled targets', () => {
+    const briefTarget = {
+      panelId: 'agent' as const,
+      sectionId: 'composer' as const,
+      capability: 'creative-brief' as const,
+    };
+    const started = reduceAgentPresence(EMPTY_AGENT_PRESENCE, event({ targets: [briefTarget] }));
+    const failed = reduceAgentPresence(
+      started,
+      event({ seq: 1, kind: 'failed', phase: 'failed', targets: [briefTarget] }),
+    );
+    const cancelled = reduceAgentPresence(
+      started,
+      event({ seq: 1, kind: 'cancelled', phase: 'cancelled', targets: [briefTarget] }),
+    );
+
+    expect(failed.terminalTarget).toEqual(briefTarget);
+    expect(cancelled.terminalTarget).toBeUndefined();
   });
 
   it('keeps awaiting approval stable and only accepts measured progress', () => {

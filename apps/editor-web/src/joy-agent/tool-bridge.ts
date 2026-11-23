@@ -85,12 +85,57 @@ const HOST_CONTEXT_DOMAINS = [
   'visual-objects',
   'titles',
   'presets',
+  'skills',
   'looks',
   'library',
 ] as const;
 type HostContextDomain = (typeof HOST_CONTEXT_DOMAINS)[number];
 const TRANSITION_PRESET_OPERATION_IDS = ['dissolve', 'wipe', 'slide'] as const;
 const MAX_HOST_PAGE_SIZE = 32;
+const JOY_CODE_SKILL_GUIDES = [
+  {
+    id: 'joy-code-speech-subtitles',
+    name: 'Speech Subtitles',
+    description: 'Speech subtitles, transcript corrections, and cue timing.',
+    guidance:
+      'Resolve the selected clip, language, transcript, and cue range. Preserve reviewed words and punctuation. Edit identified existing segments with caption.setSegmentText or caption.setSegmentTiming only when advertised; use the editor Captions workflow for transcription or new-cue creation. Query presets for caption style IDs.',
+  },
+  {
+    id: 'joy-code-caption-styling',
+    name: 'Caption Styling',
+    description: 'Readable caption styling for general, RTL, portrait, or word-timed captions.',
+    guidance:
+      'Preserve caption text, cue timing, and burn-in. Choose joy-clean for general dialogue, joy-rtl-classic for Persian or Arabic, or joy-karaoke-pop only with reliable word timing and requested emphasis. Use caption.setTemplate only when advertised. Query presets for current IDs and runnable status; inspect a long cue and busy frame in preview.',
+  },
+  {
+    id: 'joy-code-titles-and-lower-thirds',
+    name: 'Titles and Lower Thirds',
+    description: 'Openers, titles, quotes, speaker IDs, lower thirds, and end slates.',
+    guidance:
+      'Use clean-title or rtl-editorial-title for an opener, and name-role or rtl-name-role for a lower third. Preserve exact supplied copy and interval. Use text.insertTemplate for new text or text.setContent/text.setTemplate for a resolved existing object only when advertised. joy.product-card is a content-template reference, not a text.insertTemplate ID. Preview copy, placement, and caption clearance.',
+  },
+  {
+    id: 'joy-code-cuts-and-motion',
+    name: 'Cuts and Motion',
+    description: 'Scoped rough cuts, transitions at real junctions, and bounded object motion.',
+    guidance:
+      'Use build-rough-cut when available. Resolve adjacent clip IDs, the real junction, project frame rate, and clip handles before transition.addAtJunction. Use only the transition ID/operation pair marked runnable in presets; joy:dipToBlack is currently editor-only. Use motion.setKeyframe only for supported bindings, then inspect the junction or motion bounds in preview.',
+  },
+  {
+    id: 'joy-code-look-and-effects',
+    name: 'Look and Effects',
+    description: 'Living Looks, filters, text backdrops, and visual effects.',
+    guidance:
+      'Read looks for compatible Living Looks and existing instances; use look_apply only when the separate tool is exposed and the target satisfies its constraints. Read presets for effect-preset IDs and status. Ordinary filter/effect presets are editor-only because Joy Code has no apply operation. Present unmatched designer targets as suggestions.',
+  },
+  {
+    id: 'joy-code-format-and-delivery',
+    name: 'Format and Delivery',
+    description: 'Destination formats, crop planning, caption safe areas, and export checks.',
+    guidance:
+      'Recommend a native export preset by ID and use the export UI for delivery. Prepare a crop only when the host exposes that operation. Use verify-deliverable only when the recipe runtime reports it available and an encoded artifact can be read. Report preview evidence separately from decoded-export checks.',
+  },
+] as const;
 const LOOK_INSTANCE_ID_PATTERN = /^look-[A-Za-z0-9][A-Za-z0-9-]{7,64}$/;
 const LOOK_DEFINITION_ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
 
@@ -1383,6 +1428,22 @@ function pageForContext(
   canPrepare: boolean,
 ): HostRpcJson {
   const revision = context.snapshot.revision;
+  if (input.domain === 'skills') {
+    const query = input.query;
+    const records = JOY_CODE_SKILL_GUIDES.filter(
+      (guide) =>
+        query === undefined ||
+        [guide.id, guide.name, guide.description, guide.guidance].some((value) =>
+          value.toLowerCase().includes(query),
+        ),
+    ).map((guide) => ({ ...guide, mode: 'guidance-only' }));
+    return {
+      projectId: context.snapshot.projectId,
+      revision,
+      domain: 'skills',
+      ...nextPage(records, input.cursor, input.pageSize),
+    };
+  }
   if (input.domain === 'presets') {
     const titles = TEXT_TEMPLATES.map((template) => ({
       family: 'title',

@@ -462,6 +462,7 @@ import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
 import { runCreativeBriefTask } from './joy-agent/entry-points.js';
+import type { CreativeBriefRunOptions } from './joy-agent/entry-points.js';
 import {
   assertCustomEndpointConsentHolds,
   mayRestoreProviderProfile,
@@ -1293,8 +1294,22 @@ function EditorWorkspace({
     };
   }, []);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
-  const [followAgentTarget, setFollowAgentTarget] = useState(false);
-  const clearFollowAgentTarget = useCallback(() => setFollowAgentTarget(false), []);
+  const [followedAgentRunId, setFollowedAgentRunId] = useState<string>();
+  const toggleFollowAgentTarget = useCallback(() => {
+    const { runId, status } = appAgentPresenceStore.getState();
+    if (
+      runId === undefined ||
+      status === 'completed' ||
+      status === 'failed' ||
+      status === 'cancelled'
+    ) {
+      return;
+    }
+    setFollowedAgentRunId((current) => (current === runId ? undefined : runId));
+  }, []);
+  const clearFollowAgentTarget = useCallback((runId: string) => {
+    setFollowedAgentRunId((current) => (current === runId ? undefined : current));
+  }, []);
   const [agentConnectionStatus, setAgentConnectionStatus] = useState<ByokSessionStatus | undefined>(
     () => joyAgentEngineClientRef.current?.getStatus(),
   );
@@ -2029,7 +2044,7 @@ function EditorWorkspace({
     state.selectedIds,
   ]);
   const creativeBriefRunner = useCallback(
-    (requestText: string) => {
+    (requestText: string, options?: CreativeBriefRunOptions) => {
       if (agentPolicy.privacyMode === 'local-only')
         return Promise.reject(
           new Error('Remote JOY Agent processing is disabled by the Local only privacy policy.'),
@@ -2041,37 +2056,15 @@ function EditorWorkspace({
         request: requestText,
         context: creativeBriefContext,
         allowRemote: true,
-        onRunStart: (runId) => appAgentPresenceStore.beginRun(runId, session.historyCursorSequence),
-        onEvent: (event) => {
-          const terminal =
-            event.phase === 'completed' || event.phase === 'failed' || event.phase === 'cancelled';
-          appAgentPresenceStore.dispatch({
-            protocolVersion: 1,
-            runId: event.runId,
-            seq: event.seq,
-            at: event.at,
-            revision: session.historyCursorSequence,
-            kind: terminal ? event.phase : event.phase === 'planning' ? 'preview' : 'activity',
-            phase: event.phase,
-            ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
-            targets: [{ panelId: 'agent', sectionId: 'composer', capability: 'creative-brief' }],
-            ...(event.phase === 'planning'
-              ? {
-                  preview: {
-                    revision: session.historyCursorSequence,
-                    summaryCode: 'joy-agent-brief',
-                    targetCount: 1,
-                  },
-                }
-              : {}),
-          });
-        },
+        ...(options?.onRunStart === undefined ? {} : { onRunStart: options.onRunStart }),
+        ...(options?.onEvent === undefined ? {} : { onEvent: options.onEvent }),
+        ...(options?.signal === undefined ? {} : { signal: options.signal }),
+        ...(options?.isCancelled === undefined ? {} : { isCancelled: options.isCancelled }),
       });
     },
     [
       agentPolicy.privacyMode,
       creativeBriefContext,
-      session.historyCursorSequence,
       session.projectRevisionId,
       session.visualProject.id,
     ],
@@ -6102,7 +6095,7 @@ function EditorWorkspace({
           }
           break;
         case 'agent.follow':
-          setFollowAgentTarget((current) => !current);
+          toggleFollowAgentTarget();
           break;
         case 'agent.active':
           break;
@@ -6143,6 +6136,7 @@ function EditorWorkspace({
       pasteClipsAtPlayhead,
       redo,
       runSelectedClipAction,
+      toggleFollowAgentTarget,
       toggleSnapping,
       undo,
       showAgentTarget,
@@ -7970,8 +7964,8 @@ function EditorWorkspace({
                 hasSelection={state.selectedIds.length > 0}
                 supportsSpeed={supportsSpeed}
                 exporting={exporting}
-                followAgentTarget={followAgentTarget}
-                onToggleFollowAgentTarget={() => setFollowAgentTarget((current) => !current)}
+                followedAgentRunId={followedAgentRunId}
+                onToggleFollowAgentTarget={toggleFollowAgentTarget}
                 onClearFollowAgentTarget={clearFollowAgentTarget}
                 onAction={runMenuAction}
                 onShowAgentTarget={showAgentTarget}

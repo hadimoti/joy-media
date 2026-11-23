@@ -153,6 +153,33 @@ describe('JOY Agent entry points', () => {
     ).rejects.toMatchObject({ code: 'invalid-result' });
   });
 
+  it('classifies an event-less iterator close as cancellation only when its owner says it was cancelled', async () => {
+    let cancelled = false;
+    await expect(
+      runJoyAgentTask({
+        client: fakeClient([]),
+        host,
+        taskKind: 'effects',
+        prompt: 'make it softer',
+        baseRevision: 'rev-1',
+        onRunStart: () => {
+          cancelled = true;
+        },
+        isCancelled: () => cancelled,
+      }),
+    ).rejects.toMatchObject({ code: 'cancelled' });
+
+    await expect(
+      runJoyAgentTask({
+        client: fakeClient([]),
+        host,
+        taskKind: 'effects',
+        prompt: 'make it softer',
+        baseRevision: 'rev-1',
+      }),
+    ).rejects.toMatchObject({ code: 'empty-result' });
+  });
+
   it('fails closed when a model task fails, is cancelled, or includes a credential-shaped prompt', async () => {
     await expect(
       runJoyAgentTask({
@@ -184,7 +211,6 @@ describe('JOY Agent entry points', () => {
     ).rejects.toMatchObject({ code: 'failed' });
     expect(client.startRun).not.toHaveBeenCalled();
   });
-
 
   it('gives an ordinary Creative Brief request a usable model contract and validates the final brief', async () => {
     const client = fakeClient([
