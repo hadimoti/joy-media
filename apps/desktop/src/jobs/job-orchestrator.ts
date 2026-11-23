@@ -1,4 +1,20 @@
 import { randomBytes } from 'node:crypto';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import {
+  parseSpeechSynthesizeV1,
+  parseSpeechSynthesisTiming,
+  parseSpeechTranscribeV1,
+} from '@joy-media/job-protocol';
 import type { DerivativeReceipt, DispatchJob, JobDispatchStore } from './job-dispatch.js';
 
 /** Worker leases last this long unless the Worker asks for less; each heartbeat renews it. */
@@ -7,6 +23,173 @@ export const MAX_LEASE_MS = 120_000;
 export const EXPIRED_LEASE_ERROR = 'worker lease expired';
 export const CANCELLED_BY_USER = 'cancelled by user';
 const MAX_ERROR_LENGTH = 240;
+export const BUILTIN_SPEECH_OUTPUT_REF_ID = 'speech-output';
+
+interface SpeechDerivativeCleanup {
+  readonly jobId: string;
+  readonly fileName: string;
+}
+
+const pendingSpeechDerivativeCleanup = new Map<string, SpeechDerivativeCleanup>();
+const PENDING_CLEANUP_FILE = 'pending-cleanup.json';
+let derivativeDirectory: string | undefined;
+let warnCleanup: (message: string) => void = (message) => console.warn(message);
+let pendingCleanupNeedsWrite = false;
+
+type CleanupPathResult =
+  | { readonly kind: 'safe'; readonly path: string }
+  | { readonly kind: 'missing'; readonly path: string }
+  | { readonly kind: 'directory-missing' }
+  | { readonly kind: 'unsafe' }
+  | { readonly kind: 'transient' };
+
+function isSpeechDerivativeFileName(jobId: string, fileName: string): boolean {
+  const escapedJobId = jobId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escapedJobId}-[a-f0-9]{16}\\.(?:wav|json)$`).test(fileName);
+}
+
+let realpathForCleanup: typeof realpathSync = realpathSync;
+
+function cleanupPath(fileName: string): CleanupPathResult {
+  const configured = derivativeDirectory;
+  if (configured === undefined || basename(fileName) !== fileName || fileName.includes('..'))
+    return { kind: 'unsafe' };
+  const target = join(configured, fileName);
+  let realDirectory: string;
+  try {
+    realDirectory = realpathForCleanup(configured);
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') return { kind: 'directory-missing' };
+    return { kind: 'transient' };
+  }
+  try {
+    const realFile = realpathForCleanup(target);
+    const inside = relative(realDirectory, realFile);
+    if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside))
+      return { kind: 'unsafe' };
+    if (realpathForCleanup(dirname(target)) !== realDirectory || !lstatSync(target).isFile())
+      return { kind: 'unsafe' };
+    return { kind: 'safe', path: target };
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') return { kind: 'missing', path: target };
+    return { kind: 'transient' };
+  }
+}
+
+function writePendingCleanup(): void {
+  if (derivativeDirectory === undefined) return;
+  const path = join(derivativeDirectory, PENDING_CLEANUP_FILE);
+  if (pendingSpeechDerivativeCleanup.size === 0) {
+    rmSync(path, { force: true });
+    pendingCleanupNeedsWrite = false;
+    return;
+  }
+  const temporary = join(derivativeDirectory, `${PENDING_CLEANUP_FILE}.${process.pid}.tmp`);
+  writeFileSync(temporary, JSON.stringify([...pendingSpeechDerivativeCleanup.values()]), {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  renameSync(temporary, path);
+  pendingCleanupNeedsWrite = false;
+}
+
+function loadPendingCleanup(): void {
+  if (derivativeDirectory === undefined) return;
+  try {
+    const value: unknown = JSON.parse(
+      readFileSync(join(derivativeDirectory, PENDING_CLEANUP_FILE), 'utf8'),
+    );
+    if (!Array.isArray(value)) {
+      warnCleanup('Speech derivative cleanup record was refused');
+      writePendingCleanup();
+      return;
+    }
+    let discarded = false;
+    for (const entry of value) {
+      if (
+        typeof entry === 'object' &&
+        entry !== null &&
+        'jobId' in entry &&
+        typeof entry.jobId === 'string' &&
+        'fileName' in entry &&
+        typeof entry.fileName === 'string' &&
+        isSpeechDerivativeFileName(entry.jobId, entry.fileName)
+      ) {
+        pendingSpeechDerivativeCleanup.set(`${entry.jobId}\0${entry.fileName}`, {
+          jobId: entry.jobId,
+          fileName: entry.fileName,
+        });
+      } else {
+        discarded = true;
+      }
+    }
+    if (discarded) {
+      warnCleanup('Speech derivative cleanup record was refused');
+      writePendingCleanup();
+    }
+  } catch (error) {
+    if (!isNodeError(error) || error.code !== 'ENOENT')
+      warnCleanup('Speech derivative cleanup record could not be read');
+  }
+}
+
+function retrySpeechDerivativeCleanup(): void {
+  let changed = false;
+  for (const [key, cleanup] of pendingSpeechDerivativeCleanup) {
+    if (!isSpeechDerivativeFileName(cleanup.jobId, cleanup.fileName)) {
+      pendingSpeechDerivativeCleanup.delete(key);
+      changed = true;
+      warnCleanup('Speech derivative cleanup record was refused');
+      continue;
+    }
+    const checked = cleanupPath(cleanup.fileName);
+    if (checked.kind === 'unsafe') {
+      pendingSpeechDerivativeCleanup.delete(key);
+      changed = true;
+      warnCleanup('Speech derivative cleanup was refused');
+      continue;
+    }
+    if (checked.kind === 'transient') {
+      warnCleanup('Speech derivative cleanup check will be retried');
+      continue;
+    }
+    if (checked.kind === 'directory-missing') {
+      warnCleanup('Speech derivative cleanup check will be retried');
+      continue;
+    }
+    if (checked.kind === 'missing') {
+      pendingSpeechDerivativeCleanup.delete(key);
+      changed = true;
+      continue;
+    }
+    try {
+      if (existsSync(checked.path)) removeSpeechDerivative(checked.path);
+      lstatSync(checked.path);
+    } catch (error) {
+      if (isNodeError(error) && error.code === 'ENOENT') {
+        pendingSpeechDerivativeCleanup.delete(key);
+        changed = true;
+      } else warnCleanup('Speech derivative cleanup will be retried');
+    }
+  }
+  if (changed) pendingCleanupNeedsWrite = true;
+  if (changed || pendingCleanupNeedsWrite) {
+    try {
+      writePendingCleanup();
+    } catch {
+      warnCleanup('Speech derivative cleanup record could not be updated');
+    }
+  }
+}
+
+let removeSpeechDerivative: (path: string) => void = (path) => rmSync(path);
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error;
+}
+
+process.on('beforeExit', retrySpeechDerivativeCleanup);
+process.on('exit', retrySpeechDerivativeCleanup);
 
 /** Protocol refusal that the loopback API maps onto an HTTP status. */
 export class JobProtocolError extends Error {
@@ -42,6 +225,14 @@ const JOB_REQUIREMENTS: Readonly<Record<string, JobRequirement>> = {
   'mask.video': { capability: 'mask.video', missing: 'local masking models for mask.video' },
   'upscale.image': { capability: 'upscale.image', missing: 'the installed upscaling model' },
   'upscale.video': { capability: 'upscale.video', missing: 'the installed upscaling model' },
+  'speech.transcribe': {
+    capability: 'speech.transcribe',
+    missing: 'the local speech transcription engine',
+  },
+  'speech.synthesize': {
+    capability: 'speech.synthesize',
+    missing: 'the local speech synthesis engine',
+  },
 };
 
 /** Job types the desktop submits and the Worker can lease. */
@@ -52,6 +243,8 @@ const DISPATCHABLE_JOB_TYPES = [
   'media.qc',
   'mask.image',
   'mask.video',
+  'speech.transcribe',
+  'speech.synthesize',
 ] as const;
 /** Job types whose Worker needs a payload. The desktop stores it at submit and sends it with the lease. */
 const PAYLOAD_JOB_TYPES: ReadonlySet<string> = new Set([
@@ -60,6 +253,8 @@ const PAYLOAD_JOB_TYPES: ReadonlySet<string> = new Set([
   'media.qc',
   'mask.image',
   'mask.video',
+  'speech.transcribe',
+  'speech.synthesize',
 ]);
 /** A payload is stored as JSON in the local database and handed to the Worker whole, so it is capped. */
 const MAX_PAYLOAD_BYTES = 64 * 1024;
@@ -89,6 +284,12 @@ function encodePayload(
   }
   if (Buffer.byteLength(json, 'utf8') > MAX_PAYLOAD_BYTES) {
     return { ok: false, message: `${jobType} payload is larger than ${MAX_PAYLOAD_BYTES} bytes` };
+  }
+  if (jobType === 'speech.transcribe' && parseSpeechTranscribeV1(JSON.parse(json)) === undefined) {
+    return { ok: false, message: 'speech.transcribe payload is invalid' };
+  }
+  if (jobType === 'speech.synthesize' && parseSpeechSynthesizeV1(JSON.parse(json)) === undefined) {
+    return { ok: false, message: 'speech.synthesize payload is invalid' };
   }
   return { ok: true, json };
 }
@@ -127,9 +328,15 @@ export interface JobOrchestratorOptions {
   readonly newLeaseToken?: () => string;
   /** Upper bound on any lease window. Defaults to MAX_LEASE_MS; tests lower it to exercise expiry quickly. */
   readonly maxLeaseMs?: number;
+  /** Test seam for transient filesystem failures; production uses a non-recursive unlink. */
+  readonly removeDerivativeFile?: (path: string) => void;
+  /** Test seam for transient realpath failures. */
+  readonly realpathSync?: typeof realpathSync;
 }
 
 export interface JobOrchestrator {
+  /** Binds cleanup to the app-owned directory used by the loopback derivative receiver. */
+  configureDerivativeCleanup(directory: string, onWarning?: (message: string) => void): void;
   /** Main-process callers only. A Worker can never name a profile (PLAN-v4 §6b). */
   submit(request: {
     readonly jobType: string;
@@ -161,6 +368,8 @@ export interface JobOrchestrator {
       readonly kind: string;
       readonly sha256?: string;
       readonly bytes?: number;
+      readonly mimeType?: string;
+      readonly speech?: unknown;
       readonly resultJson: string;
     },
   ): void;
@@ -172,10 +381,12 @@ export interface JobOrchestrator {
 
 export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrchestrator {
   const { store } = options;
+  realpathForCleanup = options.realpathSync ?? realpathSync;
   const now = options.now ?? (() => new Date().toISOString());
   const newId = options.newId ?? (() => crypto.randomUUID());
   const newLeaseToken = options.newLeaseToken ?? (() => randomBytes(32).toString('base64url'));
   const leaseCap = Math.min(options.maxLeaseMs ?? MAX_LEASE_MS, MAX_LEASE_MS);
+  removeSpeechDerivative = options.removeDerivativeFile ?? ((path) => rmSync(path));
 
   function leaseExpiry(durationMs: number): string {
     return new Date(Date.parse(now()) + Math.min(durationMs, leaseCap)).toISOString();
@@ -204,8 +415,9 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
   function expireLeasesWithin(): number {
     const expired = store.expiredRunning(now());
     for (const job of expired) {
-      if (job.cancelRequested) finish(job, 'cancelled', CANCELLED_BY_USER);
-      else finish(job, 'failed', EXPIRED_LEASE_ERROR);
+      const patch = job.jobType.startsWith('speech.') ? { derivative: undefined } : {};
+      if (job.cancelRequested) finish(job, 'cancelled', CANCELLED_BY_USER, patch);
+      else finish(job, 'failed', EXPIRED_LEASE_ERROR, patch);
     }
     return expired.length;
   }
@@ -216,6 +428,33 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
     error: string | undefined,
     patch: Partial<DispatchJob> = {},
   ): void {
+    if (job.jobType.startsWith('speech.') && status !== 'done' && job.derivative !== undefined) {
+      const rawPath = job.derivative.path;
+      const fileName = basename(resolve(rawPath));
+      const candidateIsSafe =
+        derivativeDirectory !== undefined &&
+        isAbsolute(rawPath) &&
+        !rawPath.split(/[\\/]/).includes('..') &&
+        isSpeechDerivativeFileName(job.id, fileName) &&
+        resolve(dirname(rawPath)) === derivativeDirectory;
+      const checked = candidateIsSafe ? cleanupPath(fileName) : { kind: 'unsafe' as const };
+      if (candidateIsSafe && checked.kind !== 'unsafe' && checked.kind !== 'missing') {
+        const key = `${job.id}\0${fileName}`;
+        pendingSpeechDerivativeCleanup.set(key, {
+          jobId: job.id,
+          fileName,
+        });
+        pendingCleanupNeedsWrite = true;
+        try {
+          writePendingCleanup();
+        } catch {
+          warnCleanup('Speech derivative cleanup record could not be saved');
+        }
+        retrySpeechDerivativeCleanup();
+      } else {
+        warnCleanup('Speech derivative cleanup was refused');
+      }
+    }
     store.save({
       ...job,
       ...patch,
@@ -228,6 +467,14 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
   }
 
   return {
+    configureDerivativeCleanup(directory, onWarning) {
+      derivativeDirectory = resolve(directory);
+      warnCleanup = onWarning ?? ((message) => console.warn(message));
+      pendingSpeechDerivativeCleanup.clear();
+      mkdirSync(derivativeDirectory, { recursive: true });
+      loadPendingCleanup();
+      retrySpeechDerivativeCleanup();
+    },
     submit({ jobType, refId, kind, payload, profileId }) {
       const requirement = JOB_REQUIREMENTS[jobType];
       if (requirement === undefined) {
@@ -269,6 +516,39 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
       const payloadResult = encodePayload(jobType, payload);
       if (!payloadResult.ok) {
         return { ok: false, code: 'PAYLOAD_INVALID', jobType, message: payloadResult.message };
+      }
+      if (jobType === 'speech.transcribe' || jobType === 'speech.synthesize') {
+        const speechPayload = JSON.parse(payloadResult.json ?? '{}') as Record<string, unknown>;
+        const engineFlag = `speech.model.${String(speechPayload.modelId)}`;
+        // Only synthesis engines carry a per-model worker flag. The worker advertises speech.transcribe after it
+        // verified Whisper, and the dispatch requirement for the job type checks that capability.
+        if (jobType === 'speech.synthesize' && !presence?.capabilities.includes(engineFlag)) {
+          return {
+            ok: false,
+            code: 'SETUP_REQUIRED',
+            jobType,
+            message: `Worker has not reported ${engineFlag} as ready`,
+          };
+        }
+        if (
+          jobType === 'speech.transcribe' &&
+          (!refId.trim() || refId === BUILTIN_SPEECH_OUTPUT_REF_ID)
+        ) {
+          return {
+            ok: false,
+            code: 'PAYLOAD_INVALID',
+            jobType,
+            message: 'speech.transcribe needs an audio source',
+          };
+        }
+        if (jobType === 'speech.synthesize' && !refId.trim()) {
+          return {
+            ok: false,
+            code: 'PAYLOAD_INVALID',
+            jobType,
+            message: 'speech.synthesize needs an output or reference asset',
+          };
+        }
       }
       const timestamp = now();
       const job: DispatchJob = {
@@ -363,6 +643,8 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
     recordDerivative(workerId, jobId, leaseToken, receipt) {
       store.transaction(() => {
         const job = assertHolder(workerId, jobId, leaseToken);
+        if (job.jobType.startsWith('speech.') && job.cancelRequested)
+          throw new JobProtocolError(409, 'the speech job was cancelled');
         store.save({ ...job, derivative: receipt, updatedAt: now() });
       });
     },
@@ -381,6 +663,34 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
             throw new JobProtocolError(422, 'derivative is missing or does not match the result');
           }
         }
+        if (job.jobType === 'speech.transcribe' || job.jobType === 'speech.synthesize') {
+          if (job.cancelRequested) throw new JobProtocolError(409, 'the speech job was cancelled');
+          const derivative = job.derivative;
+          const expectedMime =
+            job.jobType === 'speech.transcribe' ? 'application/json' : 'audio/wav';
+          if (
+            completion.kind !== job.jobType ||
+            derivative === undefined ||
+            completion.sha256 !== derivative.sha256 ||
+            completion.bytes !== derivative.bytes ||
+            completion.mimeType !== expectedMime ||
+            derivative.mimeType !== expectedMime
+          ) {
+            throw new JobProtocolError(
+              422,
+              'speech derivative is missing or does not match the result',
+            );
+          }
+          if (job.jobType === 'speech.synthesize') {
+            if (parseSpeechSynthesisTiming(completion.speech) === undefined)
+              throw new JobProtocolError(422, 'speech synthesis timing is invalid');
+          } else if (completion.speech !== undefined) {
+            throw new JobProtocolError(
+              422,
+              'transcription results cannot include synthesis timing',
+            );
+          }
+        }
         finish(job, 'done', undefined, { progress: 100, resultJson: completion.resultJson });
       });
     },
@@ -388,11 +698,21 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
     fail(workerId, jobId, leaseToken, error) {
       store.transaction(() => {
         const job = assertHolder(workerId, jobId, leaseToken);
-        if (error === 'canceled') {
-          finish(job, 'cancelled', CANCELLED_BY_USER);
+        if (job.cancelRequested || error === 'canceled') {
+          finish(
+            job,
+            'cancelled',
+            CANCELLED_BY_USER,
+            job.jobType.startsWith('speech.') ? { derivative: undefined } : {},
+          );
           return;
         }
-        finish(job, 'failed', error.slice(0, MAX_ERROR_LENGTH));
+        finish(
+          job,
+          'failed',
+          error.slice(0, MAX_ERROR_LENGTH),
+          job.jobType.startsWith('speech.') ? { derivative: undefined } : {},
+        );
       });
     },
 
@@ -405,6 +725,7 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
             ...job,
             status: 'cancelled',
             error: CANCELLED_BY_USER,
+            ...(job.jobType.startsWith('speech.') ? { derivative: undefined } : {}),
             updatedAt: now(),
           };
           store.save(cancelled);
@@ -420,7 +741,9 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
     },
 
     expireLeases() {
-      return store.transaction(expireLeasesWithin);
+      const expiredCount = store.transaction(expireLeasesWithin);
+      retrySpeechDerivativeCleanup();
+      return expiredCount;
     },
 
     get(jobId) {

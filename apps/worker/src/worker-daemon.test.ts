@@ -14,6 +14,51 @@ import type { GpuPreviewHost } from './gpu-preview-host.js';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 describe('WorkerDaemon', () => {
+  it.each(['speech.transcribe', 'speech.synthesize'] as const)(
+    'uploads the checked %s derivative before completing',
+    async (kind) => {
+      let stopped = false;
+      const uploaded: string[] = [];
+      const derivative = {
+        kind,
+        sha256: 'a'.repeat(64),
+        bytes: 3,
+        localRef: 'speech-job-aaaaaaaaaaaaaaaa',
+        descriptor:
+          kind === 'speech.transcribe'
+            ? { mimeType: 'application/json' }
+            : { mimeType: 'audio/wav', durationUs: 100_000 },
+        ...(kind === 'speech.synthesize'
+          ? { speech: { durationUs: 100_000, timingSource: 'unavailable', words: [] } }
+          : {}),
+      } as const;
+      const client = {
+        hello: async () => undefined,
+        lease: async () => ({ id: 'speech-job', projectId: 'project-1', type: kind }),
+        heartbeat: async () => ({ cancelRequested: false }),
+        uploadDerivative: async (_jobId: string, result: { kind: string }) => {
+          uploaded.push(result.kind);
+        },
+        complete: async (_jobId: string, result: { kind: string; speech?: unknown }) => {
+          expect(result.kind).toBe(kind);
+          if (kind === 'speech.synthesize')
+            expect(result.speech).toMatchObject({ timingSource: 'unavailable' });
+          stopped = true;
+        },
+        fail: async () => undefined,
+      } as unknown as WorkerControlPlaneClient;
+      const runtime = {
+        hello: () => ({ capabilities: [] }),
+        localAssetIds: () => [],
+        log: { write: () => undefined },
+        run: async () => ({ state: 'completed' as const, result: derivative }),
+        readDerivative: () => new Uint8Array([1, 2, 3]),
+      } as unknown as WorkerRuntime;
+      await new WorkerDaemon(client, runtime).run({ pollIntervalMs: 1, stopped: () => stopped });
+      expect(uploaded).toEqual([kind]);
+    },
+  );
+
   it('keeps an export leased while the async export stage exceeds the short lease window', async () => {
     let stop = false;
     let lastHeartbeat = Date.now();
@@ -590,5 +635,152 @@ describe('WorkerDaemon', () => {
       stopped: () => stop,
     });
     expect(calls).toEqual(['fail:canceled']);
+  });
+
+  it('removes a speech derivative when upload fails after generation', async () => {
+    let stop = false;
+    let leased = false;
+    const removed: string[] = [];
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'speech-upload-fail', projectId: 'project-1', type: 'speech.synthesize' };
+      },
+      heartbeat: async () => ({ cancelRequested: false }),
+      uploadDerivative: async () => {
+        throw new Error('upload interrupted');
+      },
+      fail: async () => {
+        stop = true;
+      },
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async () => ({
+        state: 'completed' as const,
+        result: {
+          kind: 'speech.synthesize' as const,
+          sha256: 'e'.repeat(64),
+          bytes: 1,
+          localRef: 'speech-output-1',
+          descriptor: { mimeType: 'audio/wav' as const },
+          speech: { durationUs: 1, timingSource: 'unavailable' as const, words: [] },
+        },
+      }),
+      readDerivative: () => new Uint8Array([1]),
+      removeDerivative: async (result: { localRef: string }) => removed.push(result.localRef),
+    } as unknown as WorkerRuntime;
+    await new WorkerDaemon(client, runtime).run({ pollIntervalMs: 1, stopped: () => stop });
+    expect(removed).toEqual(['speech-output-1']);
+  });
+
+  it('removes a speech derivative when cancellation lands during upload', async () => {
+    let stop = false;
+    let leased = false;
+    let cancelRequested = false;
+    const removed: string[] = [];
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'speech-upload-cancel', projectId: 'project-1', type: 'speech.synthesize' };
+      },
+      heartbeat: async () => ({ cancelRequested }),
+      uploadDerivative: async () => {
+        cancelRequested = true;
+        await new Promise((resolve) => setTimeout(resolve, 15));
+      },
+      complete: async () => {
+        throw new Error('canceled job must not complete');
+      },
+      fail: async (_jobId: string, error: string) => {
+        expect(error).toBe('canceled');
+        stop = true;
+      },
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async () => ({
+        state: 'completed' as const,
+        result: {
+          kind: 'speech.synthesize' as const,
+          sha256: 'e'.repeat(64),
+          bytes: 1,
+          localRef: 'speech-output-canceled',
+          descriptor: { mimeType: 'audio/wav' as const },
+          speech: { durationUs: 1, timingSource: 'unavailable' as const, words: [] },
+        },
+      }),
+      readDerivative: () => new Uint8Array([1]),
+      removeDerivative: async (result: { localRef: string }) => removed.push(result.localRef),
+    } as unknown as WorkerRuntime;
+    await new WorkerDaemon(client, runtime).run({
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 2,
+      stopped: () => stop,
+    });
+    expect(removed).toEqual(['speech-output-canceled']);
+  });
+
+  it('reports a completion rejection when cancel arrives after the final heartbeat', async () => {
+    let stop = false;
+    let leased = false;
+    let cancelRequested = false;
+    const calls: string[] = [];
+    const removed: string[] = [];
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return {
+          id: 'speech-late-cancel',
+          projectId: 'project-1',
+          type: 'speech.synthesize',
+          leaseToken: 'lease-1',
+        };
+      },
+      heartbeat: async () => ({ cancelRequested: false }),
+      uploadDerivative: async () => {
+        cancelRequested = true;
+      },
+      complete: async () => {
+        if (cancelRequested) throw new Error('the speech job was cancelled');
+      },
+      fail: async (_jobId: string, error: string) => {
+        calls.push(`fail:${error}`);
+        stop = true;
+      },
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async () => ({
+        state: 'completed' as const,
+        result: {
+          kind: 'speech.synthesize' as const,
+          sha256: 'f'.repeat(64),
+          bytes: 1,
+          localRef: 'speech-output-late-cancel',
+          descriptor: { mimeType: 'audio/wav' as const },
+          speech: { durationUs: 1, timingSource: 'unavailable' as const, words: [] },
+        },
+      }),
+      readDerivative: () => new Uint8Array([1]),
+      removeDerivative: async (result: { localRef: string }) => removed.push(result.localRef),
+    } as unknown as WorkerRuntime;
+
+    await new WorkerDaemon(client, runtime).run({ pollIntervalMs: 1, stopped: () => stop });
+
+    expect(calls).toEqual(['fail:the speech job was cancelled']);
+    expect(removed).toEqual(['speech-output-late-cancel']);
   });
 });

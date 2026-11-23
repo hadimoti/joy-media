@@ -31,6 +31,9 @@ import type { createEditorPluginHost } from './plugin-host.js';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import type { ProjectWriterStorage } from './project-writer.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
+import type { SpeechSynthesizeV1 } from '@joy-media/job-protocol';
+import type { SpeechGenerationOptions, SpeechModelStatus } from './SpeechGenerationPanel.js';
+import type { SpeechSynthesisTiming } from './local-media-client.js';
 import type { TimelineMediaPlacement } from './timeline-media-placement.js';
 import type { MonitorTransportControls } from './monitor/useMonitorTransportControls.js';
 
@@ -148,6 +151,17 @@ export interface EditorPanelContextValue {
   readonly setAudioState: (next: AudioState, label?: string) => void;
   readonly transcribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
   readonly transcriptionError: string | undefined;
+  /** Which local speech engines are ready. Read from here: a dock panel keeps its first render's closure. */
+  readonly speechModelStatus: readonly SpeechModelStatus[];
+  /** Makes a voice at the CURRENT playhead (a closure would use the playhead of the panel's first render). */
+  readonly generateSpeech: (
+    request: SpeechSynthesizeV1,
+    options: SpeechGenerationOptions,
+  ) => Promise<{
+    readonly availability: 'ready' | 'setup-required';
+    readonly timing?: SpeechSynthesisTiming;
+    readonly insertionStartUs: number;
+  }>;
   readonly undo: () => void;
   readonly redo: () => void;
   readonly jumpToHistory: (sequence: number) => void;

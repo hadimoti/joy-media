@@ -495,6 +495,14 @@ import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
 import { getOrCreateControlPlaneProjectBinding } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { placeTranscriptOnTimeline } from './caption-transcript-timing.js';
+import { buildSpeechCaptionCues } from './speech-caption-cues.js';
+import {
+  buildSpeechVoicePlacement,
+  withSpeechCaptionClipPlacement,
+} from './speech-voice-placement.js';
+import type { SpeechGenerationOptions } from './SpeechGenerationPanel.js';
+import { useSpeechModelStatus } from './use-speech-model-status.js';
+import type { SpeechSynthesizeV1 } from '@joy-media/job-protocol';
 import { ProjectMediaResolver } from './project-media-resolver.js';
 import { createProjectColorLutResolver } from './project-color-luts.js';
 import { createObservationCache } from './media-observation/observation-cache.js';
@@ -530,6 +538,7 @@ import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
 import {
   SHORTCUT_REFERENCE,
+  canUseEditorSpaceTarget,
   isEditableTarget,
   actionYieldsToSelectedText,
   interactiveTargetOwnsAction,
@@ -1159,6 +1168,13 @@ function EditorWorkspace({
     if (!paletteOpen) setQuery('');
   }, [paletteOpen]);
   const [transcriptionError, setTranscriptionError] = useState<string>();
+  const speechModelStatus = useSpeechModelStatus(mediaControlPlaneClient, projectId);
+  const transcriptionControllerRef = useRef<AbortController | undefined>(undefined);
+  useEffect(() => {
+    transcriptionControllerRef.current?.abort();
+    transcriptionControllerRef.current = undefined;
+    return () => transcriptionControllerRef.current?.abort();
+  }, [projectId]);
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | undefined>(undefined);
   const [exportProgress, setExportProgress] = useState<number | undefined>(undefined);
@@ -3650,6 +3666,10 @@ function EditorWorkspace({
 
   const transcribe = useCallback(
     async (documentId: string, language: 'fa-IR' | 'en-US') => {
+      transcriptionControllerRef.current?.abort();
+      const controller = new AbortController();
+      transcriptionControllerRef.current = controller;
+      const capturedProjectId = projectId;
       try {
         // The clip the owner selected is the one to transcribe, wherever the playhead is; with nothing
         // selected, the clip under the playhead.
@@ -3660,6 +3680,25 @@ function EditorWorkspace({
             candidate.kind === 'video' &&
             !isControlTimelineElement(timelineElementKindForClip(candidate, elementKinds)),
         );
+        // A voice recording (an audio clip) is spoken word too: the picture lookup above skips audio on purpose, so
+        // fall back to the audio clip under the playhead. Subtitles for a voice-over need no video.
+        // A muted or disabled track is not audible, so it is not a subtitle source either (same rule as playback).
+        const mutedTrackIds = new Set(
+          timelineTrackFlags.filter((track) => track.muted === true).map((track) => track.id),
+        );
+        const rootComposition =
+          session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+        const spokenAudioAtPlayhead = rootComposition?.tracks
+          .filter((track) => track.enabled && !mutedTrackIds.has(track.id))
+          .flatMap((track) => track.clips)
+          .find(
+            (candidate) =>
+              candidate.kind === 'video' &&
+              session.visualProject.assets[candidate.assetId]?.kind === 'audio' &&
+              !isControlTimelineElement(timelineElementKindForClip(candidate, elementKinds)) &&
+              state.playheadUs >= candidate.startUs &&
+              state.playheadUs < candidate.startUs + candidate.durationUs,
+          );
         const clip =
           selectedMedia ??
           activeVideoClipAt(
@@ -3667,19 +3706,39 @@ function EditorWorkspace({
             state.playheadUs,
             state.selectedIds,
             session.visualProject,
-          );
+          ) ??
+          spokenAudioAtPlayhead;
         if (clip === undefined || clip.kind !== 'video')
           throw new Error('Place a media clip before transcribing.');
-        const source = await mediaResolver.resolve(clip.assetId);
-        const response = await fetch(source.url);
-        if (!response.ok) throw new Error(`Unable to read ${clip.assetId} for transcription.`);
-        const media = await response.blob();
         const transcript = await transcribeReferenceCaption(
           documentId,
           language,
           mediaControlPlaneClient,
-          { media, mediaType: source.mimeType },
+          {
+            workerRequest: {
+              projectId: controlPlaneProject.controlPlaneProjectId,
+              assetId: clip.assetId,
+              request: {
+                schemaVersion: 1,
+                language,
+                modelId: 'faster-whisper-large-v3-turbo',
+                range: {
+                  startUs: clip.sourceInUs,
+                  endUs: Math.round(clip.sourceInUs + clip.durationUs * (clip.playbackRate ?? 1)),
+                },
+              },
+            },
+            signal: controller.signal,
+            loadMedia: async () => {
+              const source = await mediaResolver.resolve(clip.assetId);
+              const response = await fetch(source.url, { signal: controller.signal });
+              if (!response.ok)
+                throw new Error(`Unable to read ${clip.assetId} for transcription.`);
+              return { media: await response.blob(), mediaType: source.mimeType };
+            },
+          },
         );
+        if (controller.signal.aborted || projectId !== capturedProjectId) return;
         // The transcript is timed from the start of the file; the caption layer is timed from its own start.
         const root = session.visualProject.compositions[session.visualProject.rootCompositionId];
         const captionClipStartUs =
@@ -3689,12 +3748,14 @@ function EditorWorkspace({
               (candidate) =>
                 candidate.kind === 'caption' && candidate.captionDocumentId === documentId,
             )?.startUs ?? 0;
-        const document = placeTranscriptOnTimeline(transcript, {
+        const placed = placeTranscriptOnTimeline(transcript, {
           offsetUs: clip.startUs - captionClipStartUs,
           sourceInUs: clip.sourceInUs,
           durationUs: clip.durationUs,
           ...(clip.playbackRate === undefined ? {} : { playbackRate: clip.playbackRate }),
         });
+        const document = buildSpeechCaptionCues(placed);
+        if (controller.signal.aborted || projectId !== capturedProjectId) return;
         session.dispatchVisualObjects({
           label: `Transcribe ${language}`,
           commands: [{ type: 'caption.replaceDocument', payload: { documentId, document } }],
@@ -3702,12 +3763,91 @@ function EditorWorkspace({
         setTranscriptionError(undefined);
         setRevision((revision) => revision + 1);
       } catch (error) {
+        if (controller.signal.aborted || projectId !== capturedProjectId) return;
         setTranscriptionError(
           error instanceof Error ? error.message : 'Local transcription is unavailable.',
         );
       }
+      if (transcriptionControllerRef.current === controller)
+        transcriptionControllerRef.current = undefined;
     },
-    [mediaResolver, session, state.playheadUs, state.selectedIds],
+    [
+      controlPlaneProject.controlPlaneProjectId,
+      mediaResolver,
+      projectId,
+      session,
+      state.playheadUs,
+      state.selectedIds,
+      timelineTrackFlags,
+    ],
+  );
+  const generateSpeech = useCallback(
+    async (request: SpeechSynthesizeV1, options: SpeechGenerationOptions) => {
+      const capturedProjectId = projectId;
+      const capturedPlayheadUs = state.playheadUs;
+      const capturedComposition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+      if (capturedComposition === undefined) throw new Error('The main timeline is unavailable.');
+      const generated = await mediaControlPlaneClient.runLocalSynthesis(
+        controlPlaneProject.controlPlaneProjectId,
+        request,
+        {
+          ...(options.referenceAssetId !== undefined
+            ? { referenceAssetId: options.referenceAssetId }
+            : {}),
+          consent: options.consent,
+          signal: options.signal,
+        },
+      );
+      if (options.signal.aborted || projectId !== capturedProjectId)
+        throw Object.assign(new Error('Generation canceled.'), { code: 'CANCELED' });
+      if (!generated.audio.type.toLowerCase().includes('wav'))
+        throw new Error('The speech worker did not return WAV audio.');
+      const file = new File([generated.audio], 'Generated speech.wav', { type: 'audio/wav' });
+      const asset = await importMediaFile({
+        projectId: controlPlaneProject.controlPlaneProjectId,
+        projectTitle: controlPlaneProject.title,
+        file,
+        displayName: 'Generated speech',
+        client: mediaControlPlaneClient,
+        originalAssetCache: originalAssetCachePromise,
+      });
+      if (options.signal.aborted || projectId !== capturedProjectId)
+        throw Object.assign(new Error('Generation canceled.'), { code: 'CANCELED' });
+      const currentComposition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+      if (currentComposition === undefined) throw new Error('The main timeline is unavailable.');
+      const transaction = buildSpeechVoicePlacement({
+        composition: currentComposition,
+        asset: {
+          id: asset.id,
+          kind: 'audio',
+          displayName: asset.displayName,
+          descriptor: asset.descriptor,
+        },
+        playheadUs: capturedPlayheadUs,
+        lockedTrackIds: new Set(
+          timelineTrackFlags.filter((track) => track.locked).map((track) => track.id),
+        ),
+        clipId: `speech-${asset.id}`,
+      });
+      dispatchTimeline(transaction);
+      setRevision((revision) => revision + 1);
+      return {
+        availability: 'ready' as const,
+        timing: generated.timing,
+        insertionStartUs: capturedPlayheadUs,
+      };
+    },
+    [
+      controlPlaneProject.controlPlaneProjectId,
+      controlPlaneProject.title,
+      dispatchTimeline,
+      projectId,
+      session,
+      state.playheadUs,
+      timelineTrackFlags,
+    ],
   );
   const reconcileWorkerResultOperations = useCallback(() => {
     for (const record of operationLedger.list()) {
@@ -4220,11 +4360,14 @@ function EditorWorkspace({
       }
       const action = resolveShortcut(event);
       if (action === undefined) return;
+      if (action === 'playback.toggle' && event.isComposing) return;
       // Escape must close the palette even while its search input has focus.
       if (
         action !== 'palette.close' &&
         (isEditableTarget(event.target) ||
-          (isInteractiveTarget(event.target) && interactiveTargetOwnsAction(action)))
+          (action === 'playback.toggle'
+            ? !canUseEditorSpaceTarget(event.target)
+            : isInteractiveTarget(event.target) && interactiveTargetOwnsAction(action)))
       )
         return;
       // Text selected on the page (a chat reply) is copied by the browser, not the selected clip.
@@ -6972,6 +7115,29 @@ function EditorWorkspace({
           transcriptionError={context.transcriptionError}
           onProjectChange={(next) => context.replaceVisualProject(next)}
           onCreateCaptionTrack={context.addCaptionLayer}
+          speechModelStatus={context.speechModelStatus}
+          onGenerateSpeech={context.generateSpeech}
+          onAddSpeechCaptions={(documentId, document, clipId, clipStartUs, clipEndUs) => {
+            const placedProject = withSpeechCaptionClipPlacement(
+              session.visualProject,
+              clipId,
+              clipStartUs,
+              clipEndUs,
+              documentId,
+            );
+            const nextProject = {
+              ...placedProject,
+              captionDocuments: {
+                ...placedProject.captionDocuments,
+                [documentId]: document,
+              },
+            };
+            session.dispatchCompound('Add speech captions', { document: nextProject });
+            invalidateAgentPreviewAfterEdit(session);
+            resyncTimelineMedia();
+            setRevision((revision) => revision + 1);
+          }}
+          onOpenLocalAssets={() => context.activatePanel('media')}
         />,
       );
     if (effectivePanelId === 'text')
@@ -8218,6 +8384,8 @@ function EditorWorkspace({
               setAudioState,
               transcribe,
               transcriptionError,
+              speechModelStatus,
+              generateSpeech,
               undo,
               redo,
               jumpToHistory,

@@ -1,8 +1,16 @@
-import { useId, useRef, useState, type ReactElement } from 'react';
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactElement,
+} from 'react';
 import type {
   CaptionClipStyleV2,
   CaptionClipV1,
   CaptionDocumentV1,
+  CaptionWordV1,
   JoyProjectV1,
   TrackV1,
 } from '@joy-media/project-schema';
@@ -35,6 +43,18 @@ import { ColorSwatchPicker } from './ColorPickerPopover.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { downloadBrowserTextFile } from './browser-text-download.js';
 import { PropertyRow } from './components/PropertyRow.js';
+import {
+  mergeCaptionCueWithPrevious,
+  splitCaptionCue,
+  type CaptionCueEdit,
+} from './caption-cue-edit.js';
+import './CaptionsTranscript.css';
+import { SpeechGenerationPanel } from './SpeechGenerationPanel.js';
+import type { SpeechModelStatus, SpeechGenerationOptions } from './SpeechGenerationPanel.js';
+import type { SpeechSynthesizeV1 } from '@joy-media/job-protocol';
+import type { SpeechSynthesisTiming } from './local-media-client.js';
+import { buildSpeechCaptionCues } from './speech-caption-cues.js';
+import { speechCaptionPlacement } from './speech-voice-placement.js';
 
 type CaptionsTab = 'transcript' | 'style' | 'generate';
 
@@ -127,6 +147,10 @@ export function CaptionsPanel({
   transcriptionError,
   onProjectChange,
   onCreateCaptionTrack,
+  speechModelStatus,
+  onGenerateSpeech,
+  onAddSpeechCaptions,
+  onOpenLocalAssets,
 }: {
   readonly project: JoyProjectV1;
   readonly playheadUs: number;
@@ -137,7 +161,25 @@ export function CaptionsPanel({
   readonly onProjectChange: (next: JoyProjectV1) => void;
   /** When supplied, creates the visual document and Classic timeline CC lane as one undo step. */
   readonly onCreateCaptionTrack?: () => void;
+  readonly speechModelStatus?: readonly SpeechModelStatus[];
+  readonly onGenerateSpeech?: (
+    request: SpeechSynthesizeV1,
+    options: SpeechGenerationOptions,
+  ) => Promise<{
+    availability: 'ready' | 'setup-required';
+    timing?: SpeechSynthesisTiming;
+    insertionStartUs: number;
+  }>;
+  readonly onAddSpeechCaptions?: (
+    documentId: string,
+    document: CaptionDocumentV1,
+    clipId: string,
+    clipStartUs: number,
+    clipEndUs: number,
+  ) => void;
+  readonly onOpenLocalAssets?: () => void;
 }) {
+  const generatedSpeechStartUsRef = useRef<number | undefined>(undefined);
   const [query, setQuery] = useState('');
   const [activeTab, setActiveTab] = useState<CaptionsTab>('transcript');
   const composition = project.compositions[project.rootCompositionId];
@@ -168,7 +210,10 @@ export function CaptionsPanel({
       // pointer-events:none, which would make the only recovery action dead.
       inactive={false}
       {...(idle
-        ? { note: 'Add a caption track to start transcription.' }
+        ? // The Generate tab makes a voice and needs no caption track; only the caption tabs do.
+          activeTab === 'generate'
+          ? {}
+          : { note: 'Add a caption track to start transcription.' }
         : transcriptionError !== undefined
           ? { note: `${transcriptionError} You can continue editing captions manually.` }
           : {})}
@@ -187,7 +232,7 @@ export function CaptionsPanel({
         </button>
       }
     >
-      {idle ? (
+      {idle && activeTab !== 'generate' ? (
         <div className="caption-empty-state">
           <p className="empty-hint">
             Add a caption track to begin editing, importing, or transcribing captions.
@@ -207,21 +252,157 @@ export function CaptionsPanel({
           </button>
         </div>
       ) : (
-        slots.map((slot, slotIndex) => (
-          <CaptionSlotEditor
-            key={`${slot.trackId}:${slot.clip.id}`}
-            slot={slot}
-            slotNumber={slotIndex + 1}
-            query={query}
-            activeTab={activeTab}
-            playheadUs={playheadUs}
-            onSeek={onSeek}
-            onDispatch={onDispatch}
-            onTranscribe={onTranscribe}
-            project={project}
-            transcriptionError={transcriptionError}
-          />
-        ))
+        <>
+          {slots.map((slot, slotIndex) => (
+            <CaptionSlotEditor
+              key={`${slot.trackId}:${slot.clip.id}`}
+              slot={slot}
+              slotNumber={slotIndex + 1}
+              query={query}
+              onClearQuery={() => setQuery('')}
+              activeTab={activeTab}
+              playheadUs={playheadUs}
+              onSeek={onSeek}
+              onDispatch={onDispatch}
+              onTranscribe={onTranscribe}
+              project={project}
+              transcriptionError={transcriptionError}
+            />
+          ))}
+          {activeTab === 'generate' &&
+            speechModelStatus !== undefined &&
+            onGenerateSpeech !== undefined &&
+            onAddSpeechCaptions !== undefined && (
+              <SpeechGenerationPanel
+                modelStatus={speechModelStatus}
+                referenceAssets={Object.values(project.assets)
+                  .filter((asset) => asset.kind === 'audio')
+                  .map((asset) => ({ id: asset.id, label: asset.displayName }))}
+                onGenerate={async (request, options) => {
+                  generatedSpeechStartUsRef.current = undefined;
+                  const result = await onGenerateSpeech(request, options);
+                  generatedSpeechStartUsRef.current = result.insertionStartUs;
+                  return result;
+                }}
+                {...(idle
+                  ? {}
+                  : {
+                      onAddCaptions: (timing: SpeechSynthesisTiming) => {
+                        const slot = slots[0];
+                        if (
+                          slot === undefined ||
+                          timing.timingSource === 'unavailable' ||
+                          timing.words.length === 0
+                        )
+                          return;
+                        const capturedStartUs = generatedSpeechStartUsRef.current;
+                        if (capturedStartUs === undefined) return;
+                        const placement = speechCaptionPlacement(
+                          slot.clip.startUs,
+                          slot.clip.durationUs,
+                          capturedStartUs,
+                          timing.durationUs,
+                        );
+                        const existingShiftUs = slot.clip.startUs - placement.clipStartUs;
+                        const documentIsShared = Object.values(project.compositions).some(
+                          (candidate) =>
+                            candidate.tracks.some((track) =>
+                              track.clips.some(
+                                (clip) =>
+                                  clip.kind === 'caption' &&
+                                  clip.id !== slot.clip.id &&
+                                  clip.captionDocumentId === slot.document.id,
+                              ),
+                            ),
+                        );
+                        const documentId =
+                          documentIsShared && existingShiftUs !== 0
+                            ? `captions-${
+                                typeof crypto !== 'undefined' &&
+                                typeof crypto.randomUUID === 'function'
+                                  ? crypto.randomUUID()
+                                  : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+                              }`
+                            : slot.document.id;
+                        const existingDocument: CaptionDocumentV1 = {
+                          ...slot.document,
+                          id: documentId,
+                          words: Object.fromEntries(
+                            Object.entries(slot.document.words).map(([id, word]) => [
+                              id,
+                              {
+                                ...word,
+                                startUs: word.startUs + existingShiftUs,
+                                endUs: word.endUs + existingShiftUs,
+                              },
+                            ]),
+                          ),
+                          segments: slot.document.segments.map((segment) => ({
+                            ...segment,
+                            startUs: segment.startUs + existingShiftUs,
+                            endUs: segment.endUs + existingShiftUs,
+                          })),
+                        };
+                        const words: Record<string, CaptionWordV1> = {};
+                        const generationId =
+                          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+                            ? crypto.randomUUID()
+                            : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+                        timing.words.forEach((word, index) => {
+                          const startUs = Math.max(
+                            0,
+                            Math.min(timing.durationUs - 1, word.startUs),
+                          );
+                          const endUs = Math.max(
+                            startUs + 1,
+                            Math.min(timing.durationUs, word.endUs),
+                          );
+                          if (
+                            word.endUs <= 0 ||
+                            word.startUs >= timing.durationUs ||
+                            endUs <= startUs
+                          )
+                            return;
+                          const id = `speech-word-${generationId}-${index + 1}`;
+                          words[id] = {
+                            id,
+                            text: word.text,
+                            startUs: placement.offsetUs + startUs,
+                            endUs: placement.offsetUs + endUs,
+                            ...(word.confidence === undefined
+                              ? {}
+                              : { confidence: word.confidence }),
+                          };
+                        });
+                        const generatedDocument = buildSpeechCaptionCues({
+                          ...existingDocument,
+                          words,
+                          segments: [],
+                        });
+                        const document = {
+                          ...generatedDocument,
+                          words: { ...existingDocument.words, ...generatedDocument.words },
+                          segments: [
+                            ...existingDocument.segments,
+                            ...generatedDocument.segments,
+                          ].sort(
+                            (left, right) =>
+                              left.startUs - right.startUs || left.endUs - right.endUs,
+                          ),
+                        };
+                        onAddSpeechCaptions(
+                          documentId,
+                          document,
+                          slot.clip.id,
+                          placement.clipStartUs,
+                          placement.clipEndUs,
+                        );
+                      },
+                    })}
+                onOpenLocalAssets={onOpenLocalAssets ?? (() => undefined)}
+              />
+            )}
+        </>
       )}
     </PanelShell>
   );
@@ -231,6 +412,7 @@ function CaptionSlotEditor({
   slot,
   slotNumber,
   query,
+  onClearQuery,
   activeTab,
   playheadUs,
   onSeek,
@@ -243,6 +425,7 @@ function CaptionSlotEditor({
   /** 1-based position of this caption track in the panel, shown instead of its id. */
   readonly slotNumber: number;
   readonly query: string;
+  readonly onClearQuery: () => void;
   readonly activeTab: CaptionsTab;
   readonly playheadUs: number;
   readonly onSeek: (timeUs: number) => void;
@@ -257,6 +440,9 @@ function CaptionSlotEditor({
   const [transcribingLanguage, setTranscribingLanguage] = useState<'fa-IR' | 'en-US'>();
   const transcriptionStatusId = useId();
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
+  const editorRefs = useRef(new Map<string, HTMLTextAreaElement>());
+  const suppressedBlurIds = useRef(new Set<string>());
+  const pendingFocus = useRef<{ readonly cueId: string; readonly caret: number } | null>(null);
   const direction = resolveCaptionDirection(document);
   const matches =
     query.trim().length === 0
@@ -265,6 +451,23 @@ function CaptionSlotEditor({
   const segments = document.segments.filter(
     (segment) => matches === undefined || matches.has(segment.id),
   );
+  useLayoutEffect(() => {
+    const target = pendingFocus.current;
+    if (target === null) return;
+    if (!segments.some((segment) => segment.id === target.cueId)) {
+      onClearQuery();
+      return;
+    }
+    const editor = editorRefs.current.get(target.cueId);
+    if (editor === undefined) return;
+    pendingFocus.current = null;
+    editor.focus();
+    editor.setSelectionRange(target.caret, target.caret);
+    for (const id of [...suppressedBlurIds.current]) {
+      if (!document.segments.some((segment) => segment.id === id))
+        suppressedBlurIds.current.delete(id);
+    }
+  }, [document, onClearQuery, segments]);
   const addSegment = () => {
     const startUs = Math.max(0, playheadUs - clip.startUs);
     onDispatch({
@@ -394,6 +597,112 @@ function CaptionSlotEditor({
       return next;
     });
   };
+  const clearDrafts = (...segmentIds: readonly string[]) => {
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const segmentId of segmentIds) delete next[segmentId];
+      return next;
+    });
+  };
+  const replaceDocumentForEdit = (
+    edit: CaptionCueEdit | undefined,
+    affectedIds: readonly string[],
+  ) => {
+    if (edit === undefined) return;
+    pendingFocus.current = { cueId: edit.focusCueId, caret: edit.caret };
+    // Only the currently focused editor is about to blur. The merge target is
+    // focused after the document update and must remain able to commit edits.
+    const activeEditor = window.document.activeElement;
+    for (const id of affectedIds) {
+      if (editorRefs.current.get(id) === activeEditor) suppressedBlurIds.current.add(id);
+      else suppressedBlurIds.current.delete(id);
+    }
+    clearDrafts(...affectedIds);
+    onDispatch({
+      label: 'Edit caption cues',
+      commands: [
+        {
+          type: 'caption.replaceDocument',
+          payload: { documentId: document.id, document: edit.document },
+        },
+      ],
+    });
+  };
+  const handleCueKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>, segmentId: string) => {
+    const composing = event.nativeEvent.isComposing || event.keyCode === 229;
+    if (composing) return;
+    if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      suppressedBlurIds.current.add(segmentId);
+      clearDrafts(segmentId);
+      event.currentTarget.blur();
+      return;
+    }
+    if (
+      event.key === 'Enter' &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+      suppressedBlurIds.current.add(segmentId);
+      commitSegmentText(segmentId, event.currentTarget.value);
+      event.currentTarget.blur();
+      return;
+    }
+    if (
+      event.key === 'Enter' &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+      const segment = document.segments.find((candidate) => candidate.id === segmentId);
+      if (segment === undefined) return;
+      const nextId = `caption-${crypto.randomUUID()}`;
+      const edit = splitCaptionCue(
+        document,
+        segmentId,
+        event.currentTarget.value,
+        event.currentTarget.selectionStart,
+        nextId,
+      );
+      replaceDocumentForEdit(edit, [segmentId]);
+      return;
+    }
+    if (
+      event.key === 'Backspace' &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.currentTarget.selectionStart === 0 &&
+      event.currentTarget.selectionEnd === 0
+    ) {
+      const segment = document.segments.find((candidate) => candidate.id === segmentId);
+      if (segment === undefined) return;
+      const previous = document.segments
+        .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+        .filter(
+          ({ candidate }) => candidate.id !== segmentId && candidate.startUs < segment.startUs,
+        )
+        .sort(
+          (left, right) =>
+            right.candidate.startUs - left.candidate.startUs ||
+            right.candidateIndex - left.candidateIndex,
+        )[0]?.candidate;
+      if (previous === undefined) return;
+      event.preventDefault();
+      const edit = mergeCaptionCueWithPrevious(
+        document,
+        segmentId,
+        event.currentTarget.value,
+        drafts[previous.id],
+      );
+      replaceDocumentForEdit(edit, [segmentId, previous.id]);
+    }
+  };
   return (
     <section aria-label={`Captions ${document.language}`}>
       <header className="captions-slot-header">
@@ -509,8 +818,11 @@ function CaptionSlotEditor({
                       {Math.round(confidence * 100)}%
                     </span>
                   )}
-                  <input
-                    type="text"
+                  <textarea
+                    ref={(element) => {
+                      if (element === null) editorRefs.current.delete(segment.id);
+                      else editorRefs.current.set(segment.id, element);
+                    }}
                     className="caption-source"
                     aria-label={`Caption text ${cueNumber}`}
                     title={source.length > 0 ? `Source: ${source}` : 'Manual caption text'}
@@ -524,21 +836,12 @@ function CaptionSlotEditor({
                         [segment.id]: value,
                       }));
                     }}
-                    onBlur={(event) => commitSegmentText(segment.id, event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') {
-                        setDrafts((current) => {
-                          const next = { ...current };
-                          delete next[segment.id];
-                          return next;
-                        });
-                        event.currentTarget.blur();
-                      } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-                        event.preventDefault();
-                        commitSegmentText(segment.id, event.currentTarget.value);
-                        event.currentTarget.blur();
-                      }
+                    rows={2}
+                    onBlur={(event) => {
+                      if (suppressedBlurIds.current.delete(segment.id)) return;
+                      commitSegmentText(segment.id, event.currentTarget.value);
                     }}
+                    onKeyDown={(event) => handleCueKeyDown(event, segment.id)}
                   />
                   {segment.textOverride !== undefined && (
                     <button
@@ -604,7 +907,10 @@ function CaptionSlotEditor({
             <span className="caption-status-dot" aria-hidden="true" />
             <div>
               <strong>Local transcription</strong>
-              <span>Requires a local Whisper endpoint configured in provider settings.</span>
+              <span>
+                Uses the local Whisper model when it is installed (see Speech-to-text setup below);
+                otherwise a local Whisper endpoint saved in provider settings.
+              </span>
             </div>
           </div>
           <div className="caption-generate-actions">

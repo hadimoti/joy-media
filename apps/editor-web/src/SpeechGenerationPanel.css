@@ -1,0 +1,231 @@
+.speech-generation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px;
+  color: var(--inspector-text, #e8eaf0);
+  font: 13px/1.45 var(--font-ui, Inter, sans-serif);
+}
+
+.speech-generation-panel h2,
+.speech-generation-panel h3,
+.speech-generation-panel p {
+  margin: 0;
+}
+
+.speech-generation-header,
+.speech-field-row,
+.speech-model-status-row,
+.speech-action-row,
+.speech-progress,
+.speech-setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.speech-generation-header,
+.speech-model-status-row,
+.speech-field-row,
+.speech-action-row {
+  justify-content: space-between;
+}
+
+.speech-generation-header h2 {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.speech-local-badge,
+.speech-state {
+  border: 1px solid var(--inspector-border, #414654);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--inspector-muted, #b1b5c2);
+  font-size: 12px;
+}
+
+.speech-state-ready {
+  color: var(--success, #8bd6a9);
+}
+
+.speech-state-setup-required {
+  color: var(--warning, #f3c66e);
+}
+
+.speech-state-incompatible {
+  color: var(--inspector-muted, #a1a5b2);
+}
+
+.speech-model-status,
+.speech-transcription-setup,
+.speech-consent-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--inspector-border, #414654);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--inspector-surface, #20232b);
+}
+
+.speech-model-status h3,
+.speech-transcription-setup h3,
+.speech-consent-group legend {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.speech-model-status-row small {
+  color: var(--inspector-muted, #a1a5b2);
+}
+
+.speech-setup-hint,
+.speech-transcription-setup p,
+.speech-consent-group small {
+  color: var(--inspector-muted, #b1b5c2);
+}
+
+.speech-setup-actions {
+  flex-wrap: wrap;
+}
+
+.speech-generation-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.speech-generation-panel label {
+  cursor: pointer;
+}
+
+.speech-generation-panel select,
+.speech-generation-panel textarea {
+  box-sizing: border-box;
+  min-width: 0;
+  border: 1px solid var(--inspector-border, #414654);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--inspector-text, #e8eaf0);
+  background: var(--inspector-input, #171920);
+  font: inherit;
+}
+
+.speech-field-row > label {
+  flex: 0 0 125px;
+}
+
+.speech-field-row > select {
+  flex: 1 1 auto;
+}
+
+.speech-text-label {
+  margin-bottom: -6px;
+  font-weight: 600;
+}
+
+.speech-generation-panel textarea {
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+  text-align: start;
+  unicode-bidi: plaintext;
+  ime-mode: auto;
+}
+
+.speech-consent-group {
+  margin: 0;
+}
+
+.speech-consent-group legend {
+  padding: 0 4px;
+}
+
+.speech-consent-group label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.speech-consent-group input {
+  flex: 0 0 auto;
+  margin-top: 3px;
+  accent-color: var(--accent, #7c81ff);
+}
+
+.speech-generation-panel button {
+  min-height: 32px;
+  border: 1px solid var(--inspector-border, #414654);
+  border-radius: 6px;
+  padding: 5px 10px;
+  color: var(--inspector-text, #e8eaf0);
+  background: var(--inspector-button, #303440);
+  font: inherit;
+  cursor: pointer;
+}
+
+.speech-generation-panel button:hover:not(:disabled) {
+  border-color: var(--accent, #7c81ff);
+}
+
+.speech-generation-panel button:focus-visible,
+.speech-generation-panel select:focus-visible,
+.speech-generation-panel textarea:focus-visible,
+.speech-generation-panel input:focus-visible {
+  outline: 2px solid var(--accent, #7c81ff);
+  outline-offset: 2px;
+}
+
+.speech-generation-panel button:disabled,
+.speech-generation-panel select:disabled,
+.speech-generation-panel textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.speech-live-status {
+  min-height: 1.4em;
+  color: var(--inspector-muted, #b1b5c2);
+}
+
+.speech-error {
+  color: var(--danger, #ff9a9a);
+}
+
+.speech-progress {
+  width: 100%;
+}
+
+.speech-progress progress {
+  flex: 1 1 auto;
+  height: 8px;
+  accent-color: var(--accent, #7c81ff);
+}
+
+.speech-progress span {
+  min-width: 3ch;
+  text-align: end;
+  color: var(--inspector-muted, #b1b5c2);
+  font-variant-numeric: tabular-nums;
+}
+
+.speech-action-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 420px) {
+  .speech-field-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .speech-field-row > label {
+    flex-basis: auto;
+  }
+}

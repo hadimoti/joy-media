@@ -1,0 +1,10 @@
+.caption-source {
+  display: block;
+  resize: vertical;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+  text-overflow: clip;
+  min-height: 2.5rem;
+  height: auto;
+}

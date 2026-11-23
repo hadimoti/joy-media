@@ -13,6 +13,16 @@ import type {
   ConsentCheckResult,
 } from '@joy-media/project-schema';
 
+export class VoiceConsentError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'VoiceConsentError';
+    this.code = code;
+  }
+}
+
 export interface EnrollVoiceParams {
   readonly displayName: string;
   readonly ownerUserId?: string;
@@ -40,6 +50,26 @@ export interface VoiceConsentManager {
   getConsentRecordsForVoice(voiceId: string): readonly ConsentRecord[];
   revokeConsent(consentId: string, reason: string): void;
   syncDeletionToProvider(voiceId: string, providerId: string): Promise<void>;
+}
+
+/** Enforce the same consent gate for every voice synthesis entry point. */
+export function requireVoiceConsent(
+  manager: VoiceConsentManager,
+  voiceId: string,
+  request: { readonly purpose: string; readonly userId: string },
+): NonNullable<ReturnType<VoiceConsentManager['getVoice']>> {
+  const voice = manager.getVoice(voiceId);
+  if (voice === undefined) {
+    throw new VoiceConsentError('VOICE_NOT_FOUND', `VOICE_NOT_FOUND: Voice "${voiceId}" not found`);
+  }
+  const check = manager.canUseVoice(voiceId, request);
+  if (!check.allowed) {
+    throw new VoiceConsentError(
+      'CONSENT_DENIED',
+      `CONSENT_DENIED: Cannot use voice "${voiceId}": ${check.reason ?? 'consent denied'}`,
+    );
+  }
+  return voice;
 }
 
 let idCounter = 0;

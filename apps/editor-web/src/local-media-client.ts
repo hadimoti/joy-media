@@ -60,6 +60,73 @@ export interface BrowserSpeechTranscript {
   };
 }
 
+export type SpeechLanguage = 'fa-IR' | 'en-US';
+export type SpeechModel =
+  'faster-whisper-large-v3-turbo' | 'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa';
+export type SpeechErrorCode =
+  'SETUP_REQUIRED' | 'SOURCE_UNAVAILABLE' | 'CONSENT_DENIED' | 'CANCELED';
+
+export interface SpeechWord {
+  readonly text: string;
+  readonly startUs: number;
+  readonly endUs: number;
+  readonly confidence?: number;
+}
+
+export interface SpeechTranscript {
+  readonly language: SpeechLanguage;
+  readonly words: readonly SpeechWord[];
+  readonly speakers: readonly [];
+  readonly provenance: {
+    readonly providerId: 'local';
+    readonly modelId: SpeechModel;
+    readonly createdAt: string;
+  };
+}
+
+export interface SpeechTranscribeV1 {
+  readonly schemaVersion: 1;
+  readonly language: SpeechLanguage;
+  readonly modelId: 'faster-whisper-large-v3-turbo';
+  readonly range?: { readonly startUs: number; readonly endUs: number };
+}
+
+export interface SpeechSynthesizeV1 {
+  readonly schemaVersion: 1;
+  readonly language: SpeechLanguage;
+  readonly modelId: 'kokoro-82m' | 'chatterbox-en' | 'chatterbox-fa';
+  readonly text: string;
+  readonly voiceId?: string;
+  readonly purpose?: 'general' | 'personal-noncommercial';
+}
+
+export interface SpeechConsentRequest {
+  readonly acknowledged: true;
+  readonly purpose: 'general' | 'personal-noncommercial';
+}
+
+export interface SpeechSynthesisTiming {
+  readonly durationUs: number;
+  readonly timingSource: 'native' | 'aligned' | 'unavailable';
+  readonly words: readonly SpeechWord[];
+}
+
+export interface SpeechModelStatus {
+  readonly modelId: SpeechModel;
+  readonly state: 'ready' | 'setup-required' | 'incompatible';
+  readonly reasonCode?: string;
+}
+
+export class DesktopSpeechError extends Error {
+  constructor(
+    readonly code: SpeechErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'DesktopSpeechError';
+  }
+}
+
 export interface BrowserSpeechSynthesis {
   readonly assetId: string;
   readonly mimeType: string;
@@ -80,6 +147,8 @@ interface DesktopJobView {
   readonly progress: number;
   readonly error?: string | null;
   readonly cancelRequested: boolean;
+  readonly errorCode?: string | null;
+  readonly speech?: SpeechSynthesisTiming;
   readonly derivative?: {
     readonly sha256: string;
     readonly bytes: number;
@@ -123,6 +192,8 @@ const MAX_LOCAL_WHISPER_MEDIA_BYTES = 200 * 1024 * 1024;
 const LOCAL_WHISPER_MEDIA_TOO_LARGE = 'Local Whisper media exceeds the 200 MB limit.';
 const MAX_LOCAL_DERIVATIVE_BYTES = 5 * 1024 * 1024 * 1024;
 const MAX_DERIVATIVE_CHUNK_BYTES = 4 * 1024 * 1024;
+const BUILT_IN_SPEECH_OUTPUT_REF_ID = 'joy-speech-output';
+let speechJobSequence = 0;
 
 function defaultBridge(): DesktopMediaBridge {
   return {
@@ -149,12 +220,168 @@ async function call<T>(bridge: DesktopMediaBridge, channel: string, payload?: un
     return (await bridge.invoke(channel, payload)) as T;
   } catch (error) {
     if (error instanceof BrowserControlPlaneRequestError) throw error;
+    const code =
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      typeof (error as { readonly code?: unknown }).code === 'string'
+        ? (error as { readonly code: string }).code
+        : undefined;
     throw new BrowserControlPlaneRequestError(
       500,
-      undefined,
+      code,
       error instanceof Error ? error.message : 'The local media request failed',
     );
   }
+}
+
+function speechErrorFrom(error: unknown): DesktopSpeechError | undefined {
+  const candidate = error as { readonly code?: unknown; readonly message?: unknown } | null;
+  const rawCode =
+    typeof candidate?.code === 'string'
+      ? candidate.code
+      : typeof error === 'string'
+        ? error
+        : typeof candidate?.message === 'string'
+          ? candidate.message
+          : '';
+  const code = rawCode.match(
+    /\b(SETUP_REQUIRED|SOURCE_UNAVAILABLE|CONSENT_DENIED|CANCELED)\b/,
+  )?.[1];
+  if (
+    code === 'SETUP_REQUIRED' ||
+    code === 'SOURCE_UNAVAILABLE' ||
+    code === 'CONSENT_DENIED' ||
+    code === 'CANCELED'
+  ) {
+    return new DesktopSpeechError(
+      code,
+      typeof candidate?.message === 'string' ? candidate.message : code,
+    );
+  }
+  return undefined;
+}
+
+function asSpeechWords(value: unknown): readonly SpeechWord[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  let previousStart = -1;
+  const words: SpeechWord[] = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return undefined;
+    const word = item as Record<string, unknown>;
+    if (
+      typeof word['text'] !== 'string' ||
+      word['text'].trim().length === 0 ||
+      !Number.isSafeInteger(word['startUs']) ||
+      !Number.isSafeInteger(word['endUs']) ||
+      (word['startUs'] as number) < 0 ||
+      (word['endUs'] as number) <= (word['startUs'] as number) ||
+      (word['startUs'] as number) < previousStart ||
+      (word['confidence'] !== undefined &&
+        (typeof word['confidence'] !== 'number' ||
+          !Number.isFinite(word['confidence']) ||
+          word['confidence'] < 0 ||
+          word['confidence'] > 1))
+    ) {
+      return undefined;
+    }
+    previousStart = word['startUs'] as number;
+    words.push({
+      text: word['text'],
+      startUs: word['startUs'] as number,
+      endUs: word['endUs'] as number,
+      ...(word['confidence'] === undefined ? {} : { confidence: word['confidence'] as number }),
+    });
+  }
+  return words;
+}
+
+function asSpeechTranscript(value: unknown, request: SpeechTranscribeV1): SpeechTranscript {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('The desktop returned an invalid speech transcript');
+  }
+  const transcript = value as Record<string, unknown>;
+  const provenanceValue = transcript['provenance'];
+  const provenance =
+    typeof provenanceValue === 'object' &&
+    provenanceValue !== null &&
+    !Array.isArray(provenanceValue)
+      ? (provenanceValue as Record<string, unknown>)
+      : undefined;
+  const words = asSpeechWords(transcript['words']);
+  const models: readonly SpeechModel[] = [
+    'faster-whisper-large-v3-turbo',
+    'kokoro-82m',
+    'chatterbox-en',
+    'chatterbox-fa',
+  ];
+  if (
+    transcript['language'] !== request.language ||
+    !Array.isArray(transcript['speakers']) ||
+    transcript['speakers'].length !== 0 ||
+    words === undefined ||
+    provenance === undefined ||
+    provenance['providerId'] !== 'local' ||
+    provenance['modelId'] !== request.modelId ||
+    !models.includes(request.modelId) ||
+    typeof provenance['createdAt'] !== 'string' ||
+    !Number.isFinite(Date.parse(provenance['createdAt']))
+  ) {
+    throw new Error('The desktop returned an invalid speech transcript');
+  }
+  return {
+    language: request.language,
+    words,
+    speakers: [],
+    provenance: {
+      providerId: 'local',
+      modelId: provenance['modelId'] as SpeechModel,
+      createdAt: provenance['createdAt'],
+    },
+  };
+}
+
+function throwIfSpeechAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
+}
+
+function asSynthesisTiming(value: unknown): SpeechSynthesisTiming {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('The desktop returned invalid speech timing');
+  }
+  const timing = value as Record<string, unknown>;
+  const words = asSpeechWords(timing['words']);
+  if (
+    !Number.isSafeInteger(timing['durationUs']) ||
+    (timing['durationUs'] as number) <= 0 ||
+    (timing['timingSource'] !== 'native' &&
+      timing['timingSource'] !== 'aligned' &&
+      timing['timingSource'] !== 'unavailable') ||
+    words === undefined ||
+    (timing['timingSource'] === 'unavailable' && words.length > 0)
+  ) {
+    throw new Error('The desktop returned invalid speech timing');
+  }
+  return {
+    durationUs: timing['durationUs'] as number,
+    timingSource: timing['timingSource'],
+    words,
+  };
+}
+
+function abortableDelay(signal: AbortSignal, milliseconds: number): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException('Speech job canceled', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, milliseconds);
+    const abort = (): void => {
+      clearTimeout(timer);
+      reject(new DOMException('Speech job canceled', 'AbortError'));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+  });
 }
 
 function abortableCall<T>(
@@ -301,7 +528,9 @@ export class BrowserControlPlaneClient {
   }
 
   async jobs(projectId: string): Promise<readonly BrowserJob[]> {
-    const tracked = [...trackedJobs.values()].filter((job) => job.projectId === projectId);
+    const tracked = [...trackedJobs.values()].filter(
+      (job) => job.projectId === projectId && !job.type.startsWith('speech.'),
+    );
     return Promise.all(
       tracked.map(async (job) =>
         toBrowserJob(
@@ -330,7 +559,8 @@ export class BrowserControlPlaneClient {
 
   async derivatives(projectId: string, assetId: string): Promise<readonly BrowserDerivative[]> {
     const tracked = [...trackedJobs.values()].filter(
-      (job) => job.projectId === projectId && job.assetId === assetId,
+      (job) =>
+        job.projectId === projectId && job.assetId === assetId && !job.type.startsWith('speech.'),
     );
     const views = await Promise.all(
       tracked.map(async (job) => {
@@ -620,6 +850,197 @@ export class BrowserControlPlaneClient {
     };
   }
 
+  async speechStatus(): Promise<{ readonly models: readonly SpeechModelStatus[] }> {
+    return call(this.bridge, 'desktop.media.speech.status');
+  }
+
+  private async runSpeechJob(
+    projectId: string,
+    jobType: 'speech.transcribe' | 'speech.synthesize',
+    refId: string | undefined,
+    payload: SpeechTranscribeV1 | SpeechSynthesizeV1,
+    consent: SpeechConsentRequest | undefined,
+    signal: AbortSignal | undefined,
+    onProgress: ((percent: number) => void) | undefined,
+  ): Promise<{ readonly editorJobId: string; readonly job: DesktopJobView }> {
+    throwIfSpeechAborted(signal);
+    let started: { readonly jobId: string };
+    try {
+      started = await call(this.bridge, 'desktop.media.speech.run', {
+        jobType,
+        ...(refId === undefined ? {} : { refId }),
+        payload,
+        ...(consent === undefined ? {} : { consent }),
+      });
+    } catch (error) {
+      throw speechErrorFrom(error) ?? error;
+    }
+    if (typeof started.jobId !== 'string' || started.jobId.length === 0) {
+      throw new Error('The desktop did not return a speech job ID');
+    }
+    const editorJobId = `speech-${++speechJobSequence}-${started.jobId}`;
+    trackedJobs.set(editorJobId, {
+      editorId: editorJobId,
+      projectId,
+      assetId: refId ?? BUILT_IN_SPEECH_OUTPUT_REF_ID,
+      type: jobType,
+      desktopJobId: started.jobId,
+    });
+
+    let cancelSent = false;
+    const cancelOnce = async (): Promise<void> => {
+      if (cancelSent) return;
+      cancelSent = true;
+      await call(this.bridge, 'desktop.media.job.cancel', { jobId: started.jobId }).catch(
+        () => undefined,
+      );
+    };
+    const onAbort = (): void => {
+      void cancelOnce();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) void cancelOnce();
+    try {
+      while (true) {
+        signal?.throwIfAborted();
+        let job: DesktopJobView;
+        try {
+          job = await (signal === undefined
+            ? call(this.bridge, 'desktop.media.job.status', { jobId: started.jobId })
+            : abortableCall(
+                this.bridge,
+                'desktop.media.job.status',
+                { jobId: started.jobId },
+                signal,
+              ));
+        } catch (error) {
+          throw speechErrorFrom(error) ?? error;
+        }
+        signal?.throwIfAborted();
+        if (Number.isFinite(job.progress)) {
+          onProgress?.(Math.max(0, Math.min(100, job.progress)));
+        }
+        if (job.status === 'done') return { editorJobId, job };
+        if (job.status === 'failed') {
+          const typed = speechErrorFrom({ code: job.errorCode, message: job.error });
+          throw typed ?? new Error(job.error || 'The local speech job failed');
+        }
+        if (job.status === 'cancelled')
+          throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
+        await (signal === undefined
+          ? new Promise<void>((resolve) => setTimeout(resolve, 250))
+          : abortableDelay(signal, 250));
+      }
+    } catch (error) {
+      if (signal?.aborted) {
+        await cancelOnce();
+        throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
+      }
+      throw speechErrorFrom(error) ?? error;
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+    }
+  }
+
+  async runLocalTranscription(
+    projectId: string,
+    assetId: string,
+    request: SpeechTranscribeV1,
+    signal?: AbortSignal,
+    onProgress?: (percent: number) => void,
+  ): Promise<SpeechTranscript> {
+    if (
+      request.schemaVersion !== 1 ||
+      (request.language !== 'fa-IR' && request.language !== 'en-US') ||
+      request.modelId !== 'faster-whisper-large-v3-turbo' ||
+      (request.range !== undefined &&
+        (!Number.isSafeInteger(request.range.startUs) ||
+          !Number.isSafeInteger(request.range.endUs) ||
+          request.range.startUs < 0 ||
+          request.range.endUs <= request.range.startUs))
+    ) {
+      throw new Error('Invalid local speech transcription request');
+    }
+    const { editorJobId } = await this.runSpeechJob(
+      projectId,
+      'speech.transcribe',
+      assetId,
+      request,
+      undefined,
+      signal,
+      onProgress,
+    );
+    throwIfSpeechAborted(signal);
+    let derivative: Blob;
+    try {
+      derivative = await this.derivativeBytes(projectId, editorJobId, editorJobId, signal);
+    } catch (error) {
+      if (signal?.aborted) throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
+      throw speechErrorFrom(error) ?? error;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await derivative.text()) as unknown;
+    } catch {
+      throw new Error('The desktop returned an invalid speech transcript derivative');
+    }
+    return asSpeechTranscript(parsed, request);
+  }
+
+  async runLocalSynthesis(
+    projectId: string,
+    request: SpeechSynthesizeV1,
+    options: {
+      readonly referenceAssetId?: string;
+      readonly consent?: SpeechConsentRequest;
+      readonly signal?: AbortSignal;
+      readonly onProgress?: (percent: number) => void;
+    },
+  ): Promise<{ readonly audio: Blob; readonly timing: SpeechSynthesisTiming }> {
+    if (
+      request.schemaVersion !== 1 ||
+      (request.language !== 'fa-IR' && request.language !== 'en-US') ||
+      (request.modelId !== 'kokoro-82m' &&
+        request.modelId !== 'chatterbox-en' &&
+        request.modelId !== 'chatterbox-fa') ||
+      typeof request.text !== 'string'
+    ) {
+      throw new Error('Invalid local speech synthesis request');
+    }
+    const graphemeCount = Array.from(
+      new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(request.text),
+    ).length;
+    if (
+      request.schemaVersion !== 1 ||
+      request.text.trim().length === 0 ||
+      graphemeCount > 1000 ||
+      new TextEncoder().encode(request.text).byteLength > 16 * 1024
+    ) {
+      throw new Error('Speech text must contain 1,000 graphemes or fewer and fit within 16 KiB');
+    }
+    const refId = options.referenceAssetId;
+    const { editorJobId, job } = await this.runSpeechJob(
+      projectId,
+      'speech.synthesize',
+      refId,
+      request,
+      options.consent,
+      options.signal,
+      options.onProgress,
+    );
+    if (job.speech === undefined) throw new Error('The desktop omitted speech synthesis timing');
+    const timing = asSynthesisTiming(job.speech);
+    throwIfSpeechAborted(options.signal);
+    let audio: Blob;
+    try {
+      audio = await this.derivativeBytes(projectId, editorJobId, editorJobId, options.signal);
+    } catch (error) {
+      if (options.signal?.aborted) throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
+      throw speechErrorFrom(error) ?? error;
+    }
+    return { audio, timing };
+  }
+
   async enqueueAssetThumbnail(
     _projectId: string,
     _id: string,
@@ -881,3 +1302,5 @@ export class BrowserControlPlaneClient {
     return undefined;
   }
 }
+
+export { BrowserControlPlaneClient as DesktopMediaClient };

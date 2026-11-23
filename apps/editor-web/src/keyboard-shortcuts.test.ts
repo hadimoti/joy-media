@@ -1,10 +1,13 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import {
   SHORTCUT_REFERENCE,
+  canUseEditorSpaceTarget,
   interactiveTargetOwnsAction,
   isEditableTarget,
   isInteractiveTarget,
   resolveShortcut,
+  timelineClipSpaceBehavior,
 } from './keyboard-shortcuts.js';
 
 const key = (
@@ -133,6 +136,75 @@ describe('isInteractiveTarget', () => {
     const button = { tagName: 'BUTTON', parentElement: null };
     const icon = { tagName: 'SPAN', parentElement: button };
     expect(isInteractiveTarget(icon as unknown as EventTarget)).toBe(true);
+  });
+});
+
+describe('canUseEditorSpaceTarget', () => {
+  it('allows ordinary editor surfaces and only the selected clip body', () => {
+    const ordinary = document.createElement('div');
+    expect(canUseEditorSpaceTarget(ordinary)).toBe(true);
+    const clip = document.createElement('div');
+    clip.setAttribute('role', 'button');
+    clip.setAttribute('aria-roledescription', 'timeline clip');
+    clip.setAttribute('aria-pressed', 'true');
+    clip.setAttribute('data-clip-id', 'clip-1');
+    expect(canUseEditorSpaceTarget(clip)).toBe(true);
+    clip.setAttribute('aria-pressed', 'false');
+    expect(canUseEditorSpaceTarget(clip)).toBe(false);
+  });
+
+  it('keeps trim handles, links, buttons, editable fields and dialogs out of transport', () => {
+    const clip = document.createElement('div');
+    clip.setAttribute('role', 'button');
+    clip.setAttribute('aria-roledescription', 'timeline clip');
+    clip.setAttribute('aria-pressed', 'true');
+    clip.setAttribute('data-clip-id', 'clip-1');
+    const trim = document.createElement('button');
+    trim.dataset.trimEdge = 'start';
+    clip.append(trim);
+    expect(canUseEditorSpaceTarget(trim)).toBe(false);
+    expect(canUseEditorSpaceTarget(document.createElement('button'))).toBe(false);
+    expect(canUseEditorSpaceTarget(document.createElement('a'))).toBe(false);
+    expect(canUseEditorSpaceTarget(document.createElement('input'))).toBe(false);
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    const dialogBody = document.createElement('div');
+    dialog.append(dialogBody);
+    expect(canUseEditorSpaceTarget(dialogBody)).toBe(false);
+    expect(canUseEditorSpaceTarget(null)).toBe(false);
+  });
+
+  it('lets the focused playhead ruler (a slider) play and pause, but nothing nested inside it', () => {
+    const ruler = document.createElement('div');
+    ruler.setAttribute('role', 'slider');
+    ruler.setAttribute('data-editor-space-surface', '');
+    // Without the marker a slider owns its keys.
+    const plainSlider = document.createElement('div');
+    plainSlider.setAttribute('role', 'slider');
+    expect(canUseEditorSpaceTarget(plainSlider)).toBe(false);
+    expect(canUseEditorSpaceTarget(ruler)).toBe(true);
+    const nestedButton = document.createElement('button');
+    ruler.append(nestedButton);
+    expect(canUseEditorSpaceTarget(nestedButton)).toBe(false);
+  });
+
+  it('still refuses Space from a ruler that sits inside a dialog', () => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    const ruler = document.createElement('div');
+    ruler.setAttribute('role', 'slider');
+    ruler.setAttribute('data-editor-space-surface', '');
+    dialog.append(ruler);
+    expect(canUseEditorSpaceTarget(ruler)).toBe(false);
+  });
+});
+
+describe('timelineClipSpaceBehavior', () => {
+  it('bubbles selected clip Space and selects unselected Space or Enter', () => {
+    expect(timelineClipSpaceBehavior(' ', true, false)).toBe('bubble');
+    expect(timelineClipSpaceBehavior(' ', false, false)).toBe('select');
+    expect(timelineClipSpaceBehavior('Enter', true, false)).toBe('select');
+    expect(timelineClipSpaceBehavior(' ', true, true)).toBe('native');
   });
 });
 

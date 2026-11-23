@@ -1,4 +1,14 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { realpathSync as fsRealpathSync } from 'node:fs';
+import type { realpathSync as RealpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -27,14 +37,21 @@ describe('job orchestrator', () => {
     return new LocalDatabase({ filePath });
   }
 
-  function orchestratorFor(db: LocalDatabase, maxLeaseMs = 3_000): JobOrchestrator {
-    return createJobOrchestrator({
+  function orchestratorFor(
+    db: LocalDatabase,
+    maxLeaseMs = 3_000,
+    removeDerivativeFile?: (path: string) => void,
+  ): JobOrchestrator {
+    const orchestrator = createJobOrchestrator({
       store: db.jobDispatch,
       now: () => at(clock),
       newId: () => `job-${++ids}`,
       newLeaseToken: () => `lease-${++tokens}`,
       maxLeaseMs,
+      ...(removeDerivativeFile === undefined ? {} : { removeDerivativeFile }),
     });
+    orchestrator.configureDerivativeCleanup(join(dir, 'derivatives'));
+    return orchestrator;
   }
 
   /** HTTP status a protocol refusal maps onto, or undefined when the call succeeds. */
@@ -88,6 +105,91 @@ describe('job orchestrator', () => {
         kind: 'derivative:mask',
       });
       expect(result).toMatchObject({ ok: false, code: 'SETUP_REQUIRED', jobType: 'mask.image' });
+    });
+
+    it('requires the speech capability and the exact engine flag before accepting a valid payload', () => {
+      const orchestrator = orchestratorFor(database);
+      const request = {
+        jobType: 'speech.transcribe',
+        refId: 'ref-audio',
+        kind: 'speech.transcribe',
+        payload: { schemaVersion: 1, language: 'fa-IR', modelId: 'faster-whisper-large-v3-turbo' },
+      };
+      expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
+      // A worker that only reports a synthesis engine cannot transcribe.
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
+      // The real worker advertises speech.transcribe once Whisper is verified; it has no Whisper model flag.
+      orchestrator.hello(WORKER, ['speech.transcribe']);
+      expect(orchestrator.submit(request)).toMatchObject({ ok: true });
+    });
+
+    it('still requires the exact engine flag for synthesis', () => {
+      const orchestrator = orchestratorFor(database);
+      const request = {
+        jobType: 'speech.synthesize',
+        kind: 'speech.synthesize',
+        refId: 'speech-output',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      };
+      orchestrator.hello(WORKER, ['speech.synthesize']);
+      expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.chatterbox-en']);
+      expect(orchestrator.submit(request)).toMatchObject({ ok: false, code: 'SETUP_REQUIRED' });
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      expect(orchestrator.submit(request)).toMatchObject({ ok: true });
+    });
+
+    it('requires a source for transcription and preserves optional synthesis references', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, [
+        'speech.transcribe',
+        'speech.model.faster-whisper-large-v3-turbo',
+        'speech.synthesize',
+        'speech.model.kokoro-82m',
+        'speech.model.chatterbox-en',
+      ]);
+      expect(
+        orchestrator.submit({
+          jobType: 'speech.transcribe',
+          refId: ' ',
+          kind: 'speech.transcribe',
+          payload: {
+            schemaVersion: 1,
+            language: 'en-US',
+            modelId: 'faster-whisper-large-v3-turbo',
+          },
+        }),
+      ).toMatchObject({ ok: false, code: 'PAYLOAD_INVALID' });
+      const selectedSource = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'voice-reference-a',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'chatterbox-en', text: 'Hello' },
+      });
+      expect(selectedSource).toMatchObject({ ok: true });
+      if (!selectedSource.ok) throw new Error('expected synthesis to be queued');
+      expect(orchestrator.lease(WORKER)?.refId).toBe('voice-reference-a');
+    });
+
+    it('rejects malformed speech payloads and accepts a valid synthesis payload', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const base = {
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+      };
+      expect(orchestrator.submit({ ...base, payload: { schemaVersion: 1 } })).toMatchObject({
+        ok: false,
+        code: 'PAYLOAD_INVALID',
+      });
+      expect(
+        orchestrator.submit({
+          ...base,
+          payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+        }),
+      ).toMatchObject({ ok: true });
     });
 
     it('queues picture and video mask jobs with their payload once the Worker advertises the capability', () => {
@@ -397,6 +499,40 @@ describe('job orchestrator', () => {
       });
     });
 
+    it('honors a pending cancellation when the late Worker failure is not labeled canceled', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const submitted = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      });
+      if (!submitted.ok) throw new Error('expected synthesis job');
+      const leased = orchestrator.lease(WORKER);
+      if (leased === undefined) throw new Error('expected a speech lease');
+      const derivativeDirectory = join(dir, 'derivatives');
+      mkdirSync(derivativeDirectory, { recursive: true });
+      const path = join(derivativeDirectory, `${submitted.jobId}-${'a'.repeat(16)}.wav`);
+      writeFileSync(path, 'wav');
+      orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
+        sha256: 'a'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
+      });
+
+      orchestrator.requestCancel(submitted.jobId);
+      orchestrator.fail(WORKER, submitted.jobId, leased.leaseToken, 'completion rejected');
+
+      expect(orchestrator.get(submitted.jobId)).toMatchObject({
+        status: 'cancelled',
+        error: CANCELLED_BY_USER,
+        derivative: undefined,
+      });
+      expect(existsSync(path)).toBe(false);
+    });
+
     it('refuses to cancel a finished job', () => {
       const orchestrator = orchestratorFor(database);
       const jobId = submitThumbnail(orchestrator);
@@ -437,6 +573,370 @@ describe('job orchestrator', () => {
         status: 'cancelled',
         error: CANCELLED_BY_USER,
       });
+    });
+
+    it('deletes an uploaded speech derivative when its lease expires', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const submitted = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      });
+      if (!submitted.ok) throw new Error('expected synthesis job');
+      const leased = orchestrator.lease(WORKER);
+      if (leased === undefined) throw new Error('expected a speech lease');
+      const derivativeDirectory = join(dir, 'derivatives');
+      mkdirSync(derivativeDirectory, { recursive: true });
+      const path = join(derivativeDirectory, `${submitted.jobId}-${'a'.repeat(16)}.wav`);
+      writeFileSync(path, 'wav');
+      orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
+        sha256: 'a'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
+      });
+      clock = 4_000;
+      expect(orchestrator.expireLeases()).toBe(1);
+      expect(orchestrator.get(submitted.jobId)?.status).toBe('failed');
+      expect(existsSync(path)).toBe(false);
+    });
+
+    it('retries a failed speech derivative deletion on the next sweep', () => {
+      let failFirstDelete = true;
+      const orchestrator = orchestratorFor(database, 3_000, (path) => {
+        if (failFirstDelete) {
+          failFirstDelete = false;
+          throw new Error('simulated transient delete failure');
+        }
+        rmSync(path);
+      });
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const submitted = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      });
+      if (!submitted.ok) throw new Error('expected synthesis job');
+      const leased = orchestrator.lease(WORKER);
+      if (leased === undefined) throw new Error('expected a speech lease');
+      const derivativeDirectory = join(dir, 'derivatives');
+      const path = join(derivativeDirectory, `${submitted.jobId}-${'b'.repeat(16)}.wav`);
+      writeFileSync(path, 'wav');
+      orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
+        sha256: 'b'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
+      });
+
+      orchestrator.requestCancel(submitted.jobId);
+      orchestrator.fail(WORKER, submitted.jobId, leased.leaseToken, 'canceled');
+      expect(orchestrator.get(submitted.jobId)).toMatchObject({
+        status: 'cancelled',
+        derivative: undefined,
+      });
+      expect(existsSync(path)).toBe(true);
+      expect(
+        JSON.parse(readFileSync(join(derivativeDirectory, 'pending-cleanup.json'), 'utf8')),
+      ).toEqual([{ jobId: submitted.jobId, fileName: `${submitted.jobId}-${'b'.repeat(16)}.wav` }]);
+      orchestrator.expireLeases();
+      expect(existsSync(path)).toBe(false);
+    });
+
+    it('retains an in-memory cleanup when persistence fails and writes it on the next sweep', () => {
+      let failDelete = true;
+      const orchestrator = orchestratorFor(database, 3_000, (file) => {
+        if (failDelete) throw new Error('temporary delete failure');
+        rmSync(file);
+      });
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const submitted = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      });
+      if (!submitted.ok) throw new Error('expected synthesis job');
+      const leased = orchestrator.lease(WORKER);
+      if (leased === undefined) throw new Error('expected a speech lease');
+      const directory = join(dir, 'derivatives');
+      const fileName = `${submitted.jobId}-${'9'.repeat(16)}.wav`;
+      const path = join(directory, fileName);
+      writeFileSync(path, 'wav');
+      orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
+        sha256: '9'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
+      });
+      mkdirSync(join(directory, 'pending-cleanup.json'));
+      orchestrator.requestCancel(submitted.jobId);
+      orchestrator.fail(WORKER, submitted.jobId, leased.leaseToken, 'canceled');
+      expect(existsSync(path)).toBe(true);
+      rmSync(join(directory, 'pending-cleanup.json'), { recursive: true });
+      orchestrator.expireLeases();
+      expect(JSON.parse(readFileSync(join(directory, 'pending-cleanup.json'), 'utf8'))).toEqual([
+        { jobId: submitted.jobId, fileName },
+      ]);
+      failDelete = false;
+      orchestrator.expireLeases();
+      expect(existsSync(path)).toBe(false);
+    });
+
+    it('retains and retries cleanup after a transient realpath error', () => {
+      const orchestrator = orchestratorFor(database);
+      const directory = join(dir, 'derivatives');
+      const fileName = `job-retry-${'8'.repeat(16)}.wav`;
+      const path = join(directory, fileName);
+      writeFileSync(path, 'wav');
+      writeFileSync(
+        join(directory, 'pending-cleanup.json'),
+        JSON.stringify([{ jobId: 'job-retry', fileName }]),
+      );
+      let failRealpath = true;
+      const restarted = createJobOrchestrator({
+        store: database.jobDispatch,
+        realpathSync: ((target) => {
+          if (failRealpath) {
+            failRealpath = false;
+            throw Object.assign(new Error('temporary I/O'), { code: 'EIO' });
+          }
+          return fsRealpathSync(target);
+        }) as typeof RealpathSync,
+      });
+      restarted.configureDerivativeCleanup(directory);
+      expect(existsSync(path)).toBe(true);
+      expect(
+        JSON.parse(readFileSync(join(directory, 'pending-cleanup.json'), 'utf8')),
+      ).toHaveLength(1);
+      failRealpath = false;
+      restarted.expireLeases();
+      expect(existsSync(path)).toBe(false);
+    });
+
+    it('queues a valid failed-job derivative when the initial cleanup check is transient', () => {
+      const directory = join(dir, 'derivatives');
+      mkdirSync(directory, { recursive: true });
+      let path = '';
+      let realpathFailures = 2;
+      const orchestrator = createJobOrchestrator({
+        store: database.jobDispatch,
+        realpathSync: ((target) => {
+          if (target === path && realpathFailures > 0) {
+            realpathFailures -= 1;
+            throw Object.assign(new Error('temporary I/O'), { code: 'EIO' });
+          }
+          return fsRealpathSync(target);
+        }) as typeof RealpathSync,
+      });
+      orchestrator.configureDerivativeCleanup(directory);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const submitted = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      });
+      if (!submitted.ok) throw new Error('expected synthesis job');
+      const fileName = `${submitted.jobId}-${'7'.repeat(16)}.wav`;
+      path = join(directory, fileName);
+      writeFileSync(path, 'wav');
+      const leased = orchestrator.lease(WORKER);
+      if (leased === undefined) throw new Error('expected a speech lease');
+      orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
+        sha256: '7'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
+      });
+
+      orchestrator.fail(WORKER, submitted.jobId, leased.leaseToken, 'failed');
+
+      expect(existsSync(path)).toBe(true);
+      expect(JSON.parse(readFileSync(join(directory, 'pending-cleanup.json'), 'utf8'))).toEqual([
+        { jobId: submitted.jobId, fileName },
+      ]);
+      orchestrator.expireLeases();
+      expect(existsSync(path)).toBe(false);
+    });
+
+    it('keeps a cleanup entry when resolving its configured directory returns ENOENT, then drops a missing target', () => {
+      const directory = join(dir, 'derivatives');
+      mkdirSync(directory, { recursive: true });
+      const fileName = `job-missing-dir-${'6'.repeat(16)}.wav`;
+      writeFileSync(
+        join(directory, 'pending-cleanup.json'),
+        JSON.stringify([{ jobId: 'job-missing-dir', fileName }]),
+      );
+      let directoryUnavailable = true;
+      const restarted = createJobOrchestrator({
+        store: database.jobDispatch,
+        realpathSync: ((target) => {
+          if (directoryUnavailable && target === directory) {
+            throw Object.assign(new Error('directory unavailable'), { code: 'ENOENT' });
+          }
+          return fsRealpathSync(target);
+        }) as typeof RealpathSync,
+      });
+      restarted.configureDerivativeCleanup(directory);
+      expect(JSON.parse(readFileSync(join(directory, 'pending-cleanup.json'), 'utf8'))).toEqual([
+        { jobId: 'job-missing-dir', fileName },
+      ]);
+      directoryUnavailable = false;
+      restarted.expireLeases();
+      expect(existsSync(join(directory, 'pending-cleanup.json'))).toBe(false);
+    });
+
+    it('never deletes a speech derivative outside the derivative directory', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const submitted = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      });
+      if (!submitted.ok) throw new Error('expected synthesis job');
+      const leased = orchestrator.lease(WORKER);
+      if (leased === undefined) throw new Error('expected a speech lease');
+      const path = join(dir, `${submitted.jobId}-${'c'.repeat(16)}.wav`);
+      writeFileSync(path, 'wav');
+      orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
+        sha256: 'c'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
+      });
+
+      orchestrator.requestCancel(submitted.jobId);
+      orchestrator.fail(WORKER, submitted.jobId, leased.leaseToken, 'canceled');
+
+      expect(existsSync(path)).toBe(true);
+    });
+
+    it('refuses a traversal path even when its normalized target is inside the configured directory', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const submitted = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      });
+      if (!submitted.ok) throw new Error('expected synthesis job');
+      const leased = orchestrator.lease(WORKER);
+      if (leased === undefined) throw new Error('expected a speech lease');
+      const directory = join(dir, 'derivatives');
+      const path = `${directory}\\..\\derivatives\\${submitted.jobId}-${'d'.repeat(16)}.wav`;
+      writeFileSync(path, 'wav');
+      orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
+        sha256: 'd'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
+      });
+      orchestrator.requestCancel(submitted.jobId);
+      orchestrator.fail(WORKER, submitted.jobId, leased.leaseToken, 'canceled');
+      expect(existsSync(path)).toBe(true);
+    });
+
+    it('refuses a derivative symlink that resolves outside the configured directory', ({
+      skip,
+    }) => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const submitted = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      });
+      if (!submitted.ok) throw new Error('expected synthesis job');
+      const leased = orchestrator.lease(WORKER);
+      if (leased === undefined) throw new Error('expected a speech lease');
+      const outside = join(dir, `${submitted.jobId}-${'e'.repeat(16)}.wav`);
+      const link = join(dir, 'derivatives', `${submitted.jobId}-${'e'.repeat(16)}.wav`);
+      writeFileSync(outside, 'wav');
+      try {
+        symlinkSync(outside, link, 'file');
+      } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+        if (!['EACCES', 'EPERM', 'ENOTSUP', 'UNKNOWN'].includes(code)) throw error;
+        skip('the operating system refused to create a file symlink');
+      }
+      orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
+        sha256: 'e'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path: link,
+      });
+      orchestrator.requestCancel(submitted.jobId);
+      orchestrator.fail(WORKER, submitted.jobId, leased.leaseToken, 'canceled');
+      expect(readFileSync(outside, 'utf8')).toBe('wav');
+    });
+
+    it('refuses a matching file in a sibling derivatives directory', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['speech.synthesize', 'speech.model.kokoro-82m']);
+      const submitted = orchestrator.submit({
+        jobType: 'speech.synthesize',
+        refId: 'speech-output',
+        kind: 'speech.synthesize',
+        payload: { schemaVersion: 1, language: 'en-US', modelId: 'kokoro-82m', text: 'Hello' },
+      });
+      if (!submitted.ok) throw new Error('expected synthesis job');
+      const leased = orchestrator.lease(WORKER);
+      if (leased === undefined) throw new Error('expected a speech lease');
+      const sibling = join(dir, 'sibling', 'derivatives');
+      mkdirSync(sibling, { recursive: true });
+      const path = join(sibling, `${submitted.jobId}-${'f'.repeat(16)}.wav`);
+      writeFileSync(path, 'wav');
+      orchestrator.recordDerivative(WORKER, submitted.jobId, leased.leaseToken, {
+        sha256: 'f'.repeat(64),
+        bytes: 3,
+        mimeType: 'audio/wav',
+        path,
+      });
+      orchestrator.requestCancel(submitted.jobId);
+      orchestrator.fail(WORKER, submitted.jobId, leased.leaseToken, 'canceled');
+      expect(existsSync(path)).toBe(true);
+    });
+
+    it('loads persisted cleanup records in a new orchestrator instance', () => {
+      const orchestrator = orchestratorFor(database);
+      const directory = join(dir, 'derivatives');
+      const jobId = 'job-restart';
+      const fileName = `${jobId}-${'1'.repeat(16)}.wav`;
+      const file = join(directory, fileName);
+      writeFileSync(file, 'wav');
+      writeFileSync(join(directory, 'pending-cleanup.json'), JSON.stringify([{ jobId, fileName }]));
+      const restarted = createJobOrchestrator({ store: database.jobDispatch });
+      restarted.configureDerivativeCleanup(directory);
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(join(directory, 'pending-cleanup.json'))).toBe(false);
+      void orchestrator;
+    });
+
+    it('discards a persisted record naming an outside file without deleting it', () => {
+      const orchestrator = orchestratorFor(database);
+      const directory = join(dir, 'derivatives');
+      const outside = join(dir, 'outside.wav');
+      writeFileSync(outside, 'keep');
+      writeFileSync(
+        join(directory, 'pending-cleanup.json'),
+        JSON.stringify([{ jobId: 'job-outside', fileName: `..\\outside.wav` }]),
+      );
+      const warnings: string[] = [];
+      const restarted = createJobOrchestrator({ store: database.jobDispatch });
+      restarted.configureDerivativeCleanup(directory, (message) => warnings.push(message));
+      expect(readFileSync(outside, 'utf8')).toBe('keep');
+      expect(existsSync(join(directory, 'pending-cleanup.json'))).toBe(false);
+      expect(warnings.every((message) => !message.includes(dir))).toBe(true);
+      void orchestrator;
     });
 
     it('keeps a dispatched job, its lease and its progress across a desktop restart', () => {

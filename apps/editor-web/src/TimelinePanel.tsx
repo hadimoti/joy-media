@@ -149,7 +149,7 @@ import {
   planClipLandings,
   type ClipLanding,
 } from './timeline-clip-interaction.js';
-import { scopedKeyTable } from './keyboard-shortcuts.js';
+import { scopedKeyTable, timelineClipSpaceBehavior } from './keyboard-shortcuts.js';
 import {
   TIMELINE_KEY_SCOPE,
   timelineToolKey,
@@ -569,7 +569,13 @@ function TimelineClip({
       }}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
-        if (event.key === 'Enter' || event.key === ' ') {
+        const spaceBehavior = timelineClipSpaceBehavior(
+          event.key,
+          selected,
+          event.altKey || event.ctrlKey || event.metaKey || event.shiftKey,
+        );
+        if (spaceBehavior === 'bubble' || spaceBehavior === 'native') return;
+        if (spaceBehavior === 'select') {
           event.preventDefault();
           onSelect(clip.id, event.metaKey || event.ctrlKey || event.shiftKey);
           return;
@@ -1679,6 +1685,12 @@ export function TimelinePanel({
   const selectedTrackView =
     selected === undefined ? undefined : tracks.find((t) => t.id === selected.track.id);
   const selectedLocked = selectedTrackView?.locked === true;
+  const canSplitAtPlayhead =
+    selected !== undefined &&
+    selectedTrackView !== undefined &&
+    !selectedLocked &&
+    playheadUs > selected.clip.startUs &&
+    playheadUs < selected.clip.startUs + selected.clip.durationUs;
   const canDuplicate = selected !== undefined && !selectedLocked;
   const canDelete = selected !== undefined && !selectedLocked;
 
@@ -3226,6 +3238,21 @@ export function TimelinePanel({
       ref={pointerDndRootRef}
       data-editor-pointer-dnd-root=""
       tabIndex={-1}
+      onPointerDownCapture={(event) => {
+        // A press on the empty timeline (lane, gaps) does not focus anything, so a toolbar button used a moment ago
+        // kept the focus and Space then pressed that button ("Back one second") instead of playing. Release such a
+        // button's focus when the press lands outside every control, so Space reaches the editor.
+        const target = event.target as HTMLElement;
+        if (
+          target.closest(
+            'button, a, input, textarea, select, [role="menu"], [role="menuitem"], [role="slider"], [contenteditable="true"], .timeline-clip',
+          ) !== null
+        )
+          return;
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active.closest('button, a, select') !== null)
+          active.blur();
+      }}
       onKeyDown={(event) => {
         if (event.key !== 'Delete' && event.key !== 'Backspace') return;
         // Shift+Delete is the ripple delete: the timeline's scoped keys own it.
@@ -3456,6 +3483,19 @@ export function TimelinePanel({
             }}
           >
             <TrashIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Split at playhead"
+            title="Split at playhead (S)"
+            disabled={!canSplitAtPlayhead}
+            onClick={() => {
+              if (!canSplitAtPlayhead || selected === undefined) return;
+              dispatchSplitAt(selected.track.id, selected.clip.id, playheadUs);
+            }}
+          >
+            <ScissorsIcon />
           </button>
         </div>
 
@@ -3887,6 +3927,10 @@ export function TimelinePanel({
                     style={{ minWidth: `${laneWidthPx}px` }}
                     onKeyDown={(event) => {
                       if (event.key !== 'Enter' && event.key !== ' ') return;
+                      // Only the lane itself is the "Insert media" button. A key from a clip, a trim handle or any
+                      // other control inside the lane bubbles up here: it is theirs (or the editor transport's, for
+                      // Space), so it must not be marked as handled and must not open the library.
+                      if (event.target !== event.currentTarget) return;
                       event.preventDefault();
                       handleAddFromLibrary();
                     }}

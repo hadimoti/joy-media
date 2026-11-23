@@ -2,7 +2,11 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { DeviceIdentity } from './runtime.js';
-import type { GpuPreviewFrameRequest, GpuPreviewFrameResponse } from '@joy-media/job-protocol';
+import type {
+  GpuPreviewFrameRequest,
+  GpuPreviewFrameResponse,
+  SpeechSynthesisTiming,
+} from '@joy-media/job-protocol';
 
 export interface WorkerSessionStore {
   loadWorkerSession(): string | undefined;
@@ -36,7 +40,10 @@ export interface WorkerJobResult {
     | 'mask.video'
     | 'text'
     | 'image'
-    | 'media.qc';
+    | 'media.qc'
+    | 'speech.transcribe'
+    | 'speech.synthesize';
+  readonly speech?: SpeechSynthesisTiming;
   readonly assetId?: string;
   /** The QC report of a `media.qc` job (ADR-0045). It travels in the result, not as a derivative file. */
   readonly report?: unknown;
@@ -75,6 +82,47 @@ export class WorkerSessionExpiredError extends Error {
     super('Worker session expired or was revoked');
     this.name = 'WorkerSessionExpiredError';
   }
+}
+
+/**
+ * A refused control-plane request. The local job API answers with a short fixed reason ({error:{message}}), for
+ * example "synthesis requires audio/wav"; keep it (single line, bounded) so a failure says why, not just the status.
+ */
+/**
+ * Plain words only: no backslashes, drive letters, URLs, quotes or long token-like runs. A single slash is allowed
+ * (media types such as "audio/wav"); two or more look like a path and are dropped.
+ */
+const SAFE_SERVER_REASON = /^[A-Za-z0-9 ,.()/-]{1,160}$/u;
+const looksLikePath = (text: string): boolean => (text.match(/\//gu)?.length ?? 0) > 1;
+
+export function requestFailure(response: {
+  readonly status: number;
+  readonly body: unknown;
+}): Error {
+  let reason = '';
+  const body = response.body;
+  if (typeof body === 'object' && body !== null) {
+    const error = (body as { readonly error?: unknown }).error;
+    const message =
+      typeof error === 'string'
+        ? error
+        : typeof error === 'object' && error !== null
+          ? (error as { readonly message?: unknown }).message
+          : undefined;
+    if (typeof message === 'string') {
+      const normalized = message.replace(/\s+/gu, ' ').trim();
+      // The local job API sends short fixed reasons. Anything else (a proxy page, a path, a credential-looking
+      // string) is dropped, so the error never carries text we did not write.
+      if (
+        SAFE_SERVER_REASON.test(normalized) &&
+        !looksLikePath(normalized) &&
+        !/[A-Za-z0-9]{32,}/u.test(normalized)
+      ) {
+        reason = `: ${normalized}`;
+      }
+    }
+  }
+  return new Error(`Worker control-plane request failed (${response.status})${reason}`);
 }
 
 /** A bounded request protects the daemon from hanging sockets and proxies. */
@@ -311,7 +359,7 @@ export class WorkerControlPlaneClient {
       this.options.sessionStore.clearWorkerSession();
       throw new WorkerSessionExpiredError();
     }
-    if (!response.ok) throw new Error(`Worker control-plane request failed (${response.status})`);
+    if (!response.ok) throw requestFailure(response);
     return response.body;
   }
 
@@ -323,7 +371,7 @@ export class WorkerControlPlaneClient {
     const response = await this.fetchJson(pathname, body);
     if (!response.ok) {
       if (!throwOnFailure && response.status === 403) return undefined;
-      throw new Error(`Worker control-plane request failed (${response.status})`);
+      throw requestFailure(response);
     }
     return response.body;
   }
