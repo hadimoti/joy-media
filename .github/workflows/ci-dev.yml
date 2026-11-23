@@ -73,7 +73,7 @@ jobs:
           - label: desktop-primary full
             project: desktop-primary
             spec: tests/e2e
-            workers: '2'
+            workers: '1'
             api_port: 4174
             web_port: 4173
           - label: desktop-compact responsive
