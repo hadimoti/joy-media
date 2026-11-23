@@ -87,6 +87,8 @@ These are built and tested in code. They were not yet confirmed in the running a
 - Smart guides and snapping on the Monitor.
 - The gear icon, the "Signed in." label and the usage limit wording in Joy Code.
 - The chat keeping your typed text and showing bold, italic and code formatting.
+- Exporting a project that holds only titles, and Add to timeline placing the clip at the playhead: built and tested in code; not yet run in the desktop app.
+- Speech subtitles, voice-over and the timeline controls were run in the desktop app on a scratch profile on 23 Nov. They have not been run on a clean install.
 
 ## Download and check
 
