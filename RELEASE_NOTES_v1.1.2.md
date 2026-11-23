@@ -4,6 +4,13 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 
 ## What is new
 
+### Speech on your PC
+
+- **Subtitles from speech.** The Captions panel can make subtitles from a voice recording on the timeline, in English or Persian. Recognition runs on your PC with the faster-whisper large-v3-turbo model. No account and no server are needed.
+- **Voice-over.** The Generate tab makes a voice from text on your PC. English voices use Kokoro (82M) or Chatterbox English. The Persian voice uses Chatterbox Persian Expressive.
+- **Reference voice.** Chatterbox can copy a voice from a short recording. Use a clean clip of 5 to 10 seconds, and only a voice you have the right to use. Put the clip on the timeline first, then choose it in the Generate tab.
+- **Credit and licence.** The Persian voice model is Chatterbox Persian Expressive by Ramin Mahmoodi, licensed CC-BY-NC-4.0 for non-commercial use. The Captions panel and the speech README credit it. The model files are not part of JOY Media.
+
 ### Asset Library
 
 - Library cards and the big preview show the picture itself, taken from the asset library folder. Before, they showed an icon. This works in the desktop app for pictures and videos.
@@ -18,6 +25,12 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 ### Timeline
 
 - Holding the left mouse button on a clip no longer sometimes turns the pointer into an arrow with a small plus and stops the drag. Clips, tracks and lanes no longer select text, and a clip cannot start a browser drag of its own.
+- **Split at the playhead** cuts the selected clip where the playhead is.
+- **Space** plays and pauses when the timeline or the Monitor has focus. It does not act while you type in a box or inside a dialog.
+- **Inspector numbers** can be typed or dragged. Each change is one Undo step.
+- **Captions:** in the caption text, Enter splits the caption at the cursor, Ctrl+Enter saves the text, and Backspace at the very start joins the caption to the one before.
+- **Tracks** have lock, hide, mute and solo buttons.
+- **Add to timeline** from the Media panel places the clip at the playhead, on the first track that is free there.
 
 ### Quality check
 
@@ -42,6 +55,11 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 
 - The command line says "usage limit" when a provider reaches its limit.
 
+## Fixes
+
+- **Title-only projects export.** A project that holds only titles now exports over the background. Before, the export refused it with "No playable visual clips are available for export".
+- **Add to timeline starts at the playhead.** Before, the clip went after the clips already on the first track.
+
 ## Under the hood
 
 - The release workflow was rebuilt without the old server-based test lanes. An offline smoke step for the Windows Sandbox test is in place.
@@ -56,6 +74,11 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 - **MiniMax video.** The video steps are tested against test servers only. A real video request reached MiniMax and was answered with "no balance or rate limited", because the Go plan credits do not cover pay-as-you-go video. A picture from MiniMax was made and placed on the timeline for real.
 - **Monitor menu.** The right-click menu on the Monitor has no Bring forward or Send backward yet. To change which layer is on top, move its track in the Timeline. Both items, and pressing Esc to cancel a title edit on the Monitor, are planned for a later version; for now Esc keeps the edit.
 - **MiniMax.** MiniMax models think before they answer. A very long thought can still use up the room, and then the chat gives no answer. The app now says so.
+- **Subtitle cues.** Each subtitle cue is one whole spoken part, so a long sentence stays one long cue. Cutting cues to a short length, and repairing Persian half-spaces, are not done yet.
+- **Reference voice.** A reference voice must be a clip on the timeline. A file that is only in the Asset Library cannot be picked yet.
+- **Speech set-up.** The speech engines and their model folders are not part of the installer in this release. The Captions and Generate panels say when something is missing.
+- **Persian voice licence.** The Persian voice model is for non-commercial use only (CC-BY-NC-4.0).
+- **Arabic final yeh.** In some Arabic titles, the final yeh may appear without its two dots in the default title font. This is not fixed in this release.
 
 ## Not yet checked on screen
 
