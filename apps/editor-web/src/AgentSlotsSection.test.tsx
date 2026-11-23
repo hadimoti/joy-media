@@ -307,7 +307,7 @@ describe('AgentSlotsSection', () => {
     expect(onUseSlot).toHaveBeenCalledWith(expect.objectContaining({ id: 'workhorse' }), profile);
   });
 
-  it('names a ChatGPT connection by its name, never by its id, and offers log out and log in again', async () => {
+  it('names a ChatGPT connection by its name, never by its id, and offers sign-out and log in again', async () => {
     window.joyDesktop = {
       channels: ['desktop.agent-slots.list'],
       invoke: vi.fn(async () => [slot({}), slot({ id: 'creative', label: 'Creative Brain' })]),
@@ -322,8 +322,8 @@ describe('AgentSlotsSection', () => {
     expect(options.find((option) => option.value === 'chatgpt-profile-1')?.textContent).toBe(
       'ChatGPT',
     );
-    expect(buttonNamed(panel, 'Log in again')).toBeDefined();
-    expect(buttonNamed(panel, 'Log out')).toBeDefined();
+    expect(buttonNamed(panel, 'Sign in again')).toBeDefined();
+    expect(buttonNamed(panel, 'Sign out')).toBeDefined();
     expect(buttonNamed(panel, 'Connect ChatGPT')).toBeUndefined();
   });
 
@@ -370,24 +370,24 @@ describe('AgentSlotsSection', () => {
     });
 
     await act(async () => {
-      buttonNamed(panel, 'Log out')?.click();
+      buttonNamed(panel, 'Sign out')?.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.sign-out', expect.anything());
     expect(panel.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'Log out of ChatGPT?',
+      'Sign out of ChatGPT?',
     );
-    await answerDialog(panel, 'Log out');
+    await answerDialog(panel, 'Sign out');
 
     expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.sign-out', {
       id: 'chatgpt-profile-1',
     });
     expect(onProfilesChanged).toHaveBeenCalled();
-    expect(panel.textContent).toContain('Logged out of ChatGPT.');
+    expect(panel.textContent).toContain('Signed out of ChatGPT.');
   });
 
-  it('does not log out when the owner declines the confirmation', async () => {
+  it('does not sign-out when the owner declines the confirmation', async () => {
     const invoke = vi.fn(async (channel: string) =>
       channel === 'desktop.agent-slots.list' ? [slot({})] : undefined,
     );
@@ -398,7 +398,7 @@ describe('AgentSlotsSection', () => {
     const panel = await render({ profiles: [chatGptProfile], onUseSlot: vi.fn() });
 
     await act(async () => {
-      buttonNamed(panel, 'Log out')?.click();
+      buttonNamed(panel, 'Sign out')?.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     await answerDialog(panel, 'Cancel');

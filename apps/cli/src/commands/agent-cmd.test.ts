@@ -191,7 +191,7 @@ describe('OAuth provider profiles', () => {
     expect(code).toBe(0);
     expect(signInOAuthProfileMock).toHaveBeenCalledTimes(1);
     const notice =
-      'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
+      'Sign-in uses a public app ID from another tool, and the provider may stop it at any time. An API key is the dependable way to connect.';
     expect(errors).toEqual([notice]);
     expect(order.indexOf(`stderr:${notice}`)).toBeLessThan(order.indexOf('sign-in'));
     expect(printed.join('\n')).toContain(
@@ -296,7 +296,7 @@ describe('OAuth provider profiles', () => {
       expect(errors.join('\n')).toContain(testCase.message);
     }
     expect(signInOAuthProfileMock).not.toHaveBeenCalled();
-    expect(errors.join('\n')).not.toContain('third-party public app');
+    expect(errors.join('\n')).not.toContain('public app ID from another tool');
   });
 
   it('no longer accepts the MiniMax-only --region flag', async () => {
@@ -600,7 +600,7 @@ describe('OAuth provider profiles', () => {
     expect(printed.join('\n')).toContain(
       'A remote CLI with no browser on that machine cannot complete it.',
     );
-    expect(errors.join('\n')).not.toContain('Signing in uses a third-party public app');
+    expect(errors.join('\n')).not.toContain('Sign-in uses a public app ID from another tool');
     expect(printed.join('\n')).not.toContain('chatgpt-access-secret');
     expect(printed.join('\n')).not.toContain('chatgpt-refresh-secret');
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();

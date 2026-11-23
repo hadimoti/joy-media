@@ -354,6 +354,12 @@ export async function toggleMaximizeDesktopWindow(): Promise<boolean> {
   return Boolean(isMax);
 }
 
+/** Toggles native fullscreen on the desktop host window. */
+export async function toggleFullscreenDesktopWindow(): Promise<boolean> {
+  const fullscreen = await requireBridge().invoke('desktop.window-fullscreen');
+  return Boolean(fullscreen);
+}
+
 /**
  * Closes the host application window.
  */

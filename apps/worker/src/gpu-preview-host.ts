@@ -10,7 +10,10 @@ import {
   canvasFontFamilyStack,
   serializeTextWrapRuntimeSource,
 } from '@joy-media/renderer-pixi/text-direction';
-import { layoutTextSpanOffsets } from '@joy-media/renderer-pixi';
+import {
+  serializeTextSpanLayoutRuntimeSource,
+  type layoutWrappedTextSpans as LayoutWrappedTextSpans,
+} from '@joy-media/renderer-pixi';
 import {
   WORKER_PROTOCOL_VERSION,
   type GpuPreviewFrameRequest,
@@ -20,6 +23,7 @@ import {
 const SOFTWARE_RENDERER = /swiftshader|software|llvmpipe|softpipe|mesa offscreen/i;
 const nodeRequire = createRequire(import.meta.url);
 const TEXT_WRAP_RUNTIME_SOURCE = serializeTextWrapRuntimeSource();
+const TEXT_SPAN_LAYOUT_RUNTIME_SOURCE = serializeTextSpanLayoutRuntimeSource();
 const GPU_TEXT_FONT_FILES = [
   {
     family: 'Inter Variable',
@@ -198,6 +202,7 @@ export class GpuPreviewHost {
       bitmaps: request.bitmaps ?? [],
       textStyles: collectGpuTextStyles(request.frame.nodes),
       textWrapRuntimeSource: TEXT_WRAP_RUNTIME_SOURCE,
+      textSpanLayoutRuntimeSource: TEXT_SPAN_LAYOUT_RUNTIME_SOURCE,
     });
     return {
       protocolVersion: WORKER_PROTOCOL_VERSION,
@@ -240,6 +245,7 @@ async function renderGpuFrame(input: {
   bitmaps: NonNullable<GpuPreviewFrameRequest['bitmaps']>;
   textStyles: Readonly<Record<string, GpuTextStyle>>;
   textWrapRuntimeSource: string;
+  textSpanLayoutRuntimeSource: string;
 }): Promise<{ width: number; height: number; pngBase64: string }> {
   const scale = input.quality === 'quarter' ? 0.25 : input.quality === 'half' ? 0.5 : 1;
   const wrapTextByWords = new Function(`return ${input.textWrapRuntimeSource};`)() as (
@@ -248,27 +254,9 @@ async function renderGpuFrame(input: {
     measure: (candidate: string, direction: 'ltr' | 'rtl') => number,
     direction: 'ltr' | 'rtl',
   ) => { text: string; lineDirections: readonly ('ltr' | 'rtl')[] };
-  const spanRunsForRange = (
-    spans: NonNullable<Extract<RenderNode, { kind: 'text' }>['spans']>,
-    start: number,
-    end: number,
-  ) => {
-    const runs: Array<{ text: string; color: (typeof spans)[number]['color'] }> = [];
-    let spanStart = 0;
-    for (const span of spans) {
-      const spanEnd = spanStart + span.text.length;
-      const overlapStart = Math.max(start, spanStart);
-      const overlapEnd = Math.min(end, spanEnd);
-      if (overlapStart < overlapEnd) {
-        runs.push({
-          text: span.text.slice(overlapStart - spanStart, overlapEnd - spanStart),
-          color: span.color,
-        });
-      }
-      spanStart = spanEnd;
-    }
-    return runs;
-  };
+  const layoutWrappedTextSpans = new Function(
+    'return ' + input.textSpanLayoutRuntimeSource,
+  )() as typeof LayoutWrappedTextSpans;
   const width = Math.max(1, Math.round(input.frame.viewport.width * scale));
   const height = Math.max(1, Math.round(input.frame.viewport.height * scale));
   const canvas = document.createElement('canvas');
@@ -420,19 +408,16 @@ async function renderGpuFrame(input: {
         const alignment = textStyle.lineAlignments[paragraphIndex] ?? 'left';
         context.direction = direction;
         context.textAlign = alignment;
-        const wrapped =
-          node.maxWidth === undefined
-            ? { text: paragraph, lineDirections: [direction] }
-            : wrapTextByWords(
-                paragraph,
-                node.maxWidth * scale,
-                (candidate, measuredDirection) => {
-                  context.direction = measuredDirection;
-                  return context.measureText(candidate).width;
-                },
-                direction,
-              );
-        const wrappedLines = wrapped.text.split('\n');
+        const wrapped = wrapTextByWords(
+          paragraph,
+          node.maxWidth === undefined ? Number.POSITIVE_INFINITY : node.maxWidth * scale,
+          (candidate, measuredDirection) => {
+            context.direction = measuredDirection;
+            return context.measureText(candidate).width;
+          },
+          direction,
+        );
+        const wrappedLines = wrapped.text.split(/\r\n|\n|\r/u);
         wrappedLines.forEach((line, lineIndex) => {
           lines.push(line);
           lineDirections.push(wrapped.lineDirections[lineIndex] ?? direction);
@@ -474,70 +459,63 @@ async function renderGpuFrame(input: {
         context.shadowOffsetX = node.shadow.offsetX * scale;
         context.shadowOffsetY = node.shadow.offsetY * scale;
       }
+      const spanLines =
+        node.spans !== undefined && node.spans.length > 1
+          ? layoutWrappedTextSpans(
+              node.text,
+              node.spans,
+              lines,
+              lineDirections,
+              lineAlignments,
+              (value, direction) => {
+                context.direction = direction;
+                return context.measureText(value).width;
+              },
+            )
+          : undefined;
       if (node.stroke !== undefined) {
         context.lineWidth = node.stroke.widthPx * scale;
-        context.strokeStyle = `rgba(${node.stroke.color.r},${node.stroke.color.g},${node.stroke.color.b},${node.stroke.color.a / 255})`;
-        let sourceCursor = 0;
+        context.strokeStyle =
+          'rgba(' +
+          [
+            node.stroke.color.r,
+            node.stroke.color.g,
+            node.stroke.color.b,
+            node.stroke.color.a / 255,
+          ].join(',') +
+          ')';
         lines.forEach((line, index) => {
-          context.direction = lineDirections[index] ?? 'ltr';
-          const align = lineAlignments[index] ?? 'left';
           const lineY = y + index * lineHeightPx;
-          if (node.spans === undefined || node.spans.length <= 1) {
-            context.textAlign = align;
+          const runs = spanLines?.[index];
+          if (runs === undefined) {
+            context.direction = lineDirections[index] ?? 'ltr';
+            context.textAlign = lineAlignments[index] ?? 'left';
             context.strokeText(line, x, lineY);
-            if (node.spans?.length === 1) sourceCursor += line.length;
             return;
           }
-          const sourceStart = node.text.indexOf(line, sourceCursor);
-          if (sourceStart < 0)
-            throw new Error(`GPU text span line could not be matched for ${node.id}`);
-          const runs = spanRunsForRange(node.spans, sourceStart, sourceStart + line.length);
-          sourceCursor = sourceStart + line.length;
-          const offsets = layoutTextSpanOffsets(
-            runs,
-            align,
-            context.direction,
-            (prefix, direction) => {
-              context.direction = direction;
-              return context.measureText(prefix).width;
-            },
-          );
           context.textAlign = 'left';
-          runs.forEach((run, runIndex) => {
-            context.strokeText(run.text, x + (offsets[runIndex] ?? 0), lineY);
-          });
+          for (const run of runs) {
+            context.direction = run.direction;
+            context.strokeText(run.text, x + run.x, lineY);
+          }
         });
       }
-      let sourceCursor = 0;
       lines.forEach((line, index) => {
-        context.direction = lineDirections[index] ?? 'ltr';
-        const align = lineAlignments[index] ?? 'left';
         const lineY = y + index * lineHeightPx;
-        if (node.spans === undefined || node.spans.length <= 1) {
-          context.textAlign = align;
-          if (node.spans?.length === 1) sourceCursor += line.length;
+        const runs = spanLines?.[index];
+        if (runs === undefined) {
+          context.direction = lineDirections[index] ?? 'ltr';
+          context.textAlign = lineAlignments[index] ?? 'left';
           context.fillText(line, x, lineY);
           return;
         }
-        const sourceStart = node.text.indexOf(line, sourceCursor);
-        if (sourceStart < 0)
-          throw new Error(`GPU text span line could not be matched for ${node.id}`);
-        const runs = spanRunsForRange(node.spans, sourceStart, sourceStart + line.length);
-        sourceCursor = sourceStart + line.length;
-        const offsets = layoutTextSpanOffsets(
-          runs,
-          align,
-          context.direction,
-          (prefix, direction) => {
-            context.direction = direction;
-            return context.measureText(prefix).width;
-          },
-        );
         context.textAlign = 'left';
-        runs.forEach((run, runIndex) => {
-          context.fillStyle = `rgba(${run.color.r},${run.color.g},${run.color.b},${run.color.a / 255})`;
-          context.fillText(run.text, x + (offsets[runIndex] ?? 0), lineY);
-        });
+        for (const run of runs) {
+          context.direction = run.direction;
+          context.fillStyle =
+            'rgba(' + [run.color.r, run.color.g, run.color.b, run.color.a / 255].join(',') + ')';
+          context.fillText(run.text, x + run.x, lineY);
+        }
       });
       context.restore();
       continue;

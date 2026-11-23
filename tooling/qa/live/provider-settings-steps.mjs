@@ -26,7 +26,7 @@ import { join, relative } from 'node:path';
 import { openMenu } from './steps.mjs';
 
 export const CONSENT_TEXT =
-  'I understand that custom endpoints may log requests according to their own policy.';
+  'I understand that custom services may log requests according to their own policy.';
 export const PUBLIC_ENDPOINT_URL = 'https://stub-public.invalid/v1';
 export const CONNECTION_NAME = 'QA stub';
 
@@ -218,7 +218,7 @@ export async function fetchModelsAndCheckMedia(page, ctx) {
   });
   await ui.checkMedia(dialog).click();
   await expectVisible(
-    dialog.getByText(/Media capability check complete for/u),
+    dialog.getByText(/Media support check complete for/u),
     'the media check result',
     45_000,
   );

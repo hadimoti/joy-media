@@ -1092,6 +1092,7 @@ export function JoyAgentSettingsDialog({
             </span>
             <div>
               <h2 id="joy-agent-settings-title">{SETTINGS_DIALOG.title}</h2>
+              <span className="joy-settings-header-sub">{SETTINGS_DIALOG.subtitle}</span>
             </div>
           </div>
           <button
@@ -1121,6 +1122,7 @@ export function JoyAgentSettingsDialog({
                   key={id}
                   type="button"
                   className={`button-secondary joy-settings-nav-item ${activeTab === id ? 'is-active' : ''}`}
+                  aria-current={activeTab === id ? 'page' : undefined}
                   onClick={() => setActiveTab(id)}
                 >
                   <span className="joy-settings-nav-icon">{icon}</span>
@@ -1136,6 +1138,7 @@ export function JoyAgentSettingsDialog({
             <div className="joy-settings-section-header">
               <span className="joy-settings-section-kicker">{activeTabMeta?.kicker ?? ''}</span>
               <h3 className="joy-settings-section-title">{activeTabMeta?.title ?? ''}</h3>
+              <p className="joy-settings-section-desc">{SETTINGS_PAGES[activeTab].description}</p>
             </div>
 
             {/* TAB 1: AI MODELS. The order a person works in: the status of the connection, the two
@@ -1644,6 +1647,7 @@ export function JoyAgentSettingsDialog({
 
                     {openAccordions['models-drawer'] && (
                       <div className="joy-accordion-content joy-model-drawer-content">
+                        <p className="joy-settings-hint-muted">{SETTINGS_MODELS.modelsHint}</p>
                         <div className="joy-model-drawer-header">
                           <div className="joy-model-drawer-search">
                             <input

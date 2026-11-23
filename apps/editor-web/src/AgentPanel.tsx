@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { TimelineContextMenu, type TimelineContextMenuState } from './TimelineContextMenu.js';
 import { buildReadOnlyTextMenuItems, buildTextFieldMenuItems } from './text-field-menu.js';
 import type { SpikeProject } from '@joy-media/project-schema';
@@ -138,7 +146,7 @@ import {
   revokeJoyAgentComposerHostLease,
   type JoyAgentComposerHostLease,
 } from './joy-agent/composer-host-lease.js';
-import type { JoyAgentPhase } from './joy-agent/protocol.js';
+import type { JoyAgentPhase, JoyAgentSafeEvent } from './joy-agent/protocol.js';
 import type { HostRpcHandlerContext } from './joy-agent/host-rpc.js';
 import {
   createJoyAgentRunController,
@@ -194,7 +202,12 @@ import { createJoyAgentProposalStagingHandler } from './joy-agent/edit-proposal-
 import { buildJoyAgentContextInput } from './joy-agent/context-input.js';
 import { createCreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-skill-editor-deps.js';
 import type { CreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-skill-editor-primitives.js';
-import { listCreativeSkills, runEditorCreativeSkill } from './joy-agent/entry-points.js';
+import {
+  JoyAgentTaskError,
+  listCreativeSkills,
+  runEditorCreativeSkill,
+} from './joy-agent/entry-points.js';
+import type { CreativeBriefRunOptions } from './joy-agent/entry-points.js';
 import type { CreativeSkillRunScope } from './joy-agent/skill-runner.js';
 import { BUILT_IN_LOOK_PACKS, type LookDefinition } from '@joy-media/motion-core';
 import { CONTENT_FONT_FAMILIES } from '@joy-media/project-schema';
@@ -323,6 +336,11 @@ const OPENROUTER_PRIVACY_POLICY_HREF = 'https://openrouter.ai/privacy';
 const NOOP_SUBSCRIBE = () => () => {};
 const NOOP_PRESENCE_SNAPSHOT = (): AgentPresenceState => EMPTY_AGENT_PRESENCE;
 const NOOP_PREVIEW_BUNDLE = (): AgentPreviewBundle | undefined => undefined;
+const CREATIVE_BRIEF_TARGET: JoyAgentTarget = {
+  panelId: 'agent',
+  sectionId: 'composer',
+  capability: 'creative-brief',
+};
 
 function sameObservationTransferAuthority(
   left: ObservationTransferAuthority | undefined,
@@ -399,6 +417,19 @@ export function selectActiveJoyAgentRunId(
   return undefined;
 }
 
+/** True only when a delayed Stop still names the run that currently owns the action. */
+export function isExpectedJoyAgentRun(
+  expectedRunId: string | undefined,
+  currentRunId: string | undefined,
+): boolean {
+  return expectedRunId !== undefined && expectedRunId === currentRunId;
+}
+
+/** All Joy Code launch surfaces share this one active-run admission check. */
+export function canStartJoyAgentSurfaceRun(activeRunId: string | undefined): boolean {
+  return activeRunId === undefined;
+}
+
 interface PendingPlan {
   readonly runId: string;
   readonly threadId: string;
@@ -439,6 +470,8 @@ export interface AgentPanelCommand {
   readonly serial: number;
   readonly type: AgentPanelCommandType;
   readonly capability?: ComposerCapability;
+  /** Stop is honored only while this exact run still owns the panel. */
+  readonly runId?: string;
 }
 
 /**
@@ -626,7 +659,10 @@ export function AgentPanel({
   readonly settings: AgentPolicyPreferences;
   readonly command?: AgentPanelCommand;
   readonly creativeBriefOptedIn?: boolean;
-  readonly creativeBriefRunner?: (requestText: string) => Promise<CreativeBriefV1>;
+  readonly creativeBriefRunner?: (
+    requestText: string,
+    options?: CreativeBriefRunOptions,
+  ) => Promise<CreativeBriefV1>;
   readonly onCreativeBriefOptIn?: () => Promise<void>;
   readonly joyAgentEngineClient?: JoyAgentEngineClient;
   /** App-owned lifecycle evidence; a test-only fallback is used when omitted. */
@@ -1904,6 +1940,8 @@ export function AgentPanel({
     [],
   );
 
+  const stopFromMenu = useEffectEvent((runId: string) => stopActiveRun(runId, 'agent-menu-stop'));
+
   useEffect(() => {
     if (command === undefined || handledCommandRef.current === command.serial) return;
     handledCommandRef.current = command.serial;
@@ -1911,57 +1949,8 @@ export function AgentPanel({
       if (command.capability !== undefined) setComposerCapability(command.capability);
       return;
     }
-    if (command.type === 'stop' && pending !== undefined) {
-      pending.qcRepair?.resolve(false);
-      auditRef.current.record({
-        planId: pending.plan.planId,
-        action: 'plan-rejected',
-        userId: 'local-owner',
-        metadata: { source: 'agent-menu-stop' },
-      });
-      appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
-      updateThreadStatus(pending.threadId, 'draft');
-      setPending(undefined);
-      clearAgentPreviewForSourceRun(pending.runId);
-      agentPresenceStore?.clear();
-      setAgentPhase('cancelled');
-      return;
-    }
-    const commandRunId = selectActiveJoyAgentRunId(agentRunId, presenceState, runLifecycle.run);
-    if (command.type === 'stop') {
-      const recipeCancelled = cancelRecipeInvocation(commandRunId);
-      if (!recipeCancelled && commandRunId === undefined) return;
-      if (!recipeCancelled && commandRunId !== undefined) {
-        cancelRunLifecycle(commandRunId);
-        if (joyAgentEngineClient !== undefined) void joyAgentEngineClient.cancel(commandRunId);
-      }
-      // Stop revokes activeModelRunIdRef before the async engine iterator can
-      // deliver its terminal event, so keep the confirmation on the action.
-      if (recipeCancelled || commandRunId !== undefined) {
-        appendMessage(activeThread.id, 'assistant', 'JOY run cancelled. No edits were applied.');
-      }
-      activeModelRunIdRef.current = undefined;
-      discardPreparedModelChange(commandRunId);
-      agentPresenceStore?.clear();
-      clearAgentPreviewForSourceRun(commandRunId);
-      setAgentPhase('cancelled');
-    }
-    setPending(undefined);
-  }, [
-    activeThread.id,
-    agentPresenceStore,
-    agentPreviewStore,
-    agentRunId,
-    cancelRunLifecycle,
-    cancelRecipeInvocation,
-    clearAgentPreviewForSourceRun,
-    command,
-    discardPreparedModelChange,
-    joyAgentEngineClient,
-    pending,
-    presenceState,
-    runLifecycle.run,
-  ]);
+    if (command.type === 'stop' && command.runId !== undefined) stopFromMenu(command.runId);
+  }, [command]);
 
   function appendMessage(_threadId: string, role: 'user' | 'assistant', body: string): void {
     const now = new Date().toISOString();
@@ -2256,6 +2245,106 @@ export function AgentPanel({
     });
   }
 
+  const handleCreativeBriefRunStart = useCallback(
+    (runId: string): void => {
+      if (!canStartJoyAgentSurfaceRun(activeModelRunIdRef.current)) {
+        void joyAgentEngineClient?.cancel(runId);
+        throw new JoyAgentTaskError('cancelled', 'Another JOY run already owns the workspace.');
+      }
+      activeModelRunIdRef.current = runId;
+      setAgentRunId(runId);
+      setAgentPhase('connecting');
+      agentPresenceStore?.beginRun(runId, latestSessionRef.current.historyCursorSequence);
+      agentPresenceStore?.dispatch({
+        protocolVersion: 1,
+        runId,
+        seq: 0,
+        at: new Date().toISOString(),
+        revision: latestSessionRef.current.historyCursorSequence,
+        kind: 'activity',
+        phase: 'connecting',
+        targets: [CREATIVE_BRIEF_TARGET],
+      });
+    },
+    [agentPresenceStore, joyAgentEngineClient],
+  );
+  const handleCreativeBriefRunEvent = useCallback(
+    (runId: string, event: JoyAgentSafeEvent): void => {
+      if (
+        activeModelRunIdRef.current !== runId ||
+        event.runId !== runId ||
+        event.phase === 'completed' ||
+        event.phase === 'failed' ||
+        event.phase === 'cancelled' ||
+        event.phase === 'awaiting-approval'
+      )
+        return;
+      setAgentPhase(event.phase);
+      agentPresenceStore?.dispatch({
+        protocolVersion: 1,
+        runId,
+        seq: event.seq,
+        at: event.at,
+        revision: latestSessionRef.current.historyCursorSequence,
+        kind: event.phase === 'planning' || event.phase === 'previewing' ? 'preview' : 'activity',
+        phase: event.phase,
+        targets: [CREATIVE_BRIEF_TARGET],
+        ...(event.progress === undefined ? {} : { progress: event.progress }),
+      });
+    },
+    [agentPresenceStore],
+  );
+  const handleCreativeBriefRunTerminal = useCallback(
+    (runId: string, status: 'completed' | 'failed' | 'cancelled'): void => {
+      if (activeModelRunIdRef.current !== runId) return;
+      const current = agentPresenceStore?.getState();
+      const phase = status;
+      agentPresenceStore?.dispatch({
+        protocolVersion: 1,
+        runId,
+        seq: Math.max(0, current?.runId === runId ? current.seq + 1 : 0),
+        at: new Date().toISOString(),
+        revision: latestSessionRef.current.historyCursorSequence,
+        kind: status,
+        phase,
+        targets: [CREATIVE_BRIEF_TARGET],
+      });
+      activeModelRunIdRef.current = undefined;
+      setAgentRunId((currentRunId) => (currentRunId === runId ? undefined : currentRunId));
+      setAgentPhase(status);
+    },
+    [agentPresenceStore],
+  );
+  const runCreativeBriefForPanel = useCallback(
+    (requestText: string, options?: CreativeBriefRunOptions): Promise<CreativeBriefV1> => {
+      if (creativeBriefRunner === undefined)
+        return Promise.reject(
+          new JoyAgentTaskError('failed', 'No Creative Brief runner is configured.'),
+        );
+      if (pending !== undefined || !canStartJoyAgentSurfaceRun(activeModelRunIdRef.current))
+        return Promise.reject(
+          new JoyAgentTaskError('cancelled', 'Another JOY run already owns the workspace.'),
+        );
+      let runId: string | undefined;
+      return creativeBriefRunner(requestText, {
+        ...(options?.signal === undefined ? {} : { signal: options.signal }),
+        isCancelled: () =>
+          options?.isCancelled?.() === true ||
+          (runId !== undefined && activeModelRunIdRef.current !== runId),
+        onRunStart: (startedRunId) => {
+          runId = startedRunId;
+          options?.onRunStart?.(startedRunId);
+        },
+        onEvent: (event) => {
+          if (runId === undefined) return;
+          handleCreativeBriefRunEvent(runId, event);
+          options?.onEvent?.(event);
+        },
+      });
+    },
+    [creativeBriefRunner, handleCreativeBriefRunEvent, pending],
+  );
+
   const handOffCreativeBrief = useCallback(
     (brief: CreativeBriefV1): void => {
       const threadId = conversation.id;
@@ -2400,7 +2489,12 @@ export function AgentPanel({
 
   function submitPrompt(prompt: string) {
     const body = prompt.trim().slice(0, MAX_COMPOSER_PROMPT_CHARS);
-    if (body.length === 0 || thinkingThreadId !== undefined) return;
+    if (
+      body.length === 0 ||
+      thinkingThreadId !== undefined ||
+      !canStartJoyAgentSurfaceRun(activeModelRunIdRef.current)
+    )
+      return;
     const threadId = activeThread.id;
     if (CREDENTIAL_LIKE_PROMPT.test(body)) {
       appendMessage(
@@ -3208,6 +3302,7 @@ export function AgentPanel({
             // adapter rejects the draft.
             if (!awaitingPreviewRender) agentPresenceStore?.dispatch(presenceEvent);
             if (event.phase === 'completed') {
+              activeModelRunIdRef.current = undefined;
               const generationHandoff = generationHandoffFromResult(event.result);
               const pendingGeneration =
                 generationHandoff === undefined
@@ -3336,10 +3431,46 @@ export function AgentPanel({
     clearAgentPreviewForSourceRun(pending.runId);
   }
 
+  function stopActiveRun(
+    expectedRunId: string,
+    source: 'agent-menu-stop' | 'composer-stop' = 'composer-stop',
+  ) {
+    if (!isExpectedJoyAgentRun(expectedRunId, pending?.runId ?? activeRunId)) return;
+    if (pending !== undefined) {
+      pending.qcRepair?.resolve(false);
+      auditRef.current.record({
+        planId: pending.plan.planId,
+        action: 'plan-rejected',
+        userId: 'local-owner',
+        metadata: { source },
+      });
+      appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
+      updateThreadStatus(pending.threadId, 'draft');
+      setPending(undefined);
+      clearAgentPreviewForSourceRun(pending.runId);
+      agentPresenceStore?.clear();
+      setAgentPhase('cancelled');
+      return;
+    }
+    if (!cancelRecipeInvocation(expectedRunId)) {
+      if (joyAgentEngineClient === undefined) return;
+      cancelRunLifecycle(expectedRunId);
+      void joyAgentEngineClient.cancel(expectedRunId);
+    }
+    // Revoking the active run prevents its async iterator from also acknowledging Stop.
+    appendMessage(activeThread.id, 'assistant', 'JOY run cancelled.');
+    activeModelRunIdRef.current = undefined;
+    discardPreparedModelChange(expectedRunId);
+    setAgentPhase('cancelled');
+    clearAgentPreviewForSourceRun(expectedRunId);
+    agentPresenceStore?.clear();
+  }
+
   async function runRecipe(skillId: string): Promise<void> {
     if (
       recipeRunningId !== undefined ||
       recipeInvocationRef.current !== undefined ||
+      !canStartJoyAgentSurfaceRun(activeModelRunIdRef.current) ||
       thinkingThreadId !== undefined ||
       modelView !== undefined ||
       pending !== undefined ||
@@ -3485,6 +3616,7 @@ export function AgentPanel({
   }
 
   async function runLook(request: LivingLooksRunInput): Promise<void> {
+    if (!canStartJoyAgentSurfaceRun(activeModelRunIdRef.current)) return;
     if (request.kind === 'detach') {
       detachLook(request.instanceId);
       return;
@@ -3492,6 +3624,7 @@ export function AgentPanel({
     if (
       lookRunningId !== undefined ||
       recipeRunningId !== undefined ||
+      !canStartJoyAgentSurfaceRun(activeModelRunIdRef.current) ||
       thinkingThreadId !== undefined ||
       modelView !== undefined ||
       pending !== undefined
@@ -3706,6 +3839,7 @@ export function AgentPanel({
       !isAgentLookRunnerReady ||
       lookRunningId !== undefined ||
       recipeRunningId !== undefined ||
+      !canStartJoyAgentSurfaceRun(activeModelRunIdRef.current) ||
       thinkingThreadId !== undefined ||
       modelView !== undefined ||
       pending !== undefined
@@ -3894,8 +4028,9 @@ export function AgentPanel({
       });
     } catch (error) {
       if (isTerminalPreparedChangeError(error)) {
-        discardPreparedModelChange(sourceRunIdForPreparedPlan(prepared.planId));
-        void joyAgentEngineClient?.cancel(sourceRunIdForPreparedPlan(prepared.planId));
+        discardPreparedModelChange(sourceRunId);
+        if (activeModelRunIdRef.current === sourceRunId) activeModelRunIdRef.current = undefined;
+        void joyAgentEngineClient?.cancel(sourceRunId);
       }
       finishRecipeInvocation(sourceRunId);
       if (lifecycleRun !== undefined)
@@ -4258,59 +4393,6 @@ export function AgentPanel({
           }
         }}
       >
-        {/* A failed run is shown by its failure card in the chat, not by this strip. */}
-        {liveAgentPhase !== undefined && liveAgentPhase !== 'failed' && (
-          <div
-            className={`joy-agent-live-status is-${liveAgentPhase}`}
-            role="status"
-            aria-live="polite"
-          >
-            <span className="joy-agent-live-mark" aria-hidden="true" />
-            <strong>
-              {liveAgentPhase === 'awaiting-approval'
-                ? 'Needs approval'
-                : `JOY ${liveAgentPhase.replaceAll('-', ' ')}`}
-            </strong>
-            <span>
-              {liveAgentPhase === 'previewing' || liveAgentPhase === 'planning'
-                ? 'Previewing changes in the editor'
-                : 'Live engine activity'}
-            </span>
-            {pending === undefined &&
-              (liveAgentPhase === 'thinking' ||
-                liveAgentPhase === 'connecting' ||
-                liveAgentPhase === 'planning' ||
-                liveAgentPhase === 'previewing') &&
-              joyAgentEngineClient !== undefined && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const recipeCancelled = cancelRecipeInvocation(activeRunId);
-                    if (!recipeCancelled && activeRunId !== undefined) {
-                      cancelRunLifecycle(activeRunId);
-                      void joyAgentEngineClient.cancel(activeRunId);
-                    }
-                    // Stop revokes activeModelRunIdRef before the async engine iterator can
-                    // deliver its terminal event, so keep the confirmation on the action.
-                    if (recipeCancelled || activeRunId !== undefined) {
-                      appendMessage(
-                        activeThread.id,
-                        'assistant',
-                        'JOY run cancelled. No edits were applied.',
-                      );
-                    }
-                    activeModelRunIdRef.current = undefined;
-                    discardPreparedModelChange(activeRunId);
-                    setAgentPhase('cancelled');
-                    clearAgentPreviewForSourceRun(activeRunId);
-                    agentPresenceStore?.clear();
-                  }}
-                >
-                  Stop
-                </button>
-              )}
-          </div>
-        )}
         <section
           className={`joy-code-composer is-${composerCapability} ${
             liveAgentBusy ? 'is-agent-busy' : ''
@@ -4511,7 +4593,14 @@ export function AgentPanel({
               noModelConnected={capability === undefined}
               {...(onOpenSettings === undefined ? {} : { onConnectModel: onOpenSettings })}
               {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
-              {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
+              {...(creativeBriefRunner === undefined ? {} : { runBrief: runCreativeBriefForPanel })}
+              onRunStart={handleCreativeBriefRunStart}
+              onRunTerminal={handleCreativeBriefRunTerminal}
+              {...(activeRunId !== undefined &&
+              presenceState.runId === activeRunId &&
+              presenceState.targets.some((target) => target.capability === 'creative-brief')
+                ? { onStop: (runId: string) => stopActiveRun(runId) }
+                : {})}
               embedded
             />
           </div>
@@ -5064,21 +5153,45 @@ export function AgentPanel({
                 <button
                   type="button"
                   className="joy-code-send"
+                  data-agent-action={liveAgentBusy && activeRunId !== undefined ? 'stop' : 'submit'}
                   aria-label={
-                    isThinking
-                      ? 'Joy Code is thinking'
-                      : pending === undefined
-                        ? 'Send message'
-                        : 'Stop current plan'
+                    liveAgentBusy && activeRunId !== undefined
+                      ? `Stop Joy Code ${liveAgentPhase ?? 'run'}`
+                      : isThinking
+                        ? 'Joy Code is processing'
+                        : pending === undefined
+                          ? 'Send message'
+                          : 'Stop current plan'
                   }
-                  title={isThinking ? 'Thinking…' : pending === undefined ? 'Send' : 'Stop'}
-                  disabled={isThinking || (pending === undefined && draft.trim().length === 0)}
+                  title={
+                    liveAgentBusy && activeRunId !== undefined
+                      ? 'Stop'
+                      : isThinking
+                        ? 'Processing…'
+                        : pending === undefined
+                          ? 'Send'
+                          : 'Stop'
+                  }
+                  disabled={
+                    (isThinking && !(liveAgentBusy && activeRunId !== undefined)) ||
+                    (!isThinking && liveAgentBusy && activeRunId === undefined) ||
+                    (pending === undefined && !liveAgentBusy && draft.trim().length === 0)
+                  }
                   onClick={() => {
-                    if (pending !== undefined) reject();
+                    if (liveAgentBusy && activeRunId !== undefined) stopActiveRun(activeRunId);
+                    else if (pending !== undefined) reject();
                     else submitPrompt(draft);
                   }}
                 >
-                  {pending === undefined ? <PlayIcon /> : <CloseIcon />}
+                  {liveAgentBusy && activeRunId !== undefined ? (
+                    <CloseIcon />
+                  ) : pending === undefined ? (
+                    <PlayIcon />
+                  ) : (
+                    <CloseIcon />
+                  )}
+                  {liveAgentBusy && activeRunId !== undefined && <span>Stop</span>}
+                  {liveAgentBusy && activeRunId === undefined && <span>Processing…</span>}
                 </button>
               </div>
             </div>

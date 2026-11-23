@@ -171,11 +171,13 @@ export function runScopedCreativeSkillEditToolLoop(
   const host: JoyAgentRunHost = {
     methods: createJoyAgentHostRpcMethodsForSnapshot(
       contextInput,
-      async (proposal, rpcContext) => {
-        const result = await handler(proposal, rpcContext);
-        lastStaged = result.changeSetId;
-        return result;
-      },
+      effectiveAllowList.includes('validate_proposal')
+        ? async (proposal, rpcContext) => {
+            const result = await handler(proposal, rpcContext);
+            lastStaged = result.changeSetId;
+            return result;
+          }
+        : undefined,
       observationBridge?.tools,
       observationBridge === undefined
         ? undefined

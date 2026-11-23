@@ -39,6 +39,7 @@ export interface SettingsPageWording {
   readonly kicker: string;
   /** The heading on the right. */
   readonly title: string;
+  readonly description: string;
 }
 
 /** The five pages, in plain words. */
@@ -47,32 +48,40 @@ export const SETTINGS_PAGES: Readonly<Record<SettingsPageId, SettingsPageWording
     name: 'AI models',
     kicker: 'Models and connections',
     title: 'AI models',
+    description: 'Choose the model Joy Code uses, and the service and key it connects with.',
   },
   execution: {
     name: 'Safety and limits',
     kicker: 'How much Joy Code does on its own',
     title: 'Safety and limits',
+    description:
+      'Choose how much Joy Code does on its own, and when it should ask you before it spends.',
   },
   experience: {
     name: 'Live preview',
     kicker: 'What you see while it works',
     title: 'Live preview',
+    description: 'Choose whether you see a live preview on the canvas while Joy Code works.',
   },
   permissions: {
     name: 'Tools and permissions',
     kicker: 'What Joy Code may change',
     title: 'Tools and permissions',
+    description: 'Choose what Joy Code is allowed to read and change.',
   },
   diagnostics: {
     name: 'Media support check',
-    kicker: 'How your computer handles it',
+    kicker: 'Graphics and media support',
     title: 'Media support check',
+    description:
+      'Check that your computer draws the picture, and that the model understands pictures, sound and video.',
   },
 };
 
 /** The dialog itself: its title and frame. */
 export const SETTINGS_DIALOG = {
   title: 'Joy Code Settings',
+  subtitle: 'Models, safety and permissions',
   categoriesLabel: 'Categories',
   categoriesNavLabel: 'Settings categories',
   closeLabel: 'Close settings',
@@ -137,20 +146,17 @@ export const SETTINGS_BUDGET = {
 export const SETTINGS_QUALITY_CHECK = {
   title: 'Quality check',
   /** `{frameCount}` and `{fixRoundCount}` use the right singular or plural form. */
-  tag: '{frameCount} a check, {fixRoundCount}',
+  tag: '{frameCount} per check · {fixRoundCount}',
   intro:
-    'These settings are saved for a future quality check. They set how many pictures a check may send to a model and how many fix rounds a run may use.',
+    'Set how many pictures a quality check may send to a model and how many fix rounds a run may use.',
   framesPerCheckLabel: 'Frames per check',
-  framesPerCheckHint: 'Saved limit for pictures in one future check. Stays between 1 and 16.',
+  framesPerCheckHint: 'Maximum pictures in one check. Choose 1 to 16.',
   framesPerRunLabel: 'Frames per run',
-  framesPerRunHint:
-    'Saved limit for all pictures in one future run, across every fix round. Stays between 12 and 48.',
+  framesPerRunHint: 'Maximum pictures across all checks in one run. Choose 12 to 48.',
   fixRoundsLabel: 'Fix rounds',
-  fixRoundsHint:
-    'Saved limit for how many times a future run may fix what it finds and check again. Stays between 1 and 3.',
+  fixRoundsHint: 'Maximum times a run can fix issues and check again. Choose 1 to 3.',
   neverRemoteLabel: 'Never send frames to a remote model',
-  neverRemoteHint:
-    'Saved for the quality check. Once the quality check exists it will keep pictures on this PC.',
+  neverRemoteHint: 'Keeps quality check pictures on this PC.',
 } as const;
 
 /**
@@ -160,14 +166,11 @@ export const SETTINGS_FRAME_PRIVACY_NOTICE = {
   title: 'Quality check privacy notice',
   /** `{perCheck}`, `{perRun}`, `{provider}` and `{model}` are filled in. */
   withModel:
-    'For a future quality check, the saved limits are {perCheck} pictures per check and {perRun} across the run, with {provider}, model {model}.',
-  noModel: 'No model is connected. These settings are saved for a future quality check.',
-  neverRemote:
-    'Saved for the quality check. Once the quality check exists it will keep pictures on this PC.',
-  localOnly:
-    'Local-only mode is saved for the quality check. Once it exists, pictures will stay on this PC.',
-  approvalUnavailable:
-    'Picture approval is not available yet. This notice only shows saved settings.',
+    'The quality check can send up to {perCheck} pictures per check and {perRun} per run to {provider} ({model}).',
+  noModel: 'No model is connected. Connect a model to review pictures.',
+  neverRemote: 'Keeps quality check pictures on this PC.',
+  localOnly: 'Local-only mode keeps quality check pictures on this PC.',
+  remoteApproval: 'JOY Media asks before sharing pictures with a remote model.',
 } as const;
 
 /** Where the settings and the keys are kept. */
@@ -197,11 +200,11 @@ export const SETTINGS_MEDIA_CHECK = {
   checking: 'Checking media support…',
   checkingShort: 'Checking…',
   invalidResult:
-    'Media capability check returned an invalid result. Reconnect the model and try again.',
+    'Media support check returned an invalid result. Reconnect the model and try again.',
   couldNotComplete:
-    'Media capability check could not be completed. Reconnect the model and try again.',
+    'Media support check could not be completed. Reconnect the model and try again.',
   /** `{model}` is the model that was checked. */
-  completeFor: 'Media capability check complete for {model}.',
+  completeFor: 'Media support check complete for {model}.',
 } as const;
 
 /** What Joy Code may change. */
@@ -215,12 +218,12 @@ export const SETTINGS_TOOLS = {
     'timeline.write': 'Change the timeline',
     'assets.read': 'Read your media',
     'assets.import': 'Bring in new media',
-    'filesystem.read': 'Read files',
-    'filesystem.write': 'Write files',
-    'provider.generate': 'Ask the model to create media',
-    'provider.spend': 'Spend money at the provider',
-    'render.preview': 'Draw previews',
-    'export.write': 'Write the exported file',
+    'filesystem.read': 'Read files on this PC',
+    'filesystem.write': 'Save files on this PC',
+    'provider.generate': 'Generate media with AI',
+    'provider.spend': 'Use paid provider services',
+    'render.preview': 'Render previews',
+    'export.write': 'Export files',
     'project.overwrite': 'Overwrite the project',
     'plugin.invoke': 'Run plugins',
   } satisfies Readonly<Record<ToolCapability, string>>,
@@ -234,11 +237,11 @@ export const SETTINGS_LIVE_PREVIEW = {
 
 /** The page that says how the computer is doing. */
 export const SETTINGS_DIAGNOSTICS = {
-  hardwareTitle: 'How your computer draws the picture',
+  hardwareTitle: 'Graphics and acceleration',
   accelerationTag: 'Hardware acceleration is on',
   graphicsCard: 'Graphics card',
   graphicsCardName: 'NVIDIA GeForce RTX 5070 Ti',
-  drawingMethod: 'How it draws',
+  drawingMethod: 'Renderer',
   drawingMethodName: 'ANGLE D3D11',
   mediaFolder: 'Your media folder',
   mediaFolderHint: 'See the Asset Library settings',
@@ -254,7 +257,7 @@ export const SETTINGS_MODELS = {
   noModel: 'No model connected',
   activeModel: 'Active: {model}',
   readyToEdit: 'Ready to edit your project',
-  briefOnly: 'Ready for a creative brief only',
+  briefOnly: "Can plan, but can't edit the project",
   connectBelow: 'Connect a model below to start.',
   connectionFailed: 'Connection failed. See the details below.',
   /** The status banner when the provider's usage limit was reached, in place of connectionFailed. */
@@ -262,7 +265,7 @@ export const SETTINGS_MODELS = {
   savedConnections: 'Saved connections',
   legacyProfile: 'Old connection, no longer used',
   keyUnreadable: 'Saved key could not be read. Enter it again.',
-  keyConfirmAgain: 'Enter the key again to confirm this endpoint.',
+  keyConfirmAgain: 'Enter the key again to confirm this connection.',
   disconnect: 'Disconnect',
   useButton: 'Use',
   laterButton: 'Later',
@@ -275,7 +278,7 @@ export const SETTINGS_MODELS = {
   connectionTitle: 'Connection and sign-in',
   providerTagNone: 'No provider',
   providerTagOpenRouter: 'OpenRouter',
-  yourOwnEndpoint: 'Your own endpoint',
+  yourOwnEndpoint: 'Custom connection',
   providerLabel: 'Provider',
   chooseProvider: 'Choose a provider',
   openRouterOption: 'OpenRouter (your own key)',
@@ -290,8 +293,8 @@ export const SETTINGS_MODELS = {
   savedKeyPlaceholder: '•••••••••••••••• (Leave blank to keep saved)',
   keyPlaceholder: 'sk-...',
   customEndpointConsent:
-    'I understand that custom endpoints may log requests according to their own policy.',
-  modelIdLabel: 'Model ID (you can change this)',
+    'I understand that custom services may log requests according to their own policy.',
+  modelIdLabel: 'Model ID',
   modelIdName: 'Model ID',
   modelIdPlaceholder: 'provider/model',
   showModelList: 'Show model list',
@@ -299,8 +302,8 @@ export const SETTINGS_MODELS = {
   findModelsTooltip: 'Find the models this service offers',
   findingModels: 'Finding models…',
   findModels: 'Find models',
-  lookAgain: 'Look again',
-  lookAgainName: 'Look again for models',
+  lookAgain: 'Refresh list',
+  lookAgainName: 'Refresh model list',
   lookAgainTitle: 'Ask this service for its models again',
   connect: 'Connect model',
   connecting: 'Connecting…',
@@ -308,7 +311,8 @@ export const SETTINGS_MODELS = {
   modelsTitle: 'Models found on this service',
   modelsReady: '{count} models ready',
   openToFind: 'Open to find models',
-  checkingAgain: 'Checking again…',
+  modelsHint: 'Choose a model to fill in the model ID, or type a word to filter the list.',
+  checkingAgain: 'Refreshing…',
   lookingForModels: 'Looking for models…',
   noModelsYet:
     'No models yet. Enter the service address and your key above, then choose Find models.',
@@ -345,8 +349,8 @@ export const SETTINGS_AGENT_SLOTS = {
   accountDisconnected: 'ChatGPT is not connected.',
   accountConnected: 'ChatGPT is connected.',
   connectChatGpt: 'Connect ChatGPT',
-  logInAgain: 'Log in again',
-  logOut: 'Log out',
+  logInAgain: 'Sign in again',
+  logOut: 'Sign out',
   slotLabel: '{label} slot',
   profileLabel: 'Provider profile',
   profileAriaLabel: '{label} profile',
@@ -374,10 +378,10 @@ export const SETTINGS_AGENT_SLOTS = {
   signInAgainSucceeded: 'ChatGPT signed in again.',
   signInFailed: 'ChatGPT sign-in did not complete: {reason}',
   logOutConfirmation:
-    'Log out of ChatGPT? JOY Media revokes this connection, and the Workhorse slot stays empty until you connect again.',
-  loggingOut: 'Logging out of ChatGPT…',
-  loggedOut: 'Logged out of ChatGPT. The connection was removed.',
-  logOutFailed: 'ChatGPT did not confirm the log out, so the connection was kept: {reason}',
+    'Sign out of ChatGPT? JOY Media revokes this connection, and the Workhorse slot stays empty until you connect again.',
+  loggingOut: 'Signing out of ChatGPT…',
+  loggedOut: 'Signed out of ChatGPT. The connection was removed.',
+  logOutFailed: 'ChatGPT did not confirm sign-out, so the connection was kept: {reason}',
   readingModels: 'Reading the models this profile offers…',
   noModels: 'This profile offers no models. Type a model ID.',
   readingModelsFailed: 'The models could not be read: {reason}',
@@ -416,11 +420,10 @@ export const SETTINGS_PROVIDER_SIGN_IN = {
   apiKeyRouteLabel: '{provider} API-key route',
   apiKeyRouteTitle: 'API key',
   noApiKeyEndpoint:
-    'No API-key endpoint is registered for this provider. OpenAI API keys remain under the separate OpenAI provider.',
+    'This provider does not offer an API key connection here. OpenAI API keys remain under the separate OpenAI provider.',
   apiKeyRegionLabel: '{provider} API key region',
   baseUrlLabel: 'OpenAI-compatible base URL',
   baseUrlAriaLabel: '{provider} API key base URL',
-  apiKeyLabel: 'API key',
   getKey: 'Get a key',
   apiDocs: 'API docs',
   apiSecretKeyLabel: 'API Secret Key',
@@ -449,15 +452,16 @@ export const SETTINGS_MESSAGES = {
   chooseProviderBeforeDiscovery: 'Choose a provider before discovering models.',
   chooseProviderBeforeConnect: 'Choose a provider before connecting.',
   ambiguousEndpoint:
-    'More than one saved profile uses this endpoint. Choose one in the list first.',
+    'More than one saved profile uses this service address. Choose one in the list first.',
   consentBeforeDiscovery: 'Enter the custom-provider acknowledgement before discovering models.',
   consentBeforeConnect: 'Enter the custom-provider acknowledgement before connecting.',
-  acknowledgeEndpoint: 'Acknowledge this custom endpoint before connecting.',
-  keyForOtherEndpoint: 'The key was entered for a different provider or endpoint. Enter it again.',
-  keyAgain: 'Enter the API key again to confirm this endpoint.',
-  keyAgainThenConnect: 'Enter the API key again to confirm this endpoint, then connect.',
+  acknowledgeEndpoint: 'Acknowledge this custom connection before connecting.',
+  keyForOtherEndpoint:
+    'The key was entered for a different provider or service address. Enter it again.',
+  keyAgain: 'Enter the API key again to confirm this connection.',
+  keyAgainThenConnect: 'Enter the API key again to confirm this connection, then connect.',
   baseUrlBeforeDiscovery: 'Please enter a Base URL before discovering models',
-  discoveryFailed: 'Failed to discover models behind endpoint',
+  discoveryFailed: 'Could not find models at this service address.',
   connectionFailed: 'The connection failed.',
   configureFailed: 'Unable to configure connection',
   providerNoToolLoop: 'The provider responded, but JOY could not use its tool loop.',
@@ -467,7 +471,7 @@ export const SETTINGS_MESSAGES = {
   /** `{reason}` is why the connection failed. */
   connectionFailedWith: 'Connection failed: {reason}',
   savedKeyOtherEndpoint:
-    'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.',
+    'The saved API key belongs to a different provider or service address. Enter a new API key to connect.',
   apiKeyRequired: 'API key is required.',
   modelIdRequired: 'Model ID is required.',
   baseUrlRequired: 'Base URL is required.',
@@ -492,8 +496,9 @@ export const SETTINGS_MESSAGES = {
   connectionCleared: 'Connection cleared. Your API key was removed from this page session.',
   /** `{items}` is the list of what is still missing. */
   missingItems: 'Enter {items} before connecting.',
-  missingKeyAgain: 'the API key again to confirm this endpoint',
-  missingNewKey: 'a new API key because the saved key belongs to a different provider or endpoint',
+  missingKeyAgain: 'the API key again to confirm this connection',
+  missingNewKey:
+    'a new API key because the saved key belongs to a different provider or service address',
   missingAnyKey: 'an API key',
   missingModelId: 'a model ID',
   missingBaseUrl: 'a base URL',
@@ -548,7 +553,7 @@ export function qualityCheckTag(perCheck: number, rounds: number): string {
     .replace('{fixRoundCount}', () => countLabel(rounds, 'fix round'));
 }
 
-/** Fills saved limits, provider and model into the future quality-check notice. */
+/** Fills saved limits, provider and model into the quality check notice. */
 export function framePrivacyNoticeWithModel(
   perCheck: number,
   perRun: number,

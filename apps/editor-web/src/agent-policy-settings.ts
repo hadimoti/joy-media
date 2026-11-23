@@ -27,7 +27,7 @@ export interface QualityCheckPreferences {
   readonly framesPerRun: number;
   /** The most fix rounds one run may make. */
   readonly fixRounds: number;
-  /** When true, the future quality check should keep pictures on this PC. */
+  /** When true, the quality check keeps pictures on this PC. */
   readonly neverSendFramesToRemoteModel: boolean;
 }
 

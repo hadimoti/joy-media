@@ -1,0 +1,348 @@
+/* Incremental visual hierarchy for designer workflows. Keep this file scoped to existing UI classes. */
+
+/* Projects: controls share one visual row and card titles lead the metadata. */
+.project-library-main {
+  width: min(100%, 96rem);
+  box-sizing: border-box;
+  padding: clamp(1.25rem, 3vw, 2.5rem) clamp(1rem, 3vw, 2rem) 3rem;
+}
+
+.project-library-intro {
+  margin-bottom: 1.25rem;
+}
+
+.project-library-intro h1 {
+  font-size: clamp(1.55rem, 2.4vw, 2rem);
+  letter-spacing: -0.025em;
+}
+
+.project-library-intro p {
+  max-width: 42rem;
+  margin-bottom: 0;
+  line-height: 1.5;
+}
+
+.project-library-toolbar {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(10rem, 13rem) auto;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.55rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--joy-bg-panel) 88%, transparent);
+}
+
+.project-library-search input,
+.project-library-sort select {
+  min-height: 2.35rem;
+  box-sizing: border-box;
+  border-color: var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-control);
+  color: var(--joy-text);
+}
+
+.project-library-view {
+  justify-self: end;
+  border-color: var(--joy-border-strong);
+  background: var(--joy-bg-inset);
+}
+
+.project-library-view button {
+  display: inline-grid;
+  min-width: 2rem;
+  min-height: 2rem;
+  place-items: center;
+  color: var(--joy-text-secondary);
+}
+
+.project-library-view button[aria-pressed='true'] {
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 50%, var(--joy-border));
+  background: color-mix(in srgb, var(--joy-accent) 14%, var(--joy-bg-raised));
+  color: var(--joy-accent);
+}
+
+.project-library-grid {
+  gap: 0.8rem;
+}
+
+.project-library-grid > li {
+  min-width: 0;
+}
+
+.project-library-card {
+  position: relative;
+  grid-template-rows: 9rem minmax(4.35rem, auto);
+  height: 100%;
+  border-color: var(--joy-border);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-surface);
+  transition:
+    border-color var(--joy-motion-hover) var(--joy-ease),
+    background var(--joy-motion-hover) var(--joy-ease),
+    box-shadow var(--joy-motion-hover) var(--joy-ease);
+}
+
+.project-library-card:hover,
+.project-library-card:focus-visible {
+  border-color: color-mix(in srgb, var(--joy-accent) 72%, var(--joy-border));
+  background: var(--joy-bg-raised);
+}
+
+.project-library-card-thumb {
+  height: auto;
+  min-height: 0;
+  background: linear-gradient(145deg, var(--joy-bg-inset), var(--joy-bg-elevated));
+}
+
+.project-library-card-body {
+  align-content: start;
+  gap: 0.28rem;
+  padding: 0.65rem 0.75rem 0.7rem;
+}
+
+.project-library-card-title strong {
+  font-size: var(--joy-type-md);
+  line-height: 1.35;
+}
+
+.project-library-card-meta {
+  color: var(--joy-text-secondary);
+  line-height: 1.4;
+}
+
+.project-library-actions-trigger {
+  top: 0.55rem;
+  right: 0.55rem;
+  border-color: color-mix(in srgb, var(--joy-border-strong) 90%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-bg-deep) 84%, transparent);
+  box-shadow: 0 1px 5px rgb(0 0 0 / 22%);
+}
+
+.project-library-new-tile {
+  height: 100%;
+  min-height: 13.35rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--joy-accent) 9%, var(--joy-bg-surface));
+  transition:
+    background var(--joy-motion-hover) var(--joy-ease),
+    border-color var(--joy-motion-hover) var(--joy-ease),
+    box-shadow var(--joy-motion-hover) var(--joy-ease);
+}
+
+.project-library-new-tile:hover,
+.project-library-new-tile:focus-visible {
+  border-color: var(--joy-accent);
+  background: color-mix(in srgb, var(--joy-accent) 16%, var(--joy-bg-surface));
+  box-shadow: 0 0.35rem 1.2rem color-mix(in srgb, var(--joy-accent) 10%, transparent);
+}
+
+.project-library-grid.is-list .project-library-card {
+  grid-template-rows: minmax(5.5rem, auto);
+}
+
+.project-library-grid.is-list .project-library-card-thumb {
+  height: 5.5rem;
+}
+
+/* Workspace, dock panel, and category are separate levels of navigation. */
+.workspace-switcher-trigger {
+  min-height: 2.1rem;
+  border-color: color-mix(in srgb, var(--joy-accent) 42%, var(--joy-border));
+  background: color-mix(in srgb, var(--joy-accent) 7%, var(--joy-bg-panel));
+  color: var(--joy-text);
+}
+
+.workspace-switcher-trigger:hover,
+.workspace-switcher-trigger[aria-expanded='true'] {
+  border-color: var(--joy-accent);
+  background: color-mix(in srgb, var(--joy-accent) 13%, var(--joy-bg-panel));
+}
+
+.workspace-switcher-menu > button[aria-checked='true'] {
+  background: color-mix(in srgb, var(--joy-accent) 12%, var(--joy-bg-raised));
+  color: var(--joy-accent);
+}
+
+.workspace-switcher-menu > button:focus-visible,
+.workspace-switcher-reset:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: -2px;
+}
+
+.joy-panel-tab[aria-selected='true'] {
+  box-shadow: inset 0 -2px 0 var(--joy-accent);
+  color: var(--joy-accent);
+}
+
+.joy-panel-tab:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: -2px;
+}
+
+.library-rail-item[aria-selected='true'] {
+  border-color: color-mix(in srgb, var(--joy-accent) 74%, var(--joy-border));
+  background: color-mix(in srgb, var(--joy-accent) 14%, var(--joy-bg-panel));
+  box-shadow: inset 3px 0 0 var(--joy-accent);
+  color: var(--joy-text);
+  font-weight: 600;
+}
+
+.library-rail-item:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: -2px;
+}
+
+/* Dockview's built-in overflow menu must remain available when tabs stop fitting. */
+#root .workspace .dv-tabs-overflow-dropdown-default {
+  display: grid !important;
+  border-inline-start: 1px solid var(--joy-border);
+  color: var(--joy-text-secondary);
+}
+
+#root .workspace .dv-tabs-overflow-dropdown-default:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: -2px;
+}
+
+#root .workspace .dv-tabs-overflow-container .dv-active-tab .panel-tab {
+  border-inline-start: 2px solid var(--joy-accent);
+  background: color-mix(in srgb, var(--joy-accent) 12%, var(--joy-bg-elevated)) !important;
+  color: var(--joy-accent);
+}
+
+/* Inspector: reinforce a single selected-layer heading and state cues. */
+.inspector-panel .inspector-clip-header {
+  padding: 0.35rem 0.5rem 0.55rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-bg-panel) 84%, transparent);
+}
+
+.inspector-panel .inspector-selection-summary {
+  column-gap: var(--space-3);
+}
+
+.inspector-panel .inspector-selection-detail {
+  grid-template-columns: 4.25rem minmax(0, 1fr);
+}
+
+.inspector-panel .inspector-selected-name {
+  font-size: var(--joy-type-md);
+  line-height: 1.35;
+}
+
+.inspector-panel .inspector-grid-row .property-row-keyframe.is-keyed {
+  border-color: var(--joy-accent);
+  background: color-mix(in srgb, var(--joy-accent) 16%, var(--joy-bg-panel));
+  color: var(--joy-accent);
+}
+
+.inspector-panel .inspector-grid-row .property-row-keyframe.is-between {
+  border-color: color-mix(in srgb, var(--joy-accent) 55%, var(--joy-border));
+  border-style: dashed;
+  background: color-mix(in srgb, var(--joy-accent) 7%, transparent);
+  color: var(--joy-text);
+}
+
+.inspector-panel .inspector-grid-row .property-row-keyframe.is-none {
+  border-color: transparent;
+  color: var(--joy-text-secondary);
+}
+
+/* Monitor controls: separate transport from preview/view settings and keep each group legible. */
+.monitor-transport {
+  min-height: 2rem;
+  height: 2rem;
+  gap: 0.35rem;
+  border-top-color: var(--joy-border-strong);
+  background: var(--joy-bg-panel);
+}
+
+.monitor-transport-controls {
+  padding-inline: 0.25rem;
+  border-inline-end: 1px solid var(--joy-border);
+}
+
+.monitor-transport-end > .monitor-preview-control,
+.monitor-transport-end > .monitor-view-root {
+  border-inline-start: 1px solid var(--joy-border);
+}
+
+.monitor-timecode,
+.timeline-timecode {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* Timeline tools keep their groups aligned, while the empty keyframe lane stays compact. */
+.timeline-toolbar {
+  gap: 0.25rem;
+  min-height: 2rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--joy-border);
+  background: color-mix(in srgb, var(--joy-bg-panel) 90%, transparent);
+}
+
+.timeline-toolbar-sep {
+  margin-inline: 0.35rem;
+  background: var(--joy-border-strong);
+}
+
+.timeline-toolbar-group {
+  min-height: 1.75rem;
+}
+
+.timeline-timecode {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-panel);
+  color: var(--joy-text);
+}
+
+.timeline-property-lanes-empty {
+  padding: 0.24rem 0.45rem;
+  line-height: 1.25;
+}
+
+.timeline-property-lanes:has(.timeline-property-lanes-empty) {
+  gap: 0;
+}
+
+.timeline-property-lanes:has(.timeline-property-lanes-empty) .timeline-property-lanes-header {
+  min-height: 1.65rem;
+  padding-block: 0.12rem;
+}
+
+@media (max-width: 42rem) {
+  .project-library-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .project-library-search {
+    grid-column: 1 / -1;
+  }
+
+  .project-library-sort {
+    min-width: 0;
+  }
+
+  .project-library-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr));
+  }
+
+  .inspector-panel .inspector-selection-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-library-card,
+  .project-library-new-tile {
+    transition-duration: 0.01ms !important;
+  }
+}

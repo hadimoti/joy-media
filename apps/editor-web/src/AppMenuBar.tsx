@@ -3,6 +3,8 @@ import { APP_MENU_GROUPS, type AppMenuActionId, type AppMenuItem } from './app-m
 import { PANEL_INTENT_LABELS } from './panel-metadata.js';
 import { usePopupManager } from './popup-manager.js';
 import { appMenuPopupId } from './popup-ids.js';
+import { useAgentPresenceSnapshot, type JoyAgentTarget } from './agent-presence.js';
+import { panelLabel } from './panel-tab-icons.js';
 
 export interface AppMenuBarProps {
   readonly canUndo: boolean;
@@ -11,7 +13,12 @@ export interface AppMenuBarProps {
   /** True when the selected clip is a video clip, the only kind with a Speed tab. */
   readonly supportsSpeed: boolean;
   readonly exporting: boolean;
+  readonly followedAgentRunId?: string | undefined;
   readonly onAction: (id: AppMenuActionId) => void;
+  readonly onToggleFollowAgentTarget: () => void;
+  readonly onClearFollowAgentTarget: (runId: string) => void;
+  readonly onShowAgentTarget?: (target: JoyAgentTarget) => void;
+  readonly onStopAgentRun?: (runId: string) => void;
 }
 
 export type MenuRuleState = Pick<
@@ -43,12 +50,61 @@ export function itemDisabled(item: AppMenuItem, props: MenuRuleState): boolean {
 }
 
 export function AppMenuBar(props: AppMenuBarProps) {
-  const { onAction } = props;
+  const {
+    onAction,
+    onShowAgentTarget,
+    onStopAgentRun,
+    followedAgentRunId,
+    onToggleFollowAgentTarget,
+    onClearFollowAgentTarget,
+  } = props;
+  const activity = useAgentPresenceSnapshot();
+  const showTargetRef = useRef(onShowAgentTarget);
+  const targetRef = useRef<JoyAgentTarget | undefined>(undefined);
+  showTargetRef.current = onShowAgentTarget;
+  const target =
+    activity.targets.find((entry) => entry.panelId !== 'agent') ??
+    activity.targets[0] ??
+    activity.terminalTarget;
+  const terminal =
+    activity.status === 'completed' ||
+    activity.status === 'failed' ||
+    activity.status === 'cancelled';
+  const followAgentTarget =
+    followedAgentRunId !== undefined && activity.runId === followedAgentRunId && !terminal;
+  const phase =
+    activity.phase === 'awaiting-approval'
+      ? 'Needs approval'
+      : activity.phase === 'idle'
+        ? 'Idle'
+        : activity.phase[0]!.toUpperCase() + activity.phase.slice(1).replaceAll('-', ' ');
+  const targetText =
+    target === undefined
+      ? 'JOY workspace'
+      : target.sectionId === undefined
+        ? panelLabel(target.panelId)
+        : `${panelLabel(target.panelId)} · ${target.sectionId}`;
+  const targetKey =
+    target === undefined
+      ? ''
+      : `${target.panelId}:${target.sectionId ?? ''}:${target.entity?.id ?? ''}:${target.capability ?? ''}`;
+  targetRef.current = target;
   const { openId, open, toggle, close, registerRoot } = usePopupManager();
   const menuRefs = useRef(new Map<string, HTMLUListElement>());
+  const joyCodePreviousInput = useRef<HTMLTextAreaElement | null>(null);
   // The menu a hover just opened. The click that follows on the same title keeps it open instead of closing it.
   const openedByHover = useRef<string | null>(null);
   const baseId = useId();
+  useEffect(() => {
+    const currentTarget = targetRef.current;
+    if (!followAgentTarget || currentTarget === undefined) return;
+    showTargetRef.current?.(currentTarget);
+  }, [followAgentTarget, targetKey]);
+  useEffect(() => {
+    if (followedAgentRunId !== undefined && !followAgentTarget) {
+      onClearFollowAgentTarget(followedAgentRunId);
+    }
+  }, [followAgentTarget, followedAgentRunId, onClearFollowAgentTarget]);
   // Which menu-bar group is open, if any. Outside click and Escape are handled by the manager.
   const openGroupId =
     APP_MENU_GROUPS.find((group) => appMenuPopupId(group.id) === openId)?.id ?? null;
@@ -93,18 +149,30 @@ export function AppMenuBar(props: AppMenuBarProps) {
             <button
               type="button"
               className="app-menu-trigger"
+              aria-describedby={group.id === 'agent' ? `${menuId}-activity` : undefined}
               aria-haspopup="menu"
               aria-expanded={isOpen}
               aria-controls={menuId}
+              onPointerDown={
+                group.id === 'agent'
+                  ? () => {
+                      const active = document.activeElement;
+                      joyCodePreviousInput.current =
+                        active instanceof HTMLTextAreaElement ? active : null;
+                    }
+                  : undefined
+              }
               onClick={(event) => {
                 if (openedByHover.current === popupId) {
                   openedByHover.current = null;
                   return;
                 }
+                if (group.id === 'agent' && event.detail === 0) joyCodePreviousInput.current = null;
                 toggle(popupId, event.currentTarget);
               }}
               onMouseEnter={(event) => {
                 if (openGroupId !== null && openGroupId !== group.id) {
+                  if (group.id === 'agent') joyCodePreviousInput.current = null;
                   openedByHover.current = popupId;
                   open(popupId, event.currentTarget);
                 }
@@ -114,7 +182,18 @@ export function AppMenuBar(props: AppMenuBarProps) {
               }}
             >
               {group.label}
+              {group.id === 'agent' && (
+                <span
+                  className={`app-menu-activity-mark is-${activity.status} is-${activity.phase}`}
+                  aria-hidden="true"
+                />
+              )}
             </button>
+            {group.id === 'agent' && (
+              <span id={`${menuId}-activity`} className="sr-only" role="status">
+                {activity.phase === 'awaiting-approval' ? 'Approval required' : phase}
+              </span>
+            )}
             {isOpen && (
               <ul
                 className="app-menu-dropdown"
@@ -126,7 +205,16 @@ export function AppMenuBar(props: AppMenuBarProps) {
                 }}
               >
                 {items.map((item, index) => {
-                  const disabled = itemDisabled(item, props);
+                  const disabled =
+                    item.id === 'agent.active'
+                      ? activity.phase !== 'awaiting-approval' && activity.status !== 'failed'
+                      : item.id === 'agent.showTarget'
+                        ? target === undefined
+                        : item.id === 'agent.follow'
+                          ? activity.runId === undefined || terminal
+                          : item.id === 'agent.stop'
+                            ? activity.runId === undefined || terminal
+                            : itemDisabled(item, props);
                   const showSeparator = item.separatorAfter === true && index < items.length - 1;
                   const previous = items[index - 1];
                   const sectionHeading =
@@ -140,16 +228,50 @@ export function AppMenuBar(props: AppMenuBarProps) {
                       )}
                       <button
                         type="button"
-                        role="menuitem"
+                        role={item.id === 'agent.follow' ? 'menuitemcheckbox' : 'menuitem'}
                         className="app-menu-item"
                         disabled={disabled}
+                        aria-checked={item.id === 'agent.follow' ? followAgentTarget : undefined}
                         onClick={() => {
                           if (disabled) return;
-                          onAction(item.id);
+                          if (item.id === 'agent.showTarget' && target !== undefined)
+                            onShowAgentTarget?.(target);
+                          else if (item.id === 'agent.follow') onToggleFollowAgentTarget();
+                          else if (item.id === 'agent.stop' && activity.runId !== undefined)
+                            onStopAgentRun?.(activity.runId);
+                          else if (item.id === 'agent.active') {
+                            const origin =
+                              activity.targets.find((entry) => entry.panelId === 'agent') ??
+                              activity.terminalTarget;
+                            if (onShowAgentTarget === undefined) onAction('agent.open');
+                            else
+                              onShowAgentTarget({
+                                panelId: 'agent',
+                                capability:
+                                  origin?.panelId === 'agent'
+                                    ? (origin.capability ?? 'edit')
+                                    : 'edit',
+                              });
+                          } else onAction(item.id);
                           close(popupId);
+                          if (item.id === 'agent.follow') {
+                            const previousInput = joyCodePreviousInput.current;
+                            joyCodePreviousInput.current = null;
+                            if (previousInput?.isConnected)
+                              previousInput.focus({ preventScroll: true });
+                          }
                         }}
                       >
-                        <span className="app-menu-item-label">{item.label}</span>
+                        <span className="app-menu-item-label">
+                          {item.id === 'agent.active'
+                            ? activity.status === 'failed'
+                              ? `View error · ${targetText}`
+                              : `${phase} · ${targetText}${activity.progress === undefined ? '' : ` · ${activity.progress.current} of ${activity.progress.total}`}`
+                            : item.label}
+                        </span>
+                        {item.id === 'agent.follow' && (
+                          <span aria-hidden="true">{followAgentTarget ? '✓' : ''}</span>
+                        )}
                         {item.shortcut !== undefined && (
                           <kbd className="app-menu-item-shortcut">{item.shortcut}</kbd>
                         )}

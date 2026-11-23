@@ -9,6 +9,7 @@ import {
   runJoyAgentTask,
   runScopedCreativeSkillToolLoop,
 } from './entry-points.js';
+import { MAX_LENGTHS, validateCreativeBrief } from '@joy-media/agent-tools';
 import type { JoyAgentEngineClient, JoyAgentRunIterator } from './engine-client.js';
 import type { HostRpcMethods } from './host-rpc.js';
 import {
@@ -152,6 +153,33 @@ describe('JOY Agent entry points', () => {
     ).rejects.toMatchObject({ code: 'invalid-result' });
   });
 
+  it('classifies an event-less iterator close as cancellation only when its owner says it was cancelled', async () => {
+    let cancelled = false;
+    await expect(
+      runJoyAgentTask({
+        client: fakeClient([]),
+        host,
+        taskKind: 'effects',
+        prompt: 'make it softer',
+        baseRevision: 'rev-1',
+        onRunStart: () => {
+          cancelled = true;
+        },
+        isCancelled: () => cancelled,
+      }),
+    ).rejects.toMatchObject({ code: 'cancelled' });
+
+    await expect(
+      runJoyAgentTask({
+        client: fakeClient([]),
+        host,
+        taskKind: 'effects',
+        prompt: 'make it softer',
+        baseRevision: 'rev-1',
+      }),
+    ).rejects.toMatchObject({ code: 'empty-result' });
+  });
+
   it('fails closed when a model task fails, is cancelled, or includes a credential-shaped prompt', async () => {
     await expect(
       runJoyAgentTask({
@@ -181,6 +209,108 @@ describe('JOY Agent entry points', () => {
         baseRevision: 'rev-1',
       }),
     ).rejects.toMatchObject({ code: 'failed' });
+    expect(client.startRun).not.toHaveBeenCalled();
+  });
+
+  it('gives an ordinary Creative Brief request a usable model contract and validates the final brief', async () => {
+    const client = fakeClient([
+      event('completed', {
+        result: {
+          schemaVersion: 1,
+          snapshotRevisionId: 'rev-1',
+          projectId: 'project-1',
+          request: 'improve it',
+          interpretedGoal: {
+            userIntent: 'improve it',
+            inferredGoal: 'The opening holds too long.',
+            resolvedGoal: 'Tighten the opening scene.',
+            confidence: 'medium',
+          },
+          distinction: { facts: [], inferences: [] },
+          assumptions: [],
+          recommendations: [
+            {
+              id: 'pacing-001',
+              kind: 'pacing',
+              confidence: 'medium',
+              evidence: [],
+              rationale: 'The opening scene runs long.',
+              expectedBenefit: 'Better retention.',
+              risk: 'none',
+              scope: {},
+            },
+          ],
+          blockedBy: [],
+          requiresHumanDecision: [],
+          intelligence: { brand: {}, scenes: [], project: {}, rules: [] },
+          warnings: [],
+        },
+      }),
+    ]);
+    const brief = await runCreativeBriefTask({
+      client,
+      projectId: 'project-1',
+      revisionId: 'rev-1',
+      request: 'improve it',
+      context: { projectId: 'project-1', revision: 'rev-1' },
+    });
+    // The request the model received carries the contract and the bindings.
+    const request = vi.mocked(client.startRun).mock.calls[0]?.[0];
+    expect(request?.taskKind).toBe('creative-brief');
+    expect(request?.prompt).toContain('project-1');
+    expect(request?.prompt).toContain('rev-1');
+    expect(request?.prompt).toContain('interpretedGoal');
+    expect(request?.prompt).toContain('recommendations');
+    expect((request?.prompt ?? '').length).toBeLessThanOrEqual(8_000);
+    // The final brief still satisfies the independent validator.
+    expect(validateCreativeBrief(brief).errors).toEqual([]);
+    expect(brief.projectId).toBe('project-1');
+    expect(brief.snapshotRevisionId).toBe('rev-1');
+  });
+
+  it('rejects a Creative Brief that is bound to another project', async () => {
+    const client = fakeClient([
+      event('completed', {
+        result: {
+          schemaVersion: 1,
+          snapshotRevisionId: 'rev-1',
+          projectId: 'project-2',
+          request: 'improve it',
+          interpretedGoal: {
+            userIntent: 'improve it',
+            inferredGoal: 'x',
+            resolvedGoal: 'y',
+            confidence: 'low',
+          },
+          distinction: { facts: [], inferences: [] },
+          recommendations: [],
+        },
+      }),
+    ]);
+    await expect(
+      runCreativeBriefTask({
+        client,
+        projectId: 'project-1',
+        revisionId: 'rev-1',
+        request: 'improve it',
+        context: { projectId: 'project-1', revision: 'rev-1' },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-result' });
+  });
+
+  it('rejects a request that cannot be recorded before contacting the model', async () => {
+    const client = fakeClient([]);
+    await expect(
+      runCreativeBriefTask({
+        client,
+        projectId: 'project-1',
+        revisionId: 'rev-1',
+        request: 'a'.repeat(MAX_LENGTHS.request + 1),
+        context: { projectId: 'project-1', revision: 'rev-1' },
+      }),
+    ).rejects.toThrow(
+      `Creative Brief requests can contain up to ${MAX_LENGTHS.request} characters`,
+    );
     expect(client.startRun).not.toHaveBeenCalled();
   });
 

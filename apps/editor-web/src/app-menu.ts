@@ -27,6 +27,8 @@ export type AppMenuActionId =
   | 'agent.active'
   | 'agent.executionMode'
   | 'agent.stop'
+  | 'agent.showTarget'
+  | 'agent.follow'
   | 'agent.settings'
   | 'view.fullscreen'
   | 'window.minimize'
@@ -117,8 +119,10 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     items: [
       { id: 'agent.open', label: 'Open Joy Code', separatorAfter: true },
       { id: 'agent.active', label: 'Built-in JOY Agent Engine', disabled: true },
+      { id: 'agent.showTarget', label: 'Show target' },
+      { id: 'agent.follow', label: 'Follow target' },
       { id: 'agent.executionMode', label: 'Execution Mode…', separatorAfter: true },
-      { id: 'agent.stop', label: 'Pause / Stop' },
+      { id: 'agent.stop', label: 'Stop active run' },
       { id: 'agent.settings', label: 'Joy Code Settings…' },
     ],
   },

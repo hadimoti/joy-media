@@ -350,7 +350,8 @@ describe('the Joy Code Settings wording (T-P07)', () => {
   it('has no "Professional AI Engine Workspace" anywhere', () => {
     expect(dialogSource).not.toContain('Professional AI Engine Workspace');
     expect(SETTINGS_DIALOG.title).toBe('Joy Code Settings');
-    expect(SETTINGS_DIALOG).not.toHaveProperty('subtitle');
+    expect(SETTINGS_DIALOG).toHaveProperty('subtitle', 'Models, safety and permissions');
+    expect(dialogSource).toContain('{SETTINGS_DIALOG.subtitle}');
     expect(dialogSource).toContain('aria-labelledby="joy-agent-settings-title"');
     expect(dialogSource).toContain(
       '<h2 id="joy-agent-settings-title">{SETTINGS_DIALOG.title}</h2>',

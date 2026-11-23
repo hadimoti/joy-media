@@ -127,3 +127,54 @@ export function buildSecureWebPreferences(preloadPath: string): SecureWebPrefere
     preload: preloadPath,
   };
 }
+
+export interface DesktopWindowPresentation {
+  isFullScreen(): boolean;
+  setFullScreen(fullscreen: boolean): void;
+  isMaximized(): boolean;
+  maximize(): void;
+  unmaximize(): void;
+}
+
+export function isWindowMaximizedOrFullscreen(win: DesktopWindowPresentation): boolean {
+  return win.isFullScreen() || win.isMaximized();
+}
+
+/** The window restore button exits native fullscreen or restores a maximized window. */
+export function toggleWindowMaximize(win: DesktopWindowPresentation): boolean {
+  if (win.isFullScreen()) {
+    win.setFullScreen(false);
+    return false;
+  }
+  if (win.isMaximized()) win.unmaximize();
+  else win.maximize();
+  return win.isMaximized();
+}
+
+export function toggleWindowFullscreen(win: DesktopWindowPresentation): boolean {
+  const fullscreen = !win.isFullScreen();
+  win.setFullScreen(fullscreen);
+  return fullscreen;
+}
+
+export function buildMainWindowOptions(
+  preloadPath: string,
+  show: boolean,
+  additionalArguments?: readonly string[],
+) {
+  return {
+    width: 1440,
+    height: 900,
+    fullscreen: true,
+    show,
+    frame: false,
+    titleBarStyle: 'hidden' as const,
+    backgroundColor: '#000000',
+    webPreferences: {
+      ...buildSecureWebPreferences(preloadPath),
+      ...(additionalArguments === undefined
+        ? {}
+        : { additionalArguments: [...additionalArguments] }),
+    },
+  };
+}

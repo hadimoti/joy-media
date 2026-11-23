@@ -1,7 +1,7 @@
 # Build script for joy-media-setup.exe using Microsoft .NET Framework C# compiler (csc.exe)
-# Usage: build-installer.ps1 [-Version 1.1.1]
+# Usage: build-installer.ps1 [-Version 1.1.2]
 param(
-    [string]$Version = "1.1.1"
+    [string]$Version = "1.1.2"
 )
 $ErrorActionPreference = "Stop"
 
@@ -47,8 +47,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Successfully built $outExe ($((Get-Item $outExe).Length) bytes)."
 
-# Explorer, Apps & features and the Sandbox receipts read these; ProductVersion must be exactly -Version (1.1.1,
-# never 1.1.1.0 or 0.0.0.0). Setup.cs takes both from InstallerEngine.ProductVersion.
+# Explorer, Apps & features and the Sandbox receipts read these; ProductVersion must be exactly -Version (1.1.2,
+# never 1.1.2.0 or 0.0.0.0). Setup.cs takes both from InstallerEngine.ProductVersion.
 $setupInfo = (Get-Item -LiteralPath $outExe).VersionInfo
 if ($setupInfo.ProductVersion -ne $Version) {
     throw "joy-media-setup.exe ProductVersion is '$($setupInfo.ProductVersion)', expected exactly '$Version'."

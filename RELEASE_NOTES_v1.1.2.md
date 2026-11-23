@@ -1,15 +1,23 @@
 # JOY Media v1.1.2
 
-JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video editor for Windows, with no account and no server. This version shows your pictures in the Asset Library, adds smart guides and snapping on the Monitor, and makes the Joy Code chat and settings clearer when something goes wrong.
+JOY Media v1.1.2 is an update to v1.1.1. It remains a local Windows desktop editor: core editing does not require a JOY account or hosted JOY server. Optional AI providers have their own account, connection and usage requirements. This version shows your pictures in the Asset Library, adds smart guides and snapping on the Monitor, and makes the Joy Code chat and settings clearer when something goes wrong.
+
+For step-by-step workflows, see the [v1.1.2 designer guide](docs/USER-GUIDE-v1.1.2.md).
 
 ## What is new
+
+### Workspace
+
+- JOY Media opens fullscreen. Use the window controls to restore a smaller window.
+- Projects, workspace tabs, the Inspector, the Program Monitor and the Timeline use clearer grouping and keyboard focus. On wider layouts the export button says **Export MP4**.
 
 ### Speech on your PC
 
 - **Subtitles from speech.** The Captions panel can make subtitles from a voice recording on the timeline, in English or Persian. Recognition runs on your PC with the faster-whisper large-v3-turbo model. No account and no server are needed.
 - **Voice-over.** The Generate tab makes a voice from text on your PC. English voices use Kokoro (82M) or Chatterbox English. The Persian voice uses Chatterbox Persian Expressive.
 - **Reference voice.** Chatterbox can copy a voice from a short recording. Use a clean clip of 5 to 10 seconds, and only a voice you have the right to use. Put the clip on the timeline first, then choose it in the Generate tab.
-- **Credit and licence.** The Persian voice model is Chatterbox Persian Expressive by Ramin Mahmoodi, licensed CC-BY-NC-4.0 for non-commercial use. The Captions panel and the speech README credit it. The model files are not part of JOY Media.
+- **Local setup.** The Windows package includes JOY's three speech runner scripts. Configure Python, its dependencies, and your model folders locally. Set an FFmpeg path for speech if your audio setup needs it. JOY Media shows which engines are ready.
+- **Credit and licence.** [Chatterbox Persian Expressive by Ramin Mahmoodi](https://huggingface.co/ramin-mahmoodi/Chatterbox-Persian-Expressive) is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) for non-commercial use. The Generate tab and speech guide credit the model.
 
 ### Asset Library
 
@@ -44,7 +52,10 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 
 ### Joy Code and chat
 
-- The Joy Code Settings button is a gear icon, not a sun.
+- Joy Code can look up title, caption and transition presets and use supported choices in an edit preview.
+- The bundled Joy Code skills cover titles, captions, transitions, color, motion and export review. They help the agent choose presets and work through previews and approvals.
+- The Joy Code menu shows activity, the current target and Stop. The composer keeps Stop within reach while a request runs.
+- Open Joy Code Settings from the gear beside the composer tabs. Use the category sidebar to move between models, safety, live preview, permissions and media support.
 - A sign-in section shows "Signed in." when you already have a saved sign-in. This does not show yet for xAI.
 - When a provider says your usage limit is reached, the app says "Usage limit reached". Before, it said the model was incompatible or that you were offline.
 - MiniMax gets a bigger answer budget, so it can think longer before it replies. If a model still runs out of room, the chat says "The model ran out of room" instead of saying you are offline.
@@ -57,6 +68,8 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 
 ## Fixes
 
+- **Animate.** Channel labels stay readable, and the previous and next keyframe controls stay together above the graph in narrow panels.
+- **Arabic and Persian text.** Arabic final yeh keeps its two dots and Persian final yeh stays dotless. URLs stay together and read left to right in mixed-script titles and captions. These fixes apply to preview and export.
 - **Title-only projects export.** A project that holds only titles now exports over the background. Before, the export refused it with "No playable visual clips are available for export".
 - **Add to timeline starts at the playhead.** Before, the clip went after the clips already on the first track.
 
@@ -66,8 +79,7 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 
 ## Known limits
 
-- **Unsigned.** The files are not code-signed, so Windows shows a warning when you download or run the setup. Windows Sandbox on the build PC blocks the unsigned installer.
-- **Clean installs and upgrades not tested.** A clean install and upgrades from v1.0.2 and v1.1.0 were not tested in a clean Windows for this build. If an install or an upgrade fails for you, please report it.
+- **Unsigned.** Windows may show a warning when you run the unsigned installer.
 - **xAI sign-in.** The "Signed in." label does not show yet for xAI.
 - **Missing library files.** A library file that is missing is asked for again at every refresh.
 - **Kimi limit.** When Kimi says the usage limit is reached, the limit is on your own Kimi plan. JOY Media cannot change it.
@@ -76,9 +88,7 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 - **MiniMax.** MiniMax models think before they answer. A very long thought can still use up the room, and then the chat gives no answer. The app now says so.
 - **Subtitle cues.** Each subtitle cue is one whole spoken part, so a long sentence stays one long cue. Cutting cues to a short length, and repairing Persian half-spaces, are not done yet.
 - **Reference voice.** A reference voice must be a clip on the timeline. A file that is only in the Asset Library cannot be picked yet.
-- **Speech set-up.** The speech engines and their model folders are not part of the installer in this release. The Captions and Generate panels say when something is missing.
 - **Persian voice licence.** The Persian voice model is for non-commercial use only (CC-BY-NC-4.0).
-- **Arabic final yeh.** In the exported video, the final yeh of some Arabic titles has no two dots with the default title font. Reproduced on 23 Nov. This is not fixed in this release.
 
 ## Not yet checked on screen
 
@@ -92,12 +102,9 @@ These are built and tested in code. They were not yet confirmed in the running a
 
 - A project that holds only titles exports, and the title is in the exported picture.
 - Add to timeline places the clip at the playhead, on the first track that is free there.
-- Speech subtitles, voice-over and the timeline controls ran in the desktop app. They have not been run on a clean install.
+- Local speech subtitles, voice-over and the timeline controls ran in the desktop app.
+- A clean install, offline smoke test and upgrades from v1.0.2 and v1.1.0 passed in Windows Sandbox. Both upgrades kept the app data.
 
 ## Download and check
 
-Every file of this release will be listed here with its SHA-256 hash by the release step. This list is not filled in yet.
-
-After you download, compare the hash of each file with that list. In PowerShell, use `Get-FileHash` on the downloaded file.
-
-[Placeholder: file hashes will be listed here by the release step.]
+Download `SHA256SUMS.txt` with the installer or portable ZIP. In PowerShell, use `Get-FileHash` to compare the downloaded file with its SHA-256 entry. [Windows downloads](https://github.com/hadimoti/joy-media/releases/tag/v1.1.2) · [Installation guide](docs/USER-GUIDE-v1.1.2.md#install-and-check-the-download)

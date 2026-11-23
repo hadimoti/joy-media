@@ -34,6 +34,7 @@ type CanvasGeneratorAdapter = {
 
 type CanvasMetricsAdapter = {
   measureText: (...args: unknown[]) => unknown;
+  measureFont: (...args: unknown[]) => unknown;
   _measureText: (...args: unknown[]) => number;
   readonly _context: CanvasTextContext;
   readonly experimentalLetterSpacing?: boolean;
@@ -48,6 +49,7 @@ interface ActiveRender {
 
 interface ActiveMeasure {
   readonly options: PixiTextDirectionOptions;
+  readonly text: string;
   lineIndex: number;
 }
 
@@ -97,6 +99,7 @@ function installCanvasTextDirectionAdapter(): void {
   const drawLetterSpacing = generator._drawLetterSpacing;
   const getAlignmentOffset = generator._getAlignmentOffset;
   const measureText = metrics.measureText;
+  const measureFont = metrics.measureFont;
   const measureLine = metrics._measureText;
 
   metrics.measureText = function (...args: unknown[]): unknown {
@@ -113,13 +116,35 @@ function installCanvasTextDirectionAdapter(): void {
     // so direction registered to separate styles stays in separate measurement entries.
     context.direction = options.lineDirections[0] ?? 'ltr';
     context.textAlign = canvasTextAlign(options.align);
-    activeMeasure = { options, lineIndex: 0 };
+    activeMeasure = { options, text: String(args[0] ?? ''), lineIndex: 0 };
     try {
       return Reflect.apply(measureText, this, args);
     } finally {
       context.direction = previousDirection;
       context.textAlign = previousTextAlign;
       activeMeasure = previousActiveMeasure;
+    }
+  };
+
+  metrics.measureFont = function (...args: unknown[]): unknown {
+    const active = activeMeasure;
+    if (active === undefined || !active.text.includes('\u064a'))
+      return Reflect.apply(measureFont, this, args);
+
+    const font = String(args[0] ?? '');
+    const previousMetricsString = CanvasTextMetrics.METRICS_STRING;
+    // Pixi caches font ascent/descent per CSS font. Add the below-baseline
+    // Arabic glyph only for this synchronous measurement, then clear that
+    // font entry so Latin/Persian text recalculates with Pixi's normal sample.
+    CanvasTextMetrics.clearMetrics(font);
+    CanvasTextMetrics.METRICS_STRING = previousMetricsString.includes('\u064a')
+      ? previousMetricsString
+      : `${previousMetricsString}\u064a`;
+    try {
+      return Reflect.apply(measureFont, this, args);
+    } finally {
+      CanvasTextMetrics.METRICS_STRING = previousMetricsString;
+      CanvasTextMetrics.clearMetrics(font);
     }
   };
 

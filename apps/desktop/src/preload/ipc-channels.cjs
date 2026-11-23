@@ -36,6 +36,7 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.agent-slots.save',
   'desktop.window-minimize',
   'desktop.window-maximize',
+  'desktop.window-fullscreen',
   'desktop.window-close',
   'desktop.window-is-maximized',
   'desktop.storage.flush',

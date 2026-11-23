@@ -455,12 +455,14 @@ import {
   isDesktopWindowMaximized,
   minimizeDesktopWindow,
   toggleMaximizeDesktopWindow,
+  toggleFullscreenDesktopWindow,
   closeDesktopWindow,
 } from './desktop-client.js';
 import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
 import { runCreativeBriefTask } from './joy-agent/entry-points.js';
+import type { CreativeBriefRunOptions } from './joy-agent/entry-points.js';
 import {
   assertCustomEndpointConsentHolds,
   mayRestoreProviderProfile,
@@ -631,11 +633,11 @@ import {
 import { buildCaptionLayerInsertion } from './caption-layer.js';
 import { buildThreeDRenderLayerInsertion } from './three-d-render-layer.js';
 import { FeatureHub } from './FeatureHub.js';
-import { AgentActivityIndicator } from './AgentActivityIndicator.js';
 import {
   AgentPresenceProvider,
   PanelIdentityContext,
   createAgentPresenceStore,
+  type JoyAgentTarget,
 } from './agent-presence.js';
 import { AgentPreviewProvider, useAgentPreviewSnapshot } from './agent-preview-store.js';
 import { featureActivationRoute, type FeatureToolId } from './feature-architecture.js';
@@ -1292,6 +1294,22 @@ function EditorWorkspace({
     };
   }, []);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
+  const [followedAgentRunId, setFollowedAgentRunId] = useState<string>();
+  const toggleFollowAgentTarget = useCallback(() => {
+    const { runId, status } = appAgentPresenceStore.getState();
+    if (
+      runId === undefined ||
+      status === 'completed' ||
+      status === 'failed' ||
+      status === 'cancelled'
+    ) {
+      return;
+    }
+    setFollowedAgentRunId((current) => (current === runId ? undefined : runId));
+  }, []);
+  const clearFollowAgentTarget = useCallback((runId: string) => {
+    setFollowedAgentRunId((current) => (current === runId ? undefined : current));
+  }, []);
   const [agentConnectionStatus, setAgentConnectionStatus] = useState<ByokSessionStatus | undefined>(
     () => joyAgentEngineClientRef.current?.getStatus(),
   );
@@ -2026,7 +2044,7 @@ function EditorWorkspace({
     state.selectedIds,
   ]);
   const creativeBriefRunner = useCallback(
-    (requestText: string) => {
+    (requestText: string, options?: CreativeBriefRunOptions) => {
       if (agentPolicy.privacyMode === 'local-only')
         return Promise.reject(
           new Error('Remote JOY Agent processing is disabled by the Local only privacy policy.'),
@@ -2038,37 +2056,15 @@ function EditorWorkspace({
         request: requestText,
         context: creativeBriefContext,
         allowRemote: true,
-        onRunStart: (runId) => appAgentPresenceStore.beginRun(runId, session.historyCursorSequence),
-        onEvent: (event) => {
-          const terminal =
-            event.phase === 'completed' || event.phase === 'failed' || event.phase === 'cancelled';
-          appAgentPresenceStore.dispatch({
-            protocolVersion: 1,
-            runId: event.runId,
-            seq: event.seq,
-            at: event.at,
-            revision: session.historyCursorSequence,
-            kind: terminal ? event.phase : event.phase === 'planning' ? 'preview' : 'activity',
-            phase: event.phase,
-            ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
-            targets: [{ panelId: 'agent', sectionId: 'composer', capability: 'creative-brief' }],
-            ...(event.phase === 'planning'
-              ? {
-                  preview: {
-                    revision: session.historyCursorSequence,
-                    summaryCode: 'joy-agent-brief',
-                    targetCount: 1,
-                  },
-                }
-              : {}),
-          });
-        },
+        ...(options?.onRunStart === undefined ? {} : { onRunStart: options.onRunStart }),
+        ...(options?.onEvent === undefined ? {} : { onEvent: options.onEvent }),
+        ...(options?.signal === undefined ? {} : { signal: options.signal }),
+        ...(options?.isCancelled === undefined ? {} : { isCancelled: options.isCancelled }),
       });
     },
     [
       agentPolicy.privacyMode,
       creativeBriefContext,
-      session.historyCursorSequence,
       session.projectRevisionId,
       session.visualProject.id,
     ],
@@ -5961,11 +5957,12 @@ function EditorWorkspace({
     exportAbortRef.current?.abort();
   }, []);
   const issueAgentPanelCommand = useCallback(
-    (type: AgentPanelCommandType, capability?: 'edit' | 'creative-brief') => {
+    (type: AgentPanelCommandType, capability?: 'edit' | 'creative-brief', runId?: string) => {
       setAgentPanelCommand((current) => ({
         serial: (current?.serial ?? 0) + 1,
         type,
         ...(capability === undefined ? {} : { capability }),
+        ...(runId === undefined ? {} : { runId }),
       }));
     },
     [],
@@ -5994,6 +5991,17 @@ function EditorWorkspace({
       root.focus({ preventScroll: true });
     }, 80);
   }, []);
+  const showAgentTarget = useCallback(
+    (target: JoyAgentTarget) => {
+      const routed =
+        target.sectionId === undefined ? undefined : featureActivationRoute(target.sectionId);
+      activatePanel(routed?.toolId ?? target.panelId);
+      if (target.panelId === 'agent' && target.capability !== undefined) {
+        issueAgentPanelCommand('select-capability', target.capability);
+      }
+    },
+    [activatePanel, issueAgentPanelCommand],
+  );
   const runMenuAction = useCallback(
     (id: AppMenuActionId) => {
       const panelId = panelIdFromMenuAction(id);
@@ -6068,13 +6076,35 @@ function EditorWorkspace({
           setAgentSettingsOpen(true);
           break;
         case 'agent.stop':
-          activatePanel('agent');
-          issueAgentPanelCommand('stop');
+          {
+            const runId = appAgentPresenceStore.getState().runId;
+            if (runId !== undefined) {
+              activatePanel('agent');
+              issueAgentPanelCommand('stop', undefined, runId);
+            }
+          }
+          break;
+        case 'agent.showTarget':
+          {
+            const current = appAgentPresenceStore.getState();
+            const target =
+              current.targets.find((entry) => entry.panelId !== 'agent') ??
+              current.targets[0] ??
+              current.terminalTarget;
+            if (target !== undefined) showAgentTarget(target);
+          }
+          break;
+        case 'agent.follow':
+          toggleFollowAgentTarget();
           break;
         case 'agent.active':
           break;
         case 'view.fullscreen':
-          if (!document.fullscreenElement) {
+          if (isDesktopHost()) {
+            void toggleFullscreenDesktopWindow()
+              .then(() => isDesktopWindowMaximized())
+              .then(setIsMaximized);
+          } else if (!document.fullscreenElement) {
             void document.documentElement.requestFullscreen();
           } else {
             void document.exitFullscreen();
@@ -6106,8 +6136,10 @@ function EditorWorkspace({
       pasteClipsAtPlayhead,
       redo,
       runSelectedClipAction,
+      toggleFollowAgentTarget,
       toggleSnapping,
       undo,
+      showAgentTarget,
     ],
   );
   const runPaletteAction = useCallback(
@@ -7897,19 +7929,6 @@ function EditorWorkspace({
       <AgentPresenceProvider store={appAgentPresenceStore}>
         <main>
           <header className="app-header">
-            <AgentActivityIndicator
-              onShowTarget={(target) => {
-                const routed =
-                  target.sectionId === undefined
-                    ? undefined
-                    : featureActivationRoute(target.sectionId);
-                activatePanel(routed?.toolId ?? target.panelId);
-                if (target.panelId === 'agent' && target.capability !== undefined) {
-                  issueAgentPanelCommand('select-capability', target.capability);
-                }
-              }}
-              onStop={() => issueAgentPanelCommand('stop')}
-            />
             {exportProgress !== undefined && (
               <div
                 className="export-progress"
@@ -7945,7 +7964,15 @@ function EditorWorkspace({
                 hasSelection={state.selectedIds.length > 0}
                 supportsSpeed={supportsSpeed}
                 exporting={exporting}
+                followedAgentRunId={followedAgentRunId}
+                onToggleFollowAgentTarget={toggleFollowAgentTarget}
+                onClearFollowAgentTarget={clearFollowAgentTarget}
                 onAction={runMenuAction}
+                onShowAgentTarget={showAgentTarget}
+                onStopAgentRun={(runId) => {
+                  activatePanel('agent');
+                  issueAgentPanelCommand('stop', undefined, runId);
+                }}
               />
             </div>
             <div className="header-spacer" aria-hidden="true" />
@@ -8070,6 +8097,9 @@ function EditorWorkspace({
                 aria-busy={exporting}
               >
                 <ExportIcon />
+                <span className="header-export-label" aria-hidden="true">
+                  Export MP4
+                </span>
                 {exportPresetWarning !== undefined && (
                   <span
                     className="header-export-warning-badge"

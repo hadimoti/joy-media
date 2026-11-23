@@ -12,6 +12,7 @@ import {
   workspaceImportSpecifiers,
   workspaceRuntimeClosure,
 } from './workspace-staging.mjs';
+import { stageSpeechRunners } from './speech-staging.mjs';
 
 /** Every `.js`, `.mjs` and `.cjs` file under a folder, for the staged-import check below. */
 async function listJavaScriptFiles(dir) {
@@ -87,7 +88,8 @@ async function stageRenderer() {
  * Electron launch, not just inspection) makes that arithmetic land one directory too high and
  * fail with `ERR_FILE_NOT_FOUND`. `worker-entry.ts`'s `resolveWorkerEntry` walks the same
  * `../../worker/index.js` path from `dist/main`, so `worker/` must sit at that same sibling
- * level too.
+ * level too. JOY-authored speech runners are staged separately at `joy-media-unpacked/speech`;
+ * Python environments, dependencies, and model folders remain local opt-in setup.
  */
 async function assembleUnpacked() {
   if (!existsSync(compiledMainEntry)) {
@@ -153,6 +155,29 @@ async function assembleUnpacked() {
     recursive: true,
     filter: (source) => !/\.test\.(js|d\.ts)(\.map)?$/.test(source.replaceAll('\\', '/')),
   });
+
+  // Ship only JOY-authored Python entrypoints. Python, dependencies, ffmpeg, and model
+  // folders remain locally installed/configured and are never copied from the workspace.
+  await stageSpeechRunners(
+    resolve(repoRoot, 'apps', 'worker', 'speech'),
+    resolve(unpackedDir, 'speech'),
+  );
+
+  for (const skill of [
+    'joy-code-caption-styling',
+    'joy-code-cuts-and-motion',
+    'joy-code-format-and-delivery',
+    'joy-code-look-and-effects',
+    'joy-code-speech-subtitles',
+    'joy-code-titles-and-lower-thirds',
+  ]) {
+    const destination = resolve(unpackedDir, 'joy-code-skills', skill);
+    await mkdir(destination, { recursive: true });
+    await cp(
+      resolve(repoRoot, '.agent', 'skills', skill, 'SKILL.md'),
+      resolve(destination, 'SKILL.md'),
+    );
+  }
 
   // Stage the internal workspace packages that the desktop main process and the Worker import (and
   // that those packages import, transitively) into node_modules, so the packaged runtime resolves

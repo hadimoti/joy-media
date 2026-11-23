@@ -397,6 +397,16 @@ describe('mounted Worker bounded semantic tool exchange', () => {
       'read_project_context',
       'validate_proposal',
     ]);
+    const contextTool = BROWSER_AGENT_TOOLS.find(
+      (tool) => tool.function.name === 'read_project_context',
+    );
+    expect(contextTool?.function.parameters).toMatchObject({
+      properties: { domain: { enum: expect.arrayContaining(['presets', 'skills']) } },
+    });
+    expect(contextTool?.function.description).toContain('query skills for the matching guidance');
+    expect(contextTool?.function.description).toContain(
+      'query presets for current catalog IDs and runnable status',
+    );
     const proposalTool = BROWSER_AGENT_TOOLS.find(
       (tool) => tool.function.name === 'validate_proposal',
     );

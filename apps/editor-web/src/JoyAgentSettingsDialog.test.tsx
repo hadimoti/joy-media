@@ -182,6 +182,18 @@ function installDesktopBridge(): void {
 }
 
 describe('JOY Agent Settings connection status', () => {
+  it('identifies the current settings page as navigation changes', async () => {
+    const rendered = await render(client());
+    const current = () => rendered.querySelectorAll('nav button[aria-current="page"]');
+    expect(current()).toHaveLength(1);
+    expect(current()[0]?.textContent?.trim()).toBe('AI models');
+
+    await act(async () => buttonByText(rendered, 'Safety and limits').click());
+
+    expect(current()).toHaveLength(1);
+    expect(current()[0]?.textContent?.trim()).toBe('Safety and limits');
+  });
+
   beforeEach(() => {
     installDesktopBridge();
   });
@@ -342,7 +354,7 @@ describe('JOY Agent Settings connection status', () => {
     expect(rendered.querySelector('[role="status"]')?.textContent).toContain(
       SETTINGS_MODELS.briefOnly,
     );
-    expect(countLeafTextMatches(rendered, /Ready for a creative brief only/)).toBe(1);
+    expect(countLeafTextMatches(rendered, /Can plan, but can't edit the project/)).toBe(1);
     expect(rendered.textContent).toContain('Connected successfully in plan-only mode.');
   });
 
@@ -559,7 +571,7 @@ describe('JOY Agent Settings media capability probe', () => {
 
     expect(probe).toHaveBeenCalledTimes(1);
     expect(rendered.textContent).toContain(
-      'Media capability check complete for openrouter/verified-model.',
+      'Media support check complete for openrouter/verified-model.',
     );
     const mediaResult = rendered.querySelector('.agent-media-capability-result');
     expect(mediaResult?.textContent).toContain('ImageSupported');
@@ -587,7 +599,7 @@ describe('JOY Agent Settings media capability probe', () => {
     });
 
     expect(rendered.textContent).toContain(
-      'Media capability check could not be completed. Reconnect the model and try again.',
+      'Media support check could not be completed. Reconnect the model and try again.',
     );
     expect(rendered.textContent).not.toContain(privateKey);
     expect(rendered.textContent).not.toContain(privateEndpoint);
@@ -657,7 +669,7 @@ describe('JOY Agent Settings media capability probe', () => {
 
     expect(engineClient.clear).toHaveBeenCalledTimes(1);
     expect(rendered.querySelector('.agent-media-capability-result')).toBeNull();
-    expect(rendered.textContent).not.toContain('Media capability check complete');
+    expect(rendered.textContent).not.toContain('Media support check complete');
     expect(rendered.textContent).toContain(
       'Connection cleared. Your API key was removed from this page session.',
     );
@@ -666,7 +678,7 @@ describe('JOY Agent Settings media capability probe', () => {
 
 describe('JOY Agent Settings custom provider acknowledgement', () => {
   const disclosureText =
-    'I understand that custom endpoints may log requests according to their own policy.';
+    'I understand that custom services may log requests according to their own policy.';
 
   function providerSelect(rendered: HTMLElement): HTMLSelectElement {
     const select = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find((candidate) =>
@@ -783,7 +795,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
       expect.objectContaining({ apiKey: 'vault-openrouter-secret' }),
     );
     expect(rendered.textContent).toContain(
-      'a new API key because the saved key belongs to a different provider or endpoint',
+      'a new API key because the saved key belongs to a different provider or service address',
     );
   });
 
@@ -1054,7 +1066,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
 
     expect(invoke).not.toHaveBeenCalledWith('desktop.provider.models', expect.anything());
     expect(rendered.textContent).toContain(
-      'The key was entered for a different provider or endpoint. Enter it again.',
+      'The key was entered for a different provider or service address. Enter it again.',
     );
   });
 
@@ -1149,7 +1161,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     });
 
     expect(invoke).not.toHaveBeenCalledWith('desktop.provider.models', expect.anything());
-    expect(rendered.textContent).toContain('Enter the API key again to confirm this endpoint.');
+    expect(rendered.textContent).toContain('Enter the API key again to confirm this connection.');
   });
 
   it('shows an unconfirmed custom profile in the form, and a key entered there updates that profile', async () => {
@@ -1280,7 +1292,7 @@ describe('JOY Agent Settings saved profile connect', () => {
       await Promise.resolve();
     });
     expect(engineClient.configure).not.toHaveBeenCalled();
-    expect(rendered.textContent).toContain('Acknowledge this custom endpoint before connecting.');
+    expect(rendered.textContent).toContain('Acknowledge this custom connection before connecting.');
     const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
     if (consent === null) throw new Error('Expected the endpoint consent');
     await act(async () => {
@@ -2042,7 +2054,7 @@ describe('JOY Agent Settings saved profile connect', () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
 
-    expect(rendered.textContent).toContain('Enter the key again to confirm this endpoint.');
+    expect(rendered.textContent).toContain('Enter the key again to confirm this connection.');
     await act(async () => {
       buttonByText(rendered, 'Use').click();
       await Promise.resolve();
@@ -2050,7 +2062,7 @@ describe('JOY Agent Settings saved profile connect', () => {
 
     expect(engineClient.configure).not.toHaveBeenCalled();
     expect(rendered.textContent).toContain(
-      'Enter the API key again to confirm this endpoint, then connect.',
+      'Enter the API key again to confirm this connection, then connect.',
     );
   });
 });

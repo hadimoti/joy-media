@@ -11,6 +11,7 @@ import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
+import { compileJoyCodeCaptionOperation } from './joy-code-caption-operations.js';
 import { withSpeechCaptionClipPlacement } from './speech-voice-placement.js';
 
 function memoryStorage() {
@@ -799,4 +800,68 @@ describe('CaptionsPanel cue keyboard editing', () => {
     await act(async () => root.unmount());
     container.remove();
   });
+});
+
+it('shows the active Joy Code caption preset and switches the same clip from the style tab', async () => {
+  const styled = compileJoyCodeCaptionOperation({
+    project: INITIAL_EDITOR_PROJECT,
+    operation: {
+      id: 'set-rtl-preset',
+      dependsOn: [],
+      kind: 'caption.setTemplate',
+      captionClipId: 'caption-clip-1',
+      templateId: 'joy-rtl-classic',
+    },
+  });
+  if (!styled.ok) throw new Error(styled.error.message);
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const onDispatch = vi.fn();
+  try {
+    await act(async () =>
+      root.render(
+        <CaptionsPanel
+          project={styled.project}
+          playheadUs={1_500_000}
+          onSeek={() => undefined}
+          onDispatch={onDispatch}
+          onTranscribe={async () => undefined}
+          transcriptionError={undefined}
+          onProjectChange={() => undefined}
+        />,
+      ),
+    );
+    const styleTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      (button) => button.textContent?.trim() === 'Style',
+    );
+    expect(styleTab).toBeDefined();
+    await act(async () => styleTab!.click());
+    const card = (label: string) =>
+      [...container.querySelectorAll<HTMLButtonElement>('.caption-template-card')].find(
+        (button) => button.textContent?.trim() === label,
+      )!;
+    expect(card('JOY RTL Classic').getAttribute('aria-pressed')).toBe('true');
+    expect(card('JOY Clean').getAttribute('aria-pressed')).toBe('false');
+    await act(async () => card('JOY Clean').click());
+    expect(onDispatch).toHaveBeenCalledWith({
+      label: 'Apply caption template',
+      commands: [
+        {
+          type: 'caption.setClipStyle',
+          payload: {
+            clipId: 'caption-clip-1',
+            style: expect.objectContaining({
+              templateId: 'joy-clean',
+              align: 'center',
+              textColor: '#ffffff',
+            }),
+          },
+        },
+      ],
+    });
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });

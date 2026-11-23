@@ -60,7 +60,17 @@ describe('Joy Code compound compiler', () => {
     expect(result.proposalHash).toBe(`joy-code-proposal-${result.operationDigest}`);
     expect(result.documentChanged).toBe(true);
     expect(result.document.visualObjects['text-clean-title-compound-1-0']).toBeDefined();
-    expect(result.document.captionDocuments['captions-fa']?.styleRef).toBe('joy-rtl-classic');
+    expect(result.document.compositions.root?.tracks[0]?.clips).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'caption-clip-1',
+          style: expect.objectContaining({ templateId: 'joy-rtl-classic' }),
+        }),
+      ]),
+    );
+    expect(result.document.captionDocuments['captions-fa']).toEqual(
+      INITIAL_EDITOR_PROJECT.captionDocuments['captions-fa'],
+    );
     expect(result.document.pluginData['joy.captions.burnIn']).toBe(true);
     expect(result.groups.map((group) => group.kind)).toEqual(['text', 'caption', 'caption']);
   });

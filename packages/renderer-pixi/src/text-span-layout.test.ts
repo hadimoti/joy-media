@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { layoutTextSpanOffsets } from './text-span-layout.js';
+import {
+  layoutTextSpanOffsets,
+  type layoutWrappedTextSpans,
+  serializeTextSpanLayoutRuntimeSource,
+} from './text-span-layout.js';
+import { wrapTextByWords } from './text-direction.js';
 
 type Direction = 'ltr' | 'rtl';
 type Alignment = 'left' | 'center' | 'right' | 'start' | 'end';
@@ -38,4 +43,52 @@ describe('layoutTextSpanOffsets', () => {
     expect(offsets).toEqual(expected);
     expect(measuredPrefixes).toEqual(['a', 'ab', 'abc']);
   });
+});
+
+it('keeps styled URL fragments in LTR order across repeated raw and authored-isolate lines', () => {
+  const prefix = 'عنوان ';
+  const head = 'https://example.com/';
+  const tail = 'long-path';
+  const red = { r: 225, g: 20, b: 40, a: 255 };
+  const green = { r: 30, g: 235, b: 55, a: 255 };
+  const white = { r: 255, g: 255, b: 255, a: 255 };
+  const spans = [
+    { text: prefix, color: white },
+    { text: head, color: red },
+    { text: tail, color: green },
+    { text: '\n' + prefix + '\u2066', color: white },
+    { text: head, color: green },
+    { text: tail + '\u2069', color: red },
+  ];
+  const source = spans.map((span) => span.text).join('');
+  const length = (text: string) => text.replace(/[\u2066-\u2069]/gu, '').length;
+  const wrapped = wrapTextByWords(source, 18, length, 'rtl');
+  const lines = wrapped.text.split('\n');
+  expect(lines).toEqual([
+    prefix.trimEnd(),
+    '\u2068' + head + tail + '\u2069',
+    prefix.trimEnd(),
+    '\u2066' + head + tail + '\u2069',
+  ]);
+  const layout = new Function(
+    'return ' + serializeTextSpanLayoutRuntimeSource(),
+  )() as typeof layoutWrappedTextSpans;
+  const runs = layout(
+    source,
+    spans,
+    lines,
+    wrapped.lineDirections,
+    ['right', 'right', 'right', 'right'],
+    length,
+  );
+  for (const [index, colors] of [
+    [1, [red, green]],
+    [3, [green, red]],
+  ] as const) {
+    expect(runs[index]?.map(({ text, color, direction }) => ({ text, color, direction }))).toEqual([
+      { text: head, color: colors[0], direction: 'ltr' },
+      { text: tail, color: colors[1], direction: 'ltr' },
+    ]);
+    expect(runs[index]![1]!.x).toBeGreaterThan(runs[index]![0]!.x);
+  }
 });

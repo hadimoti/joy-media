@@ -232,6 +232,25 @@ describe('JOY Agent Engine client V2 lifecycle', () => {
     expect((await pending).value).toMatchObject({ runEpoch: 2, phase: 'thinking' });
   });
 
+  it('closes a cancelled run iterator without synthesizing a terminal event', async () => {
+    const { worker, client } = await configuredClient();
+    const iterator = client.startRun({
+      runId: 'eventless-cancel',
+      prompt: 'brief',
+      mode: 'plan-only',
+    });
+    const waiting = iterator.next();
+
+    await client.cancel('eventless-cancel');
+
+    await expect(waiting).resolves.toEqual({ done: true, value: undefined });
+    expect(worker.messages.at(-1)).toMatchObject({
+      type: 'cancel',
+      runId: 'eventless-cancel',
+      runEpoch: 1,
+    });
+  });
+
   it('fails active work with an actionable reconnect error for invalid cached Worker data', async () => {
     const { worker, client } = await configuredClient();
     const iterator = client.startRun(

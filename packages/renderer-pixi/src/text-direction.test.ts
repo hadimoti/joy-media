@@ -119,6 +119,38 @@ describe('canvas text direction', () => {
     expect(result.text.split('\n').every((line) => countTextGraphemes(line) <= 2)).toBe(true);
   });
 
+  it.each(['https://example.com/a-very-long-path', 'HTTPS://example.com/a-very-long-path'])(
+    'keeps %s intact and isolated as one LTR unit inside an RTL paragraph',
+    (url) => {
+      const result = wrapTextByWords(
+        `اقرأ ${url} الآن`,
+        12,
+        (candidate) => [...candidate].length,
+        'rtl',
+      );
+
+      expect(result.text).toContain(`\u2068${url}\u2069`);
+      expect(result.text.split('\n').some((line) => line.includes(url))).toBe(true);
+      expect(
+        result.text
+          .replaceAll('\u2068', '')
+          .replaceAll('\u2069', '')
+          .replaceAll('\n', '')
+          .replaceAll(' ', ''),
+      ).toBe(`اقرأ${url}الآن`);
+    },
+  );
+
+  it('isolates an RTL paragraph URL when no wrap width is configured', () => {
+    const result = wrapTextByWords(
+      'رابط https://example.com الآن',
+      Number.POSITIVE_INFINITY,
+      () => 0,
+      'rtl',
+    );
+    expect(result.text).toBe('رابط \u2068https://example.com\u2069 الآن');
+  });
+
   it('keeps Latin word wrapping compatible with the existing line breaks', () => {
     const result = wrapTextByWords('The story starts here', 11, (text) => [...text].length, 'ltr');
     expect(result.text).toBe('The story\nstarts here');

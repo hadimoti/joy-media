@@ -326,32 +326,34 @@ export function GraphEditor({
         >
           <PasteIcon />
         </button>
-        <button
-          type="button"
-          className="icon-button"
-          data-guide="Previous key"
-          aria-label="Jump to previous key"
-          onClick={() => {
-            const times = curve.keyframes.map((k) => k.timeUs).sort((a, b) => a - b);
-            const prev = [...times].reverse().find((t) => t < playheadUs);
-            if (prev !== undefined) onSeek(prev);
-          }}
-        >
-          <KeyPrevIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          data-guide="Next key"
-          aria-label="Jump to next key"
-          onClick={() => {
-            const times = curve.keyframes.map((k) => k.timeUs).sort((a, b) => a - b);
-            const next = times.find((t) => t > playheadUs);
-            if (next !== undefined) onSeek(next);
-          }}
-        >
-          <KeyNextIcon />
-        </button>
+        <div className="graph-editor-navigation" role="group" aria-label="Keyframe navigation">
+          <button
+            type="button"
+            className="icon-button"
+            data-guide="Previous key"
+            aria-label="Jump to previous key"
+            onClick={() => {
+              const times = curve.keyframes.map((k) => k.timeUs).sort((a, b) => a - b);
+              const prev = [...times].reverse().find((t) => t < playheadUs);
+              if (prev !== undefined) onSeek(prev);
+            }}
+          >
+            <KeyPrevIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            data-guide="Next key"
+            aria-label="Jump to next key"
+            onClick={() => {
+              const times = curve.keyframes.map((k) => k.timeUs).sort((a, b) => a - b);
+              const next = times.find((t) => t > playheadUs);
+              if (next !== undefined) onSeek(next);
+            }}
+          >
+            <KeyNextIcon />
+          </button>
+        </div>
       </div>
       <div className="motion-graph-scale">
         <span>{metrics.max.toFixed(2)}</span>

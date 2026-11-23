@@ -379,6 +379,22 @@ describe('library rail', () => {
     });
     expect(onSelect).toHaveBeenCalledWith('a');
   });
+
+  it('scrolls the keyboard-focused category into view when navigating the rail', () => {
+    const view = render(rail(() => undefined));
+    const selected = view.querySelector<HTMLButtonElement>('[aria-selected="true"]')!;
+    const next = view.querySelector<HTMLButtonElement>('#test-panel-tab-c')!;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(next, 'scrollIntoView', { value: scrollIntoView });
+
+    act(() => {
+      selected.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+      );
+    });
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+  });
 });
 
 describe('the Filters and Effects panels use the shared card and rail', () => {

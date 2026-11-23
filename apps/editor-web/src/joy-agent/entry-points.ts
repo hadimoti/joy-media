@@ -1,5 +1,12 @@
 import type { CreativeBriefV1, CreativeSkillAvailability } from '@joy-media/agent-tools';
-import { resolveCreativeSkillAvailability, validateCreativeBrief } from '@joy-media/agent-tools';
+import {
+  resolveCreativeSkillAvailability,
+  validateCreativeBrief,
+  buildCreativeBriefModelPrompt,
+  completeCreativeBriefFromModelOutput,
+  CreativeBriefContractError,
+  MAX_LENGTHS,
+} from '@joy-media/agent-tools';
 import type { JoyAgentEngineClient, JoyAgentRunHost } from './engine-client.js';
 import {
   createCreativeSkillEditorPrimitives,
@@ -166,6 +173,10 @@ export interface RunJoyAgentTaskInput {
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
   /** Called after a run id is allocated and before the Worker iterator starts. */
   readonly onRunStart?: (runId: string) => void;
+  /** Abort the active engine queue and classify its event-less close as cancellation. */
+  readonly signal?: AbortSignal;
+  /** Covers cancellation initiated by an owner that does not hold this task's signal. */
+  readonly isCancelled?: () => boolean;
   /** Local-only policy must fail before any remote Worker/provider call. */
   readonly allowRemote?: boolean;
 }
@@ -192,6 +203,13 @@ export class JoyAgentTaskError extends Error {
     this.code = code;
     this.runErrorCode = runErrorCode;
   }
+}
+
+export interface CreativeBriefRunOptions {
+  readonly signal?: AbortSignal;
+  readonly isCancelled?: () => boolean;
+  readonly onRunStart?: (runId: string) => void;
+  readonly onEvent?: (event: JoyAgentSafeEvent) => void;
 }
 
 function newRunId(taskKind: JoyAgentTaskKind): string {
@@ -228,6 +246,8 @@ export async function runJoyAgentTask(input: RunJoyAgentTaskInput): Promise<JoyA
     );
   const runId = newRunId(input.taskKind);
   input.onRunStart?.(runId);
+  if (input.signal?.aborted)
+    throw new JoyAgentTaskError('cancelled', 'JOY Agent Engine run cancelled');
   const request: Omit<JoyAgentRunRequest, 'runEpoch'> = {
     runId,
     taskKind: input.taskKind,
@@ -239,21 +259,31 @@ export async function runJoyAgentTask(input: RunJoyAgentTaskInput): Promise<JoyA
   let completed: JoyAgentSafeEvent | undefined;
   let awaitingApproval: JoyAgentSafeEvent | undefined;
   let preparedProposal: JoyAgentPreparedProposal | undefined;
-  for await (const event of input.client.startRun(request, input.host)) {
-    input.onEvent?.(event);
-    if (event.phase === 'failed')
-      throw new JoyAgentTaskError(
-        'failed',
-        event.message ?? 'JOY Agent Engine failed',
-        runErrorCodeOf(event.errorCode),
-      );
-    if (event.phase === 'cancelled')
-      throw new JoyAgentTaskError('cancelled', 'JOY Agent Engine run cancelled');
-    if (event.phase === 'previewing' && event.proposal !== undefined)
-      preparedProposal = event.proposal;
-    if (event.phase === 'awaiting-approval') awaitingApproval = event;
-    if (event.phase === 'completed') completed = event;
+  const iterator = input.client.startRun(request, input.host);
+  const cancelOnAbort = () => void input.client.cancel(runId);
+  input.signal?.addEventListener('abort', cancelOnAbort, { once: true });
+  try {
+    if (input.signal?.aborted) cancelOnAbort();
+    for await (const event of iterator) {
+      input.onEvent?.(event);
+      if (event.phase === 'failed')
+        throw new JoyAgentTaskError(
+          'failed',
+          event.message ?? 'JOY Agent Engine failed',
+          runErrorCodeOf(event.errorCode),
+        );
+      if (event.phase === 'cancelled')
+        throw new JoyAgentTaskError('cancelled', 'JOY Agent Engine run cancelled');
+      if (event.phase === 'previewing' && event.proposal !== undefined)
+        preparedProposal = event.proposal;
+      if (event.phase === 'awaiting-approval') awaitingApproval = event;
+      if (event.phase === 'completed') completed = event;
+    }
+  } finally {
+    input.signal?.removeEventListener('abort', cancelOnAbort);
   }
+  if (input.signal?.aborted || input.isCancelled?.())
+    throw new JoyAgentTaskError('cancelled', 'JOY Agent Engine run cancelled');
   if (completed !== undefined) return completed;
   if (awaitingApproval !== undefined) {
     if (planOnly)
@@ -289,21 +319,63 @@ export async function runCreativeBriefTask(input: {
   readonly context: unknown;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
   readonly onRunStart?: (runId: string) => void;
+  readonly signal?: AbortSignal;
+  readonly isCancelled?: () => boolean;
   readonly allowRemote?: boolean;
 }): Promise<CreativeBriefV1> {
+  const { request } = input;
+  if (request.length > MAX_LENGTHS.request) {
+    throw new JoyAgentTaskError(
+      'failed',
+      `Creative Brief requests can contain up to ${MAX_LENGTHS.request} characters. Shorten your request and try again.`,
+    );
+  }
+  // The model is given the Creative Brief contract for this exact request, so
+  // it knows every field, the exact project and revision to echo, and the
+  // allowed enums. The contract is the model-facing half of the same contract
+  // the independent validator enforces below.
   const event = await runJoyAgentTask({
     client: input.client,
     taskKind: 'creative-brief',
-    prompt: input.request,
+    prompt: buildCreativeBriefModelPrompt({
+      request,
+      projectId: input.projectId,
+      revisionId: input.revisionId,
+    }),
     baseRevision: input.revisionId,
     context: input.context,
     ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
     ...(input.onRunStart === undefined ? {} : { onRunStart: input.onRunStart }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.isCancelled === undefined ? {} : { isCancelled: input.isCancelled }),
     ...(input.allowRemote === undefined ? {} : { allowRemote: input.allowRemote }),
   });
   if (event.result === undefined)
     throw new JoyAgentTaskError('empty-result', 'JOY returned no Creative Brief');
-  const validation = validateCreativeBrief(event.result);
+  // Host-owned fields (schema version, project and revision bindings, the
+  // recorded request, metadata, the intelligence shell) are completed here.
+  // A binding the model got wrong is rejected, never silently rewritten.
+  let brief: CreativeBriefV1;
+  try {
+    brief = completeCreativeBriefFromModelOutput({
+      output: event.result,
+      projectId: input.projectId,
+      revisionId: input.revisionId,
+      request,
+    });
+  } catch (error) {
+    if (error instanceof CreativeBriefContractError)
+      throw new JoyAgentTaskError(
+        'invalid-result',
+        `JOY Creative Brief failed the contract: ${error.code}${
+          error.field === undefined ? '' : ` (${error.field})`
+        } - ${error.message}`,
+      );
+    throw error;
+  }
+  // Independent validation: the completed brief must still satisfy every rule
+  // of the Creative Brief contract. The prompt contract is not a substitute.
+  const validation = validateCreativeBrief(brief);
   if (!validation.valid)
     throw new JoyAgentTaskError(
       'invalid-result',
@@ -312,7 +384,6 @@ export async function runCreativeBriefTask(input: {
         .map((error) => error.message)
         .join('; ')}`,
     );
-  const brief = event.result as CreativeBriefV1;
   if (brief.projectId !== input.projectId || brief.snapshotRevisionId !== input.revisionId)
     throw new JoyAgentTaskError(
       'stale-result',

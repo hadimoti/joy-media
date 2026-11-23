@@ -167,7 +167,7 @@ export function reduceAgentPresence(
       targets: [],
       progress: undefined,
       preview: undefined,
-      terminalTarget: undefined,
+      terminalTarget: event.kind === 'failed' ? primaryTarget : undefined,
       terminalAt: event.at,
     });
   }

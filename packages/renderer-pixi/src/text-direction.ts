@@ -146,7 +146,8 @@ export function wrapTextByWords(
   direction: CanvasTextDirection = 'auto',
 ): WrappedCanvasText {
   if (!Number.isFinite(maxWidth) || maxWidth <= 0) {
-    return { text, lineDirections: getLineDirections(text, direction) };
+    const isolatedText = text.replace(urlTokenPattern(), isolateUrl);
+    return { text: isolatedText, lineDirections: getLineDirections(isolatedText, direction) };
   }
 
   const outputLines: string[] = [];
@@ -181,7 +182,8 @@ export function wrapTextByWords(
         }
       }
 
-      if (measure(content, paragraphDirection) > maxWidth) {
+      const isIsolatedUrl = /^[\u2066-\u2068]https?:\/\/[^\u2069]*\u2069$/iu.test(content);
+      if (!isIsolatedUrl && measure(content, paragraphDirection) > maxWidth) {
         const chunks = breakLongToken(content, maxWidth, measure, paragraphDirection);
         for (let index = 0; index < chunks.length - 1; index += 1) {
           pushLine(chunks[index]!, paragraphDirection, outputLines, outputDirections);
@@ -210,7 +212,32 @@ function resolveTextLocale(text: string, direction: 'ltr' | 'rtl'): string {
   return 'en';
 }
 
+function urlTokenPattern(): RegExp {
+  return /[\u2066-\u2068]https?:\/\/[^\s\u2066-\u2069]+\u2069|https?:\/\/[^\s\u2066-\u2069]+/giu;
+}
+
+function isolateUrl(url: string): string {
+  return /^[\u2066-\u2068]/u.test(url) ? url : '\u2068' + url + '\u2069';
+}
+
 function segmentWords(text: string, locale: string): string[] {
+  const urlPattern = urlTokenPattern();
+  const segments: string[] = [];
+  let offset = 0;
+  for (const match of text.matchAll(urlPattern)) {
+    const index = match.index ?? 0;
+    if (index > offset)
+      segments.push(...segmentWordsWithoutUrls(text.slice(offset, index), locale));
+    const url = match[0];
+    segments.push(isolateUrl(url));
+    offset = index + url.length;
+  }
+  if (offset === 0) return segmentWordsWithoutUrls(text, locale);
+  if (offset < text.length) segments.push(...segmentWordsWithoutUrls(text.slice(offset), locale));
+  return segments;
+}
+
+function segmentWordsWithoutUrls(text: string, locale: string): string[] {
   const segmenter = getSegmenter(locale, 'word');
   if (segmenter !== undefined) {
     return [...segmenter.segment(text)].map(({ segment }) => segment);
@@ -269,7 +296,10 @@ export function serializeTextWrapRuntimeSource(): string {
     };
     const getLineDirections = ${getLineDirections.toString()};
     const resolveTextLocale = ${resolveTextLocale.toString()};
+    const urlTokenPattern = ${urlTokenPattern.toString()};
+    const isolateUrl = ${isolateUrl.toString()};
     const segmentWords = ${segmentWords.toString()};
+    const segmentWordsWithoutUrls = ${segmentWordsWithoutUrls.toString()};
     const breakLongToken = ${breakLongToken.toString()};
     const pushLine = ${pushLine.toString()};
     return ${wrapTextByWords.toString()};

@@ -200,8 +200,8 @@ describe('Joy Code capability panel contract', () => {
     expect(panelSource).toContain('joyCodeKeyForBlockReason(built.reason)');
   });
 
-  it('hides the grey live-status strip while a run has failed', () => {
-    expect(panelSource).toContain("liveAgentPhase !== undefined && liveAgentPhase !== 'failed'");
+  it('keeps the retired live-status strip out of the composer', () => {
+    expect(panelSource).not.toContain('joy-agent-live-status');
   });
 
   it('never renders an engine, host or thrown message in JSX, only the table sentence', () => {

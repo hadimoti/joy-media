@@ -446,6 +446,97 @@ describe('GpuPreviewHost text setup', () => {
     ]);
 
     styledDraws.length = 0;
+    const mixedRtlUrl = 'https://example.com/a-very-long-path?q=42';
+    const mixedRtlText = `شاهد ${mixedRtlUrl} الآن`;
+    const urlHead = 'https://example.com/';
+    const urlTail = 'a-very-long-path?q=42 ';
+    const karaokeRtlUrlRequest = {
+      ...request,
+      requestId: 'karaoke-rtl-url',
+      frame: {
+        ...request.frame,
+        nodes: [
+          {
+            ...textNode('karaoke-rtl-url', mixedRtlText, 'Vazirmatn Variable', 'rtl'),
+            maxWidth: 280,
+            spans: [
+              { text: 'شاهد ', color: { r: 230, g: 40, b: 50, a: 255 } },
+              { text: urlHead, color: { r: 40, g: 210, b: 70, a: 255 } },
+              { text: urlTail, color: { r: 40, g: 80, b: 230, a: 255 } },
+              { text: 'الآن', color: { r: 255, g: 255, b: 255, a: 255 } },
+            ],
+          },
+        ],
+      },
+    } as unknown as Parameters<GpuPreviewHost['render']>[0];
+    await host.render(karaokeRtlUrlRequest);
+    const urlDraws = styledDraws.filter(
+      ({ text }) => text.includes('https:') || text.includes('a-very'),
+    );
+    expect(urlDraws.map(({ text }) => text).join('')).toBe(mixedRtlUrl);
+    expect(urlDraws.every(({ direction }) => direction === 'ltr')).toBe(true);
+    expect(urlDraws[1]!.x).toBeGreaterThan(urlDraws[0]!.x);
+
+    styledDraws.length = 0;
+    const mixedInlineRtlText = `شاهد ${mixedRtlUrl} الآن`;
+    const inlineUrlRequest = {
+      ...request,
+      requestId: 'karaoke-rtl-inline-url',
+      frame: {
+        ...request.frame,
+        nodes: [
+          {
+            ...textNode('karaoke-rtl-inline-url', mixedInlineRtlText, 'Vazirmatn Variable', 'rtl'),
+            spans: [
+              { text: 'شاهد https://example.com/', color: { r: 230, g: 40, b: 50, a: 255 } },
+              { text: 'a-very-long-path?q=42 الآن', color: { r: 40, g: 210, b: 70, a: 255 } },
+            ],
+          },
+        ],
+      },
+    } as unknown as Parameters<GpuPreviewHost['render']>[0];
+    await host.render(inlineUrlRequest);
+    const inlineUrlDraws = styledDraws.filter(({ text }) => /https?:|a-very-long/u.test(text));
+    expect(inlineUrlDraws.map(({ text }) => text).join('')).toBe(mixedRtlUrl);
+    expect(inlineUrlDraws.every(({ direction }) => direction === 'ltr')).toBe(true);
+    expect(inlineUrlDraws[1]!.x).toBeGreaterThan(inlineUrlDraws[0]!.x);
+
+    styledDraws.length = 0;
+    const authoredIsolatesText = `شاهد \u2068${mixedRtlUrl}\u2069 الآن`;
+    const authoredIsolatesRequest = {
+      ...request,
+      requestId: 'karaoke-rtl-authored-isolates',
+      frame: {
+        ...request.frame,
+        nodes: [
+          {
+            ...textNode(
+              'karaoke-rtl-authored-isolates',
+              authoredIsolatesText,
+              'Vazirmatn Variable',
+              'rtl',
+            ),
+            spans: [
+              {
+                text: `شاهد \u2068${urlHead}`,
+                color: { r: 230, g: 40, b: 50, a: 255 },
+              },
+              {
+                text: `${urlTail.trimEnd()}\u2069 الآن`,
+                color: { r: 40, g: 210, b: 70, a: 255 },
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as Parameters<GpuPreviewHost['render']>[0];
+    await host.render(authoredIsolatesRequest);
+    const authoredUrlDraws = styledDraws.filter(({ text }) => /https?:|a-very-long/u.test(text));
+    expect(authoredUrlDraws.map(({ text }) => text).join('')).toBe(mixedRtlUrl);
+    expect(authoredUrlDraws.every(({ direction }) => direction === 'ltr')).toBe(true);
+    expect(authoredUrlDraws[1]!.x).toBeGreaterThan(authoredUrlDraws[0]!.x);
+
+    styledDraws.length = 0;
     const karaokeWrappedRequest = {
       ...request,
       requestId: 'karaoke-wrapped',

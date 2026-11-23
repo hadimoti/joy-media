@@ -216,7 +216,7 @@ describe('agent slots in the CLI', () => {
     saveAgentSlot('workhorse', { profileId: 'public-custom', model: 'public-model' });
 
     expect(() => resolveByokConfig({ slot: 'workhorse' })).toThrow(
-      'The base URL of "public-custom" is refused: A public endpoint needs your explicit consent before any key is sent to it.',
+      'The base URL of "public-custom" is refused: Confirm the public connection before sending it a key.',
     );
   });
 

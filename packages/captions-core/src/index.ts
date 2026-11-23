@@ -67,6 +67,7 @@ export { formatSrt, formatWebVtt, parseSrt, parseWebVtt } from './interchange.js
 
 export type { CaptionLine, CaptionTemplate, TemplatedCaptionLayoutOptions } from './styling.js';
 export {
+  applyCaptionTemplateToClipStyle,
   breakCaptionLines,
   DEFAULT_CAPTION_TEMPLATE_ID,
   JOY_CAPTION_TEMPLATES,

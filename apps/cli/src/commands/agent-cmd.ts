@@ -96,7 +96,7 @@ const DISCOVERY_TIMEOUT_MS = 10_000;
 const DISCOVERY_MAX_BYTES = 8 * 1024 * 1024;
 const MAX_CACHED_MODELS = 5_000;
 const OAUTH_RISK_NOTICE =
-  'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
+  'Sign-in uses a public app ID from another tool, and the provider may stop it at any time. An API key is the dependable way to connect.';
 
 function numberFlag(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
@@ -677,7 +677,7 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
     if (!verdict.allowed) {
       const hint =
         verdict.code === 'CONSENT_REQUIRED'
-          ? ' To use a public endpoint, add --accept-public-endpoint after reading what it receives.'
+          ? ' To use a public connection, add --accept-public-endpoint after reading what it receives.'
           : '';
       throw failure(`The base URL is refused: ${verdict.reason}${hint}`);
     }
@@ -1118,7 +1118,10 @@ async function handleConfig(flags: CliFlags, out: AgentOutput): Promise<number> 
     out.step('Provider', `${s.providerName} (${s.kind})`);
     out.step('Base URL', s.baseUrl);
     out.step('Model', s.modelId);
-    out.step('API Key', s.apiKey ? 'set (hidden)' : s.local ? 'none (local endpoint)' : 'MISSING');
+    out.step(
+      'API Key',
+      s.apiKey ? 'set (hidden)' : s.local ? 'none (local connection)' : 'MISSING',
+    );
   }
   return 0;
 }

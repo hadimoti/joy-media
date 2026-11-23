@@ -42,10 +42,13 @@ import {
   DEV_RENDERER_RETRY_MS,
   DEV_RENDERER_URL,
   PACKAGED_RENDERER_SCHEME,
-  buildSecureWebPreferences,
+  buildMainWindowOptions,
   createPackagedLoadingGate,
   devLoadingPageHtml,
   resolveRendererTarget,
+  isWindowMaximizedOrFullscreen,
+  toggleWindowFullscreen,
+  toggleWindowMaximize,
 } from './window.js';
 import { registerShutdownHooks } from './shutdown.js';
 import { resolveDesktopPaths } from '../store/paths.js';
@@ -395,16 +398,16 @@ if (!app.requestSingleInstanceLock()) {
           win.minimize();
           return true;
         case 'maximize':
-          if (win.isMaximized()) win.unmaximize();
-          else win.maximize();
-          return win.isMaximized();
+          return toggleWindowMaximize(win);
+        case 'fullscreen':
+          return toggleWindowFullscreen(win);
         case 'close':
           // Write the renderer's DOM storage out before the window is destroyed.
           storageFlush.flushNow();
           win.close();
           return true;
         case 'is-maximized':
-          return win.isMaximized();
+          return isWindowMaximizedOrFullscreen(win);
       }
     },
   });
@@ -635,20 +638,15 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     const win = new BrowserWindow({
-      width: 1440,
-      height: 900,
-      // A packaged window is shown once its renderer has loaded (see showPackagedWindowWhenLoaded).
-      show: isDev && !isSmokeMode,
-      frame: false,
-      titleBarStyle: 'hidden',
-      backgroundColor: '#000000',
+      // Packaged windows remain hidden until their renderer loads; fullscreen is still active on first show.
+      ...buildMainWindowOptions(
+        join(__dirname, '..', 'preload', 'preload.cjs'),
+        isDev && !isSmokeMode,
+        testApiBaseUrl === undefined
+          ? undefined
+          : [`${DESKTOP_TEST_API_BASE_ARGUMENT}${testApiBaseUrl}`],
+      ),
       ...windowIconOption(),
-      webPreferences: {
-        ...buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
-        ...(testApiBaseUrl === undefined
-          ? {}
-          : { additionalArguments: [`${DESKTOP_TEST_API_BASE_ARGUMENT}${testApiBaseUrl}`] }),
-      },
     });
     mainWindow = win;
     // Alt+F4 and the taskbar close button skip the window control, so every close flushes too.

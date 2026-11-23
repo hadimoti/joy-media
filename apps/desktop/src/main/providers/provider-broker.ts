@@ -589,14 +589,14 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     if (!verdict.allowed) throw new BrokerError('ENDPOINT_REFUSED', verdict.reason);
     const expected = endpointBindingDigest(profile.id, verdict.origin, verdict.basePath);
     if (profile.bindingDigest !== expected) {
-      throw new BrokerError('BINDING_MISMATCH', 'Enter the key again to confirm this endpoint.');
+      throw new BrokerError('BINDING_MISMATCH', 'Enter the key again to confirm this connection.');
     }
     // The key must be the one confirmed for this endpoint. A key written since, by any build, has a
     // new version and is refused until it is entered again (PLAN-v4 §6c item 6).
     if (profile.bindingSecretDigest !== deps.store.secretVersion(profile.secretHandleId)) {
       throw new BrokerError(
         'BINDING_MISMATCH',
-        'The saved key changed after it was confirmed for this endpoint. Enter it again.',
+        'The saved key changed after it was confirmed for this connection. Enter it again.',
       );
     }
     const hostname = new URL(profile.baseUrl).hostname;
@@ -1640,7 +1640,7 @@ async function assertPublicHost(
 ): Promise<readonly string[]> {
   const addresses = await resolveHost(hostname);
   if (addresses.length === 0 || addresses.some((address) => isPrivateOrInternalHost(address))) {
-    throw new BrokerError('ENDPOINT_REFUSED', 'This endpoint name resolves to a private address.');
+    throw new BrokerError('ENDPOINT_REFUSED', 'This service name resolves to a private address.');
   }
   return addresses;
 }

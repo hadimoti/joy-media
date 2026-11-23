@@ -1,4 +1,5 @@
 import { WindowControls } from './WindowControls.js';
+import './designer-ui-polish.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import {

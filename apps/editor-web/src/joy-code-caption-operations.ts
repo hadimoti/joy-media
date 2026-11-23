@@ -1,5 +1,6 @@
 import {
   applyCaptionProjectCommand,
+  applyCaptionTemplateToClipStyle,
   JOY_CAPTION_TEMPLATES,
   type CaptionCommand,
 } from '@joy-media/captions-core';
@@ -97,8 +98,9 @@ export function compileJoyCodeCaptionOperation(
         },
       };
       break;
-    case 'caption.setTemplate':
-      if (!JOY_CAPTION_TEMPLATES.some((template) => template.id === operation.templateId))
+    case 'caption.setTemplate': {
+      const template = JOY_CAPTION_TEMPLATES.find((entry) => entry.id === operation.templateId);
+      if (template === undefined)
         return {
           ok: false,
           error: {
@@ -107,10 +109,14 @@ export function compileJoyCodeCaptionOperation(
           },
         };
       command = {
-        type: 'caption.setStyle',
-        payload: { documentId: document.id, styleRef: operation.templateId },
+        type: 'caption.setClipStyle',
+        payload: {
+          clipId: captionClip.id,
+          style: applyCaptionTemplateToClipStyle(template, captionClip.style),
+        },
       };
       break;
+    }
     default:
       return {
         ok: false,
@@ -125,7 +131,8 @@ export function compileJoyCodeCaptionOperation(
     return {
       ok: true,
       project: applied.project,
-      affectedIds: [operation.captionClipId, document.id],
+      affectedIds:
+        operation.kind === 'caption.setTemplate' ? [captionClip.id] : [captionClip.id, document.id],
       summary: `Apply ${operation.kind}`,
     };
   } catch (error) {

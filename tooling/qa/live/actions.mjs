@@ -93,8 +93,10 @@ export const MENU_SPEC = [
     items: [
       { id: 'agent.open', label: 'Open Joy Code', shortcut: '' },
       { id: 'agent.active', label: 'Built-in JOY Agent Engine', shortcut: '', disabled: true },
+      { id: 'agent.showTarget', label: 'Show target', shortcut: '' },
+      { id: 'agent.follow', label: 'Follow target', shortcut: '' },
       { id: 'agent.executionMode', label: 'Execution Mode…', shortcut: '' },
-      { id: 'agent.stop', label: 'Pause / Stop', shortcut: '' },
+      { id: 'agent.stop', label: 'Stop active run', shortcut: '' },
       { id: 'agent.settings', label: 'Joy Code Settings…', shortcut: '' },
     ],
   },
@@ -271,6 +273,20 @@ function panelCheck(label, { focus }) {
 }
 
 /** The checks, keyed by menu action id. */
+function idleAgentAction(label) {
+  return async (t) => {
+    if (t.surface === 'menu') {
+      const menu = await openMenuGroup(t.page, 'Joy Code');
+      const item = menu.items.find((candidate) => candidate.label === label);
+      await t.page.keyboard.press('Escape');
+      if (item?.disabled !== true) throw new Error(`${label} is enabled without a Joy Code run`);
+    } else {
+      await t.fire();
+    }
+    throw notReachable(t.rowId, `${label} needs a Joy Code run with a model (T-A11)`);
+  };
+}
+
 export const ACTION_CHECKS = {
   'file.projects': async (t) => {
     if (!t.ctx.projectTitle) {
@@ -619,6 +635,9 @@ export const ACTION_CHECKS = {
     );
   },
 
+  'agent.showTarget': idleAgentAction('Show target'),
+  'agent.follow': idleAgentAction('Follow target'),
+
   'agent.executionMode': async (t) => {
     await t.fire();
     const dialog = t.page
@@ -648,14 +667,7 @@ export const ACTION_CHECKS = {
     return `Execution Mode… opened settings on "${settings.active}"; ${cards.length} modes; picking ${other.name} moved the selection and ${current?.name ?? 'the first mode'} was restored`;
   },
 
-  'agent.stop': async (t) => {
-    await t.fire();
-    await waitPanel(t.page, 'Joy Code', { focus: false });
-    throw notReachable(
-      t.rowId,
-      'the menu item is enabled and opens Joy Code, but stopping a running turn needs a stub-model run (T-A11)',
-    );
-  },
+  'agent.stop': idleAgentAction('Stop active run'),
 
   'agent.settings': async (t) => {
     await t.fire();

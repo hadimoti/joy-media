@@ -25,7 +25,7 @@
   line-height: 1.45;
 }
 
-.quality-check-privacy-notice__pending {
+.quality-check-privacy-notice__approval {
   margin: 0;
   color: var(--joy-text-secondary);
   font-size: var(--joy-type-xs);

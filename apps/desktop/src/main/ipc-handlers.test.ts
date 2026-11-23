@@ -907,6 +907,7 @@ describe('IPC dispatch', () => {
   it('handles desktop window control actions', async () => {
     const handleWindowControl = vi.fn(async (action: string) => {
       if (action === 'maximize') return true;
+      if (action === 'fullscreen') return true;
       if (action === 'is-maximized') return false;
       return undefined;
     });
@@ -926,6 +927,13 @@ describe('IPC dispatch', () => {
     });
     expect(maxRes).toEqual({ ok: true, data: true });
     expect(handleWindowControl).toHaveBeenCalledWith('maximize');
+
+    const fullscreenRes = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.window-fullscreen',
+    });
+    expect(fullscreenRes).toEqual({ ok: true, data: true });
+    expect(handleWindowControl).toHaveBeenCalledWith('fullscreen');
 
     const closeRes = await dispatchIpcRequest(handlers, {
       origin: 'joy-media-app://renderer',
@@ -1392,7 +1400,7 @@ describe('legacy provider profiles (v1.1.0)', () => {
     });
     expect(refused).toEqual({
       ok: false,
-      error: expect.stringContaining('explicit consent'),
+      error: 'Confirm the public connection before sending it a key.',
     });
   });
 
