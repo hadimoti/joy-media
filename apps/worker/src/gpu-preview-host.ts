@@ -299,7 +299,7 @@ async function renderGpuFrame(input: {
   ): { text: string; start: number } | undefined => {
     const candidates = [
       line,
-      line.replace(/\u2068((?:\u2068)?https?:\/\/[^\u2069\n]*(?:\u2069)?)\u2069/gu, '$1'),
+      line.replace(/\u2068((?:\u2068)?https?:\/\/[^\u2069\n]*(?:\u2069)?)\u2069/giu, '$1'),
     ];
     for (const text of candidates) {
       const start = source.indexOf(text, cursor);
@@ -310,7 +310,7 @@ async function renderGpuFrame(input: {
   const urlRangesForRenderedLine = (line: string, sourceLine: string, sourceStart: number) => {
     const ranges: Array<{ start: number; end: number }> = [];
     let searchFrom = 0;
-    for (const match of line.matchAll(/\u2068(https?:\/\/[^\u2069\n]+)\u2069/gu)) {
+    for (const match of line.matchAll(/\u2068(https?:\/\/[^\u2069\n]+)\u2069/giu)) {
       const url = match[1]!;
       const start = sourceLine.indexOf(url, searchFrom);
       if (start < 0) continue;

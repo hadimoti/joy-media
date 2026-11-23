@@ -185,7 +185,7 @@ export function wrapTextByWords(
         }
       }
 
-      const isIsolatedUrl = /^\u2068https?:\/\/.*\u2069$/u.test(content);
+      const isIsolatedUrl = /^\u2068https?:\/\/.*\u2069$/iu.test(content);
       if (!isIsolatedUrl && measure(content, paragraphDirection) > maxWidth) {
         const chunks = breakLongToken(content, maxWidth, measure, paragraphDirection);
         for (let index = 0; index < chunks.length - 1; index += 1) {
