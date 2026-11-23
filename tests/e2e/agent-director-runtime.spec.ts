@@ -186,6 +186,11 @@ test.describe('JOY Live Director runtime boundary', () => {
       { timeout: 20_000 },
     );
     await expect(page.getByText(/No edits were applied\./)).toBeVisible();
+    await page.getByRole('button', { name: 'Creative Brief', exact: true }).click();
+    await expect(composer).toBeHidden();
+    await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
+    await page.getByRole('menuitem', { name: /^View error ·/ }).click();
+    await expect(page.getByText(/No edits were applied\./)).toBeVisible();
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
     expect(await page.locator('.timeline-clip').count()).toBe(canonicalClipCount);
   });

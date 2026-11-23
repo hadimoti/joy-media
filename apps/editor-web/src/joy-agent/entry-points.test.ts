@@ -9,7 +9,7 @@ import {
   runJoyAgentTask,
   runScopedCreativeSkillToolLoop,
 } from './entry-points.js';
-import { validateCreativeBrief } from '@joy-media/agent-tools';
+import { MAX_LENGTHS, validateCreativeBrief } from '@joy-media/agent-tools';
 import type { JoyAgentEngineClient, JoyAgentRunIterator } from './engine-client.js';
 import type { HostRpcMethods } from './host-rpc.js';
 import {
@@ -296,6 +296,22 @@ describe('JOY Agent entry points', () => {
         context: { projectId: 'project-1', revision: 'rev-1' },
       }),
     ).rejects.toMatchObject({ code: 'invalid-result' });
+  });
+
+  it('rejects a request that cannot be recorded before contacting the model', async () => {
+    const client = fakeClient([]);
+    await expect(
+      runCreativeBriefTask({
+        client,
+        projectId: 'project-1',
+        revisionId: 'rev-1',
+        request: 'a'.repeat(MAX_LENGTHS.request + 1),
+        context: { projectId: 'project-1', revision: 'rev-1' },
+      }),
+    ).rejects.toThrow(
+      `Creative Brief requests can contain up to ${MAX_LENGTHS.request} characters`,
+    );
+    expect(client.startRun).not.toHaveBeenCalled();
   });
 
   it('keeps the Creative Brief entry point explicitly plan-only with bounded context', async () => {

@@ -91,6 +91,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
   targetRef.current = target;
   const { openId, open, toggle, close, registerRoot } = usePopupManager();
   const menuRefs = useRef(new Map<string, HTMLUListElement>());
+  const joyCodePreviousInput = useRef<HTMLTextAreaElement | null>(null);
   // The menu a hover just opened. The click that follows on the same title keeps it open instead of closing it.
   const openedByHover = useRef<string | null>(null);
   const baseId = useId();
@@ -152,15 +153,26 @@ export function AppMenuBar(props: AppMenuBarProps) {
               aria-haspopup="menu"
               aria-expanded={isOpen}
               aria-controls={menuId}
+              onPointerDown={
+                group.id === 'agent'
+                  ? () => {
+                      const active = document.activeElement;
+                      joyCodePreviousInput.current =
+                        active instanceof HTMLTextAreaElement ? active : null;
+                    }
+                  : undefined
+              }
               onClick={(event) => {
                 if (openedByHover.current === popupId) {
                   openedByHover.current = null;
                   return;
                 }
+                if (group.id === 'agent' && event.detail === 0) joyCodePreviousInput.current = null;
                 toggle(popupId, event.currentTarget);
               }}
               onMouseEnter={(event) => {
                 if (openGroupId !== null && openGroupId !== group.id) {
+                  if (group.id === 'agent') joyCodePreviousInput.current = null;
                   openedByHover.current = popupId;
                   open(popupId, event.currentTarget);
                 }
@@ -228,13 +240,26 @@ export function AppMenuBar(props: AppMenuBarProps) {
                           else if (item.id === 'agent.stop' && activity.runId !== undefined)
                             onStopAgentRun?.(activity.runId);
                           else if (item.id === 'agent.active') {
-                            if (target !== undefined && onShowAgentTarget !== undefined) {
-                              onShowAgentTarget(target);
-                            } else {
-                              onAction('agent.open');
-                            }
+                            const origin =
+                              activity.targets.find((entry) => entry.panelId === 'agent') ??
+                              activity.terminalTarget;
+                            if (onShowAgentTarget === undefined) onAction('agent.open');
+                            else
+                              onShowAgentTarget({
+                                panelId: 'agent',
+                                capability:
+                                  origin?.panelId === 'agent'
+                                    ? (origin.capability ?? 'edit')
+                                    : 'edit',
+                              });
                           } else onAction(item.id);
                           close(popupId);
+                          if (item.id === 'agent.follow') {
+                            const previousInput = joyCodePreviousInput.current;
+                            joyCodePreviousInput.current = null;
+                            if (previousInput?.isConnected)
+                              previousInput.focus({ preventScroll: true });
+                          }
                         }}
                       >
                         <span className="app-menu-item-label">

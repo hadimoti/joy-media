@@ -16,7 +16,7 @@ test.describe('built-in JOY Agent live presence', () => {
     await dialog.getByRole('button', { name: 'Done' }).click();
   });
 
-  test('shows the semantic target while keeping the composer focused by default', async ({
+  test('shows the semantic target and opens the proposal from the approval entry', async ({
     page,
   }) => {
     const composer = page.getByLabel('Message Joy Code');
@@ -27,10 +27,20 @@ test.describe('built-in JOY Agent live presence', () => {
     await expect(composer).toBeFocused();
 
     await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
-    await expect(
-      page.getByRole('menuitem', { name: /Needs approval · .*captions/i }),
-    ).toBeVisible();
+    const approval = page.getByRole('menuitem', { name: /Needs approval · .*captions/i });
+    await expect(approval).toBeVisible();
     await expect(page.getByRole('menuitemcheckbox', { name: 'Follow target' })).not.toBeChecked();
+    await page.getByRole('menuitem', { name: 'Show target' }).click();
+    await expect(
+      page.locator('[data-feature-tool="captions"][aria-selected="true"]'),
+    ).toBeVisible();
+
+    const toolbar = page.getByRole('toolbar', { name: 'Composer capabilities' });
+    await toolbar.getByRole('button', { name: 'Creative Brief', exact: true }).click();
+    await expect(composer).toBeHidden();
+    await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
+    await approval.click();
+    await expect(page.getByRole('button', { name: /Approve & apply/ })).toBeVisible();
   });
 
   test('Follow activates the routed nested feature tab without stealing input focus', async ({
@@ -41,7 +51,7 @@ test.describe('built-in JOY Agent live presence', () => {
     await composer.press('Enter');
     await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
     await page.getByRole('menuitemcheckbox', { name: 'Follow target' }).click();
-    await composer.focus();
+    await expect(composer).toBeFocused();
 
     await expect(
       page.locator('[data-feature-tool="captions"][aria-selected="true"]'),

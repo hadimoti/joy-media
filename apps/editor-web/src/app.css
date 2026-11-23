@@ -11087,6 +11087,10 @@ label {
   font-size: var(--joy-type-xs);
   pointer-events: auto;
 }
+.joy-code-composer .agent-preview-badge {
+  position: static;
+  width: fit-content;
+}
 .agent-preview-badge-mark {
   color: var(--joy-accent);
   font-size: 1rem;

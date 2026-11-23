@@ -5,7 +5,7 @@ import {
   buildCreativeBriefModelPrompt,
   completeCreativeBriefFromModelOutput,
   CreativeBriefContractError,
-  CREATIVE_BRIEF_MODEL_REQUEST_MAX_CHARS,
+  MAX_LENGTHS,
 } from '@joy-media/agent-tools';
 import type { JoyAgentEngineClient, JoyAgentRunHost } from './engine-client.js';
 import {
@@ -323,11 +323,17 @@ export async function runCreativeBriefTask(input: {
   readonly isCancelled?: () => boolean;
   readonly allowRemote?: boolean;
 }): Promise<CreativeBriefV1> {
+  const { request } = input;
+  if (request.length > MAX_LENGTHS.request) {
+    throw new JoyAgentTaskError(
+      'failed',
+      `Creative Brief requests can contain up to ${MAX_LENGTHS.request} characters. Shorten your request and try again.`,
+    );
+  }
   // The model is given the Creative Brief contract for this exact request, so
   // it knows every field, the exact project and revision to echo, and the
   // allowed enums. The contract is the model-facing half of the same contract
   // the independent validator enforces below.
-  const request = input.request.slice(0, CREATIVE_BRIEF_MODEL_REQUEST_MAX_CHARS);
   const event = await runJoyAgentTask({
     client: input.client,
     taskKind: 'creative-brief',
