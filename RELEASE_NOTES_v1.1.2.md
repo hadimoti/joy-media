@@ -78,7 +78,7 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 - **Reference voice.** A reference voice must be a clip on the timeline. A file that is only in the Asset Library cannot be picked yet.
 - **Speech set-up.** The speech engines and their model folders are not part of the installer in this release. The Captions and Generate panels say when something is missing.
 - **Persian voice licence.** The Persian voice model is for non-commercial use only (CC-BY-NC-4.0).
-- **Arabic final yeh.** In some Arabic titles, the final yeh may appear without its two dots in the default title font. This is not fixed in this release.
+- **Arabic final yeh.** In the exported video, the final yeh of some Arabic titles has no two dots with the default title font. Reproduced on 23 Nov. This is not fixed in this release.
 
 ## Not yet checked on screen
 
@@ -87,8 +87,12 @@ These are built and tested in code. They were not yet confirmed in the running a
 - Smart guides and snapping on the Monitor.
 - The gear icon, the "Signed in." label and the usage limit wording in Joy Code.
 - The chat keeping your typed text and showing bold, italic and code formatting.
-- Exporting a project that holds only titles, and Add to timeline placing the clip at the playhead: built and tested in code; not yet run in the desktop app.
-- Speech subtitles, voice-over and the timeline controls were run in the desktop app on a scratch profile on 23 Nov. They have not been run on a clean install.
+
+## Checked in the desktop app (23 Nov, scratch profile)
+
+- A project that holds only titles exports, and the title is in the exported picture.
+- Add to timeline places the clip at the playhead, on the first track that is free there.
+- Speech subtitles, voice-over and the timeline controls ran in the desktop app. They have not been run on a clean install.
 
 ## Download and check
 
