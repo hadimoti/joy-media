@@ -29,6 +29,7 @@ class RecordingCanvasContext {
   lineCap = 'butt';
   readonly drawCalls: DrawCall[] = [];
   readonly measuredDirections: Array<{ text: string; direction: string }> = [];
+  readonly measuredSamples: string[] = [];
   private currentLetterSpacing = 'normal';
 
   get letterSpacing(): string {
@@ -57,6 +58,7 @@ class RecordingCanvasContext {
     actualBoundingBoxAscent: number;
     actualBoundingBoxDescent: number;
   } {
+    this.measuredSamples.push(text);
     this.measuredDirections.push({ text, direction: this.direction });
     const graphemes = [...text];
     const rawWidth = graphemes.reduce(
@@ -71,7 +73,7 @@ class RecordingCanvasContext {
       actualBoundingBoxLeft: 0,
       actualBoundingBoxRight: width,
       actualBoundingBoxAscent: 15,
-      actualBoundingBoxDescent: 5,
+      actualBoundingBoxDescent: text.includes('\u064a') ? 46 : 21,
     };
   }
 
@@ -193,6 +195,39 @@ function expectedPixiOffset(
 }
 
 describe('Pixi RTL canvas text integration', () => {
+  it('extends descent only for Arabic yeh, leaving Latin and Persian font metrics unchanged', () => {
+    const context = installRecordingContext();
+    const style = makeStyle('right', 'rtl');
+    const arabic = '\u0639\u0644\u064a \u0643\u0631\u0633\u064a';
+    const persian = '\u0639\u0644\u06cc \u06a9\u0631\u0633\u06cc';
+
+    registerPixiTextDirection(style, {
+      direction: 'rtl',
+      align: 'right',
+      lineDirections: ['rtl'],
+    });
+    const arabicMeasurement = measureText(arabic, style, context);
+    const latinMeasurement = measureText('JOY MEDIA', makeStyle('left', 'ltr'), context);
+    const persianStyle = makeStyle('right', 'rtl');
+    registerPixiTextDirection(persianStyle, {
+      direction: 'rtl',
+      align: 'right',
+      lineDirections: ['rtl'],
+    });
+    const persianMeasurement = measureText(persian, persianStyle, context);
+
+    expect(CanvasTextMetrics.METRICS_STRING).not.toContain('\u064a');
+    expect(metrics.__context!.measuredSamples).toContain(
+      `${CanvasTextMetrics.METRICS_STRING}\u064a${CanvasTextMetrics.BASELINE_SYMBOL}`,
+    );
+    expect(arabicMeasurement.fontProperties.descent).toBeGreaterThanOrEqual(46);
+    expect(latinMeasurement.fontProperties.descent).toBe(21);
+    expect(persianMeasurement.fontProperties.descent).toBe(21);
+    expect(arabic).toContain('\u064a');
+    expect(persian).toContain('\u06cc');
+    expect(persian).not.toContain('\u064a');
+  });
+
   it.each([
     ['ltr', 'left'],
     ['ltr', 'center'],

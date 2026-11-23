@@ -252,22 +252,107 @@ async function renderGpuFrame(input: {
     spans: NonNullable<Extract<RenderNode, { kind: 'text' }>['spans']>,
     start: number,
     end: number,
+    baseDirection: 'ltr' | 'rtl',
+    urlRanges: readonly { start: number; end: number }[],
   ) => {
-    const runs: Array<{ text: string; color: (typeof spans)[number]['color'] }> = [];
+    const runs: Array<{
+      text: string;
+      color: (typeof spans)[number]['color'];
+      direction: 'ltr' | 'rtl';
+    }> = [];
     let spanStart = 0;
     for (const span of spans) {
       const spanEnd = spanStart + span.text.length;
       const overlapStart = Math.max(start, spanStart);
       const overlapEnd = Math.min(end, spanEnd);
       if (overlapStart < overlapEnd) {
-        runs.push({
-          text: span.text.slice(overlapStart - spanStart, overlapEnd - spanStart),
-          color: span.color,
-        });
+        const boundaries = [
+          overlapStart,
+          ...urlRanges.flatMap(({ start: urlStart, end: urlEnd }) =>
+            [urlStart, urlEnd].filter((value) => value > overlapStart && value < overlapEnd),
+          ),
+          overlapEnd,
+        ].sort((left, right) => left - right);
+        for (let index = 0; index < boundaries.length - 1; index += 1) {
+          const segmentStart = boundaries[index]!;
+          const segmentEnd = boundaries[index + 1]!;
+          runs.push({
+            text: span.text.slice(segmentStart - spanStart, segmentEnd - spanStart),
+            color: span.color,
+            direction: urlRanges.some(
+              ({ start: urlStart, end: urlEnd }) =>
+                segmentStart >= urlStart && segmentEnd <= urlEnd,
+            )
+              ? 'ltr'
+              : baseDirection,
+          });
+        }
       }
       spanStart = spanEnd;
     }
     return runs;
+  };
+  const sourceLineForRenderedLine = (
+    line: string,
+    source: string,
+    cursor: number,
+  ): { text: string; start: number } | undefined => {
+    const candidates = [
+      line,
+      line.replace(/\u2068((?:\u2068)?https?:\/\/[^\u2069\n]*(?:\u2069)?)\u2069/gu, '$1'),
+    ];
+    for (const text of candidates) {
+      const start = source.indexOf(text, cursor);
+      if (start >= 0) return { text, start };
+    }
+    return undefined;
+  };
+  const urlRangesForRenderedLine = (line: string, sourceLine: string, sourceStart: number) => {
+    const ranges: Array<{ start: number; end: number }> = [];
+    let searchFrom = 0;
+    for (const match of line.matchAll(/\u2068(https?:\/\/[^\u2069\n]+)\u2069/gu)) {
+      const url = match[1]!;
+      const start = sourceLine.indexOf(url, searchFrom);
+      if (start < 0) continue;
+      ranges.push({ start: sourceStart + start, end: sourceStart + start + url.length });
+      searchFrom = start + url.length;
+    }
+    return ranges;
+  };
+  const layoutDirectionalRuns = (
+    runs: readonly {
+      readonly text: string;
+      readonly direction: 'ltr' | 'rtl';
+    }[],
+    direction: 'ltr' | 'rtl',
+    lineLeft: number,
+    measurePrefix: (text: string, direction: 'ltr' | 'rtl') => number,
+  ): readonly number[] => {
+    const groups: Array<{ direction: 'ltr' | 'rtl'; runs: (typeof runs)[number][] }> = [];
+    for (const run of runs) {
+      const current = groups.at(-1);
+      if (current?.direction === run.direction) current.runs.push(run);
+      else groups.push({ direction: run.direction, runs: [run] });
+    }
+    const offsets = new Array<number>(runs.length);
+    const visualGroups = direction === 'rtl' ? [...groups].reverse() : groups;
+    let cursor = lineLeft;
+    for (const group of visualGroups) {
+      const groupText = group.runs.map(({ text }) => text).join('');
+      const groupWidth = measurePrefix(groupText, group.direction);
+      const groupOffsets = layoutTextSpanOffsets(
+        group.runs,
+        'left',
+        group.direction,
+        measurePrefix,
+      );
+      for (const [runIndex, run] of group.runs.entries()) {
+        const sourceIndex = runs.indexOf(run);
+        offsets[sourceIndex] = cursor + (groupOffsets[runIndex] ?? 0);
+      }
+      cursor += groupWidth;
+    }
+    return offsets;
   };
   const width = Math.max(1, Math.round(input.frame.viewport.width * scale));
   const height = Math.max(1, Math.round(input.frame.viewport.height * scale));
@@ -420,18 +505,15 @@ async function renderGpuFrame(input: {
         const alignment = textStyle.lineAlignments[paragraphIndex] ?? 'left';
         context.direction = direction;
         context.textAlign = alignment;
-        const wrapped =
-          node.maxWidth === undefined
-            ? { text: paragraph, lineDirections: [direction] }
-            : wrapTextByWords(
-                paragraph,
-                node.maxWidth * scale,
-                (candidate, measuredDirection) => {
-                  context.direction = measuredDirection;
-                  return context.measureText(candidate).width;
-                },
-                direction,
-              );
+        const wrapped = wrapTextByWords(
+          paragraph,
+          node.maxWidth === undefined ? Number.POSITIVE_INFINITY : node.maxWidth * scale,
+          (candidate, measuredDirection) => {
+            context.direction = measuredDirection;
+            return context.measureText(candidate).width;
+          },
+          direction,
+        );
         const wrappedLines = wrapped.text.split('\n');
         wrappedLines.forEach((line, lineIndex) => {
           lines.push(line);
@@ -485,26 +567,34 @@ async function renderGpuFrame(input: {
           if (node.spans === undefined || node.spans.length <= 1) {
             context.textAlign = align;
             context.strokeText(line, x, lineY);
-            if (node.spans?.length === 1) sourceCursor += line.length;
             return;
           }
-          const sourceStart = node.text.indexOf(line, sourceCursor);
-          if (sourceStart < 0)
+          const sourceMatch = sourceLineForRenderedLine(line, node.text, sourceCursor);
+          if (sourceMatch === undefined)
             throw new Error(`GPU text span line could not be matched for ${node.id}`);
-          const runs = spanRunsForRange(node.spans, sourceStart, sourceStart + line.length);
-          sourceCursor = sourceStart + line.length;
-          const offsets = layoutTextSpanOffsets(
-            runs,
-            align,
+          const urlRanges = urlRangesForRenderedLine(line, sourceMatch.text, sourceMatch.start);
+          const runs = spanRunsForRange(
+            node.spans,
+            sourceMatch.start,
+            sourceMatch.start + sourceMatch.text.length,
             context.direction,
-            (prefix, direction) => {
-              context.direction = direction;
-              return context.measureText(prefix).width;
-            },
+            urlRanges,
           );
+          sourceCursor = sourceMatch.start + sourceMatch.text.length;
+          const measurePrefix = (prefix: string, direction: 'ltr' | 'rtl'): number => {
+            context.direction = direction;
+            return context.measureText(prefix).width;
+          };
+          const offsets =
+            urlRanges.length > 0
+              ? layoutDirectionalRuns(runs, context.direction, lineLefts[index] ?? x, measurePrefix)
+              : layoutTextSpanOffsets(runs, align, context.direction, measurePrefix);
           context.textAlign = 'left';
           runs.forEach((run, runIndex) => {
-            context.strokeText(run.text, x + (offsets[runIndex] ?? 0), lineY);
+            context.direction = run.direction;
+            const runX =
+              urlRanges.length > 0 ? (offsets[runIndex] ?? x) : x + (offsets[runIndex] ?? 0);
+            context.strokeText(run.text, runX, lineY);
           });
         });
       }
@@ -515,28 +605,36 @@ async function renderGpuFrame(input: {
         const lineY = y + index * lineHeightPx;
         if (node.spans === undefined || node.spans.length <= 1) {
           context.textAlign = align;
-          if (node.spans?.length === 1) sourceCursor += line.length;
           context.fillText(line, x, lineY);
           return;
         }
-        const sourceStart = node.text.indexOf(line, sourceCursor);
-        if (sourceStart < 0)
+        const sourceMatch = sourceLineForRenderedLine(line, node.text, sourceCursor);
+        if (sourceMatch === undefined)
           throw new Error(`GPU text span line could not be matched for ${node.id}`);
-        const runs = spanRunsForRange(node.spans, sourceStart, sourceStart + line.length);
-        sourceCursor = sourceStart + line.length;
-        const offsets = layoutTextSpanOffsets(
-          runs,
-          align,
+        const urlRanges = urlRangesForRenderedLine(line, sourceMatch.text, sourceMatch.start);
+        const runs = spanRunsForRange(
+          node.spans,
+          sourceMatch.start,
+          sourceMatch.start + sourceMatch.text.length,
           context.direction,
-          (prefix, direction) => {
-            context.direction = direction;
-            return context.measureText(prefix).width;
-          },
+          urlRanges,
         );
+        sourceCursor = sourceMatch.start + sourceMatch.text.length;
+        const measurePrefix = (prefix: string, direction: 'ltr' | 'rtl'): number => {
+          context.direction = direction;
+          return context.measureText(prefix).width;
+        };
+        const offsets =
+          urlRanges.length > 0
+            ? layoutDirectionalRuns(runs, context.direction, lineLefts[index] ?? x, measurePrefix)
+            : layoutTextSpanOffsets(runs, align, context.direction, measurePrefix);
         context.textAlign = 'left';
         runs.forEach((run, runIndex) => {
+          context.direction = run.direction;
           context.fillStyle = `rgba(${run.color.r},${run.color.g},${run.color.b},${run.color.a / 255})`;
-          context.fillText(run.text, x + (offsets[runIndex] ?? 0), lineY);
+          const runX =
+            urlRanges.length > 0 ? (offsets[runIndex] ?? x) : x + (offsets[runIndex] ?? 0);
+          context.fillText(run.text, runX, lineY);
         });
       });
       context.restore();

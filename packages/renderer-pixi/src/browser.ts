@@ -508,15 +508,16 @@ export async function createBrowserPixiRenderer(
     const paragraphDirections = resolveParagraphDirections(node.text, direction);
     const usesRtlRendering =
       node.direction === 'rtl' || paragraphDirections.some((direction) => direction === 'rtl');
-    const wrapped =
-      usesRtlRendering && node.maxWidth !== undefined
-        ? wrapTextByWords(
-            node.text,
-            node.maxWidth / (Math.abs(node.transform.scaleX) || 1),
-            createTextMeasurement(node, canvasFontFamilyStack(node.text, node.fontFamily), true),
-            direction,
-          )
-        : undefined;
+    const wrapped = usesRtlRendering
+      ? wrapTextByWords(
+          node.text,
+          node.maxWidth === undefined
+            ? Number.POSITIVE_INFINITY
+            : node.maxWidth / (Math.abs(node.transform.scaleX) || 1),
+          createTextMeasurement(node, canvasFontFamilyStack(node.text, node.fontFamily), true),
+          direction,
+        )
+      : undefined;
     const renderedText = wrapped?.text ?? node.text;
     const lineDirections =
       wrapped?.lineDirections ?? resolveParagraphDirections(renderedText, node.direction ?? 'auto');
