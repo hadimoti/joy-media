@@ -64,12 +64,13 @@ function layout({ title, active, body, wide = false }) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${esc(title === 'Home' ? 'JOY Media: a free video editor for Windows' : `${title} | JOY Media`)}</title>
   <meta name="description" content="JOY Media is a free, open-source video editor for Windows. No account, no upload: your media stays on your PC.">
+  <link rel="icon" type="image/png" href="/img/joy-media-mark.png">
   <link rel="stylesheet" href="/site.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="/">JOY Media</a>
+    <a class="brand" href="/"><img src="/img/joy-media-mark.png" alt="" aria-hidden="true" width="32" height="32">JOY Media</a>
     <nav aria-label="Main">
       <ul>
 ${nav}
@@ -318,7 +319,7 @@ a:focus-visible, .button:focus-visible { outline: 2px solid var(--accent); outli
 .skip-link:focus { left: 16px; top: 16px; background: var(--panel); padding: 8px 12px; border-radius: var(--radius); }
 .site-header, main, .site-footer { max-width: 1080px; margin: 0 auto; padding-left: 24px; padding-right: 24px; }
 .site-header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; padding-top: 20px; padding-bottom: 20px; }
-.brand { font-weight: 700; text-decoration: none; color: var(--fg); font-size: 1.15rem; letter-spacing: 0.01em; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; text-decoration: none; color: var(--fg); font-size: 1.15rem; letter-spacing: 0.01em; }
 .site-header ul, .site-footer ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 24px; }
 .site-header a { color: var(--muted); text-decoration: none; }
 .site-header a:hover, .site-header a[aria-current] { color: var(--fg); }
