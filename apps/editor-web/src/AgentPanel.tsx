@@ -399,6 +399,14 @@ export function selectActiveJoyAgentRunId(
   return undefined;
 }
 
+/** True only when a delayed Stop still names the run that currently owns the action. */
+export function isExpectedJoyAgentRun(
+  expectedRunId: string | undefined,
+  currentRunId: string | undefined,
+): boolean {
+  return expectedRunId !== undefined && expectedRunId === currentRunId;
+}
+
 interface PendingPlan {
   readonly runId: string;
   readonly threadId: string;
@@ -439,6 +447,8 @@ export interface AgentPanelCommand {
   readonly serial: number;
   readonly type: AgentPanelCommandType;
   readonly capability?: ComposerCapability;
+  /** Stop is honored only while this exact run still owns the panel. */
+  readonly runId?: string;
 }
 
 /**
@@ -1912,6 +1922,7 @@ export function AgentPanel({
       return;
     }
     if (command.type === 'stop' && pending !== undefined) {
+      if (!isExpectedJoyAgentRun(command.runId, pending.runId)) return;
       pending.qcRepair?.resolve(false);
       auditRef.current.record({
         planId: pending.plan.planId,
@@ -1929,6 +1940,7 @@ export function AgentPanel({
     }
     const commandRunId = selectActiveJoyAgentRunId(agentRunId, presenceState, runLifecycle.run);
     if (command.type === 'stop') {
+      if (!isExpectedJoyAgentRun(command.runId, commandRunId)) return;
       const recipeCancelled = cancelRecipeInvocation(commandRunId);
       if (!recipeCancelled && commandRunId === undefined) return;
       if (!recipeCancelled && commandRunId !== undefined) {
@@ -3336,6 +3348,36 @@ export function AgentPanel({
     clearAgentPreviewForSourceRun(pending.runId);
   }
 
+  function stopActiveRun(expectedRunId: string) {
+    if (!isExpectedJoyAgentRun(expectedRunId, activeRunId)) return;
+    if (pending !== undefined) {
+      if (pending.runId !== expectedRunId) return;
+      pending.qcRepair?.resolve(false);
+      auditRef.current.record({
+        planId: pending.plan.planId,
+        action: 'plan-rejected',
+        userId: 'local-owner',
+        metadata: { source: 'composer-stop' },
+      });
+      appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
+      updateThreadStatus(pending.threadId, 'draft');
+      setPending(undefined);
+      clearAgentPreviewForSourceRun(pending.runId);
+      agentPresenceStore?.clear();
+      setAgentPhase('cancelled');
+      return;
+    }
+    if (joyAgentEngineClient === undefined) return;
+    cancelRunLifecycle(expectedRunId);
+    void joyAgentEngineClient.cancel(expectedRunId);
+    appendMessage(activeThread.id, 'assistant', 'JOY run cancelled. No edits were applied.');
+    activeModelRunIdRef.current = undefined;
+    discardPreparedModelChange(expectedRunId);
+    setAgentPhase('cancelled');
+    clearAgentPreviewForSourceRun(expectedRunId);
+    agentPresenceStore?.clear();
+  }
+
   async function runRecipe(skillId: string): Promise<void> {
     if (
       recipeRunningId !== undefined ||
@@ -4258,59 +4300,6 @@ export function AgentPanel({
           }
         }}
       >
-        {/* A failed run is shown by its failure card in the chat, not by this strip. */}
-        {liveAgentPhase !== undefined && liveAgentPhase !== 'failed' && (
-          <div
-            className={`joy-agent-live-status is-${liveAgentPhase}`}
-            role="status"
-            aria-live="polite"
-          >
-            <span className="joy-agent-live-mark" aria-hidden="true" />
-            <strong>
-              {liveAgentPhase === 'awaiting-approval'
-                ? 'Needs approval'
-                : `JOY ${liveAgentPhase.replaceAll('-', ' ')}`}
-            </strong>
-            <span>
-              {liveAgentPhase === 'previewing' || liveAgentPhase === 'planning'
-                ? 'Previewing changes in the editor'
-                : 'Live engine activity'}
-            </span>
-            {pending === undefined &&
-              (liveAgentPhase === 'thinking' ||
-                liveAgentPhase === 'connecting' ||
-                liveAgentPhase === 'planning' ||
-                liveAgentPhase === 'previewing') &&
-              joyAgentEngineClient !== undefined && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const recipeCancelled = cancelRecipeInvocation(activeRunId);
-                    if (!recipeCancelled && activeRunId !== undefined) {
-                      cancelRunLifecycle(activeRunId);
-                      void joyAgentEngineClient.cancel(activeRunId);
-                    }
-                    // Stop revokes activeModelRunIdRef before the async engine iterator can
-                    // deliver its terminal event, so keep the confirmation on the action.
-                    if (recipeCancelled || activeRunId !== undefined) {
-                      appendMessage(
-                        activeThread.id,
-                        'assistant',
-                        'JOY run cancelled. No edits were applied.',
-                      );
-                    }
-                    activeModelRunIdRef.current = undefined;
-                    discardPreparedModelChange(activeRunId);
-                    setAgentPhase('cancelled');
-                    clearAgentPreviewForSourceRun(activeRunId);
-                    agentPresenceStore?.clear();
-                  }}
-                >
-                  Stop
-                </button>
-              )}
-          </div>
-        )}
         <section
           className={`joy-code-composer is-${composerCapability} ${
             liveAgentBusy ? 'is-agent-busy' : ''
@@ -5064,21 +5053,45 @@ export function AgentPanel({
                 <button
                   type="button"
                   className="joy-code-send"
+                  data-agent-action={liveAgentBusy && activeRunId !== undefined ? 'stop' : 'submit'}
                   aria-label={
-                    isThinking
-                      ? 'Joy Code is thinking'
-                      : pending === undefined
-                        ? 'Send message'
-                        : 'Stop current plan'
+                    liveAgentBusy && activeRunId !== undefined
+                      ? `Stop Joy Code ${liveAgentPhase ?? 'run'}`
+                      : isThinking
+                        ? 'Joy Code is processing'
+                        : pending === undefined
+                          ? 'Send message'
+                          : 'Stop current plan'
                   }
-                  title={isThinking ? 'Thinking…' : pending === undefined ? 'Send' : 'Stop'}
-                  disabled={isThinking || (pending === undefined && draft.trim().length === 0)}
+                  title={
+                    liveAgentBusy && activeRunId !== undefined
+                      ? 'Stop'
+                      : isThinking
+                        ? 'Processing…'
+                        : pending === undefined
+                          ? 'Send'
+                          : 'Stop'
+                  }
+                  disabled={
+                    (isThinking && !(liveAgentBusy && activeRunId !== undefined)) ||
+                    (!isThinking && liveAgentBusy && activeRunId === undefined) ||
+                    (pending === undefined && !liveAgentBusy && draft.trim().length === 0)
+                  }
                   onClick={() => {
-                    if (pending !== undefined) reject();
+                    if (liveAgentBusy && activeRunId !== undefined) stopActiveRun(activeRunId);
+                    else if (pending !== undefined) reject();
                     else submitPrompt(draft);
                   }}
                 >
-                  {pending === undefined ? <PlayIcon /> : <CloseIcon />}
+                  {liveAgentBusy && activeRunId !== undefined ? (
+                    <CloseIcon />
+                  ) : pending === undefined ? (
+                    <PlayIcon />
+                  ) : (
+                    <CloseIcon />
+                  )}
+                  {liveAgentBusy && activeRunId !== undefined && <span>Stop</span>}
+                  {liveAgentBusy && activeRunId === undefined && <span>Processing…</span>}
                 </button>
               </div>
             </div>

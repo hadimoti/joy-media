@@ -595,6 +595,8 @@ main {
   height: 100%;
 }
 .app-menu-trigger {
+  display: inline-flex;
+  align-items: center;
   height: 1.75rem;
   padding: 0 0.45rem;
   border: 0;
@@ -10645,6 +10647,7 @@ label {
   }
 }
 .joy-code-input {
+  container-type: inline-size;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: end;
@@ -10684,6 +10687,21 @@ label {
   background: var(--joy-accent);
   color: var(--joy-on-accent);
   cursor: pointer;
+}
+.joy-code-send[data-agent-action='stop'] {
+  position: relative;
+}
+.joy-code-send[data-agent-action='stop'] span {
+  position: absolute;
+  inset-inline-start: calc(100% + 0.35rem);
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+  white-space: nowrap;
+}
+@container (max-width: 340px) {
+  .joy-code-send[data-agent-action='stop'] span {
+    display: none;
+  }
 }
 .joy-code-send:disabled {
   /* Still visible when idle: at least 4.5:1 on the control background (T-J02). */
@@ -11009,103 +11027,24 @@ label {
   margin-inline-start: 0.15rem;
 }
 
-.agent-activity-rail {
-  position: absolute;
-  inset-block-start: 50%;
-  inset-inline-start: 50%;
-  z-index: 4;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  max-width: min(36rem, 42vw);
-  min-height: 1.9rem;
-  padding: 0.22rem 0.65rem;
-  border: 1px solid color-mix(in srgb, var(--joy-accent) 34%, var(--joy-border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--joy-bg-elevated) 96%, var(--joy-accent));
-  box-shadow: 0 2px 10px rgb(0 0 0 / 28%);
-  transform: translate(-50%, -50%);
-  color: var(--joy-text);
-  font-size: var(--joy-type-xs);
-  pointer-events: auto;
-}
-.agent-activity-rail--active {
-  border-color: color-mix(in srgb, var(--joy-accent) 62%, var(--joy-border));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--joy-accent) 22%, transparent),
-    0 2px 12px rgb(0 0 0 / 32%);
-}
-.agent-activity-rail--awaiting-approval,
-.agent-activity-rail--active.agent-activity-rail--awaiting-approval {
-  border-color: var(--joy-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 18%, transparent);
-}
-.agent-activity-mark {
-  display: grid;
-  place-items: center;
-  width: 0.78rem;
-  height: 0.78rem;
-  border: 1px solid var(--joy-accent);
-  border-radius: 50%;
+.app-menu-activity-mark {
+  width: 0.38rem;
+  height: 0.38rem;
+  margin-inline-start: 0.28rem;
   flex: none;
-}
-.agent-activity-mark-core {
-  width: 0.28rem;
-  height: 0.28rem;
   border-radius: 50%;
   background: var(--joy-accent);
-  animation: joy-agent-core-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 18%, transparent);
 }
-.agent-activity-copy {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-  line-height: 1.15;
+.app-menu-activity-mark.is-idle {
+  visibility: hidden;
 }
-.agent-activity-phase {
-  color: var(--joy-text);
-  font-weight: 650;
+.app-menu-activity-mark.is-awaiting-approval {
+  background: var(--joy-warning, var(--joy-accent));
 }
-.agent-activity-target,
-.agent-activity-progress {
-  color: var(--joy-text-secondary);
-  white-space: nowrap;
+.app-menu-activity-mark.is-failed {
+  background: var(--joy-danger);
 }
-.agent-activity-progress {
-  font-variant-numeric: tabular-nums;
-}
-.agent-activity-action,
-.agent-activity-follow {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 0.2rem;
-  min-height: 1.35rem;
-  padding: 0.1rem 0.3rem;
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--joy-text-secondary);
-  font: inherit;
-  font-size: var(--joy-type-xs);
-  white-space: nowrap;
-}
-.agent-activity-action:hover,
-.agent-activity-action:focus-visible,
-.agent-activity-follow:hover {
-  background: var(--joy-bg-hover);
-  color: var(--joy-text);
-}
-.agent-activity-stop {
-  color: var(--joy-danger);
-}
-.agent-activity-follow input {
-  width: 0.72rem;
-  height: 0.72rem;
-}
-
 .agent-preview-badge {
   position: absolute;
   inset-block-start: 0.6rem;
@@ -20186,61 +20125,6 @@ body:not([data-editor-pointer-dragging])
 .agent-settings-readonly strong {
   color: var(--joy-text);
   font-size: 0.86rem;
-}
-.joy-agent-live-status {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  margin: 0.7rem 0;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid color-mix(in srgb, var(--joy-accent) 65%, transparent);
-  border-radius: 0.5rem;
-  color: var(--joy-text);
-  background: color-mix(in srgb, var(--joy-accent) 8%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--joy-accent) 18%, transparent) inset;
-}
-.joy-agent-live-status > span:not(.joy-agent-live-mark) {
-  color: var(--joy-text-secondary);
-  font-size: 0.78rem;
-}
-.joy-agent-live-status .joy-agent-live-mark {
-  color: var(--joy-accent);
-  animation: joy-agent-pulse 1.8s ease-in-out infinite;
-}
-.joy-agent-live-status.is-awaiting-approval {
-  border-color: var(--joy-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 22%, transparent) inset;
-}
-.joy-agent-live-status.is-completed {
-  border-color: var(--joy-ok);
-}
-.joy-agent-live-status.is-failed {
-  border-color: var(--joy-danger);
-}
-.joy-agent-live-status button {
-  margin-inline-start: auto;
-  border: 1px solid currentColor;
-  background: transparent;
-  color: inherit;
-  border-radius: 0.35rem;
-  padding: 0.25rem 0.55rem;
-  cursor: pointer;
-}
-@keyframes joy-agent-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.85);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.15);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .joy-agent-live-status .joy-agent-live-mark {
-    animation: none;
-  }
 }
 
 /* Missing media (MissingMediaSection.tsx): one slim banner above the media list;

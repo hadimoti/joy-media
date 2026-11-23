@@ -42,6 +42,13 @@ describe('AgentPanel stop cancellation messaging', () => {
     ).toBeUndefined();
   });
 
+  it('accepts Stop only for the exact run ID and rejects absent or replaced IDs', () => {
+    expect(agentPanel.isExpectedJoyAgentRun('run-a', 'run-a')).toBe(true);
+    expect(agentPanel.isExpectedJoyAgentRun('run-a', 'run-b')).toBe(false);
+    expect(agentPanel.isExpectedJoyAgentRun(undefined, 'run-a')).toBe(false);
+    expect(agentPanel.isExpectedJoyAgentRun('run-a', undefined)).toBe(false);
+  });
+
   it('uses the active presence run when the stored agent id belongs to a completed run', () => {
     expect(
       agentPanel.selectActiveJoyAgentRunId(
@@ -104,7 +111,6 @@ describe('AgentPanel stop cancellation messaging', () => {
 
   it('keeps Stop confirmation immediate because cancelling revokes the async event stream', () => {
     expect(panelSource).toContain('if (recipeCancelled || commandRunId !== undefined) {');
-    expect(panelSource).toContain('if (recipeCancelled || activeRunId !== undefined) {');
     expect(panelSource).toContain(
       "if (event.phase === 'cancelled')\n              appendMessage(threadId, 'assistant', 'JOY run cancelled. No edits were applied.');",
     );
@@ -125,6 +131,16 @@ describe('AgentPanel stop cancellation messaging', () => {
     expect(pendingStop).toContain('setPending(undefined);');
     expect(pendingStop).toContain('clearAgentPreviewForSourceRun(pending.runId);');
     expect(pendingStop).toContain('return;');
-    expect(panelSource).toMatch(/pending === undefined &&\s*\(liveAgentPhase === 'thinking'/);
+    expect(panelSource).toContain('isExpectedJoyAgentRun(command.runId, pending.runId)');
+  });
+
+  it('validates a menu Stop against the current active run before cancelling', () => {
+    expect(panelSource).toContain('isExpectedJoyAgentRun(command.runId, commandRunId)');
+    expect(panelSource).toContain('function stopActiveRun(expectedRunId: string)');
+    expect(panelSource).toContain('isExpectedJoyAgentRun(expectedRunId, activeRunId)');
+    expect(panelSource).toContain(
+      "data-agent-action={liveAgentBusy && activeRunId !== undefined ? 'stop' : 'submit'}",
+    );
+    expect(panelSource).not.toContain('Live engine activity');
   });
 });

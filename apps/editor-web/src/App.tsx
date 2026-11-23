@@ -632,7 +632,6 @@ import {
 import { buildCaptionLayerInsertion } from './caption-layer.js';
 import { buildThreeDRenderLayerInsertion } from './three-d-render-layer.js';
 import { FeatureHub } from './FeatureHub.js';
-import { AgentActivityIndicator } from './AgentActivityIndicator.js';
 import {
   AgentPresenceProvider,
   PanelIdentityContext,
@@ -5962,11 +5961,12 @@ function EditorWorkspace({
     exportAbortRef.current?.abort();
   }, []);
   const issueAgentPanelCommand = useCallback(
-    (type: AgentPanelCommandType, capability?: 'edit' | 'creative-brief') => {
+    (type: AgentPanelCommandType, capability?: 'edit' | 'creative-brief', runId?: string) => {
       setAgentPanelCommand((current) => ({
         serial: (current?.serial ?? 0) + 1,
         type,
         ...(capability === undefined ? {} : { capability }),
+        ...(runId === undefined ? {} : { runId }),
       }));
     },
     [],
@@ -6069,8 +6069,9 @@ function EditorWorkspace({
           setAgentSettingsOpen(true);
           break;
         case 'agent.stop':
-          activatePanel('agent');
-          issueAgentPanelCommand('stop');
+          break;
+        case 'agent.showTarget':
+        case 'agent.follow':
           break;
         case 'agent.active':
           break;
@@ -6105,7 +6106,6 @@ function EditorWorkspace({
       cutSelectedClips,
       exportEditableProject,
       handleExport,
-      issueAgentPanelCommand,
       onBackToLibrary,
       openPopup,
       pasteClipsAtPlayhead,
@@ -7902,19 +7902,6 @@ function EditorWorkspace({
       <AgentPresenceProvider store={appAgentPresenceStore}>
         <main>
           <header className="app-header">
-            <AgentActivityIndicator
-              onShowTarget={(target) => {
-                const routed =
-                  target.sectionId === undefined
-                    ? undefined
-                    : featureActivationRoute(target.sectionId);
-                activatePanel(routed?.toolId ?? target.panelId);
-                if (target.panelId === 'agent' && target.capability !== undefined) {
-                  issueAgentPanelCommand('select-capability', target.capability);
-                }
-              }}
-              onStop={() => issueAgentPanelCommand('stop')}
-            />
             {exportProgress !== undefined && (
               <div
                 className="export-progress"
@@ -7951,6 +7938,20 @@ function EditorWorkspace({
                 supportsSpeed={supportsSpeed}
                 exporting={exporting}
                 onAction={runMenuAction}
+                onShowAgentTarget={(target) => {
+                  const routed =
+                    target.sectionId === undefined
+                      ? undefined
+                      : featureActivationRoute(target.sectionId);
+                  activatePanel(routed?.toolId ?? target.panelId);
+                  if (target.panelId === 'agent' && target.capability !== undefined) {
+                    issueAgentPanelCommand('select-capability', target.capability);
+                  }
+                }}
+                onStopAgentRun={(runId) => {
+                  activatePanel('agent');
+                  issueAgentPanelCommand('stop', undefined, runId);
+                }}
               />
             </div>
             <div className="header-spacer" aria-hidden="true" />

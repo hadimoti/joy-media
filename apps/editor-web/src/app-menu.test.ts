@@ -82,13 +82,15 @@ describe('app-menu catalog', () => {
     expect(file?.items.map((item) => item.id)).not.toContain('file.signOut');
   });
 
-  it('keeps the Joy Code menu focused on the project conversation and settings', () => {
+  it('keeps scoped activity commands in the Joy Code menu', () => {
     const agent = APP_MENU_GROUPS.find((group) => group.id === 'agent');
     expect(agent?.items.map((item) => item.label)).toEqual([
       'Open Joy Code',
       'Built-in JOY Agent Engine',
+      'Show target',
+      'Follow target',
       'Execution Mode…',
-      'Pause / Stop',
+      'Stop active run',
       'Joy Code Settings…',
     ]);
   });
