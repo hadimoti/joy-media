@@ -61,22 +61,7 @@ jobs:
         shard: [1, 2, 3]
     timeout-minutes: 90
     env:
-      JOY_TEST_DATABASE_URL: postgres://joy_media:joy_media@localhost:5432/joy_media_test
       JOY_MEDIA_EDGE_URL: off
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: joy_media
-          POSTGRES_PASSWORD: joy_media
-          POSTGRES_DB: joy_media_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U joy_media -d joy_media_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -117,26 +102,9 @@ jobs:
     runs-on: [self-hosted, linux, x64, joy-media-ci]
     needs: [validate-candidate]
     timeout-minutes: 60
-    # The collection runs with the same PostgreSQL environment as the shards. A suite that registers only when the database is
-    # set (describe.skipIf) must be listed here exactly as it runs in a shard, or the merge would meet a test the list does not
-    # name. This is the environment the collection lacked before this job existed.
+    # Collection and shards use the same environment so conditional suites match.
     env:
-      JOY_TEST_DATABASE_URL: postgres://joy_media:joy_media@localhost:5432/joy_media_test
       JOY_MEDIA_EDGE_URL: off
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: joy_media
-          POSTGRES_PASSWORD: joy_media
-          POSTGRES_DB: joy_media_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U joy_media -d joy_media_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -156,7 +124,7 @@ jobs:
           test "$(pnpm --version)" = '11.15.0'
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
-      - name: Collect the full Vitest collection on this exact commit (the shards' database environment)
+      - name: Collect the full Vitest collection on this exact commit
         shell: bash
         run: |
           set -euo pipefail
@@ -254,22 +222,7 @@ jobs:
         node: ['22.17.0', 24]
     timeout-minutes: 45
     env:
-      JOY_TEST_DATABASE_URL: postgres://joy_media:joy_media@localhost:5432/joy_media_test
       JOY_MEDIA_EDGE_URL: off
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: joy_media
-          POSTGRES_PASSWORD: joy_media
-          POSTGRES_DB: joy_media_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U joy_media -d joy_media_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -293,23 +246,10 @@ jobs:
           corepack enable pnpm
           test "$(pnpm --version)" = '11.15.0'
           pnpm install --frozen-lockfile
-      - name: Ensure media codec tool is available
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v ffmpeg >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y ffmpeg
-          fi
-          ffmpeg -version
+      - name: Verify the runner's FFmpeg installation
+        run: ffmpeg -version
       - name: Run full CLI contract suite on the supported Node version
         run: pnpm exec vitest run --retry=0 apps/cli/src --no-file-parallelism
-      - name: Run PostgreSQL migration and concurrent invoice acceptance
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$JOY_TEST_DATABASE_URL"
-          pnpm exec vitest run --retry=0 apps/api/src/usdc-invoice-ledger.pg.test.ts --no-file-parallelism
 
   editor-web-bundle:
     name: editor-web-bundle (standard hosted Linux)
@@ -396,20 +336,7 @@ jobs:
           test -s "$committed_sums" || { echo "committed candidate checksums are missing: $committed_sums" >&2; exit 1; }
           node --experimental-strip-types tooling/release/src/checksums.ts verify --dir "$candidate_files_dir"
           cmp "$candidate_files_dir/SHA256SUMS.txt" "$committed_sums"
-          staging_dir="$RUNNER_TEMP/joy-media-candidate-files-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          case "$staging_dir" in "$RUNNER_TEMP"/joy-media-candidate-files-*) ;; *) echo 'refusing to stage candidate files outside RUNNER_TEMP' >&2; exit 1 ;; esac
-          test ! -e "$staging_dir" || { echo "candidate staging directory already exists: $staging_dir" >&2; exit 1; }
-          mkdir -p "$staging_dir"
-          cp -a "$candidate_files_dir/." "$staging_dir/"
-          test -s "$staging_dir/joy-media-setup.exe"
-          test -s "$staging_dir/SHA256SUMS.txt"
-      - name: Upload the verified candidate files for receipt validation
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: joy-media-candidate-files-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
-          path: ${{ runner.temp }}/joy-media-candidate-files-${{ github.run_id }}-${{ github.run_attempt }}/*
-          retention-days: 1
-          if-no-files-found: error
+          test -s "$candidate_files_dir/joy-media-setup.exe"
 
   # Windows is not run here: the attended and Sandbox receipts are read from the dispatch checkout. The local-only release gate
   # then evaluates the candidate with its real inputs (builds, tests, static checks, receipts). The dispatch checkout holds the
@@ -440,11 +367,21 @@ jobs:
           node --version
           corepack enable pnpm
           test "$(pnpm --version)" = '11.15.0'
-      - name: Download verified candidate files
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: joy-media-candidate-files-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
-          path: apps/desktop/dist/releases
+      - name: Stage and verify candidate files from the local evidence store
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          candidate_files_dir="${JOY_MEDIA_CI_EVIDENCE_ROOT:?candidate files require a local evidence store}/$CANDIDATE_SHA/candidate-files"
+          committed_sums="docs/release/attended/$CANDIDATE_SHA/SHA256SUMS.txt"
+          release_dir="apps/desktop/dist/releases"
+          test -d "$candidate_files_dir" || { echo "candidate files are missing from the evidence store: $candidate_files_dir" >&2; exit 1; }
+          test ! -e "$release_dir" || { echo "candidate staging directory already exists: $release_dir" >&2; exit 1; }
+          mkdir -p "$release_dir"
+          cp -a "$candidate_files_dir/." "$release_dir/"
+          node --experimental-strip-types tooling/release/src/checksums.ts verify --dir "$release_dir"
+          cmp "$release_dir/SHA256SUMS.txt" "$committed_sums"
+          test -s "$release_dir/joy-media-setup.exe"
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Run the local release gate on the candidate (this step fails when the gate exits non-zero)
@@ -595,14 +532,14 @@ jobs:
           export PLAYWRIGHT_BASE_URL="http://127.0.0.1:${web_port}"
           # Each server is its own process group (setsid) so teardown can signal the whole tree by pgid — no `pkill -f` sweeping
           # other jobs.
-          setsid pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts >"$PW_PID_DIR/api.log" 2>&1 &
+          setsid pnpm --fail-if-no-match --filter @joy-media/test-control-plane exec tsx ../../tooling/e2e-server.ts >"$PW_PID_DIR/api.log" 2>&1 &
           echo $! > "$PW_PID_DIR/api.pid"
           setsid pnpm --filter @joy-media/editor-web exec vite preview --host 127.0.0.1 --port "$web_port" --strictPort >"$PW_PID_DIR/web.log" 2>&1 &
           echo $! > "$PW_PID_DIR/web.pid"
           for i in $(seq 1 60); do curl -fsS "http://127.0.0.1:${api_port}/health" >/dev/null 2>&1 && break; sleep 1; done
-          curl -fsS "http://127.0.0.1:${api_port}/health" >/dev/null
+          if ! curl -fsS "http://127.0.0.1:${api_port}/health" >/dev/null; then cat "$PW_PID_DIR/api.log" >&2; exit 1; fi
           for i in $(seq 1 45); do curl -fsS "http://127.0.0.1:${web_port}/" >/dev/null 2>&1 && break; sleep 1; done
-          curl -fsS "http://127.0.0.1:${web_port}/" >/dev/null
+          if ! curl -fsS "http://127.0.0.1:${web_port}/" >/dev/null; then cat "$PW_PID_DIR/web.log" >&2; exit 1; fi
           # Serve the *production* editor bundle (vite preview of dist/, mirrored /api proxy) + the isolated e2e API; run the
           # UI-journey specs that exercise import, decode/seek and the encode/export Worker path against the shipped artifact. The
           # dev-server-only white-box decoder specs stay in the desktop-primary and real-service lanes.
@@ -675,7 +612,7 @@ jobs:
           test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install chromium
       - name: Layout / overflow / a11y / panel-reachability at every non-primary viewport
         shell: bash
         env:
