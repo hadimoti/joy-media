@@ -175,6 +175,35 @@ describe('transcribeReferenceCaption (live + fixture fallback)', () => {
     expect(loadMedia).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a failing saved endpoint after the fallback the same way the endpoint path always has', async () => {
+    const loadMedia = vi.fn(async () => ({ media: new Blob(['audio']), mediaType: 'audio/wav' }));
+    const client = {
+      async runLocalTranscription() {
+        throw new DesktopSpeechError('SETUP_REQUIRED', 'Worker speech is not set up');
+      },
+      async transcribeSpeech() {
+        throw new Error('The local Whisper server could not process the media.');
+      },
+    } as unknown as BrowserControlPlaneClient;
+
+    await expect(
+      transcribeReferenceCaption('caption-en', 'en-US', client, {
+        workerRequest: {
+          projectId: 'project-1',
+          assetId: 'asset-1',
+          request: {
+            schemaVersion: 1,
+            language: 'en-US',
+            modelId: 'faster-whisper-large-v3-turbo',
+          },
+        },
+        loadMedia,
+      }),
+    ).rejects.toThrow(
+      'Live transcription could not process the selected media. The local Whisper server could not process the media.',
+    );
+  });
+
   it('does not use loopback fallback for a first-party runtime failure', async () => {
     const loadMedia = vi.fn(async () => ({ media: new Blob(['audio']) }));
     const failure = new Error('runtime failure');

@@ -130,6 +130,27 @@ async function tryLiveTranscription(
 }
 
 /**
+ * The error for a selected file that the saved local Whisper endpoint could not transcribe. The two setup messages
+ * pass through unchanged; any other reason is kept short and on one line, so the owner can tell a refused file from
+ * a down server.
+ */
+function liveTranscriptionFailure(error: unknown): Error {
+  if (
+    error instanceof Error &&
+    (error.message === 'Local Whisper is not configured.' ||
+      error.message === 'The saved local Whisper endpoint was refused.')
+  ) {
+    return new Error(error.message);
+  }
+  const reason = (error instanceof Error ? error.message : '').replace(/\s+/g, ' ').trim();
+  return new Error(
+    reason.length === 0
+      ? 'Live transcription could not process the selected media.'
+      : `Live transcription could not process the selected media. ${reason.slice(0, 160)}`,
+  );
+}
+
+/**
  * Caption transcription: prefer authenticated faster-whisper API,
  * fall back to committed fixtures when unsigned or the provider is down.
  */
@@ -170,12 +191,20 @@ export async function transcribeReferenceCaption(
       if (options.signal?.aborted) {
         throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
       }
-      const live = await client.transcribeSpeech(
-        language,
-        loaded.mediaType === undefined
-          ? { media: loaded.media }
-          : { media: loaded.media, mediaType: loaded.mediaType },
-      );
+      let live: Awaited<ReturnType<typeof tryLiveTranscription>>;
+      try {
+        live = await client.transcribeSpeech(
+          language,
+          loaded.mediaType === undefined
+            ? { media: loaded.media }
+            : { media: loaded.media, mediaType: loaded.mediaType },
+        );
+      } catch (fallbackError) {
+        // The saved endpoint failed: report it the way the endpoint path always has, so the message names what
+        // happened ("Live transcription could not process the selected media. ...").
+        if (fallbackError instanceof DesktopSpeechError) throw fallbackError;
+        throw liveTranscriptionFailure(fallbackError);
+      }
       if (options.signal?.aborted) {
         throw new DesktopSpeechError('CANCELED', 'Speech job canceled');
       }
@@ -196,22 +225,7 @@ export async function transcribeReferenceCaption(
       provenance: live.provenance,
     });
   } catch (error) {
-    if (options.media !== undefined) {
-      if (
-        error instanceof Error &&
-        (error.message === 'Local Whisper is not configured.' ||
-          error.message === 'The saved local Whisper endpoint was refused.')
-      ) {
-        throw new Error(error.message);
-      }
-      // Keep the reason, short and on one line, so the owner can tell a refused file from a down server.
-      const reason = (error instanceof Error ? error.message : '').replace(/\s+/g, ' ').trim();
-      throw new Error(
-        reason.length === 0
-          ? 'Live transcription could not process the selected media.'
-          : `Live transcription could not process the selected media. ${reason.slice(0, 160)}`,
-      );
-    }
+    if (options.media !== undefined) throw liveTranscriptionFailure(error);
     const provider = fixtureProvider(language);
     return captionDocumentFromTranscription(
       documentId,
