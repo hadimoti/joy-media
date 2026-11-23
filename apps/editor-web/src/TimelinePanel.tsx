@@ -3238,6 +3238,21 @@ export function TimelinePanel({
       ref={pointerDndRootRef}
       data-editor-pointer-dnd-root=""
       tabIndex={-1}
+      onPointerDownCapture={(event) => {
+        // A press on the empty timeline (lane, gaps) does not focus anything, so a toolbar button used a moment ago
+        // kept the focus and Space then pressed that button ("Back one second") instead of playing. Release such a
+        // button's focus when the press lands outside every control, so Space reaches the editor.
+        const target = event.target as HTMLElement;
+        if (
+          target.closest(
+            'button, a, input, textarea, select, [role="menu"], [role="menuitem"], [role="slider"], [contenteditable="true"], .timeline-clip',
+          ) !== null
+        )
+          return;
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active.closest('button, a, select') !== null)
+          active.blur();
+      }}
       onKeyDown={(event) => {
         if (event.key !== 'Delete' && event.key !== 'Backspace') return;
         // Shift+Delete is the ripple delete: the timeline's scoped keys own it.

@@ -173,6 +173,20 @@ describe('canUseEditorSpaceTarget', () => {
     expect(canUseEditorSpaceTarget(dialogBody)).toBe(false);
     expect(canUseEditorSpaceTarget(null)).toBe(false);
   });
+
+  it('lets the focused playhead ruler (a slider) play and pause, but nothing nested inside it', () => {
+    const ruler = document.createElement('div');
+    ruler.setAttribute('role', 'slider');
+    ruler.setAttribute('data-editor-space-surface', '');
+    // Without the marker a slider owns its keys.
+    const plainSlider = document.createElement('div');
+    plainSlider.setAttribute('role', 'slider');
+    expect(canUseEditorSpaceTarget(plainSlider)).toBe(false);
+    expect(canUseEditorSpaceTarget(ruler)).toBe(true);
+    const nestedButton = document.createElement('button');
+    ruler.append(nestedButton);
+    expect(canUseEditorSpaceTarget(nestedButton)).toBe(false);
+  });
 });
 
 describe('timelineClipSpaceBehavior', () => {

@@ -55,6 +55,8 @@ export function TimelineRuler({
       style={{ width: widthPx }}
       role="slider"
       tabIndex={0}
+      // Space is not a slider key: with the playhead focused it plays and pauses like anywhere on the editor.
+      data-editor-space-surface=""
       aria-label="Playhead"
       aria-valuemin={0}
       aria-valuemax={durationUs}

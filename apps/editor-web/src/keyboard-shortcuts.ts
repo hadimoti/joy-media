@@ -113,6 +113,8 @@ export function canUseEditorSpaceTarget(target: EventTarget | null): boolean {
   while (element !== null) {
     const role = element.getAttribute?.('role')?.toLowerCase();
     if (role === 'dialog' || role === 'alertdialog') return false;
+    // The playhead ruler is a slider, but Space is not a slider key: it is the editor's play/pause there.
+    if (element.hasAttribute?.('data-editor-space-surface') === true) return !nestedInteractive;
     if (element.getAttribute?.('aria-roledescription') === 'timeline clip') {
       if (element.getAttribute('aria-pressed') !== 'true' || !element.getAttribute('data-clip-id'))
         return false;
