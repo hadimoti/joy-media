@@ -9,7 +9,8 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 - **Subtitles from speech.** The Captions panel can make subtitles from a voice recording on the timeline, in English or Persian. Recognition runs on your PC with the faster-whisper large-v3-turbo model. No account and no server are needed.
 - **Voice-over.** The Generate tab makes a voice from text on your PC. English voices use Kokoro (82M) or Chatterbox English. The Persian voice uses Chatterbox Persian Expressive.
 - **Reference voice.** Chatterbox can copy a voice from a short recording. Use a clean clip of 5 to 10 seconds, and only a voice you have the right to use. Put the clip on the timeline first, then choose it in the Generate tab.
-- **Credit and licence.** The Persian voice model is Chatterbox Persian Expressive by Ramin Mahmoodi, licensed CC-BY-NC-4.0 for non-commercial use. The Captions panel and the speech README credit it. The model files are not part of JOY Media.
+- **Local setup.** The Windows package includes JOY's three speech runner scripts. Configure Python, its dependencies, and your model folders locally. Set an FFmpeg path for speech if your audio setup needs it. JOY Media shows which engines are ready.
+- **Credit and licence.** [Chatterbox Persian Expressive by Ramin Mahmoodi](https://huggingface.co/ramin-mahmoodi/Chatterbox-Persian-Expressive) is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) for non-commercial use. The Generate tab and speech guide credit the model.
 
 ### Asset Library
 
@@ -76,7 +77,6 @@ JOY Media v1.1.2 is an update to v1.1.1. It is still a local desktop video edito
 - **MiniMax.** MiniMax models think before they answer. A very long thought can still use up the room, and then the chat gives no answer. The app now says so.
 - **Subtitle cues.** Each subtitle cue is one whole spoken part, so a long sentence stays one long cue. Cutting cues to a short length, and repairing Persian half-spaces, are not done yet.
 - **Reference voice.** A reference voice must be a clip on the timeline. A file that is only in the Asset Library cannot be picked yet.
-- **Speech set-up.** The speech engines and their model folders are not part of the installer in this release. The Captions and Generate panels say when something is missing.
 - **Persian voice licence.** The Persian voice model is for non-commercial use only (CC-BY-NC-4.0).
 - **Arabic final yeh.** In the exported video, the final yeh of some Arabic titles has no two dots with the default title font. Reproduced on 23 Nov. This is not fixed in this release.
 

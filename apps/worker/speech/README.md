@@ -4,6 +4,14 @@ These runners use local Python environments and bring-your-own model folders.
 Jobs do not install packages, download models, or call cloud services. Configure
 absolute paths and restart the Worker after changing them.
 
+The Windows desktop package includes only these JOY-authored entrypoint scripts:
+`transcribe.py`, `synthesize_kokoro.py`, and `synthesize_chatterbox.py`, under
+`speech/` beside `worker/`. It does not include Python, Python packages, ffmpeg,
+or speech model weights. Install and configure those locally before the related
+capability becomes available. `JOY_MEDIA_SPEECH_RUNNER_DIR` and the older
+`JOY_MEDIA_SPEECH_SCRIPT_DIR` can point to a custom runner folder; the optional
+Chatterbox script override remains supported.
+
 ## Python environments
 
 Set `JOY_MEDIA_SPEECH_STT_PYTHON` and `JOY_MEDIA_SPEECH_TTS_PYTHON` to absolute

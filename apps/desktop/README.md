@@ -151,3 +151,8 @@ it to unblock local/staging packaging smoke tests without the owner-provided Win
 certificate. Running `package:release` (or `package-release.mjs` with no flag) still fails closed
 with exit code `2` whenever `JOY_MEDIA_WINDOWS_CERTIFICATE_PATH` or
 `JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY` is unset — that strictness is unchanged.
+
+Unpacked and installer packages include JOY's three speech runner scripts in
+`speech/` beside `worker/`. Python, Python packages, ffmpeg, and speech model
+files remain a separate local setup. Follow the [speech setup guide](../worker/speech/README.md). The runner-folder
+environment overrides continue to work for custom installations.
