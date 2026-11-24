@@ -1,21 +1,24 @@
-# JOY Media
+# ![JOY Media](docs/images/v1.1.2/github/editorial-cover.webp)
 
 **A Windows desktop editor for graphic and motion design.** Layer artwork and video, set type, animate with keyframes, and finish on a multitrack timeline.
 
-[**Download v1.1.2 for Windows**](https://github.com/hadimoti/joy-media/releases/tag/v1.1.2) · [Designer guide](docs/USER-GUIDE-v1.1.2.md) · [Release notes](RELEASE_NOTES_v1.1.2.md)
-
-![Build the frame. Set it in motion. The JOY Media mark on a taped paper card.](docs/images/v1.1.2/github/editorial-cover.webp)
+[![Windows downloads](docs/images/v1.1.2/github/windows-downloads.png)](https://github.com/hadimoti/joy-media/releases/tag/v1.1.2)
+[![Designer guide](docs/images/v1.1.2/github/designer-guide.png)](docs/USER-GUIDE-v1.1.2.md)
+[![Release notes](docs/images/v1.1.2/github/release-notes.png)](RELEASE_NOTES_v1.1.2.md)
+[![MIT License](docs/images/v1.1.2/github/mit-license.png)](LICENSE)
 
 ## From type on a canvas to a finished MP4
 
-In this motion study, a bilingual title fades in over a field of gold rings. The title and artwork occupy separate tracks so their spacing, timing, and animation can be adjusted independently.
+[![JOY Media Studio showing the logo animation in the Program Monitor, five populated Timeline tracks, and a Joy Code conversation with Kimi.](docs/images/v1.1.2/github/joy-code-kimi-studio.png)](docs/images/v1.1.2/github/joy-code-kimi-studio.png)
 
-[![The Form & Time composition in JOY Media, with the title selected in the Program Monitor and its opacity keyframes visible in the Timeline.](docs/images/v1.1.2/studio.png)](docs/images/v1.1.2/studio.png)
+In the Studio above, Joy Code uses Kimi to discuss the logo reveal and suggest when to cut. The five-track Timeline holds the motion assets and audio.
 
 1. **Build the frame.** Choose a canvas format, bring in your artwork and video, and stack the elements on tracks.
 2. **Shape the type and color.** Position the title in the Monitor, use smart guides to line it up, and refine the look in the Typography and Color panels.
 3. **Set the timing.** Add keyframes, scrub the Timeline to check when the title becomes visible, and adjust the audio and captions as needed.
 4. **Export the result.** Select **Export MP4**, review the preset and any warnings, and find the completed file in **Recent processes**.
+
+The Form & Time motion study uses the same workflow to animate a bilingual title over gold rings.
 
 [![Frame from the exported Form & Time MP4, showing Persian and English titles beside gold rings on a dark grid.](docs/images/v1.1.2/rendered-frame.png)](docs/images/v1.1.2/rendered-frame.png)
 
